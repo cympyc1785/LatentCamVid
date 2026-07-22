@@ -1,0 +1,5 @@
+# @package _global_
+exp_name: smoke_clatr
+val_step: 2
+val_max_batches: 1
+max_scenes: 3

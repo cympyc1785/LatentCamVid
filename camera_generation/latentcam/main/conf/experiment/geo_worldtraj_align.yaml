@@ -1,0 +1,22 @@
+# @package _global_
+# Same context selection as geo_worldtraj (first cam frame s fixed + residual-coverage
+# out-of-seg), but FULL coordinate alignment:
+#   - initial normalization = 1.35*max_dist (scale_mode=first_farthest_135), matching the VAE
+#     re-fit on this scale (vae_worldtraj, latent_std 0.569379).
+#   - LagerNVS's own 1.35*context_max normalization is SKIPPED: context reuses the target's
+#     initial 1.35*max_dist scale (geo_lagernvs_skip_ctx_norm=True), so target & geo latent
+#     share one frame (origin frame s) + one scale.
+exp_name: dl3dv_geo_worldtraj_align
+meta_csv: meta_worldtraj.csv
+coverage_blacklist_path: null
+geo_encoder: lagernvs
+geo_view_sampling: frustum_cover
+geo_cover_out_of_seg: true
+geo_first_view_target_s: true
+geo_cover_subtract_first: true
+geo_anchor_first_frame: true
+geo_posed: true
+geo_lagernvs_skip_ctx_norm: true
+scale_mode: first_farthest_135
+vae_ckpt_path: /data1/cympyc1785/LatentCamVid/camera_generation/latentcam/my_checkpoints/vae_worldtraj/last.pth
+vae_latent_scale: 0.569379

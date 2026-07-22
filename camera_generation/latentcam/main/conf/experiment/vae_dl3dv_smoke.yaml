@@ -1,0 +1,11 @@
+# @package _global_
+exp_name: vae_dl3dv_smoke
+batch_size: 16
+epochs: 2
+scale_mode: geo_lagernvs
+max_scenes: 20
+geo_encoder: null
+geo_cover_out_of_seg: true
+geo_first_view_target_s: true
+geo_anchor_first_frame: true
+coverage_blacklist_path: /data1/cympyc1785/LatentCamVid/camera_generation/latentcam/data/blacklist_selk_viewS_tau0.7.csv

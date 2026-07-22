@@ -1,0 +1,5 @@
+# @package _global_
+exp_name: vae_dl3dv_avgscale
+batch_size: 64
+epochs: 60
+geo_encoder: null

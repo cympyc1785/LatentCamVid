@@ -1,0 +1,12 @@
+# @package _global_
+# Camera VAE re-fit on the WorldTraj scope (DL3DV 1K-7K, meta_worldtraj.csv, blacklist-excluded)
+# with LagerNVS-style normalization: scale = 1.35 * max(||cam center - first camera||) per segment.
+exp_name: vae_worldtraj
+geo_encoder: null
+scale_mode: first_farthest_135
+meta_csv: meta_worldtraj.csv
+coverage_blacklist_path: null
+batch_size: 64
+lr: 0.0001
+epochs: 60
+vae_beta: 0.001

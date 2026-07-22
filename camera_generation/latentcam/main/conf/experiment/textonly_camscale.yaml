@@ -1,0 +1,4 @@
+# @package _global_
+exp_name: dl3dv_textonly_camscale
+scale_mode: context_longer
+geo_encoder: null

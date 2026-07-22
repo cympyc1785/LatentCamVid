@@ -1,0 +1,5 @@
+# @package _global_
+exp_name: textonly_smoke
+epochs: 1
+max_scenes: 8
+geo_encoder: null

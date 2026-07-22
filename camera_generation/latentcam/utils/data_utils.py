@@ -1,6 +1,6 @@
 import numpy as np
 import torch
-from core_pkg.common.utils.rotation_utils import compute_rotation_matrix_from_ortho6d
+from utils.rotation_utils import compute_rotation_matrix_from_ortho6d
 
 SCENE_CUTTING_THRESHOLD = 75
 MAX_POINTS = 16_000_000

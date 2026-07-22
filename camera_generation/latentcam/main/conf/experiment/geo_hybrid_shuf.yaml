@@ -1,0 +1,16 @@
+# @package _global_
+# Geo (LagerNVS) on WorldTraj: hybrid context = 2 in-target views (view0 = frame s) + 3
+# out-of-segment covis views; the first context view (frame s = VGGT reference) is FIXED and
+# the remaining 4 are shuffled each access (order-invariance augmentation, ref preserved).
+# target normalization = avg_scale (target_cam); LagerNVS internal 1.35*max (geo_posed).
+exp_name: dl3dv_geo_hybrid_shuf
+meta_csv: meta_worldtraj.csv
+coverage_blacklist_path: null
+geo_encoder: lagernvs
+geo_view_sampling: hybrid
+geo_num_inseg: 2          # in-target views (first = frame s)
+geo_num_covis: 3          # out-of-segment views
+geo_posed: true
+geo_shuffle_order: true
+geo_shuffle_keep_first: true
+scale_mode: target_cam

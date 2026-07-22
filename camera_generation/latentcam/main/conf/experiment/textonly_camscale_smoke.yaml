@@ -1,0 +1,6 @@
+# @package _global_
+exp_name: textonly_camscale_smoke
+epochs: 1
+scale_mode: context_longer
+max_scenes: 8
+geo_encoder: null

@@ -1,0 +1,3 @@
+# @package _global_
+exp_name: dl3dv_geo_shuf
+geo_view_sampling: random_inseg

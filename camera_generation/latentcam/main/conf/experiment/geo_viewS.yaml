@@ -1,0 +1,9 @@
+# @package _global_
+exp_name: dl3dv_geo_viewS
+scale_mode: context_longer
+geo_view_sampling: frustum_cover
+geo_cover_out_of_seg: true
+geo_posed: true
+geo_first_view_target_s: true
+geo_anchor_first_frame: true
+coverage_blacklist_path: /data1/cympyc1785/LatentCamVid/camera_generation/latentcam/data/blacklist_selk_viewS_tau0.7.csv

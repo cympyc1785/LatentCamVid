@@ -1,0 +1,3 @@
+# @package _global_
+exp_name: dl3dv_geo_cover
+geo_view_sampling: frustum_cover

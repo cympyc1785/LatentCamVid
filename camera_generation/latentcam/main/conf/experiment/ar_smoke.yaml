@@ -1,0 +1,7 @@
+# @package _global_
+exp_name: ar_smoke
+is_ar: true
+causal_vae: true
+vae_latent_scale: 0.920076
+vae_ckpt_path: /data1/cympyc1785/LatentCamVid/camera_generation/models/CamVLA/checkpoints/causal_vae_v1_240.pth
+max_scenes: 3

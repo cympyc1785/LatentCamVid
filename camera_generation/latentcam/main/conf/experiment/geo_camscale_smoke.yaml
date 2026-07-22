@@ -1,0 +1,11 @@
+# @package _global_
+exp_name: geo_camscale_smoke
+batch_size: 2
+epochs: 1
+scale_mode: context_longer
+max_scenes: 6
+geo_view_sampling: frustum_cover
+geo_cover_out_of_seg: true
+geo_posed: true
+geo_anchor_first_frame: true
+coverage_blacklist_path: /data1/cympyc1785/LatentCamVid/camera_generation/latentcam/data/blacklist_selk_tau0.7.csv

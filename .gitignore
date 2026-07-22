@@ -216,3 +216,17 @@ __marimo__/
 
 # Streamlit
 .streamlit/secrets.toml
+
+DATA
+tools
+camera_generation/tools
+camera_generation/models
+video_generation/tools
+video_generation/models
+camera_generation/latentcam/results
+camera_generation/latentcam/exp_results
+camera_generation/latentcam/my_checkpoints
+camera_generation/latentcam/main/wandb
+camera_generation/latentcam/main/evaluate/CLaTr/lightning_logs
+camera_generation/latentcam/main/evaluate/CLaTr/results
+camera_generation/latentcam/checkpoints

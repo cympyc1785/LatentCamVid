@@ -182,3 +182,44 @@ if __name__ == "__main__":
         writer.writeheader()
         writer.writerows(rows)
     print(output_csv)
+
+    # ---- per-sample scores of ALL wandb-logged metrics -> preds_scores.csv ----
+    # Per-sample columns (one value per target):
+    #   captions/{precision,recall,fscore} : per-sample caption metrics
+    #   clatr/clatr_score                  : 100*cos(pred-traj latent, text latent)  (text alignment)
+    #   clatr/pred_ref_cosine              : 100*cos(pred-traj latent, GT-traj latent) (extra, GT closeness)
+    # Aggregate (set-level) columns, REPEATED constant on every row because they are distributional
+    # and have no per-sample value (PRDC = split-averaged manifold stats, FCD = Frechet distance):
+    #   clatr/{precision,recall,density,coverage,fcd}
+    pf = torch.nn.functional.normalize(pred_feats, dim=-1)
+    rf = torch.nn.functional.normalize(ref_feat, dim=-1)
+    pred_ref_cos = (100 * (pf * rf).sum(-1)).tolist()
+    clatr_score_list = score_metrics.score_list
+
+    def _agg(key):   # run-level aggregate from the computed metrics dict (tensor or float)
+        v = metrics.get(key)
+        return round(v.item() if hasattr(v, 'item') else float(v), 4) if v is not None else ''
+    agg_cols = {k: _agg(k) for k in
+                ['clatr/precision', 'clatr/recall', 'clatr/density', 'clatr/coverage', 'clatr/fcd']}
+
+    per_sample_fields = ['filename', 'captions/precision', 'captions/recall', 'captions/fscore',
+                         'clatr/clatr_score', 'clatr/pred_ref_cosine']
+    agg_fields = ['clatr/precision', 'clatr/recall', 'clatr/density', 'clatr/coverage', 'clatr/fcd']
+    score_rows = []
+    for i in range(len(batch['ref_filenames'])):
+        row = {
+            'filename': batch['ref_filenames'][i],
+            'captions/precision': round(float(caption_metrics.precision_list[i]), 4),
+            'captions/recall': round(float(caption_metrics.recall_list[i]), 4),
+            'captions/fscore': round(float(caption_metrics.fscore_list[i]), 4),
+            'clatr/clatr_score': round(clatr_score_list[i], 4),
+            'clatr/pred_ref_cosine': round(pred_ref_cos[i], 4),
+        }
+        row.update(agg_cols)   # constant aggregate columns
+        score_rows.append(row)
+    scores_csv = os.path.join(base_dir, f"{pred_path.split('/')[-1][:-4]}_scores.csv")
+    with open(scores_csv, "w", newline="", encoding="utf-8") as f:
+        writer = csv.DictWriter(f, fieldnames=per_sample_fields + agg_fields)
+        writer.writeheader()
+        writer.writerows(score_rows)
+    print(scores_csv)

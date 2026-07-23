@@ -23,11 +23,21 @@ All notable changes to the latentcam sub-project. Follows [Keep a Changelog](htt
   camera forward points up in the image (map-like). User-confirmed orientation.
 
 ### Added
+- **`preds_scores.csv`** (`main/evaluate/eval/src/eval_only.py`): per-sample dump of every
+  wandb-logged eval metric. Per-sample columns `captions/{precision,recall,fscore}`,
+  `clatr/clatr_score` (100·cos(pred-traj, text)), `clatr/pred_ref_cosine` (100·cos(pred-traj,
+  GT-traj)); plus `clatr/{precision,recall,density,coverage,fcd}` repeated as run-level constants
+  (distributional/set-level → no per-sample value). `preds.csv`/`preds_pcf.csv` unchanged.
+- **`scripts/data/extract_geo_context.py`**: dumps the geo-context camera world centers for the
+  160 validation targets (geo_worldtraj config; context selection is deterministic + identical for
+  align) → `_geo_context.json`, so the comparison viz can overlay conditioning views as stars.
 - **`scripts/render/compare_norm_topdown.py`**: compares two normalization schemes
   (point = target_cam vs dist = first_farthest_135) on the same 160 validation targets. Per-target
-  top-down (GT + both preds, first-cam anchored X/-Z) + world-space scores (pos_rmse/rot), plus a
-  `_summary.png` and `_scores.csv`. Metrics computed in denormalized world so they are comparable
-  regardless of each model's normalization/VAE. Output → `results/compare/normalization_point_vs_dist/`.
+  top-down (GT + both preds + geo-context cameras as magenta stars, first-cam anchored X/-Z) +
+  world-space scores (pos_rmse/rot) and per-target CLaTr score (from `_clatr.json`), plus a 2×2
+  `_summary.png` (pos_rmse + CLaTr, sorted + paired) and `_scores.csv`. Metrics in denormalized
+  world so they are comparable regardless of each model's normalization/VAE. Output →
+  `results/compare/normalization_point_vs_dist/`.
 - **`models/GenDoP/extrinsic2pyramid/vis_validation_anchor.py`**: trajectory pyramid viz that
   replicates GenDoP's **original** `dataset/extrinsic2pyramid/visualize.py::draw_json`
   preprocessing — first-frame anchoring (`c2ws = inv(c2w[0]) @ c2ws`) + optional 2-frame

@@ -141,29 +141,19 @@ def main():
     json.dump(metrics, open(os.path.join(tag_dir, f"{base}_metrics.json"), "w"), indent=2)
     print(f"[{TAG}] loss_latent={loss_latent:.4f} loss_traj={loss_traj:.4f} pos_rmse={metrics['pos_rmse']:.4f}")
 
-    # true top-down in the OpenGL/COLMAP frame (up=+Y, ground=X-Z). transforms.json stores c2w in
-    # the nerfstudio frame where DL3DV's applied_transform (x<->y swap + z flip) has been baked in,
-    # so there world-up is X and motion lives in Y-Z. Undo it (AT is an involution, det=+1 => pure
-    # rotation, shape preserved) to recover the OpenGL frame, THEN drop the up-axis. Constant across
-    # all DL3DV scenes.
-    AT = np.array([[0., 1., 0.], [1., 0., 0.], [0., 0., -1.]])   # DL3DV applied_transform (3x3)
-    gc = gc @ AT.T
-    pc = pc @ AT.T
-    up_vec = (ref_c2w[:, :3, 1] @ AT.T).mean(0)
-    up_axis = int(np.argmax(np.abs(up_vec)))                       # 0=X 1=Y 2=Z (=Y here)
-    up_sign = 1.0 if up_vec[up_axis] >= 0 else -1.0
-    ga = [a for a in (0, 1, 2) if a != up_axis]                    # ground-plane axes (X,Z here)
-    # right-handed horizontal sign so R x U = +world-up (else it mirrors into a "down-top" view)
-    parity = 1.0 if (ga[0], ga[1], up_axis) in {(0, 1, 2), (1, 2, 0), (2, 0, 1)} else -1.0
-    hsign = up_sign * parity
-    an = "XYZ"
-    hlab = ("-" if hsign < 0 else "") + an[ga[0]]
+    # top-down in the FIRST-camera-relative frame (like the GenDoP pyramid anchoring): anchor both
+    # GT and pred to the GT first camera (inv(c2w[0]) @ c2w), which puts cam0 at the origin with the
+    # OpenGL camera axes (up=+Y, right=+X, forward=-Z). Dropping up (+Y) leaves ground = X-Z; plot
+    # X horizontal, -Z vertical so the camera's forward points up in the image (map-like).
+    Rinv = np.linalg.inv(ref_c2w[0])
+    gc = (Rinv @ ref_c2w)[:, :3, 3]
+    pc = (Rinv @ pred_c2w)[:, :3, 3]
     fig, ax = plt.subplots(1, 1, figsize=(6, 6))
-    ax.plot(hsign * gc[:, ga[0]], gc[:, ga[1]], '-o', ms=3, lw=1.4, c='tab:blue', label='GT')
-    ax.plot(hsign * pc[:, ga[0]], pc[:, ga[1]], '-x', ms=4, lw=1.4, c='tab:red', label='pred')
-    ax.scatter(hsign * gc[0, ga[0]], gc[0, ga[1]], c='k', s=70, marker='*', zorder=5, label='start')
+    ax.plot(gc[:, 0], -gc[:, 2], '-o', ms=3, lw=1.4, c='tab:blue', label='GT')
+    ax.plot(pc[:, 0], -pc[:, 2], '-x', ms=4, lw=1.4, c='tab:red', label='pred')
+    ax.scatter(gc[0, 0], -gc[0, 2], c='k', s=70, marker='*', zorder=5, label='start')
     ax.set_aspect('equal', 'datalim'); ax.legend(fontsize=9)
-    ax.set_xlabel(hlab); ax.set_ylabel(an[ga[1]])
+    ax.set_xlabel('X'); ax.set_ylabel('-Z')
     ax.set_title(f"{TAG}  {SEG}\nloss_traj={loss_traj:.4f}  pos_rmse={metrics['pos_rmse']:.3f}", fontsize=9)
     fig.tight_layout(); fig.savefig(os.path.join(tag_dir, f"{base}_topdown.png"), dpi=130, bbox_inches='tight')
     plt.close(fig)

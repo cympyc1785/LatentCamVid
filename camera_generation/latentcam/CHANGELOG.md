@@ -17,11 +17,10 @@ All notable changes to the latentcam sub-project. Follows [Keep a Changelog](htt
   `scripts/render/topdown_swap.py`). They hardcoded the x-z plane, but transforms.json stores c2w
   in the nerfstudio frame where DL3DV's `applied_transform` (x↔y swap + z flip) is baked in — there
   world-up is X and motion lives in Y-Z, so x-z looked down the *forward* axis (a front/back view).
-  Fix: undo `applied_transform` (an involution, det=+1 → pure rotation, shape preserved) to recover
-  the OpenGL/COLMAP frame (up=+Y, ground=X-Z, constant across all DL3DV scenes), then drop the
-  auto-detected up-axis and plot the two ground-plane axes with a right-handed horizontal sign
-  (`hsign = up_sign · levi_civita(ga0,ga1,up)`) so it is a true top-down from the +up side, not a
-  mirrored "down-top" bottom-up view. Result: horizontal=X, vertical=Z (up=Y dropped).
+  Fix: anchor both GT and pred to the GT first camera (`inv(c2w[0]) @ c2w`, same first-frame
+  anchoring as the GenDoP pyramid viz), which puts cam0 at the origin with the OpenGL camera axes
+  (up=+Y, right=+X, forward=-Z). Drop up(+Y) → ground = X-Z; plot X horizontal, -Z vertical so the
+  camera forward points up in the image (map-like). User-confirmed orientation.
 
 ### Added
 - **`models/GenDoP/extrinsic2pyramid/vis_validation_anchor.py`**: trajectory pyramid viz that

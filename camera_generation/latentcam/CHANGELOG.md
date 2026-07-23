@@ -23,6 +23,11 @@ All notable changes to the latentcam sub-project. Follows [Keep a Changelog](htt
   camera forward points up in the image (map-like). User-confirmed orientation.
 
 ### Added
+- **`scripts/render/compare_norm_topdown.py`**: compares two normalization schemes
+  (point = target_cam vs dist = first_farthest_135) on the same 160 validation targets. Per-target
+  top-down (GT + both preds, first-cam anchored X/-Z) + world-space scores (pos_rmse/rot), plus a
+  `_summary.png` and `_scores.csv`. Metrics computed in denormalized world so they are comparable
+  regardless of each model's normalization/VAE. Output → `results/compare/normalization_point_vs_dist/`.
 - **`models/GenDoP/extrinsic2pyramid/vis_validation_anchor.py`**: trajectory pyramid viz that
   replicates GenDoP's **original** `dataset/extrinsic2pyramid/visualize.py::draw_json`
   preprocessing — first-frame anchoring (`c2ws = inv(c2w[0]) @ c2ws`) + optional 2-frame

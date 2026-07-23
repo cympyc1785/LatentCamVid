@@ -12,6 +12,15 @@ All notable changes to the latentcam sub-project. Follows [Keep a Changelog](htt
   wandb configs / helper scripts keep resolving; remove it once all runs referencing the old
   path have finished.
 
+### Fixed
+- **top-down plots were a front/back view, not top-down** (`main/infer_validation_sample.py`,
+  `scripts/render/topdown_swap.py`). They hardcoded the x-z plane, but latentcam's world up-axis
+  is X, so plotting x-z looked down the *forward* axis (a front/back view). Now the up-axis is
+  auto-detected from the mean camera-up (OpenGL c2w col1), dropped, and the two ground-plane axes
+  are plotted with a right-handed horizontal sign (`hsign = up_sign · levi_civita(ga0,ga1,up)`)
+  so the view is a true top-down from the +up side, not a mirrored "down-top" bottom-up view.
+  For current DL3DV data (up ≈ -X) this yields horizontal=-Y, vertical=Z.
+
 ### Added
 - **`models/GenDoP/extrinsic2pyramid/vis_validation_anchor.py`**: trajectory pyramid viz that
   replicates GenDoP's **original** `dataset/extrinsic2pyramid/visualize.py::draw_json`

@@ -4,7 +4,38 @@ All notable changes to the latentcam sub-project. Follows [Keep a Changelog](htt
 
 ## [Unreleased]
 
+### Changed
+- **lagernvs moved** `/data1/cympyc1785/lagernvs` → `camera_generation/tools/lagernvs`
+  (same-FS rename; data/ are absolute symlinks so unaffected). Updated
+  `lagernvs_repo_path`/`lagernvs_ckpt_path` in `main/conf/config.yaml` + `main/config.py` to
+  the new path. A compat symlink at the old location is kept so in-flight runs / historical
+  wandb configs / helper scripts keep resolving; remove it once all runs referencing the old
+  path have finished.
+
 ### Added
+- **`models/GenDoP/extrinsic2pyramid/vis_validation_anchor.py`**: trajectory pyramid viz that
+  replicates GenDoP's **original** `dataset/extrinsic2pyramid/visualize.py::draw_json`
+  preprocessing — first-frame anchoring (`c2ws = inv(c2w[0]) @ c2ws`) + optional 2-frame
+  subsample — before calling `vis.py::draw_json`. The plain `vis.py` path omits anchoring and
+  therefore inherits each dataset's arbitrary world up-axis (X for latentcam, Y for DataDoP),
+  which is why front/top/side came out mislabelled. Anchoring re-expresses the trajectory in the
+  first camera's frame so the views are canonical regardless of world up-axis. Verified: anchored
+  DataDoP output matches the reference `shot_0003_traj_cleaning.png` exactly. Supersedes the
+  earlier `vis_validation_rot.py` per-trajectory rotation hack (wrong approach). Single-file mode:
+  `vis_validation_anchor.py IN.json OUT.png [--sub]`; no-arg mode sweeps `results/validation`.
+- **`main/infer_swap_ablation.py`**: swap-ablation inference for the geo camera-DM models.
+  For N fixed val samples (deterministic split), runs 3 modes and saves each per model/mode
+  (`results/swap_ablation/<model>/<mode>/`): (a) normal, (b) ctxswap — keep the anchor context
+  view (view0=frame s), take the rest from another sample, (c) textswap — keep context, swap
+  text. Per-sample noise seeded so modes are directly comparable. Reads SWAP_CKPT/SWAP_OUT/
+  SWAP_N/SWAP_TAG env + `experiment=` Hydra override.
+- **`geo_cover_before_only`** flag (`dataset_dl3dv.py`): restrict out-of-segment geo context
+  to frames BEFORE the target segment (index < s) instead of the longer out-of-seg side; the
+  target segment must have frames before it, so first-segment targets are filtered out
+  (`s < geo_cover_k`) — the target segment can be the 2nd segment onward. New Hydra experiment
+  `conf/experiment/geo_worldtraj_before.yaml` (identical to geo_worldtraj except before-only
+  context: first camera s + 5 out-of-target views drawn from earlier segments). Default off —
+  existing geo configs unchanged.
 - **`geo_lagernvs_skip_ctx_norm`** flag + `build_cam_token(override_scale=...)`
   (`models/geo_encoder.py`, `geo_encode`): skip LagerNVS's own 1.35·max(context) normalization
   and reuse the target's initial 1.35·max_dist (avg_scale) so target & geo latent share one

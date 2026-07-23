@@ -23,6 +23,11 @@ All notable changes to the latentcam sub-project. Follows [Keep a Changelog](htt
   camera forward points up in the image (map-like). User-confirmed orientation.
 
 ### Added
+- **`scripts/render/compare_textonly.py`**: visualizes the text-only model
+  (`20260719_210144_dl3dv_textonly`, target_cam + no geo) inference → `results/compare/textonly/`.
+  Per-target top-down (GT vs pred, first-cam anchored X/-Z) + world pos_rmse/rot + CLaTr; `_summary.png`;
+  and `_vs_geo.png` a DISTRIBUTIONAL box comparison vs point(worldtraj)/dist(align) (targets are
+  disjoint across models — distributions, not per-pair). Kept `normalization_point_vs_dist/` intact.
 - **`preds_scores.csv`** (`main/evaluate/eval/src/eval_only.py`): per-sample dump of every
   wandb-logged eval metric. Per-sample columns `captions/{precision,recall,fscore}`,
   `clatr/clatr_score` (100·cos(pred-traj, text)), `clatr/pred_ref_cosine` (100·cos(pred-traj,

@@ -23,6 +23,18 @@ All notable changes to the latentcam sub-project. Follows [Keep a Changelog](htt
   camera forward points up in the image (map-like). User-confirmed orientation.
 
 ### Added
+- **`main/conf/experiment/textonly_align.yaml`**: text-only counterpart of geo_worldtraj_align —
+  no geo, but first_farthest_135 (1.35·max_dist) normalization + vae_worldtraj (latent_scale
+  0.569379) + meta_worldtraj.csv. Purpose: text-only vs worldtraj_align isolates the geo effect
+  under dist normalization. (Training launched on GPU5 per explicit user instruction — overrides
+  the CLAUDE.md no-4~7 rule; run `dl3dv_textonly_align`, screen train5.)
+- **`main/infer_textonly_batch.py`**: runs the text-only model on the worldtraj validation targets
+  (inputs reconstructed from saved `_transforms_ref.json` + `_caption.json`, no CamDataset load) so
+  text-only vs worldtraj can be compared PER-PAIR on identical targets. Writes
+  `results/compare/text-only_vs_worldtraj/textonly_preds/`.
+- **`scripts/render/compare_textonly_vs_worldtraj.py`**: per-pair top-down (GT + worldtraj+geo pred
+  + text-only pred + geo-context stars, first-cam anchored X/-Z) on the same 160 targets + world
+  pos_rmse; both use target_cam so the diff is geo on/off. `_summary.png` (paired) + `_scores.csv`.
 - **`scripts/render/compare_textonly.py`**: visualizes the text-only model
   (`20260719_210144_dl3dv_textonly`, target_cam + no geo) inference → `results/compare/textonly/`.
   Per-target top-down (GT vs pred, first-cam anchored X/-Z) + world pos_rmse/rot + CLaTr; `_summary.png`;

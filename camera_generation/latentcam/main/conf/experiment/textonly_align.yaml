@@ -1,0 +1,13 @@
+# @package _global_
+# Text-only counterpart of geo_worldtraj_align: NO geo conditioning, but the SAME align-style
+# coordinate normalization + VAE as worldtraj_align, so text-only vs worldtraj_align isolates the
+# geo effect under the dist (1.35*max_dist) normalization.
+#   - scale_mode = first_farthest_135 (1.35 * max ||center - first||)
+#   - VAE re-fit on this scale (vae_worldtraj, latent_scale 0.569379)
+#   - same data scope as align (meta_worldtraj.csv)
+exp_name: dl3dv_textonly_align
+meta_csv: meta_worldtraj.csv
+geo_encoder: null
+scale_mode: first_farthest_135
+vae_ckpt_path: /data1/cympyc1785/LatentCamVid/camera_generation/latentcam/my_checkpoints/vae_worldtraj/last.pth
+vae_latent_scale: 0.569379

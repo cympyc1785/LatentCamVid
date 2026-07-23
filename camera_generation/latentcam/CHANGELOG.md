@@ -23,6 +23,15 @@ All notable changes to the latentcam sub-project. Follows [Keep a Changelog](htt
   camera forward points up in the image (map-like). User-confirmed orientation.
 
 ### Added
+- **`main/dump_render_inputs.py`** (+ vendored `tools/lagernvs/render_pred_from_dump.py`, not
+  committed): render a results/validation predicted trajectory with LagerNVS. Two-step to avoid the
+  latentcam↔lagernvs `models` package clash — step 1 (latentcam) dumps the exact inference-time geo
+  context (image paths + OpenCV-world c2w + intrinsics, same frames as at inference) + the pred
+  cameras to `render_inputs.pt`; step 2 (lagernvs) loads context at 512, adjusts intrinsics,
+  normalizes exactly like training (`normalize_extrinsics` = view0-relative + 1.35·max, camera_scale
+  0.7407) and `build_cam_cond` → `render_chunked` with the same general_512 model used for geo
+  conditioning → `render_pred_lagernvs.mp4` + `render_pred_grid.png` per model. worldtraj/align share
+  the frustum_cover context; hybrid uses its own.
 - **`main/conf/experiment/textonly_align.yaml`**: text-only counterpart of geo_worldtraj_align —
   no geo, but first_farthest_135 (1.35·max_dist) normalization + vae_worldtraj (latent_scale
   0.569379) + meta_worldtraj.csv. Purpose: text-only vs worldtraj_align isolates the geo effect

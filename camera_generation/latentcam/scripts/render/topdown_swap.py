@@ -18,14 +18,20 @@ import matplotlib.pyplot as plt
 ROOT_DEFAULT = os.path.join(os.path.dirname(__file__), "..", "..", "results", "swap_ablation")
 
 
+# DL3DV applied_transform (x<->y swap + z flip) is baked into transforms.json; undoing it recovers
+# the OpenGL/COLMAP frame (up=+Y, ground=X-Z). Constant across all DL3DV scenes; AT is an involution.
+_AT = np.array([[0., 1., 0.], [1., 0., 0.], [0., 0., -1.]])
+
+
 def centers(poses):     # (T,4,4) w2c -> (T,3) centers, (ga0,ga1) ground axes, hsign for right-handed top-down
     c2w = np.linalg.inv(poses)
-    up_vec = c2w[:, :3, 1].mean(0)
+    ctr = c2w[:, :3, 3] @ _AT.T                       # -> OpenGL frame (up=+Y)
+    up_vec = (c2w[:, :3, 1] @ _AT.T).mean(0)
     up_axis = int(np.argmax(np.abs(up_vec)))
     up_sign = 1.0 if up_vec[up_axis] >= 0 else -1.0
     ga = [a for a in (0, 1, 2) if a != up_axis]
     parity = 1.0 if (ga[0], ga[1], up_axis) in {(0, 1, 2), (1, 2, 0), (2, 0, 1)} else -1.0
-    return c2w[:, :3, 3], ga, up_sign * parity   # look DOWN world up-axis, non-mirrored
+    return ctr, ga, up_sign * parity   # look DOWN world up-axis, non-mirrored
 
 
 def plot_model_mode(model_dir, model, mode, out_path):

@@ -129,8 +129,9 @@ def main():
 
     # top-down from the c2w matrices (camera center = transform_matrix[:3,3])
     ref_c2w = np.array([f["transform_matrix"] for f in build_json(ref_intr, m_ref)["frames"]])
+    pred_c2w = np.array([f["transform_matrix"] for f in build_json(pred_intr, m_pred)["frames"]])
     gc = ref_c2w[:, :3, 3]
-    pc = np.array([f["transform_matrix"] for f in build_json(pred_intr, m_pred)["frames"]])[:, :3, 3]
+    pc = pred_c2w[:, :3, 3]
     pos_err = np.linalg.norm(pc - gc, axis=1)
     metrics = {"model": TAG, "segment": SEG, "experiment": cfg.exp_name,
                "loss_latent": loss_latent, "loss_traj": loss_traj,
@@ -140,15 +141,19 @@ def main():
     json.dump(metrics, open(os.path.join(tag_dir, f"{base}_metrics.json"), "w"), indent=2)
     print(f"[{TAG}] loss_latent={loss_latent:.4f} loss_traj={loss_traj:.4f} pos_rmse={metrics['pos_rmse']:.4f}")
 
-    # true top-down: look DOWN the world up-axis (from the +up side, looking -up). up-axis =
-    # dominant component of mean camera-up (OpenGL c2w col1); drop it, plot the two ground-plane
-    # axes. Horizontal sign is chosen right-handed so R x U = +world-up (else it mirrors into a
-    # "down-top" bottom-up view): hsign = up_sign * levi_civita(ga0, ga1, up_axis). (latentcam
-    # up=-X -> plots (-Y, Z); plain x-z was a front/back view, not top-down.)
-    up_vec = ref_c2w[:, :3, 1].mean(0)
-    up_axis = int(np.argmax(np.abs(up_vec)))                       # 0=X 1=Y 2=Z
+    # true top-down in the OpenGL/COLMAP frame (up=+Y, ground=X-Z). transforms.json stores c2w in
+    # the nerfstudio frame where DL3DV's applied_transform (x<->y swap + z flip) has been baked in,
+    # so there world-up is X and motion lives in Y-Z. Undo it (AT is an involution, det=+1 => pure
+    # rotation, shape preserved) to recover the OpenGL frame, THEN drop the up-axis. Constant across
+    # all DL3DV scenes.
+    AT = np.array([[0., 1., 0.], [1., 0., 0.], [0., 0., -1.]])   # DL3DV applied_transform (3x3)
+    gc = gc @ AT.T
+    pc = pc @ AT.T
+    up_vec = (ref_c2w[:, :3, 1] @ AT.T).mean(0)
+    up_axis = int(np.argmax(np.abs(up_vec)))                       # 0=X 1=Y 2=Z (=Y here)
     up_sign = 1.0 if up_vec[up_axis] >= 0 else -1.0
-    ga = [a for a in (0, 1, 2) if a != up_axis]                    # ground-plane axes
+    ga = [a for a in (0, 1, 2) if a != up_axis]                    # ground-plane axes (X,Z here)
+    # right-handed horizontal sign so R x U = +world-up (else it mirrors into a "down-top" view)
     parity = 1.0 if (ga[0], ga[1], up_axis) in {(0, 1, 2), (1, 2, 0), (2, 0, 1)} else -1.0
     hsign = up_sign * parity
     an = "XYZ"

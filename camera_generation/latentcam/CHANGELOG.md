@@ -14,12 +14,14 @@ All notable changes to the latentcam sub-project. Follows [Keep a Changelog](htt
 
 ### Fixed
 - **top-down plots were a front/back view, not top-down** (`main/infer_validation_sample.py`,
-  `scripts/render/topdown_swap.py`). They hardcoded the x-z plane, but latentcam's world up-axis
-  is X, so plotting x-z looked down the *forward* axis (a front/back view). Now the up-axis is
-  auto-detected from the mean camera-up (OpenGL c2w col1), dropped, and the two ground-plane axes
-  are plotted with a right-handed horizontal sign (`hsign = up_sign · levi_civita(ga0,ga1,up)`)
-  so the view is a true top-down from the +up side, not a mirrored "down-top" bottom-up view.
-  For current DL3DV data (up ≈ -X) this yields horizontal=-Y, vertical=Z.
+  `scripts/render/topdown_swap.py`). They hardcoded the x-z plane, but transforms.json stores c2w
+  in the nerfstudio frame where DL3DV's `applied_transform` (x↔y swap + z flip) is baked in — there
+  world-up is X and motion lives in Y-Z, so x-z looked down the *forward* axis (a front/back view).
+  Fix: undo `applied_transform` (an involution, det=+1 → pure rotation, shape preserved) to recover
+  the OpenGL/COLMAP frame (up=+Y, ground=X-Z, constant across all DL3DV scenes), then drop the
+  auto-detected up-axis and plot the two ground-plane axes with a right-handed horizontal sign
+  (`hsign = up_sign · levi_civita(ga0,ga1,up)`) so it is a true top-down from the +up side, not a
+  mirrored "down-top" bottom-up view. Result: horizontal=X, vertical=Z (up=Y dropped).
 
 ### Added
 - **`models/GenDoP/extrinsic2pyramid/vis_validation_anchor.py`**: trajectory pyramid viz that

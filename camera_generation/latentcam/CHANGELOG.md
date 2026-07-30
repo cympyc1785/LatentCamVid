@@ -4,7 +4,66 @@ All notable changes to the latentcam sub-project. Follows [Keep a Changelog](htt
 
 ## [Unreleased]
 
+### Added
+- **`conf/experiment/vae_dl3dv_1_7k.yaml`** — camera-VAE re-fit on the full DL3DV corpus the
+  diffusion runs actually use (`meta.csv`, no coverage blacklist → **39830 segments / 6097
+  scenes**), replacing the 1K-only fit behind the active default ckpt
+  `vae_20260202_065659_400.pth` (SCVideo fit that on DL3DV 1K with one 49-frame window per scene,
+  ~1000 samples). Deliberately a **drop-in**: `cam_dim: 32` + `scale_mode: avg_scale` +
+  `intr_norm: raw`, so the resulting `state_dict` is key- and shape-identical to the old ckpt
+  (verified) and swapping it changes only the VAE's training corpus. `batch_size 64`, `lr 1e-4`,
+  `60 epochs`, `vae_beta 0.001`. Its `train/latent_std` (also written to
+  `my_checkpoints/vae_dl3dv_1_7k/latent_std.txt`) becomes the matching `vae_latent_scale` —
+  `0.4467666` belongs to the 1K-only fit and must not be reused with it.
+  Note for the record: `meta.csv` lists 8048 scenes (1K–11K) but 8K–11K have no scene dirs on
+  disk, so both this and every `meta.csv` diffusion run resolve to **DL3DV 1K–7K, all segments**.
+
 ### Changed
+- **`vae_latent_scale` set to SCVideo's verbatim `0.4467666`** (was our measured `0.46312`), keeping
+  the DL3DV-only `config.py` triple otherwise unchanged (`vae_20260202_065659_400.pth`,
+  `cam_dim: 32`, `intr_norm: raw`, `scale_mode: avg_scale`, `clatr_epoch109_dl3dv_seg_2.ckpt`).
+  Explicit user decision to use SCVideo's constant rather than our re-measurement. Consequence,
+  measured not estimated: the latent std of this triple on our 1264 DL3DV segments is 0.46312, so
+  the diffusion input std is **1.0366** instead of 1.0000 (train/infer do
+  `encode(traj) / vae_latent_scale`) — a 3.7% overshoot, from our segment definitions differing
+  from SCVideo's one-49-frame-window-per-scene sampling.
+  `config_large.py`'s line (`0.96032625` + `vae_20260302_300.pth` + `cam_dim 64` + `intr_norm: rel`
+  + `clatr_epoch139_large.ckpt`) was evaluated and rejected in the same session. Recorded for
+  future reference, since it is a valid alternative: that ckpt loads strict at 64-dim, gives
+  `latent (16,13,64)` with the best recon of any cell (L1 rot 0.00504 / trans 0.00301 /
+  intr 0.00222), `CameraDiffusionModel(cam_dim=64)` = 64.82M params; `config_large`'s dataset
+  really does use saved `avg_scale` (`data/dataset_large.py:295-304`) + frame-0-relative
+  intrinsics (line 313), so `avg_scale` + `rel` is its exact pipeline; 31 of its keys already match
+  ours, the 7 that differ being `batch_size` 32, `save_epoch` 25, `num_thread` 4,
+  `sample_data` 33980, and the three that make it a **point-cloud-conditioned,
+  attention-supervised** run rather than text-only (`load_points`/`load_saved_pc_embeds` True,
+  `model_type: baseline_attn_sup`). Its blocker is the same class of problem as above but larger:
+  `0.96032625` was fit over SCVideo's MIXED corpus (DL3DV + DynamicVerse + dynpose-100k), while
+  DL3DV-only measures 0.44696 → input std **0.4654**. `clatr_epoch139_large.ckpt` is a verified
+  drop-in (both CLaTr ckpts: 260-key state_dict, no shape mismatch, 191,546,118 B; the input
+  standardization lives in `evaluate/CLaTr/configs/dataset/standardization/0120.yaml`, not in the
+  ckpt) but is trained on a different corpus, so its FD/PRDC/CLaTr-score would not be comparable
+  with the `epoch109_dl3dv_seg_2` history we already have.
+- **`cam_dim` + `intr_norm` pinned in every experiment that overrides `vae_ckpt_path`, plus the
+  VAE-training experiments**, so each ckpt keeps its own latent dim and intrinsics convention
+  regardless of the global default. Both values were set to what the current/pre-`intr_norm` code
+  resolved to, i.e. **no behavior change** — the point is that these configs no longer silently
+  depend on `config.yaml`'s defaults:
+  * `cam_dim: 64` in `ar.yaml`, `ar_smoke.yaml`, `rolling.yaml`, `rolling_smoke.yaml`
+    (CamVLA `causal_vae_v1_240.pth`), `textonly_align.yaml`, `geo_worldtraj_align.yaml`
+    (`my_checkpoints/vae_worldtraj/last.pth`), and the VAE-training configs `vae_worldtraj.yaml`,
+    `vae_dl3dv.yaml`, `vae_dl3dv_smoke.yaml`, `vae_dl3dv_avgscale.yaml`. All three non-SCVideo
+    ckpts were inspected and are 64-dim (`encoder.to_mu.weight (64,64,1)`), so with the default now
+    32 they would have hit the exact `size mismatch for encoder.to_mu.weight` crash recorded in
+    FIX.log 2026-07-18.
+  * `intr_norm: rel` in the four CamVLA configs (no `scale_mode` override → `avg_scale` → legacy
+    `auto` == `rel`) and `vae_dl3dv_avgscale.yaml`; `intr_norm: raw` in `textonly_align.yaml`,
+    `geo_worldtraj_align.yaml`, `vae_worldtraj.yaml` (fit under `first_farthest_135` → legacy
+    `auto` == `raw`), `vae_dl3dv.yaml`, `vae_dl3dv_smoke.yaml` (`geo_lagernvs` → `raw`), and
+    `textonly_savedscale.yaml` (already `raw`; pinned rather than inherited).
+  Experiments that use the DEFAULT VAE and only override `scale_mode` (`geo_*`, `textonly`,
+  `textonly_camscale*`, `smoke_*`) are intentionally left unpinned, so they now inherit the 32-dim
+  `vae_20260202_065659_400` + `raw` default.
 - **DL3DV root moved** `/data1/cympyc1785/data/DL3DV/DL3DV-960/DL3DV-10K` → `/data1/cympyc1785/data/DL3DV/scenes`
   (done by the user on disk). Updated every live reference: `main/conf/config.yaml` (`dl3dv_root`),
   `main/conf/experiment/geo_worldtraj_seglist.yaml` (`train_seg_list`/`test_seg_list`),

@@ -96,15 +96,22 @@ class Config:
     # Intrinsics encoding of cam_param[..., 9:11] — a property of the VAE CKPT, NOT of scale_mode.
     #   'raw'  : fx/2cx, fy/2cy            -> (0.448, 0.796) for DL3DV
     #   'rel'  : the same, divided by frame 0 -> exactly 1.0 for DL3DV (dataset_large.py:313)
-    #   'auto' : legacy coupling, 'rel' iff scale_mode == 'avg_scale' (default, bit-for-bit compat)
+    #   'auto' : legacy coupling, 'rel' iff scale_mode == 'avg_scale' (reproduces pre-fix runs
+    #            bit-for-bit; use it only to re-run an old experiment)
     # Mismatch vs the ckpt silently destroys the intr channels — see scripts/vae/vae_scale_matrix.py.
-    intr_norm = 'auto'
+    # 'raw' is the correct convention for the default 32-dim ckpt below (20260202_065659, fit
+    # before SCVideo added the frame-0 division at data/dataset_large.py:313).
+    intr_norm = 'raw'
 
-    # VAE (train_latent_cam_dm.py uses vae_intr_large.CameraVAE -> cam_dim=64)
+    # VAE — SCVideo's DL3DV-only config.py setting. cam_dim MUST match the ckpt's latent_dim
+    # (20260202_065659 -> 32, 20260302 -> 64) or the state_dict load hard-crashes on to_mu.
+    # NOTE 0.4467666 is SCVideo's constant; on our 1264 DL3DV SEGMENTS the same triple measures
+    # 0.46312 -> input std 1.0366, not 1.0. Kept verbatim per explicit user decision; see
+    # main/conf/config.yaml's comment for the measured matrix.
     use_vae = True
     if use_vae:
         num_cam = 13
-        cam_dim = 64
+        cam_dim = 32
     else:
         num_cam = 49
         cam_dim = 11
@@ -196,6 +203,8 @@ class Config:
     clip_version = 'ViT-B/32'
     clip_max_length = 77
 
+    # All our runs' CLaTr metrics are against this ckpt. config_large.py's clatr_epoch139_large.ckpt
+    # is an architecture-identical drop-in but trained on a different corpus -> incomparable scores.
     clatr_ckpt_path = osp.join(ckpt_root, 'clatr_epoch109_dl3dv_seg_2.ckpt')
 
 

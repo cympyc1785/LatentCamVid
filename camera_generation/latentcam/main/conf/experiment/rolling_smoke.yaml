@@ -6,5 +6,7 @@ causal_vae: true
 per_token_noise: true
 vae_latent_scale: 0.920076
 vae_ckpt_path: /data1/cympyc1785/LatentCamVid/camera_generation/models/CamVLA/checkpoints/causal_vae_v1_240.pth
+cam_dim: 64                 # the CamVLA causal VAE is 64-dim; see ar.yaml
+intr_norm: rel              # pinned (= what pre-intr_norm 'auto' resolved to here); see ar.yaml
 max_scenes: 4
 geo_encoder: null

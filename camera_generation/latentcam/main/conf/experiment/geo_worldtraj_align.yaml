@@ -20,3 +20,5 @@ geo_lagernvs_skip_ctx_norm: true
 scale_mode: first_farthest_135
 vae_ckpt_path: /data1/cympyc1785/LatentCamVid/camera_generation/latentcam/my_checkpoints/vae_worldtraj/last.pth
 vae_latent_scale: 0.569379
+cam_dim: 64                 # vae_worldtraj is 64-dim; see textonly_align.yaml
+intr_norm: raw              # vae_worldtraj's own convention; see textonly_align.yaml

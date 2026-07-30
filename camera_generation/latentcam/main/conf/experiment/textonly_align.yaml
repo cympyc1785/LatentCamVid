@@ -11,3 +11,8 @@ geo_encoder: null
 scale_mode: first_farthest_135
 vae_ckpt_path: /data1/cympyc1785/LatentCamVid/camera_generation/latentcam/my_checkpoints/vae_worldtraj/last.pth
 vae_latent_scale: 0.569379
+# Pinned so this run survives config.yaml default changes: vae_worldtraj is 64-dim (the default is
+# now 32 -> strict load would crash on encoder.to_mu.weight), and it was FIT under the
+# pre-intr_norm code with scale_mode=first_farthest_135, where legacy 'auto' resolved to 'raw'.
+cam_dim: 64
+intr_norm: raw

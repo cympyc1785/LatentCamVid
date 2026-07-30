@@ -4,3 +4,8 @@ is_ar: true
 causal_vae: true
 vae_latent_scale: 0.920076
 vae_ckpt_path: /data1/cympyc1785/LatentCamVid/camera_generation/models/CamVLA/checkpoints/causal_vae_v1_240.pth
+# Pinned so this run survives config.yaml default changes: the CamVLA causal VAE is 64-dim (the
+# default is now 32 -> strict load would crash on encoder.to_mu.weight), and 'rel' is the value the
+# pre-intr_norm code resolved to here (no scale_mode override -> avg_scale -> legacy 'auto').
+cam_dim: 64
+intr_norm: rel

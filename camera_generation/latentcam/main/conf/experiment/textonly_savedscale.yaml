@@ -1,12 +1,14 @@
 # @package _global_
 # text-only with SCVideo's ORIGINAL DL3DV-only normalization: camera translations divided by the
-# stored point-cloud avg_scale (scale_mode=avg_scale) + SCVideo intrinsics (fx/2cx, fy/2cy). The
-# plain dl3dv_textonly had used camera-based cam_dist_mean, which diverged from the port origin
-# (data/dataset_large.py). Same base/loss as dl3dv_textonly otherwise; the VAE triple
-# (vae_20260202_065659_400 / cam_dim 32 / intr_norm raw / vae_latent_scale 0.46312) comes from
-# config.yaml — see its comment for the measured matrix. intr_norm is set explicitly here because
-# the default 'auto' would pick 'rel' for scale_mode=avg_scale, which is the WRONG convention for
-# this ckpt (intr recon L1 0.263 vs 0.0029).
+# stored point-cloud avg_scale (scale_mode=avg_scale) + SCVideo's non-relative intrinsics
+# (intr_norm=raw, i.e. fx/2cx, fy/2cy) — the exact pipeline vae_20260202_065659_400 was fit with
+# (SCVideo main/config.py + data/dataset.py, DL3DV 1K only). The plain dl3dv_textonly had used
+# camera-based cam_dist_mean, which diverged from the port origin. Same base/loss as
+# dl3dv_textonly otherwise; the VAE triple (vae_20260202_065659_400 / cam_dim 32 /
+# vae_latent_scale 0.4467666) comes from config.yaml — see its comment for the measured matrix.
+# intr_norm is pinned here rather than left at the default so the ckpt<->convention pairing
+# survives future default changes (and because the legacy 'auto' would pick the WRONG 'rel' for
+# scale_mode=avg_scale: intr recon L1 0.263 vs 0.0029).
 exp_name: dl3dv_textonly_savedscale
 geo_encoder: null
 scale_mode: avg_scale

@@ -3,3 +3,5 @@ exp_name: vae_dl3dv_avgscale
 batch_size: 64
 epochs: 60
 geo_encoder: null
+cam_dim: 64                 # latent dim of the VAE this trains (previous fits were 64)
+intr_norm: rel              # pinned (= legacy 'auto' for avg_scale, and config_large's convention)

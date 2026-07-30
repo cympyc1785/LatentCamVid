@@ -4,6 +4,8 @@
 exp_name: vae_worldtraj
 geo_encoder: null
 scale_mode: first_farthest_135
+cam_dim: 64                 # latent dim of the VAE this trains (existing vae_worldtraj ckpt is 64)
+intr_norm: raw              # what the existing vae_worldtraj ckpt was fit with (legacy 'auto')
 meta_csv: meta_worldtraj.csv
 coverage_blacklist_path: null
 batch_size: 64

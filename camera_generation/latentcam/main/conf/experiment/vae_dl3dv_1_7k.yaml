@@ -1,0 +1,24 @@
+# @package _global_
+# Camera VAE re-fit on the FULL DL3DV corpus that the diffusion runs actually train on:
+# meta.csv (lists 1K-11K, but only 1K-7K exist on disk -> 6132 scenes, ~all segments) minus
+# blacklist.csv, with NO coverage blacklist. This is the direct upgrade of the active default
+# ckpt vae_20260202_065659_400.pth, which SCVideo fit on DL3DV *1K only* with one 49-frame
+# window per scene (see conf/config.yaml's VAE block for that provenance).
+#
+# Deliberately a DROP-IN replacement for that ckpt, so the only thing that changes vs. the
+# currently-running text-only baselines is the VAE's training corpus:
+#   cam_dim 32 (same latent_dim -> strict load works, num_cam stays 13)
+#   scale_mode avg_scale + intr_norm raw (the exact same normalization pipeline)
+# After training, take train/latent_std (also written to my_checkpoints/<exp>/latent_std.txt)
+# as the new vae_latent_scale -- do NOT reuse 0.4467666, it was measured on the 1K-only fit.
+exp_name: vae_dl3dv_1_7k
+geo_encoder: null
+meta_csv: meta.csv
+coverage_blacklist_path: null
+scale_mode: avg_scale
+intr_norm: raw
+cam_dim: 32
+batch_size: 64
+lr: 0.0001
+epochs: 60
+vae_beta: 0.001

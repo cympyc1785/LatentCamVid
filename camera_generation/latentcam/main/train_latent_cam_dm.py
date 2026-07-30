@@ -79,6 +79,27 @@ def geo_encode(geo_encoder, data, device):
     return geo_encoder(images, cam_token)
 
 
+def attach_geo_cam(emb, data, device):
+    """[new] cfg.geo_cam_embed: append each context view's 11-d camera pose (relative to the
+    target's FIRST camera, dataset_dl3dv._geo_cam_param) to every patch token of that view.
+
+      emb (B, M, C) with M = V*P  ->  (B, M, C + 11)
+
+    The raw dims ride along inside geo_emb so no call site's signature changes; the model splits
+    them off and lifts them with a trainable MLP (CameraDiffusionModel._lift_geo_cam). No-op when
+    geo_cam_embed is off or the batch carries no geo_cam_param."""
+    if not getattr(cfg, 'geo_cam_embed', None) or 'geo_cam_param' not in data:
+        return emb
+    cam = data['geo_cam_param'].to(device).to(emb.dtype)          # (B, V, 11)
+    B, M, _ = emb.shape
+    V = cam.shape[1]
+    if M % V:
+        raise ValueError(f"geo token count {M} not divisible by #views {V}")
+    P = M // V
+    cam = cam.unsqueeze(2).expand(B, V, P, cam.shape[-1]).reshape(B, M, cam.shape[-1])
+    return torch.cat([emb, cam], dim=-1)
+
+
 @torch.no_grad()
 def sample(model, scheduler, traj_len, text_emb, text_masks, point_emb, point_mask):
     B = text_emb.size(0)
@@ -267,10 +288,19 @@ def train():
         from core_pkg.common.utils.clip_utils import get_model, encode_text_clip
         text_encoder, tokenizer = get_model(cfg.clip_repo_name, device=device)
     
+    # [new] cfg.geo_cam_embed widens the geo cross-attention input: geo_proj sees
+    # geo_latent_dim + geo_cam_embed_dim instead of geo_latent_dim. Off (0) -> identical model.
+    _geo_kw = {}
+    if getattr(cfg, 'geo_cam_embed', None):
+        _geo_kw = dict(geo_latent_dim=getattr(cfg, 'geo_latent_dim', 768),
+                       geo_cam_raw_dim=11,
+                       geo_cam_embed_dim=getattr(cfg, 'geo_cam_embed_dim', 128))
+        print(f"(model) geo_cam_embed={cfg.geo_cam_embed}: geo_proj input = "
+              f"{_geo_kw['geo_latent_dim']} + {_geo_kw['geo_cam_embed_dim']}")
     if cfg.point_encoder != 'custom':
-        model = CameraDiffusionModel(cam_dim=cfg.cam_dim)
+        model = CameraDiffusionModel(cam_dim=cfg.cam_dim, **_geo_kw)
     else:
-        model = CameraDiffusionModel(cam_dim=cfg.cam_dim, pc_encoder=pc_encoder)
+        model = CameraDiffusionModel(cam_dim=cfg.cam_dim, pc_encoder=pc_encoder, **_geo_kw)
     
     # Load weights from the (peeked) resume checkpoint. Optimizer/step/epoch are
     # restored after accelerator.prepare() below (full resume only).
@@ -368,6 +398,8 @@ def train():
                     pc_embeds, pc_masks = geo_emb_from_cache(data, device)
                 elif geo_encoder is not None and 'images' in data:
                     pc_embeds, pc_masks = geo_encode(geo_encoder, data, device)
+                if pc_embeds is not None:
+                    pc_embeds = attach_geo_cam(pc_embeds, data, device)
                 if cfg.text_encoder == 'T5':
                     text_embeds, text_masks = text_encoder(text_prompt, device)
                 elif cfg.text_encoder == 'CLIP':
@@ -620,6 +652,8 @@ def train():
             elif geo_encoder is not None and 'images' in data:
                 with torch.no_grad():
                     pc_embeds, pc_masks = geo_encode(geo_encoder, data, device)
+            if pc_embeds is not None:
+                pc_embeds = attach_geo_cam(pc_embeds, data, device)
 
             noise = torch.randn_like(traj_latents)
             timesteps = torch.randint(

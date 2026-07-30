@@ -191,6 +191,12 @@ class Config:
     # [new] precomputed frozen geo-latent cache root (main/cache_geo_embeddings.py). None = OFF,
     # i.e. run LagerNVS every step as before. See conf/config.yaml for layout + validity caveats.
     geo_latent_cache_dir = None
+    # [new] per-context-view camera embedding channel-concatenated onto the geo tokens.
+    # None = OFF (geo condition stays the plain (M, 768) LagerNVS tokens). 'relfirst' = 11-d pose
+    # of each context view relative to the target's FIRST camera (trans / norm_scale), appended
+    # raw by the dataset and lifted by a trainable MLP inside the model. See conf/config.yaml.
+    geo_cam_embed = None
+    geo_cam_embed_dim = 128
     geo_inseg_span = None       # (hybrid) frames from anchor to spread in-segment over (None -> num_frames//8)
     geo_covis_radius = 2.0      # (hybrid) candidate center within R * segment-scale of anchor
     geo_covis_theta0 = 10.0     # (hybrid) preferred triangulation angle (deg) for covis score

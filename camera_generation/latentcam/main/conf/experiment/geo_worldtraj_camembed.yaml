@@ -1,0 +1,47 @@
+# @package _global_
+# Ablation of geo_worldtraj: DECOUPLE the geo context from the camera to be generated.
+#
+# geo_worldtraj pins context view0 = the target segment's FIRST camera (frame s), which hands
+# LagerNVS the generation frame for free. Here NO target-segment camera is a context view at all:
+#   geo_first_view_target_s: false  -> all geo_cover_k views are retrieved (k_retr = k = 6)
+#   geo_cover_out_of_seg:    true   -> candidates = the LONGER of before(0..s) / after(e..N)
+#                                      (dataset_dl3dv.py:619-625), so [s:e] is fully excluded
+#   geo_cover_subtract_first: false -> nothing is prepicked; plain greedy max coverage over k views
+#   geo_anchor_first_frame:  true   -> the coverage ball is still centered on frame s (known at
+#                                      inference, so leakage-free) and its radius comes from
+#                                      CONTEXT movement, never from the unseen [s+1:e]
+# Camera embeddings still go INTO LagerNVS (geo_posed: true) and LagerNVS keeps its own
+# 1.35*max||center|| context normalization (geo_lagernvs_skip_ctx_norm stays false) -- so the geo
+# latent lives in an arbitrary context frame.
+#
+# What replaces the lost frame alignment: geo_cam_embed 'relfirst'. For each context view v the
+# dataset builds an 11-d pose RELATIVE to the target's first camera s
+#   rel = w2c_v @ inv(w2c_s), trans / norm_scale, [rot6d(6), trans(3), fx/2cx, fy/2cy]
+# (dataset_dl3dv._geo_cam_param) and broadcasts it over that view's patch tokens, so the geo
+# condition is (V, P, 768) -> (V, P, 768+11); the model splits the 11 off, lifts them through a
+# trainable MLP to geo_cam_embed_dim and re-concatenates -> geo_proj input 768+128 = 896.
+# Translations use the target's norm_scale (scale_mode avg_scale), i.e. the SAME units as the
+# trajectory being generated, so the model can read off where each view sits in the output frame.
+#
+# Everything else matches geo_worldtraj (post-2026-07-31): meta_worldtraj.csv, scale_mode
+# avg_scale, VAE vae_20260302_300.pth @ cam_dim 64 / intr_norm rel, clatr_epoch139_large.ckpt.
+#
+# Cache: the context selection differs from geo_worldtraj, so this run gets its OWN latent tree.
+# geo_first_view_target_s is false here, so dataset/cache script both resolve the subdir to
+# first_cam_not_included/ -- disjoint from geo_worldtraj's first_cam_included/. Those files are
+# the v2 format {'emb', 'geo_idxs'}; geo_idxs is what lets a cache hit rebuild the camera
+# embedding without redoing the greedy coverage search.
+exp_name: dl3dv_geo_worldtraj_camembed
+meta_csv: meta_worldtraj.csv
+coverage_blacklist_path: null
+geo_encoder: lagernvs
+geo_view_sampling: frustum_cover
+geo_cover_out_of_seg: true
+geo_first_view_target_s: false
+geo_cover_subtract_first: false
+geo_anchor_first_frame: true
+geo_posed: true
+scale_mode: avg_scale
+geo_cam_embed: relfirst
+geo_cam_embed_dim: 128
+geo_latent_cache_dir: /data1/cympyc1785/data/DL3DV/latent_cache

@@ -120,6 +120,24 @@ geo_anchor_first_frame: false # honest frustum_cover: anchor at target's first f
 geo_cover_subtract_first: false # [new] subtract the fixed first-cam (s) coverage before the greedy pick, so the
                               #   remaining k-1 views maximize RESIDUAL coverage (what s doesn't already cover)
 coverage_blacklist_path: null # per-segment coverage-blacklist CSV (columns scene,segment); null = no filtering
+# [new] per-context-view camera embedding channel-concatenated onto the geo tokens.
+#   null (default) = OFF, i.e. the geo condition is exactly the (M, 768) LagerNVS tokens as before.
+#   'relfirst'     = for each context view v build an 11-d pose relative to the TARGET segment's
+#                    FIRST camera s -- rel = w2c_v @ inv(w2c_s), translation / norm_scale (the same
+#                    divisor scale_mode gave the target), parametrized exactly like cam_param
+#                    (rot6d = rel[:3,0] ++ rel[:3,1], trans = rel[:3,3], intr = fx/2cx, fy/2cy).
+#                    The dataset appends those 11 raw dims to every patch token of that view, so
+#                    geo_emb arrives as (M, 768+11); the MODEL splits them off, runs them through a
+#                    trainable MLP (11 -> geo_cam_embed_dim) and concatenates, giving geo_proj an
+#                    input of geo_latent_dim + geo_cam_embed_dim. Only the raw 11 dims are cached.
+#   Intended for the ablation where the target's own first camera is NOT a context view
+#   (geo_first_view_target_s: false): LagerNVS then anchors to an arbitrary context view, and this
+#   embedding is what tells the model where each view sits in the generation frame.
+#   Context intrinsics are kept RAW (fx/2cx, fy/2cy) regardless of intr_norm: under intr_norm 'rel'
+#   the target's own intr channels are ~[1,1] by construction, so raw is the only way the context
+#   FoV reaches the model.
+geo_cam_embed: null
+geo_cam_embed_dim: 128        # width of the trainable MLP that lifts the 11 raw dims (geo_cam_embed only)
 # [new] precomputed frozen geo-latent cache (built by main/cache_geo_embeddings.py). null = OFF,
 # i.e. the original behaviour: load context images and run LagerNVS every step. When set, the
 # dataset loads <dir>/<first_cam_included|first_cam_not_included>/<iK>/<data_name>.pt instead and

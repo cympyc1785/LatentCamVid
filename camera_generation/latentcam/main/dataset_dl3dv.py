@@ -260,6 +260,12 @@ class CamDataset(torch.utils.data.Dataset):
                 self.geo_latent_cache_dir = osp.join(_cdir, sub)
                 print(f"[geo cache] reading {self.geo_latent_cache_dir}/<iK>/<data_name>.pt "
                       f"(miss -> on-the-fly LagerNVS)")
+        # [new] per-context-view camera embedding concatenated onto the geo tokens.
+        # None = OFF (unchanged geo condition). 'relfirst' = 11-d pose relative to the target's
+        # first camera; see conf/config.yaml and _geo_cam_param below.
+        self.geo_cam_embed = getattr(cfg, 'geo_cam_embed', None)
+        if self.geo_cam_embed not in (None, 'relfirst'):
+            raise ValueError(f"geo_cam_embed must be null | 'relfirst', got {self.geo_cam_embed!r}")
         # geo context-view sampling (leakage ablation): 'even' (in-segment) | 'hybrid'
         self.geo_view_sampling = getattr(cfg, 'geo_view_sampling', 'even')
         self.geo_num_inseg = getattr(cfg, 'geo_num_inseg', 3)
@@ -752,6 +758,29 @@ class CamDataset(torch.utils.data.Dataset):
             imgs.append(torch.from_numpy(np.array(im)).permute(2, 0, 1).float() / 255.0)
         return torch.stack(imgs)
 
+    def _geo_cam_param(self, scene_idx, geo_idxs, w2c_s, norm_scale):
+        """[new] geo_cam_embed='relfirst': (V, 11) pose of each context view RELATIVE to the
+        target segment's first camera s, in exactly the target's cam_param parametrization.
+
+          rel_v = w2c_v @ inv(w2c_s)          # same form as normalize_camera_extrinsics_
+                                              # and_points (utils/data_utils.py:24)
+          rel_v[:3, 3] /= norm_scale          # the divisor the active scale_mode produced, so the
+                                              # context translations live in the SAME units as the
+                                              # trajectory the model generates
+          out = [rel[:3,0], rel[:3,1], rel[:3,3], fx/2cx, fy/2cy]
+
+        Intrinsics stay RAW (not divided by frame s) even under intr_norm 'rel': the target's own
+        intr channels are ~[1,1] by construction there, so raw is the only way each context view's
+        FoV reaches the model. Uses full-resolution scene poses, so it is independent of the
+        segment subsampling and of whether the geo latent came from the cache."""
+        w2c_v = self.extrinsics_list[scene_idx][list(geo_idxs)].float()   # (V,4,4)
+        K = self.intrinsics_list[scene_idx][list(geo_idxs)].float()       # (V,3,3)
+        rel = w2c_v @ torch.linalg.inv(w2c_s.float()).unsqueeze(0)        # (V,4,4)
+        trans = rel[:, :3, 3] / norm_scale
+        intr = torch.stack([K[:, 0, 0] / (K[:, 0, 2] * 2),
+                            K[:, 1, 1] / (K[:, 1, 2] * 2)], dim=-1)       # (V,2) raw
+        return torch.cat([rel[:, :3, 0], rel[:, :3, 1], trans, intr], dim=-1).float()
+
     def __len__(self):
         return len(self.samples)
 
@@ -836,8 +865,20 @@ class CamDataset(torch.utils.data.Dataset):
         if self.geo_enabled and self.geo_latent_cache_dir is not None:
             _p = osp.join(self.geo_latent_cache_dir, data_name.split('_')[0], f'{data_name}.pt')
             if osp.exists(_p):
-                out['geo_emb'] = torch.load(_p, map_location='cpu', weights_only=False).float()
-                return out
+                _c = torch.load(_p, map_location='cpu', weights_only=False)
+                # two on-disk formats: a bare (M, 768) tensor (v1) and {'emb', 'geo_idxs'} (v2,
+                # written once geo_idxs was needed to rebuild the per-view camera embedding).
+                _idxs = _c['geo_idxs'].tolist() if isinstance(_c, dict) else None
+                _emb = (_c['emb'] if isinstance(_c, dict) else _c).float()
+                if self.geo_cam_embed is None:
+                    out['geo_emb'] = _emb
+                    return out
+                if _idxs is not None:            # v1 files carry no view indices -> can't rebuild
+                    out['geo_emb'] = _emb
+                    out['geo_cam_param'] = self._geo_cam_param(
+                        scene_idx, _idxs, extrinsics[0], norm_scale)
+                    return out
+                # v1 cache + geo_cam_embed -> fall through to the on-the-fly path below
 
         if self.geo_enabled:
             if self.geo_view_sampling == 'frustum_cover':
@@ -856,6 +897,13 @@ class CamDataset(torch.utils.data.Dataset):
                 else:
                     random.shuffle(geo_idxs)                     # shuffle all (VGGT ref changes)
             out['images'] = self._load_images(frame_files, geo_idxs)   # (V,3,H,W)
+            # [new] the selected context frame indices. cache_geo_embeddings.py stores them next
+            # to the latent so a cache hit can rebuild geo_cam_param without redoing the greedy
+            # coverage search; harmless (a (V,) int tensor) on every other path.
+            out['geo_idxs'] = torch.tensor(list(geo_idxs), dtype=torch.long)
+            if self.geo_cam_embed is not None:
+                out['geo_cam_param'] = self._geo_cam_param(
+                    scene_idx, geo_idxs, extrinsics[0], norm_scale)
 
             # posed geo: raw geo-view camera geometry (geo_encoder builds the lagernvs
             # cam_token from these). c2w OpenCV, intrinsics (fx,fy,cx,cy) px, image hw.

@@ -5,6 +5,35 @@ All notable changes to the latentcam sub-project. Follows [Keep a Changelog](htt
 ## [Unreleased]
 
 ### Added
+- **`geo_cam_embed` — per-context-view camera embedding concatenated onto the geo tokens**
+  (default **`null` = off**, geo conditioning byte-identical to before). With `'relfirst'` the
+  dataset builds, for each context view `v`, an 11-d pose relative to the TARGET segment's FIRST
+  camera `s` — `rel = w2c_v @ inv(w2c_s)`, `trans /= norm_scale`, parametrized exactly like
+  `cam_param` (`rot6d = rel[:3,0] ++ rel[:3,1]`, `trans`, `fx/2cx`, `fy/2cy`) — and the training
+  loop broadcasts it over that view's patch tokens, so `geo_emb` goes `(B, V·P, 768)` →
+  `(B, V·P, 779)`. The model (`CameraDiffusionModel._lift_geo_cam`) splits the trailing 11 dims
+  off, lifts them through a **trainable** MLP (`11 → geo_cam_embed_dim → geo_cam_embed_dim`,
+  default 128) and re-concatenates, so `geo_proj` sees `768 + 128 = 896`. Carrying the raw dims
+  inside `geo_emb` means no call-site signature changed and the frozen LagerNVS half stays
+  cacheable. Translations use the target's `norm_scale`, i.e. the same units as the trajectory
+  being generated; context intrinsics stay **raw** (under `intr_norm: rel` the target's own intr
+  channels are ~[1,1], so raw is the only way context FoV reaches the model).
+  Verified: `geo_proj.in_features` 896 vs baseline 768, params 64.905M vs 64.821M (Δ = 83,584 =
+  exactly the MLP + wider `geo_proj`), broadcast checked per view, forward → `(B, 13, 64)`.
+- **`conf/experiment/geo_worldtraj_camembed.yaml`** — the ablation that decouples the geo context
+  from the camera being generated: `geo_first_view_target_s: false` (no target-segment frame is a
+  context view at all, so all `geo_cover_k = 6` views are retrieved) +
+  `geo_cover_subtract_first: false`, keeping `geo_cover_out_of_seg` / `geo_anchor_first_frame` /
+  `geo_posed` and LagerNVS's own `1.35·max‖center‖` context normalization. `geo_cam_embed:
+  relfirst` is what replaces the lost frame alignment. Its cache resolves to
+  `first_cam_not_included/`, disjoint from `geo_worldtraj`'s `first_cam_included/`.
+- **geo latent cache v2 format** — `cache_geo_embeddings.py` now writes
+  `{'emb': (M,768) fp16, 'geo_idxs': (V,) int16}` instead of a bare tensor, and the dataset emits
+  `geo_idxs` on the geo path. Storing the selected context frames lets a cache hit rebuild
+  `geo_cam_param` without redoing the greedy coverage search. **Both formats are read**: v1 bare
+  tensors still work for runs with `geo_cam_embed` off; a v1 file under a `geo_cam_embed` run
+  falls back to the on-the-fly path rather than guessing. Round-trip verified bit-exact
+  (`emb maxdiff 0.000000`, `geo_cam_param maxdiff 0.00000000`, 3/3) and cache-ON decodes no images.
 - **`geo_latent_cache_dir` + a cache-read path in `dataset_dl3dv` / `train_latent_cam_dm`** — the
   precomputed frozen geo latents built by `cache_geo_embeddings.py` were being written but never
   read (nothing in the training code loaded them; `load_saved_pc_embeds` is the point-cloud flag

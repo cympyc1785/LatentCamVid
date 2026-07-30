@@ -91,6 +91,8 @@ class CameraDiffusionModel(nn.Module):
         text_dim=4096,
         dropout=0.1,
         geo_encoder=None,
+        geo_cam_raw_dim=0,
+        geo_cam_embed_dim=128,
     ):
         super().__init__()
 
@@ -105,7 +107,19 @@ class CameraDiffusionModel(nn.Module):
         self.mod2 = nn.Linear(hidden_dim, hidden_dim * 2)
 
         self.text_proj = nn.Linear(text_dim, hidden_dim)
-        self.geo_proj = nn.Linear(geo_latent_dim, hidden_dim)
+        # [new] geo_cam_raw_dim > 0 (cfg.geo_cam_embed): geo_emb arrives as
+        # (B, M, geo_latent_dim + geo_cam_raw_dim) — the trailing raw dims are the per-context-view
+        # camera pose relative to the target's first camera, broadcast to that view's patches by
+        # the training loop. They are split off here and lifted by a TRAINABLE MLP before being
+        # concatenated back, so the frozen LagerNVS part stays cacheable. 0 = the original layout.
+        self.geo_cam_raw_dim = int(geo_cam_raw_dim)
+        if self.geo_cam_raw_dim > 0:
+            self.geo_cam_mlp = nn.Sequential(
+                nn.Linear(self.geo_cam_raw_dim, geo_cam_embed_dim), nn.SiLU(),
+                nn.Linear(geo_cam_embed_dim, geo_cam_embed_dim))
+            self.geo_proj = nn.Linear(geo_latent_dim + geo_cam_embed_dim, hidden_dim)
+        else:
+            self.geo_proj = nn.Linear(geo_latent_dim, hidden_dim)
 
         self.layers = nn.ModuleList([
             nn.ModuleList([
@@ -125,6 +139,14 @@ class CameraDiffusionModel(nn.Module):
         self.geo_cross_attn_weight = None
 
         self.geo_encoder = geo_encoder
+
+    def _lift_geo_cam(self, geo_emb):
+        """[new] split the trailing raw camera dims off geo_emb and replace them with the MLP
+        embedding. Identity when geo_cam_raw_dim == 0 (the original geo condition)."""
+        if self.geo_cam_raw_dim <= 0:
+            return geo_emb
+        d = self.geo_cam_raw_dim
+        return torch.cat([geo_emb[..., :-d], self.geo_cam_mlp(geo_emb[..., -d:])], dim=-1)
 
     def forward(self, x_t, t, text_emb, text_mask, geo_emb=None, geo_mask=None):
         self.text_cross_attn_weight = None
@@ -151,7 +173,7 @@ class CameraDiffusionModel(nn.Module):
         text_tok = text_tok + positional_encoding(text_tok.shape[-2], text_tok.shape[-1], device=device).unsqueeze(0).expand(B, -1, -1)
 
         if has_geo_latent:
-            geo_tok = self.geo_proj(geo_emb)
+            geo_tok = self.geo_proj(self._lift_geo_cam(geo_emb))
             geo_tok = geo_tok * geo_mask.unsqueeze(-1)
 
         for norm1, self_attn, text_cross_attn, mlp1, norm2, geo_cross_attn, mlp2 in self.layers:
@@ -224,7 +246,7 @@ class CameraDiffusionModel(nn.Module):
 
         has_geo_latent = geo_emb is not None
         if has_geo_latent:
-            geo_tok = self.geo_proj(geo_emb) * geo_mask.unsqueeze(-1)
+            geo_tok = self.geo_proj(self._lift_geo_cam(geo_emb)) * geo_mask.unsqueeze(-1)
 
         # causal self-attn mask: position i attends to positions <= i
         causal = torch.triu(torch.full((L, L), float("-inf"), device=device), diagonal=1)

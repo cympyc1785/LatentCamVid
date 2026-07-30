@@ -7,7 +7,11 @@ Saves one file per segment. Two layouts, selected by CACHE_LAYOUT:
 The 'batch' layout mirrors the DL3DV scene root, which is now split into per-1000 batch dirs
 (<dl3dv_root>/{1K..7K}/<scene_hash>/), and additionally splits on geo_first_view_target_s --
 that flag changes which context views are encoded, so the two settings must not share files.
-Each file is geo_emb (M, 768) fp16 (the mask is all-ones -> not stored), ~6.7 MB.
+Each file is {'emb': geo_emb (M, 768) fp16, 'geo_idxs': (V,) int16} (the mask is all-ones -> not
+stored), ~6.7 MB. geo_idxs is the selected context frame index per view; it lets a cache hit
+rebuild the per-view camera embedding (cfg.geo_cam_embed) without redoing the greedy coverage
+search. Files written before geo_idxs existed are bare (M, 768) tensors and are still read (the
+dataset accepts both), but they cannot serve a geo_cam_embed run -- those fall back to on-the-fly.
 
 CACHE_BATCH accepts one batch, a comma-separated list, or 'all' (every batch present in the
 index). Batches are processed in order and each is resumable -- already-present files are
@@ -79,9 +83,13 @@ def run_batch(ds, ge, batch, idxs):
             if any(not os.path.exists(p) for p in paths):
                 emb, _ = geo_encode(ge, data)              # (B, M, 768)
                 emb = emb.to(torch.float16).cpu()
+                # NOT `idxs` -- that is this function's sample-index argument; shadowing it broke
+                # the progress/ETA line (it printed done/<batch size>).
+                gidxs = data["geo_idxs"].to(torch.int16).cpu()  # (B, V) selected context frames
                 for b, p in enumerate(paths):
                     if not os.path.exists(p):
-                        torch.save(emb[b].clone(), p); saved += 1; bytes_ += emb[b].numel() * 2
+                        torch.save({"emb": emb[b].clone(), "geo_idxs": gidxs[b].clone()}, p)
+                        saved += 1; bytes_ += emb[b].numel() * 2
             done += len(names)
             if done % 200 < BS:
                 el = time.time() - t0

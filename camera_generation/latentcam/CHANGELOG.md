@@ -23,6 +23,23 @@ All notable changes to the latentcam sub-project. Follows [Keep a Changelog](htt
   camera forward points up in the image (map-like). User-confirmed orientation.
 
 ### Added
+- **`scale_mode: saved_avg_scale`** (`main/dataset_dl3dv.py`): replicate SCVideo's original
+  normalization (`data/dataset_large.py`) — normalize camera translations by the STORED
+  point-cloud `avg_scale` (`<scene_dir>/avg_scale/<seg_key>.json` = mean ‖scene point − first
+  camera‖, ~10–44) instead of the camera-based mean. Also mirrors SCVideo's intrinsics under this
+  mode: width/height from principal point (cx·2, cy·2) + normalized relative to frame 0
+  (frame0 intr → [1,1]). Falls back to camera-based if the json is missing. Other modes unchanged.
+  Purpose: match the scale the default VAE (`vae_20260302_300`) was trained on (SCVideo used stored
+  point-cloud avg_scale; the DL3DV port had silently switched to camera-based `target_cam`).
+  Added `self.scene_dir_list` + `_saved_avg_scale()`.
+
+### Fixed
+- **porting divergence from SCVideo `dataset_large.py`** surfaced: the DL3DV `dataset_dl3dv.py`
+  port had diverged in 3 places — (1) avg_scale source (camera-based vs stored point-cloud), (2) no
+  frame-0-relative intrinsics normalization, (3) width/height from stored w,h vs cx·2/cy·2. All three
+  are now reproducible via `scale_mode: saved_avg_scale` (existing camera-based modes left intact).
+
+### Added (more)
 - **`scripts/data/norm_camera_length_stats.py`**: camera-length distribution under the two training
   normalizations (point=target_cam vs dist=1.35·max) over ~5.4k real training segments (rebuilt
   standalone from transforms.json + prompts.json, no dataset load). Per-frame ‖center‖/avg_scale,

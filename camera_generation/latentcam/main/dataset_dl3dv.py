@@ -190,6 +190,10 @@ class CamDataset(torch.utils.data.Dataset):
         self.geo_cover_radius = getattr(cfg, 'geo_cover_radius', 2.0)
         self.geo_cover_ndepth = getattr(cfg, 'geo_cover_ndepth', 3)
         self.geo_cover_out_of_seg = getattr(cfg, 'geo_cover_out_of_seg', False)
+        # restrict out-of-segment context to frames BEFORE the target segment (index < s)
+        # only, instead of the longer side. Requires the target segment to have frames
+        # before it -> the target segment can be the 2nd segment onward.
+        self.geo_cover_before_only = getattr(cfg, 'geo_cover_before_only', False)
         self.geo_posed = getattr(cfg, 'geo_posed', False)
         self.geo_shuffle_order = getattr(cfg, 'geo_shuffle_order', False)
         # honest selection: anchor at the target's FIRST frame only (known at inference);
@@ -205,6 +209,7 @@ class CamDataset(torch.utils.data.Dataset):
         self.intrinsics_list = []   # [(N,3,3)]
         self.frame_files_list = []  # [[path,...]]
         self.hw_list = []           # [(h,w)]
+        self.scene_dir_list = []    # [scene_dir]  (for saved_avg_scale json lookup)
         self.samples = []           # [(scene_idx, start, end, caption, data_name)]
         self.load_data()
 
@@ -243,6 +248,10 @@ class CamDataset(torch.utils.data.Dataset):
                     continue
                 if (chunk, seg_key) in cov_black:   # coverage-filtered out
                     continue
+                # before-only geo context: need enough frames before s (excludes the
+                # first segment -> target segment can be the 2nd segment onward).
+                if self.geo_cover_before_only and s < self.geo_cover_k:
+                    continue
                 pcs = seg.get('prompt_camera_with_scene_video')
                 caption = pcs.get('concise', "") if isinstance(pcs, dict) else (pcs or "")
                 self.samples.append((scene_idx, s, e,
@@ -254,6 +263,7 @@ class CamDataset(torch.utils.data.Dataset):
                 self.intrinsics_list.append(intr)
                 self.frame_files_list.append(frame_files)
                 self.hw_list.append((h, w))
+                self.scene_dir_list.append(scene_dir)
                 if self.max_scenes is not None and len(self.extrinsics_list) >= self.max_scenes:
                     break
 
@@ -384,7 +394,12 @@ class CamDataset(torch.utils.data.Dataset):
         ball_center = None
         if self.geo_cover_out_of_seg:
             before, after = list(range(0, s)), list(range(e, N))
-            allowed = before if len(before) >= len(after) else after
+            # before_only: out-of-target context must come from earlier indices (< s);
+            # else pick the longer out-of-segment side (original behavior).
+            if self.geo_cover_before_only:
+                allowed = before
+            else:
+                allowed = before if len(before) >= len(after) else after
             if self.geo_anchor_first_frame:
                 anchor = s                                  # known first frame only
                 cs = self._np_context_scale(centers, allowed, self.num_frames) if allowed else None
@@ -455,6 +470,18 @@ class CamDataset(torch.utils.data.Dataset):
         centers = torch.linalg.inv(normalized)[:, :3, 3]
         return centers.norm(dim=-1).mean().clamp(min=1e-5).unsqueeze(0)
 
+    def _saved_avg_scale(self, scene_idx, seg_key):
+        """Stored point-cloud avg_scale (SCVideo original): scene_dir/avg_scale/<seg_key>.json =
+        mean(||scene point - first camera||). Mirrors dataset_large.py's saved_avg_scale path.
+        Returns None if the json is missing (caller falls back to camera-based)."""
+        p = osp.join(self.scene_dir_list[scene_idx], 'avg_scale', f'{seg_key}.json')
+        if not osp.isfile(p):
+            return None
+        try:
+            return torch.tensor([float(json.load(open(p)))]).clamp(min=1e-5)
+        except Exception:
+            return None
+
     def _first_farthest_scale(self, extrinsics):
         """LagerNVS-style scale = 1.35 * max(||camera center - FIRST camera||) over the segment
         (relative to frame 0). Matches LagerNVS normalize(): scene_scale = 1.35*max ||t||."""
@@ -516,7 +543,12 @@ class CamDataset(torch.utils.data.Dataset):
             intrinsics = intrinsics[sel]
 
         _scale_mode = getattr(self.cfg, 'scale_mode', 'target_cam')
-        if _scale_mode == 'geo_lagernvs':
+        if _scale_mode == 'saved_avg_scale':
+            # SCVideo original: normalize by the stored point-cloud avg_scale
+            # (scene_dir/avg_scale/<seg_key>.json). Falls back to camera-based if missing.
+            gs = self._saved_avg_scale(scene_idx, data_name.split('_')[-1])
+            avg_scale = gs if gs is not None else self._camera_based_avg_scale(extrinsics)
+        elif _scale_mode == 'geo_lagernvs':
             # FULL alignment: scale = 1.35*max(||geo-context center - frame s||) = the exact
             # scale LagerNVS's build_cam_token uses -> target & geo latent share frame+scale.
             gs = self._geo_lagernvs_scale(scene_idx, s, e)
@@ -534,7 +566,15 @@ class CamDataset(torch.utils.data.Dataset):
 
         fx = intrinsics[:, 0, 0]
         fy = intrinsics[:, 1, 1]
-        normalized_intrinsics = torch.cat([(fx / w)[:, None], (fy / h)[:, None]], dim=-1).float()
+        if _scale_mode == 'saved_avg_scale':
+            # SCVideo original intrinsics (dataset_large.py): width/height from principal point
+            # (cx*2, cy*2), then normalize relative to the first frame -> frame0 intr = [1,1].
+            wv = intrinsics[:, 0, 2] * 2
+            hv = intrinsics[:, 1, 2] * 2
+            normalized_intrinsics = torch.cat([(fx / wv)[:, None], (fy / hv)[:, None]], dim=-1).float()
+            normalized_intrinsics = normalized_intrinsics / normalized_intrinsics[0:1, :]
+        else:
+            normalized_intrinsics = torch.cat([(fx / w)[:, None], (fy / h)[:, None]], dim=-1).float()
 
         cam_param = torch.cat([
             normalized_extrinsics[:, :3, 0],

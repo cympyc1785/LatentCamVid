@@ -33,9 +33,12 @@ from models.vae_intr_large import CameraVAE
 
 dev = 'cuda' if torch.cuda.is_available() else 'cpu'
 CKPT_DIR = osp.join(osp.dirname(__file__), '..', '..', 'checkpoints')
-CKPTS = {                              # name -> (file, latent_dim)
+CKPTS = {                              # name -> (file relative to checkpoints/, latent_dim)
     'vae_20260302_300': ('vae_20260302_300.pth', 64),
     'vae_20260202_065659_400': ('vae_20260202_065659_400.pth', 32),
+    # 1K-7K re-fit of the 32-dim ckpt above (experiment=vae_dl3dv_1_7k) -- drop-in, same
+    # architecture/keys, so it belongs in the same matrix for a like-for-like comparison
+    'vae_dl3dv_1_7k': ('../my_checkpoints/vae_dl3dv_1_7k/last.pth', 32),
 }
 MODES = os.environ.get(
     'MODES', 'avg_scale,cam_dist_mean,first_farthest_135,context_longer').split(',')

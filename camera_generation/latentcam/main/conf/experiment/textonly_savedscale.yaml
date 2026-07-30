@@ -13,3 +13,10 @@ exp_name: dl3dv_textonly_savedscale
 geo_encoder: null
 scale_mode: avg_scale
 intr_norm: raw
+# Corpus = meta_worldtraj.csv (DL3DV 1K-7K, 6098 scenes), the same scene list every other
+# worldtraj-scoped run uses (textonly_align, geo_worldtraj*, vae_worldtraj) so the numbers stay
+# comparable with them. Segment-level coverage_blacklist_path stays null (that filter scores
+# geo context coverage, which is meaningless without a geo encoder). The scene-level
+# blacklist.csv (295 scenes) needs no flag: meta_worldtraj.csv already excludes all of them and
+# dataset_dl3dv re-applies it unconditionally at index build.
+meta_csv: meta_worldtraj.csv

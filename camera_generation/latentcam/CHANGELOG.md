@@ -15,10 +15,27 @@ All notable changes to the latentcam sub-project. Follows [Keep a Changelog](htt
   `60 epochs`, `vae_beta 0.001`. Its `train/latent_std` (also written to
   `my_checkpoints/vae_dl3dv_1_7k/latent_std.txt`) becomes the matching `vae_latent_scale` —
   `0.4467666` belongs to the 1K-only fit and must not be reused with it.
-  Note for the record: `meta.csv` lists 8048 scenes (1K–11K) but 8K–11K have no scene dirs on
-  disk, so both this and every `meta.csv` diffusion run resolve to **DL3DV 1K–7K, all segments**.
+- **`scripts/vae/vae_scale_matrix.py`: `vae_dl3dv_1_7k` added to the `CKPTS` matrix** (as
+  `../my_checkpoints/vae_dl3dv_1_7k/last.pth`, 32-d) so the new fit is measured on exactly the
+  same basis as the two reference ckpts. First measurement (1264 segments, `avg_scale`): latent
+  std **0.60396** with `raw` (→ `vae_latent_scale` ≈ 0.60–0.62, and `0.4467666` would give input
+  std 1.3518), recon L1 rot 0.00564 / trans 0.00900 / intr 0.00485, vs the 1K-only ckpt's 0.46312
+  and 0.00466 / 0.00495 / 0.00293. The `raw` ≪ `rel` gap on `intr_L1` (0.00485 vs 0.25884) is
+  preserved, i.e. the new ckpt is still a `raw` ckpt and still a strict drop-in.
 
 ### Changed
+- **`meta_csv: meta_worldtraj.csv` pinned in `textonly_savedscale.yaml` and
+  `vae_dl3dv_1_7k.yaml`** (was the `meta.csv` default), matching every other worldtraj-scoped
+  experiment. `coverage_blacklist_path` stays `null`.
+  **This changes no data** — measured, not assumed: both CSVs index to exactly 39830 samples /
+  6097 scenes, and the scene sets and all 39830 sample IDs are identical (verified by diffing the
+  two cached indexes). `meta.csv` lists 8048 scenes (1K–11K) but 8K–11K have no scene dirs on
+  disk, and its 1K–7K portion (6132) exceeds `meta_worldtraj.csv` (6098) by 34 scenes that have
+  `prompts.json` + `transforms.json` but no valid 49-frame segment, so they were dropped either
+  way. The value of the switch is that the corpus is now stated explicitly in the config.
+  Also measured: the scene-level `blacklist.csv` (295 scenes) is a no-op for both CSVs
+  (`∩ = 0` for each) and `dataset_dl3dv._load_index` re-applies it unconditionally regardless, so
+  no flag is needed to "enable" it.
 - **`vae_latent_scale` set to SCVideo's verbatim `0.4467666`** (was our measured `0.46312`), keeping
   the DL3DV-only `config.py` triple otherwise unchanged (`vae_20260202_065659_400.pth`,
   `cam_dim: 32`, `intr_norm: raw`, `scale_mode: avg_scale`, `clatr_epoch109_dl3dv_seg_2.ckpt`).

@@ -1,9 +1,12 @@
 # @package _global_
 # Camera VAE re-fit on the FULL DL3DV corpus that the diffusion runs actually train on:
-# meta.csv (lists 1K-11K, but only 1K-7K exist on disk -> 6132 scenes, ~all segments) minus
-# blacklist.csv, with NO coverage blacklist. This is the direct upgrade of the active default
+# meta_worldtraj.csv (DL3DV 1K-7K, 6098 scenes, all segments), with NO coverage blacklist --
+# the same scene list as textonly_savedscale and every other worldtraj-scoped run, so the VAE is
+# fit on exactly the corpus it will be used on. This is the direct upgrade of the active default
 # ckpt vae_20260202_065659_400.pth, which SCVideo fit on DL3DV *1K only* with one 49-frame
 # window per scene (see conf/config.yaml's VAE block for that provenance).
+# The scene-level blacklist.csv (295 scenes) needs no flag here: meta_worldtraj.csv already
+# excludes all of them and dataset_dl3dv re-applies it unconditionally at index build.
 #
 # Deliberately a DROP-IN replacement for that ckpt, so the only thing that changes vs. the
 # currently-running text-only baselines is the VAE's training corpus:
@@ -13,7 +16,7 @@
 # as the new vae_latent_scale -- do NOT reuse 0.4467666, it was measured on the 1K-only fit.
 exp_name: vae_dl3dv_1_7k
 geo_encoder: null
-meta_csv: meta.csv
+meta_csv: meta_worldtraj.csv
 coverage_blacklist_path: null
 scale_mode: avg_scale
 intr_norm: raw

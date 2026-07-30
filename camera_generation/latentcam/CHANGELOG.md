@@ -59,6 +59,35 @@ All notable changes to the latentcam sub-project. Follows [Keep a Changelog](htt
   conclusion was an artifact of the `intr_norm` bug below (the correct cell was not expressible).
   Note `cam_dim` must match the ckpt's `latent_dim` or the state_dict load hard-crashes on
   `encoder.to_mu.weight`.
+  **Provenance of `vae_20260202_065659_400.pth`, from SCVideo's git history** (confirms the triple
+  independently of our measurement). The run dir `20260202_065659` falls between SCVideo commits
+  `cfd2cc0` (2026-02-02T04:22:35Z "Fix dataset") and `2f40e21` (06:59:23Z), so the launch tree is
+  `cfd2cc0` + the `vae_intr` import edit that was committed the next day as `eb99764`
+  (2026-02-03T02:25Z) — that edit is required, because at `cfd2cc0` `train_vae.py` still imported
+  `vae_intr_large.CameraVAE()` whose default `latent_dim=64`, while the ckpt is 32-dim
+  (`encoder.to_mu.weight (32,64,1)`). This also rules out reading the dir name as KST: 06:56:59 KST
+  = 2026-02-01T21:56Z would precede `d4441b9` (02-02T02:12Z), the commit that first ADDED
+  `vae_intr.py`. At that tree:
+    * **train set = DL3DV `1K` only** — `config.py` had `dataset_dir = '.../DL3DV/scenes/1K'` (its
+      only dataset key, unchanged from `d4441b9` through `a3713ae`), and `data/dataset.py:36`
+      branches on `basename(dataset_path)[-1] == 'K'` → a flat `os.listdir('.../1K')` (1000 scenes
+      locally). The `train_dataset_dir` 1K / `val_dataset_dir` 7K split only appears at `b27060c`
+      (2026-02-23), three weeks after the ckpt; multi-chunk `build_dataset_dir_list()` is later
+      still (`config_large.py`/`config_vae.py`).
+    * **one sample per scene, frames 0-48** — `extrinsics[:num_frames]`, scenes with < 49 frames
+      `continue`. No segment enumeration (that is our addition), which is why our 1264-segment
+      measurement lands 3.7% off SCVideo's 0.4467666.
+    * `avg_scale` + `raw` confirmed at the source: `normalize_camera_extrinsics_and_points`
+      (`data_utils.py:20`) divides translations by `mean ||point - first cam||`, and
+      `dataset.py:118-121` builds the intrinsics as `fx/(2cx), fy/(2cy)` with **no frame-0
+      division** — the `rel` division (`dataset_large.py:313`) does not exist yet in this tree.
+      The only later change to those lines (`eb99764`) is numpy → torch, semantics identical.
+    * hyperparams at that tree: `batch_size 64`, `lr 1e-4`, `epochs 50000`, `save_epoch 10`,
+      `vae_beta 1e-3`. `config.py` still pointed at the PREVIOUS ckpt (`20260123_074547/900.pth`,
+      `vae_latent_scale 0.48848`); `0.4467666` + `20260202_065659/400.pth` were adopted at
+      `a3713ae` (2026-02-05T06:42Z), with `dataset_dir` still `1K`.
+- **`save_epoch: 1` → `10`** (`main/conf/config.yaml`), matching SCVideo's `config.py`. Only affects
+  checkpoint-write frequency (per-epoch validation is unchanged).
 - **`scripts/vae/vae_scale_matrix.py`** (new): measures latent std + per-component recon L1 over the
   whole (ckpt × scale_mode × intr_norm) grid, so a config constant like `0.4467666` can be traced
   back to the triple it was measured on. env `MAX_SCENES` / `MODES` / `CKPTS` / `META`.

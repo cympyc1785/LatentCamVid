@@ -24,6 +24,15 @@ import matplotlib
 matplotlib.use('Agg')
 import matplotlib.pyplot as plt
 
+# image dir: 'images_4' (DL3DV-960, 960x540) or 'images_8' (DL3DV-480, 480x270)
+def _img_dir(sd, names=('images_4', 'images_8', 'images')):
+    for c in names:
+        p = osp.join(sd, c)
+        if osp.isdir(p):
+            return p
+    return None
+
+
 _GL2CV = np.diag([1.0, -1.0, -1.0, 1.0])
 
 
@@ -50,7 +59,8 @@ def load_scene(scene_dir):
     c2w = c2w_gl @ _GL2CV                       # OpenGL -> OpenCV c2w
     centers = c2w[:, :3, 3]                      # (N,3)
     faxis = c2w[:, :3, 2]                        # OpenCV forward = +Z col
-    files = [osp.join(scene_dir, 'images_4', osp.basename(fr['file_path'])) for fr in frames]
+    _d = _img_dir(scene_dir)
+    files = [osp.join(_d, osp.basename(fr['file_path'])) for fr in frames]
     K = np.array([[fx, 0, cx], [0, fy, cy], [0, 0, 1]])
     w2c = np.linalg.inv(c2w)
     return dict(centers=centers, faxis=faxis, files=files, K=K, w=w, h=h, w2c=w2c)

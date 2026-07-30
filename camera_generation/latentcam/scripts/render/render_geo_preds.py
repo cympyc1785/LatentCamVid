@@ -28,6 +28,15 @@ from vggt.utils.load_fn import load_and_preprocess_images
 from vis import compute_plucker_coordinates, render_chunked
 from models.encoder_decoder import EncDec_VitB8
 
+# image dir: 'images_4' (DL3DV-960, 960x540) or 'images_8' (DL3DV-480, 480x270)
+def _img_dir(sd, names=('images_4', 'images_8', 'images')):
+    for c in names:
+        p = osp.join(sd, c)
+        if osp.isdir(p):
+            return p
+    return None
+
+
 _GL2CV = np.diag([1.0, -1.0, -1.0, 1.0])   # OpenGL c2w -> OpenCV c2w
 
 
@@ -87,7 +96,7 @@ def main():
         parts = name.split('_')                       # ['1K', '<hash>', '<seg>']
         chunk = f"{parts[0]}/{parts[1]}"
         sd = osp.join(ROOT, chunk)
-        if not osp.isdir(osp.join(sd, 'images_4')):
+        if _img_dir(sd) is None:
             continue
         c2w_all, fnames, K_frac = load_scene(sd)
         w, h = RS.scene_wh(sd)

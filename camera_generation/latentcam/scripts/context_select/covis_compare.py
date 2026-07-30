@@ -20,6 +20,15 @@ import matplotlib
 matplotlib.use('Agg')
 import matplotlib.pyplot as plt
 
+# image dir: 'images_4' (DL3DV-960, 960x540) or 'images_8' (DL3DV-480, 480x270)
+def _img_dir(sd, names=('images_4', 'images_8', 'images')):
+    for c in names:
+        p = osp.join(sd, c)
+        if osp.isdir(p):
+            return p
+    return None
+
+
 _GL2CV = np.diag([1.0, -1.0, -1.0, 1.0])
 
 
@@ -43,7 +52,8 @@ def load_scene(scene_dir):
     K = np.array([[tj['fl_x'], 0, tj['cx']], [0, tj['fl_y'], tj['cy']], [0, 0, 1]])
     frames = sorted(tj['frames'], key=lambda fr: fr['file_path'])
     c2w = np.array([fr['transform_matrix'] for fr in frames], dtype=np.float64) @ _GL2CV
-    files = [osp.join(scene_dir, 'images_4', osp.basename(fr['file_path'])) for fr in frames]
+    _d = _img_dir(scene_dir)
+    files = [osp.join(_d, osp.basename(fr['file_path'])) for fr in frames]
     return dict(centers=c2w[:, :3, 3], faxis=c2w[:, :3, 2], w2c=np.linalg.inv(c2w),
                 K=K, w=w, h=h, files=files)
 

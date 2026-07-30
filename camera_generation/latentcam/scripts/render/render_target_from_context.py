@@ -34,6 +34,15 @@ from models.encoder_decoder import EncDec_VitB8
 from vggt.utils.load_fn import load_and_preprocess_images
 from vis import compute_plucker_coordinates, render_chunked
 
+# image dir: 'images_4' (DL3DV-960, 960x540) or 'images_8' (DL3DV-480, 480x270)
+def _img_dir(sd, names=('images_4', 'images_8', 'images')):
+    for c in names:
+        p = osp.join(sd, c)
+        if osp.isdir(p):
+            return p
+    return None
+
+
 _GL2CV = np.diag([1.0, -1.0, -1.0, 1.0])
 CKPT = osp.join(LAGER, "checkpoints/lagernvs_general_512/model.pt")
 ROOT = "/data1/cympyc1785/data/DL3DV/DL3DV-960/DL3DV-10K"
@@ -62,11 +71,12 @@ def longer_context(N, s, e, k):
 
 
 def img_path(sd, fname):
-    p = osp.join(sd, "images_4", fname)
+    d = _img_dir(sd) or osp.join(sd, "images_4")
+    p = osp.join(d, fname)
     if osp.isfile(p):
         return p
     for ext in (".png", ".jpg", ".JPG"):
-        q = osp.join(sd, "images_4", osp.splitext(fname)[0] + ext)
+        q = osp.join(d, osp.splitext(fname)[0] + ext)
         if osp.isfile(q):
             return q
     return None
@@ -99,7 +109,7 @@ def pick_segments(csv_path, n, seed=0):
         picked_bin, tried = [], 0
         for r in cand:
             sd = osp.join(ROOT, r[0])
-            if osp.isdir(osp.join(sd, "images_4")) and osp.isfile(osp.join(sd, "prompts.json")):
+            if _img_dir(sd) is not None and osp.isfile(osp.join(sd, "prompts.json")):
                 picked_bin.append(r)
             if len(picked_bin) >= per:
                 break

@@ -4,8 +4,8 @@ target trajectory for the results/validation target, so lagernvs can render the 
 Writes <result_dir>/render_inputs.pt with:
   image_paths : list[str]      geo-context image files (the conditioning views used at inference)
   ctx_c2w     : (V,4,4)        context camera c2w, OpenCV, WORLD frame
-  ctx_K       : (V,3,3)        context intrinsics (px, images_4 full res)
-  hw_full     : (2,)           images_4 full-res (H,W) the intrinsics are in
+  ctx_K       : (V,3,3)        context intrinsics (px, transforms.json full res)
+  hw_full     : (2,)           transforms.json full-res (H,W) the intrinsics are in
   pred_c2w    : (T,4,4)        predicted target cameras, OpenCV, WORLD frame
 env: RI_EXP (hydra experiment), RI_RESULT (result subdir under results/validation), RI_SEG.
 """

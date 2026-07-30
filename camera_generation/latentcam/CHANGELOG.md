@@ -5,6 +5,27 @@ All notable changes to the latentcam sub-project. Follows [Keep a Changelog](htt
 ## [Unreleased]
 
 ### Changed
+- **image dir is now resolved, not hardcoded** (`main/dataset_dl3dv.py` + 6 scripts). Added
+  `IMAGE_DIR_NAMES = ('images_4', 'images_8', 'images')` and `scene_image_dir(scene_dir, names)`,
+  which returns the first existing candidate (one `isdir` per candidate — no per-frame stat, which
+  matters on lustre). `_parse_transforms` uses it via `getattr(cfg, 'image_dir_names',
+  IMAGE_DIR_NAMES)`, so the search order is overridable from config. The same local `_img_dir()`
+  helper replaced hardcoded `images_4` joins in `scripts/render/{render_geo_preds,
+  render_scene_stitched,render_target_from_context}.py` and
+  `scripts/context_select/{visualize_covis_retrieval,vis_frustum_cover,covis_compare}.py`.
+  Motivation: the on-disk images were swapped to 480p (below) — nothing else in the pose/intrinsic
+  math changes, because `transforms.json` is byte-identical between the 960p and 480p trees and
+  always reports the ORIGINAL full resolution (w=3840, h=2160, fl_x=1720.22, cx=1920, cy=1080).
+- **DL3DV images swapped 960p → 480p to reclaim disk** (`scripts/data/migrate_480_images.py`, new).
+  `DL3DV-480/<chunk>/<scene>/images_8` (480×270) was `os.rename`d into the name-matched
+  `DL3DV-960/DL3DV-10K/<chunk>/<scene>/` (same lustre FS → metadata rename, ~4s/1000 scenes),
+  keeping the dir name `images_8`; then every `images_4` (960×540) under DL3DV-960 was removed,
+  including chunks 8K–11K which have no 480p counterpart (explicit user decision — those scenes
+  are not in `meta_worldtraj.csv`). Pre-flight verified 6098/6098 `meta_worldtraj.csv` scenes and
+  7000/7000 scene dirs in 1K–7K match by name with identical frame counts and filenames
+  (2,092,998 frames each side). Move runs before any delete, so no scene is ever image-less.
+  Consequences: the geo latent cache (`DATA/DL3DV/latent_cache`) was computed from 960p and is
+  now stale; LagerNVS renders at 512 so 480×270 inputs are upscaled.
 - **lagernvs moved** `/data1/cympyc1785/lagernvs` → `camera_generation/tools/lagernvs`
   (same-FS rename; data/ are absolute symlinks so unaffected). Updated
   `lagernvs_repo_path`/`lagernvs_ckpt_path` in `main/conf/config.yaml` + `main/config.py` to

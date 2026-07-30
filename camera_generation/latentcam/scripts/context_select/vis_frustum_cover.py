@@ -14,6 +14,15 @@ from PIL import Image
 import matplotlib; matplotlib.use('Agg'); import matplotlib.pyplot as plt
 from dataset_dl3dv import frustum_cover_select
 
+# image dir: 'images_4' (DL3DV-960, 960x540) or 'images_8' (DL3DV-480, 480x270)
+def _img_dir(sd, names=('images_4', 'images_8', 'images')):
+    for c in names:
+        p = osp.join(sd, c)
+        if osp.isdir(p):
+            return p
+    return None
+
+
 ROOT = '/data1/cympyc1785/data/DL3DV/DL3DV-960/DL3DV-10K'
 OUT = osp.join(osp.dirname(__file__), 'frustum_cover_demo.png')
 _GL2CV = np.diag([1.0, -1.0, -1.0, 1.0])
@@ -26,7 +35,8 @@ def load_scene(sd):
     K = np.array([[tj['fl_x'], 0, tj['cx']], [0, tj['fl_y'], tj['cy']], [0, 0, 1]])
     fr = sorted(tj['frames'], key=lambda f: f['file_path'])
     c2w = np.array([f['transform_matrix'] for f in fr], dtype=np.float64) @ _GL2CV
-    files = [osp.join(sd, 'images_4', osp.basename(f['file_path'])) for f in fr]
+    _d = _img_dir(sd)
+    files = [osp.join(_d, osp.basename(f['file_path'])) for f in fr]
     return c2w[:, :3, 3], c2w[:, :3, 2], np.linalg.inv(c2w), K, w, h, files
 
 

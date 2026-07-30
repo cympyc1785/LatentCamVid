@@ -1,7 +1,7 @@
 """DL3DV-960 dataset for the latent (geo-conditioned) camera diffusion model.
 
 Scene list from meta.csv (chunk = '<batch>K/<hash>'), scenes in blacklist.csv
-excluded. Each scene: transforms.json (nerfstudio c2w + intrinsics) + images_4/ +
+excluded. Each scene: transforms.json (nerfstudio c2w + intrinsics) + images_4/ or images_8/ +
 prompts.json (per-segment captions).
 
 Samples are per PROMPT SEGMENT (like the original SCVideo dataset): each segment
@@ -57,6 +57,22 @@ _SCALE_MODE_ALIASES = {'saved_avg_scale': 'avg_scale', 'target_cam': 'cam_dist_m
 def resolve_scale_mode(cfg):
     m = getattr(cfg, 'scale_mode', 'cam_dist_mean')
     return _SCALE_MODE_ALIASES.get(m, m)
+
+
+# per-scene image dir, in preference order: 'images_4' = DL3DV-960 (960x540),
+# 'images_8' = DL3DV-480 (480x270). Intrinsics/hw always come from transforms.json
+# (full 3840x2160), so which one is present only affects image detail.
+IMAGE_DIR_NAMES = ('images_4', 'images_8', 'images')
+
+
+def scene_image_dir(scene_dir, names=IMAGE_DIR_NAMES):
+    """First existing image dir in `scene_dir` (one isdir per candidate — no per-frame
+    stat, which matters on lustre). None if none of them exist."""
+    for cand in names:
+        p = osp.join(scene_dir, cand)
+        if osp.isdir(p):
+            return p
+    return None
 
 
 def frustum_cover_select(centers, faxis, w2c, K, w, h, anchor, seg_scale,
@@ -451,10 +467,9 @@ class CamDataset(torch.utils.data.Dataset):
         K = torch.tensor([[fx, 0, cx], [0, fy, cy], [0, 0, 1]], dtype=torch.float32)
         intr = K.unsqueeze(0).repeat(w2c.shape[0], 1, 1)
 
-        # single dir check instead of a per-frame osp.isfile() stat (~330 stats/scene on lustre)
-        img_dir = osp.join(scene_dir, 'images_4')
-        use_4 = osp.isdir(img_dir)
-        frame_files = [osp.join(img_dir, osp.basename(fr['file_path'])) if use_4
+        img_dir = scene_image_dir(scene_dir,
+                                  getattr(self.cfg, 'image_dir_names', IMAGE_DIR_NAMES))
+        frame_files = [osp.join(img_dir, osp.basename(fr['file_path'])) if img_dir
                        else osp.join(scene_dir, fr['file_path']) for fr in frames]
         return w2c, intr, frame_files, (h, w)
 

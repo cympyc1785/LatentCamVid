@@ -35,6 +35,15 @@ from vis import compute_plucker_coordinates, render_chunked
 from render_target_from_context import load_scene, img_path, normalize, ROOT, CKPT
 from render_target_pose_ablation import build_cam_tokens
 
+# image dir: 'images_4' (DL3DV-960, 960x540) or 'images_8' (DL3DV-480, 480x270)
+def _img_dir(sd, names=('images_4', 'images_8', 'images')):
+    for c in names:
+        p = osp.join(sd, c)
+        if osp.isdir(p):
+            return p
+    return None
+
+
 COV_RADIUS = 2.5
 
 
@@ -200,7 +209,7 @@ def pick_scenes(n, min_segs=4):
     for chunk in chunks:
         sd = osp.join(ROOT, chunk)
         pj = osp.join(sd, 'prompts.json')
-        if not (osp.isdir(osp.join(sd, 'images_4')) and osp.isfile(pj)
+        if not (_img_dir(sd) is not None and osp.isfile(pj)
                 and osp.isfile(osp.join(sd, 'transforms.json'))):
             continue
         try:

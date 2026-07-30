@@ -33,9 +33,10 @@ def seg_key(sid):
 
 
 torch.manual_seed(cfg.random_seed); np.random.seed(cfg.random_seed); random.seed(cfg.random_seed)
-ds = CamDataset(cfg, "train")
-idx = next(i for i, s in enumerate(ds.samples) if seg_key(s[4]) == SEG)
-scene_idx, s, e, _, _ = ds.samples[idx]
+# only this segment's scene is parsed (no full-corpus index scan) -- geo sampling is unchanged
+_b, _h, _seg = SEG.split("/")
+ds = CamDataset.from_segments(cfg, [(f"{_b}/{_h}", _seg)])
+scene_idx, s, e, _, _ = ds.samples[0]
 
 # mirror __getitem__ geo view selection
 if cfg.geo_view_sampling == "frustum_cover":

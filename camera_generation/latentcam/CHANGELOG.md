@@ -35,6 +35,17 @@ All notable changes to the latentcam sub-project. Follows [Keep a Changelog](htt
   RAM-bound.
 
 ### Added
+- **`CamDataset.from_segments(cfg, segments)`** (`main/dataset_dl3dv.py`): segment-scoped dataset
+  for inference/rendering. Instead of indexing the whole corpus, it reads `meta.csv` once to map
+  the flattened scene name back to its chunk, then opens `prompts.json`/`transforms.json` for only
+  the requested scenes — cost is O(#requested segments). `__getitem__`, geo context sampling and
+  normalization are untouched, so output is identical to the full dataset (verified: 10 segments,
+  all tensors diff 0.0 vs `CamDataset(cfg,'train')`, and the re-dumped `render_inputs.pt` byte-match
+  the previous run). Used by `main/dump_render_inputs.py` (single `RI_SEG`) and
+  `main/dump_avgscale_render.py` (new optional `SEGS` env). Dumping the 10 avg_scale-test segments:
+  **~20 min → 6.2 s**. For reference SCVideo has no such path — its `main/infer_cam_dm.py` calls
+  `Trainer._make_batch_generator(include_train=False)`, which builds the full `CamDataset` and
+  `random_split`s 90/10, so inference there loads exactly as much as training.
 - **`scale_mode: saved_avg_scale`** (`main/dataset_dl3dv.py`): replicate SCVideo's original
   normalization (`data/dataset_large.py`) — normalize camera translations by the STORED
   point-cloud `avg_scale` (`<scene_dir>/avg_scale/<seg_key>.json` = mean ‖scene point − first

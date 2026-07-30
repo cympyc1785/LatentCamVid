@@ -184,9 +184,13 @@ class _LazyScenes:
 
 
 class CamDataset(torch.utils.data.Dataset):
-    def __init__(self, cfg, type='train'):
+    def __init__(self, cfg, type='train', only_segments=None):
         self.cfg = cfg
         self.type = type
+        # inference/render helper: restrict the index to these segments (list of data_name
+        # strings, e.g. '1K_<hash>_0', or (chunk, seg_key) tuples). Only those scenes'
+        # prompts.json are read -- no full-corpus scan, no index cache. See from_segments().
+        self.only_segments = only_segments
         self.root = cfg.dl3dv_root
         self.num_frames = cfg.num_frames
         self.geo_num_views = getattr(cfg, 'geo_num_views', 4)
@@ -230,7 +234,7 @@ class CamDataset(torch.utils.data.Dataset):
         self._scene_cache = {}      # lazy: scene_idx -> {w2c,intr,frame_files,hw}
         # lazy_dataset (default True): __init__ only builds the sample/scene index (from a persisted
         # cache when available); scene poses/paths are parsed on demand in __getitem__ + cached.
-        self.lazy = getattr(cfg, 'lazy_dataset', True)
+        self.lazy = getattr(cfg, 'lazy_dataset', True) or only_segments is not None
         if self.lazy:
             self._load_index()
             self.extrinsics_list = _LazyScenes(self, 'w2c')
@@ -260,6 +264,9 @@ class CamDataset(torch.utils.data.Dataset):
                f"__ms{self.max_scenes}")
         cache_dir = osp.join(self.root, '.latentcam_index'); os.makedirs(cache_dir, exist_ok=True)
         cache_path = osp.join(cache_dir, key.replace('/', '_') + '.pt')
+        if self.only_segments is not None:
+            self._load_index_subset()
+            return
         if osp.isfile(cache_path):
             idx = torch.load(cache_path, weights_only=False)
             self.samples = idx['samples']; self.scene_dir_list = idx['scene_dir_list']
@@ -312,6 +319,47 @@ class CamDataset(torch.utils.data.Dataset):
                     'hw_list': self.hw_list}, cache_path)
         print(f"[index build] {len(self.samples)} samples / {len(self.scene_dir_list)} scenes "
               f"-> saved {cache_path}")
+
+    def _load_index_subset(self):
+        """Index ONLY self.only_segments (inference / rendering). Reads meta.csv once to map the
+        flattened scene name back to its chunk, then opens prompts.json for just those scenes.
+        Cost is O(#requested segments), not O(#corpus): no full scan, no index cache, and the
+        per-segment filters (num_frames / before_only / blacklists) are deliberately NOT applied
+        -- the caller asked for these exact segments."""
+        meta_name = getattr(self.cfg, 'meta_csv', 'meta.csv')
+        flat2chunk = {c.replace('/', '_'): c for c in _read_meta_scenes(self.root, meta_name)}
+        want = []
+        for seg in self.only_segments:
+            if isinstance(seg, (tuple, list)):
+                want.append((seg[0], str(seg[1])))
+            else:
+                flat, seg_key = str(seg).rsplit('_', 1)
+                if flat not in flat2chunk:
+                    raise KeyError(f"segment '{seg}': scene '{flat}' not in {meta_name}")
+                want.append((flat2chunk[flat], seg_key))
+        chunk_idx = {}
+        for chunk, seg_key in want:
+            scene_dir = osp.join(self.root, chunk)
+            if chunk not in chunk_idx:
+                tj = json.load(open(osp.join(scene_dir, 'transforms.json')))
+                chunk_idx[chunk] = len(self.scene_dir_list)
+                self.scene_dir_list.append(scene_dir)
+                self.hw_list.append((int(tj['h']), int(tj['w'])))
+            seg = json.load(open(osp.join(scene_dir, 'prompts.json')))[seg_key]
+            s, e = int(seg['frame_idx'][0]), int(seg['frame_idx'][1])
+            pcs = seg.get('prompt_camera_with_scene_video')
+            caption = pcs.get('concise', "") if isinstance(pcs, dict) else (pcs or "")
+            self.samples.append((chunk_idx[chunk], s, e, caption,
+                                 f"{chunk.replace('/', '_')}_{seg_key}"))
+        print(f"[index subset] {len(self.samples)} samples / {len(self.scene_dir_list)} scenes "
+              f"(requested segments only)")
+
+    @classmethod
+    def from_segments(cls, cfg, segments, type='test'):
+        """Lightweight CamDataset over just `segments` -- for inference/rendering where building
+        the full corpus index is wasted work. Everything else (__getitem__, geo context sampling,
+        normalization) behaves exactly as in training."""
+        return cls(cfg, type=type, only_segments=list(segments))
 
     def load_data(self):
         meta_name = getattr(self.cfg, 'meta_csv', 'meta.csv')

@@ -85,7 +85,7 @@ axs[0].plot(np.sort(pr), "-o", ms=2, c="tab:red"); axs[0].set_title(f"textonly p
 axs[0].set_xlabel("target (sorted)"); axs[0].set_ylabel("world pos_rmse")
 axs[1].plot(np.sort(cl), "-o", ms=2, c="tab:red"); axs[1].set_title(f"textonly CLaTr (mean {np.nanmean(cl):.2f})")
 axs[1].set_xlabel("target (sorted)"); axs[1].set_ylabel("CLaTr score")
-fig.suptitle(f"textonly (dl3dv_textonly, target_cam, no geo) — {len(ids)} targets", fontsize=12)
+fig.suptitle(f"textonly (dl3dv_textonly, cam_dist_mean, no geo) — {len(ids)} targets", fontsize=12)
 fig.tight_layout(); fig.savefig(os.path.join(OUT, "_summary.png"), dpi=120, bbox_inches="tight"); plt.close(fig)
 
 # ---- distributional comparison vs geo point/dist (different targets -> boxplot of distributions) ----

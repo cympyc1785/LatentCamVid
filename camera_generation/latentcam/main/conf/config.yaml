@@ -36,7 +36,7 @@ causal_vae: false
 per_token_noise: false
 cfg_dropout_p: 0.1
 loss_tau_min: 0.02
-scale_mode: target_cam
+scale_mode: avg_scale
 lazy_dataset: true          # [new] __init__ builds only the sample index (cached); scene poses parsed lazily in __getitem__
 use_vae: true
 num_cam: 13

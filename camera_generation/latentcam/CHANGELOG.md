@@ -34,6 +34,25 @@ All notable changes to the latentcam sub-project. Follows [Keep a Changelog](htt
   per-worker scene cache grows toward the working set (no COW sharing like eager) — cap workers if
   RAM-bound.
 
+### Changed
+- **`scale_mode` naming unified** — "avg_scale" was overloaded (stored point-cloud value vs the
+  camera-distance mean). Now `avg_scale` means **only** the stored point-cloud avg_scale
+  (`<scene>/avg_scale/<seg>.json`), and the camera-distance one is `cam_dist_mean`:
+  - `saved_avg_scale` → **`avg_scale`**, `_saved_avg_scale()` → `_avg_scale()`
+  - `target_cam` → **`cam_dist_mean`**, `_camera_based_avg_scale()` → `_cam_dist_mean_scale()`,
+    `_cam_avg_scale_context()` → `_cam_dist_mean_context()` (mode `context_longer` unchanged)
+  Old spellings still work via `_SCALE_MODE_ALIASES` / `resolve_scale_mode(cfg)`, so existing
+  yaml, wandb configs and in-flight resumes are unaffected (verified: `avg_scale` vs
+  `saved_avg_scale` and `cam_dist_mean` vs `target_cam` both give cam_param diff 0.0).
+  The batch now also carries **`norm_scale`** = the divisor the active mode produced; the old
+  key `avg_scale` is kept as an alias of the same tensor (SCVideo's name), so every consumer
+  (`train_latent_cam_dm.py`, `infer_*.py`, `gen_*.py`, `cache_geo_embeddings.py`) is unchanged.
+  Updated: `main/conf/config.yaml` (`scale_mode: avg_scale`), `geo_worldtraj{,_before,_seglist}`,
+  `geo_hybrid_shuf`, `textonly_savedscale`, `main/config.py` default (`cam_dist_mean`), and the
+  analysis scripts' labels/columns (`scripts/render/compare_*`, `scripts/data/
+  norm_camera_length_stats.py`, `scripts/coverage/compare_scene_span_scale.py`).
+  `main/configs_backup/` left as-is (historical, covered by the aliases).
+
 ### Added
 - **`CamDataset.from_segments(cfg, segments)`** (`main/dataset_dl3dv.py`): segment-scoped dataset
   for inference/rendering. Instead of indexing the whole corpus, it reads `meta.csv` once to map

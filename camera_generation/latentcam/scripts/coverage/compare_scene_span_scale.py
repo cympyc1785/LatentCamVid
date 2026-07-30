@@ -4,15 +4,15 @@ Three candidate scales, all from camera CENTER distances (frame-invariant, so co
 transforms.json c2w directly; identical math to dataset_dl3dv):
   scene_span (NEW, scene-UNIFIED): max_i ||center[i] - center[0]|| over the WHOLE video.
                                    One value per scene (first camera is always context anchor).
-  target_cam (per-segment):        mean_i ||center[s:e] - center[s]||  (== _camera_based_avg_scale).
+  cam_dist_mean (per-segment):        mean_i ||center[s:e] - center[s]||  (== _cam_dist_mean_scale).
                                    Depends on the target -> changes every segment.
   context_longer (per-segment):    mean over num_frames-windows of the LONGER out-of-segment side
-                                   of each window's mean center-norm (== _cam_avg_scale_context).
+                                   of each window's mean center-norm (== _cam_dist_mean_context).
                                    Target-free but still changes every segment.
 
 We quantify the user's concern ("context 기준 normalize면 scale이 계속 변한다"): within-scene
 variability (coefficient of variation) of the per-segment scales vs the single scene_span, and
-the magnitude ratios scene_span/target_cam etc. Raw per-scene numbers dumped to CSV; aggregate
+the magnitude ratios scene_span/cam_dist_mean etc. Raw per-scene numbers dumped to CSV; aggregate
 percentiles printed.
 
 Run: python scripts/compare_scene_span_scale.py --n-scenes 200 --num-frames 49
@@ -31,12 +31,12 @@ sys.path.insert(0, HERE)
 from render_target_from_context import load_scene, ROOT
 
 
-def target_cam_scale(centers, s, e):
+def cam_dist_mean_scale(centers, s, e):
     return float(np.linalg.norm(centers[s:e] - centers[s], axis=1).mean())
 
 
 def context_longer_scale(centers, s, e, T):
-    """Mirror dataset_dl3dv._cam_avg_scale_context: longer out-of-seg side, chunk into
+    """Mirror dataset_dl3dv._cam_dist_mean_context: longer out-of-seg side, chunk into
     T-frame windows, each window's mean center-norm rel to its first frame, averaged."""
     N = centers.shape[0]
     side = list(range(0, s)) if s >= (N - e) else list(range(e, N))
@@ -112,7 +112,7 @@ def main():
         span = scene_span(centers)
         tcs, cls = [], []
         for (s, e) in segs:
-            tc = target_cam_scale(centers, s, e)
+            tc = cam_dist_mean_scale(centers, s, e)
             cl = context_longer_scale(centers, s, e, args.num_frames)
             tcs.append(tc)
             cls.append(cl if cl is not None else np.nan)
@@ -121,7 +121,7 @@ def main():
         cls_valid = np.array([x for x in cls if x == x], float)   # drop nan
         scene_rows.append({
             'chunk': chunk, 'n_seg': len(segs), 'scene_span': span,
-            'target_cam_mean': float(tcs.mean()), 'target_cam_cv': cv(tcs),
+            'cam_dist_mean_mean': float(tcs.mean()), 'cam_dist_mean_cv': cv(tcs),
             'context_longer_mean': float(cls_valid.mean()) if len(cls_valid) else np.nan,
             'context_longer_cv': cv(cls_valid) if len(cls_valid) >= 2 else np.nan,
             'span_over_targetmean': span / tcs.mean() if tcs.mean() > 0 else np.nan,
@@ -131,7 +131,7 @@ def main():
     # dump per-segment CSV
     with open(args.out, 'w', newline='') as f:
         wtr = csv.writer(f)
-        wtr.writerow(['chunk', 's', 'e', 'scene_span', 'target_cam', 'context_longer'])
+        wtr.writerow(['chunk', 's', 'e', 'scene_span', 'cam_dist_mean', 'context_longer'])
         wtr.writerows(rows)
     scene_csv = args.out.replace('.csv', '_perscene.csv')
     with open(scene_csv, 'w', newline='') as f:
@@ -140,19 +140,19 @@ def main():
 
     # aggregate report (raw numbers)
     n = len(scene_rows)
-    tc_cv = [r['target_cam_cv'] for r in scene_rows]
+    tc_cv = [r['cam_dist_mean_cv'] for r in scene_rows]
     cl_cv = [r['context_longer_cv'] for r in scene_rows if r['context_longer_cv'] == r['context_longer_cv']]
     span_tc = [r['span_over_targetmean'] for r in scene_rows if r['span_over_targetmean'] == r['span_over_targetmean']]
     span_cl = [r['span_over_ctxmean'] for r in scene_rows if r['span_over_ctxmean'] == r['span_over_ctxmean']]
     print(f"\n=== scenes={n}  segments={len(rows)}  (>= {args.min_segs} segs, seg>= {args.num_frames}f) ===")
     print("scene_span is CONSTANT within a scene by construction (CV=0).")
     print(f"\nWITHIN-SCENE CV of per-segment scale (higher = scale 'keeps changing'):")
-    print(f"  target_cam     CV  percentiles {{5,25,50,75,95}} = "
+    print(f"  cam_dist_mean  CV  percentiles {{5,25,50,75,95}} = "
           + str({k: round(v, 3) for k, v in pct(tc_cv).items()}))
     print(f"  context_longer CV  percentiles {{5,25,50,75,95}} = "
           + str({k: round(v, 3) for k, v in pct(cl_cv).items()}))
     print(f"\nMAGNITUDE ratio scene_span / mean(per-seg scale):")
-    print(f"  scene_span / target_cam_mean     {{5,25,50,75,95}} = "
+    print(f"  scene_span / cam_dist_mean_mean     {{5,25,50,75,95}} = "
           + str({k: round(v, 3) for k, v in pct(span_tc).items()}))
     print(f"  scene_span / context_longer_mean {{5,25,50,75,95}} = "
           + str({k: round(v, 3) for k, v in pct(span_cl).items()}))

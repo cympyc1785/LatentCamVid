@@ -1,0 +1,18 @@
+# @package _global_
+# Same as geo_worldtraj, but the train/val split comes from EXPLICIT segment lists
+# (latentcam_{train,test}_seg_list.txt = the deterministic seed-42 split dumped from
+# geo_worldtraj) instead of an in-run random_split. Validation = the first
+# (val_max_batches × batch_size) segments of the test list (shuffle=False).
+exp_name: dl3dv_geo_worldtraj_seglist
+meta_csv: meta_worldtraj.csv
+coverage_blacklist_path: null
+geo_encoder: lagernvs
+geo_view_sampling: frustum_cover
+geo_cover_out_of_seg: true
+geo_first_view_target_s: true
+geo_cover_subtract_first: true
+geo_anchor_first_frame: true
+geo_posed: true
+scale_mode: cam_dist_mean
+train_seg_list: /data1/cympyc1785/data/DL3DV/DL3DV-960/DL3DV-10K/latentcam_train_seg_list.txt
+test_seg_list: /data1/cympyc1785/data/DL3DV/DL3DV-960/DL3DV-10K/latentcam_test_seg_list.txt

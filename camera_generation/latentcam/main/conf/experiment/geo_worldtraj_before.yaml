@@ -1,0 +1,20 @@
+# @package _global_
+# Same as geo_worldtraj, EXCEPT the (k-1)=5 out-of-target context views are restricted
+# to frames BEFORE the target segment (index < s) instead of the longer out-of-seg side.
+#   context = first camera (frame s) FIXED + 5 out-of-target views drawn ONLY from earlier
+#     indices (segments preceding the target), chosen by greedy residual coverage.
+#   -> the target segment must have frames before it, so it can be the 2nd segment onward
+#      (first segment is excluded as a target: s < geo_cover_k are filtered out).
+# All other settings (normalization=cam_dist_mean, geo_posed, VAE/CLaTr defaults) match geo_worldtraj.
+exp_name: dl3dv_geo_worldtraj_before
+meta_csv: meta_worldtraj.csv
+coverage_blacklist_path: null
+geo_encoder: lagernvs
+geo_view_sampling: frustum_cover
+geo_cover_out_of_seg: true
+geo_cover_before_only: true
+geo_first_view_target_s: true
+geo_cover_subtract_first: true
+geo_anchor_first_frame: true
+geo_posed: true
+scale_mode: cam_dist_mean

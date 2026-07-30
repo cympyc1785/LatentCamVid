@@ -1,0 +1,9 @@
+# @package _global_
+# text-only, but with SCVideo's ORIGINAL normalization: normalize camera translations by the
+# stored point-cloud avg_scale (scale_mode=avg_scale) + SCVideo intrinsics (cx*2/cy*2,
+# frame0-relative). This matches the scale the default VAE (vae_20260302_300, latent_scale
+# 0.96032625) was trained on — the plain dl3dv_textonly had used camera-based cam_dist_mean, which
+# diverged from the port origin (dataset_large.py). Same base/VAE/loss as dl3dv_textonly otherwise.
+exp_name: dl3dv_textonly_savedscale
+geo_encoder: null
+scale_mode: avg_scale

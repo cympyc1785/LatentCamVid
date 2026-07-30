@@ -7,7 +7,7 @@ scene. Saved (OpenGL c2w transforms.json) as {scene}_transforms_pred.json (gener
 {scene}_transforms_ref.json (GT full scene, same world) so scripts/viser_val_cameras.py can
 show it. Drift = per-frame gen-vs-GT camera-center distance / scene scale.
 
-Per-chunk scale = the GT segment's target_cam avg_scale (metric per chunk). Chaining is done
+Per-chunk scale = the GT segment's cam_dist_mean scale (metric per chunk). Chaining is done
 in c2w; each chunk's start is snapped exactly to the running anchor.
 
 Run: CUDA_VISIBLE_DEVICES=1 LATENTCAM_CONFIG=config_textonly PYTHONPATH=..:. \

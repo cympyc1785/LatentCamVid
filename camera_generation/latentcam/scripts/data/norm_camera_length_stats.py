@@ -2,7 +2,7 @@
 sample of REAL training segments (reconstructed standalone from transforms.json + prompts.json;
 no dataset load). For each segment: w2c = inv(c2w_gl @ GL2CV), relative to E0, centers = c2w
 translation; then normalize by
-  point (target_cam)        : avg_scale = mean(||center_i||)
+  point (cam_dist_mean)     : scale = mean(||center_i||)
   dist  (first_farthest_135): avg_scale = 1.35 * max(||center_i||)
 "Camera length" = normalized per-frame distance from the first camera (||center_i|| / avg_scale)
 == the translation norm the diffusion model regresses. Aggregates mean/std/min/max/percentiles +
@@ -111,6 +111,6 @@ axs[1].set_title("per-segment MAX length (span)"); axs[1].set_xlabel("max ||cent
 axs[2].hist(pt_path, bins=60, alpha=0.6, density=True, color="tab:orange", label=f"point (mean {np.mean(pt_path):.2f})")
 axs[2].hist(di_path, bins=60, alpha=0.6, density=True, color="tab:green", label=f"dist (mean {np.mean(di_path):.2f})")
 axs[2].set_title("per-segment path length"); axs[2].set_xlabel("path length"); axs[2].legend()
-fig.suptitle(f"camera length under point (target_cam) vs dist (1.35*max)  [{nseg} training segments]", fontsize=13)
+fig.suptitle(f"camera length under point (cam_dist_mean) vs dist (1.35*max)  [{nseg} training segments]", fontsize=13)
 fig.tight_layout(); fig.savefig(os.path.join(OUT, "camera_length_stats.png"), dpi=120, bbox_inches="tight")
 print("\nsaved", os.path.join(OUT, "camera_length_stats.png"))

@@ -13,13 +13,23 @@ Per sample:
   cam_param    : (num_frames, 11)  rot6d(6)+trans(3)+[fx/w, fy/h](2), normalized
   intrinsics   : (num_frames, 3, 3)
   first_extrinsic : (4, 4)  un-normalized w2c of the segment's first frame
-  avg_scale    : (1,)  camera-based scene scale (no point cloud in DL3DV-960)
+  norm_scale   : (1,)  the divisor the active `scale_mode` produced; also emitted under the
+                 legacy key 'avg_scale' (SCVideo's name) for compatibility. NOTE 'avg_scale'
+                 as a SCALE_MODE means specifically the stored point-cloud value -- see below.
   images       : (V, 3, H, W)  multi-view RGB (segment frames) for the geo encoder
   text_prompt  : str  (prompt_camera_with_scene_video.concise)
   height/width : int
 
-Assumptions to validate (see plan): camera-based scale (no point cloud; VAE was
-point-normalized -> may need re-fit); transforms.json OpenGL c2w -> OpenCV w2c;
+scale_mode (what the camera translations are divided by):
+  'avg_scale'          stored point-cloud avg_scale, <scene>/avg_scale/<seg>.json =
+                       mean(||scene point - first camera||)  (SCVideo original; ~10-44)
+  'cam_dist_mean'      mean(||camera center_i - center_0||) over the target segment  (~1-2)
+  'context_longer'     'cam_dist_mean' computed on out-of-segment context windows instead
+  'first_farthest_135' 1.35 * max(||center_i - center_0||) over the segment (LagerNVS-style)
+  'geo_lagernvs'       1.35 * max(||geo-context center - frame s||) (full LagerNVS alignment)
+Legacy aliases accepted: 'saved_avg_scale' -> 'avg_scale', 'target_cam' -> 'cam_dist_mean'.
+
+Assumptions to validate (see plan): transforms.json OpenGL c2w -> OpenCV w2c;
 frame_idx indexes the file-sorted transforms frames.
 """
 import os
@@ -38,6 +48,15 @@ from utils.data_utils import normalize_camera_extrinsics_and_points
 
 # OpenGL(c2w) -> OpenCV(c2w): flip Y and Z camera axes
 _GL2CV = torch.diag(torch.tensor([1.0, -1.0, -1.0, 1.0]))
+
+# old scale_mode spellings -> current name. 'avg_scale' now means ONLY the stored point-cloud
+# value; the camera-distance one is 'cam_dist_mean'. Old configs/wandb runs keep working.
+_SCALE_MODE_ALIASES = {'saved_avg_scale': 'avg_scale', 'target_cam': 'cam_dist_mean'}
+
+
+def resolve_scale_mode(cfg):
+    m = getattr(cfg, 'scale_mode', 'cam_dist_mean')
+    return _SCALE_MODE_ALIASES.get(m, m)
 
 
 def frustum_cover_select(centers, faxis, w2c, K, w, h, anchor, seg_scale,
@@ -229,7 +248,7 @@ class CamDataset(torch.utils.data.Dataset):
         self.intrinsics_list = []   # [(N,3,3)]
         self.frame_files_list = []  # [[path,...]]
         self.hw_list = []           # [(h,w)]
-        self.scene_dir_list = []    # [scene_dir]  (for saved_avg_scale json lookup)
+        self.scene_dir_list = []    # [scene_dir]  (for avg_scale json lookup)
         self.samples = []           # [(scene_idx, start, end, caption, data_name)]
         self._scene_cache = {}      # lazy: scene_idx -> {w2c,intr,frame_files,hw}
         # lazy_dataset (default True): __init__ only builds the sample/scene index (from a persisted
@@ -512,7 +531,7 @@ class CamDataset(torch.utils.data.Dataset):
     @staticmethod
     def _np_context_scale(centers, side, num_frames):
         """Mean per-window camera movement over the context `side`, chunked into
-        num_frames windows (numpy; mirrors _cam_avg_scale_context). Target-free."""
+        num_frames windows (numpy; mirrors _cam_dist_mean_context). Target-free."""
         T = num_frames
         chunks = [side[i:i + T] for i in range(0, len(side) - T + 1, T)]
         if not chunks and len(side) >= 2:
@@ -612,16 +631,19 @@ class CamDataset(torch.utils.data.Dataset):
             idxs += [s + i for i in self._even_indices(e - s, need)]
         return idxs
 
-    def _camera_based_avg_scale(self, extrinsics):
+    def _cam_dist_mean_scale(self, extrinsics):
+        """scale_mode='cam_dist_mean': mean(||camera center_i - center_0||) over the given
+        cameras. This is a CAMERA-distance scale -- not to be confused with 'avg_scale',
+        which is the stored point-cloud distance."""
         e0_inv = torch.linalg.inv(extrinsics[0].float())
         normalized = extrinsics.float() @ e0_inv.unsqueeze(0)
         centers = torch.linalg.inv(normalized)[:, :3, 3]
         return centers.norm(dim=-1).mean().clamp(min=1e-5).unsqueeze(0)
 
-    def _saved_avg_scale(self, scene_idx, seg_key):
-        """Stored point-cloud avg_scale (SCVideo original): scene_dir/avg_scale/<seg_key>.json =
-        mean(||scene point - first camera||). Mirrors dataset_large.py's saved_avg_scale path.
-        Returns None if the json is missing (caller falls back to camera-based)."""
+    def _avg_scale(self, scene_idx, seg_key):
+        """scale_mode='avg_scale' (SCVideo original): the STORED point-cloud avg_scale,
+        scene_dir/avg_scale/<seg_key>.json = mean(||scene point - first camera||).
+        Mirrors dataset_large.py. Returns None if the json is missing (caller falls back)."""
         p = osp.join(self.scene_dir_list[scene_idx], 'avg_scale', f'{seg_key}.json')
         if not osp.isfile(p):
             return None
@@ -648,10 +670,10 @@ class CamDataset(torch.utils.data.Dataset):
         d = (centers[geo_idxs] - centers[s]).norm(dim=-1)              # dist from frame s
         return (1.35 * d.max()).clamp(min=1e-5).unsqueeze(0)
 
-    def _cam_avg_scale_context(self, scene_idx, s, e):
-        """cam_avg_scale from the LONGER out-of-segment side, chunked into num_frames
-        windows: mean over windows of each window's camera movement (same metric as
-        _camera_based_avg_scale: mean center-norm relative to the window's first frame).
+    def _cam_dist_mean_context(self, scene_idx, s, e):
+        """scale_mode='context_longer': cam_dist_mean taken from the LONGER out-of-segment
+        side, chunked into num_frames windows — mean over windows of each window's camera
+        movement (same metric as _cam_dist_mean_scale, relative to the window's first frame).
         Target-excluded -> leakage-free and reproducible at inference from context only.
         Returns None when the longer side is too short (caller falls back)."""
         w2c_all = self.extrinsics_list[scene_idx]              # (N,4,4) w2c
@@ -663,7 +685,7 @@ class CamDataset(torch.utils.data.Dataset):
             chunks = [side]                                    # short side -> one partial window
         if not chunks:
             return None
-        scales = [self._camera_based_avg_scale(w2c_all[ch]) for ch in chunks]
+        scales = [self._cam_dist_mean_scale(w2c_all[ch]) for ch in chunks]
         return torch.stack(scales, 0).mean(0).clamp(min=1e-5)  # (1,)
 
     def _load_images(self, frame_files, idxs):
@@ -690,31 +712,31 @@ class CamDataset(torch.utils.data.Dataset):
             extrinsics = extrinsics[sel]
             intrinsics = intrinsics[sel]
 
-        _scale_mode = getattr(self.cfg, 'scale_mode', 'target_cam')
-        if _scale_mode == 'saved_avg_scale':
-            # SCVideo original: normalize by the stored point-cloud avg_scale
-            # (scene_dir/avg_scale/<seg_key>.json). Falls back to camera-based if missing.
-            gs = self._saved_avg_scale(scene_idx, data_name.split('_')[-1])
-            avg_scale = gs if gs is not None else self._camera_based_avg_scale(extrinsics)
+        _scale_mode = resolve_scale_mode(self.cfg)
+        if _scale_mode == 'avg_scale':
+            # SCVideo original: normalize by the STORED point-cloud avg_scale
+            # (scene_dir/avg_scale/<seg_key>.json). Falls back to cam_dist_mean if missing.
+            gs = self._avg_scale(scene_idx, data_name.split('_')[-1])
+            norm_scale = gs if gs is not None else self._cam_dist_mean_scale(extrinsics)
         elif _scale_mode == 'geo_lagernvs':
             # FULL alignment: scale = 1.35*max(||geo-context center - frame s||) = the exact
             # scale LagerNVS's build_cam_token uses -> target & geo latent share frame+scale.
             gs = self._geo_lagernvs_scale(scene_idx, s, e)
-            avg_scale = gs if gs is not None else self._camera_based_avg_scale(extrinsics)
+            norm_scale = gs if gs is not None else self._cam_dist_mean_scale(extrinsics)
         elif _scale_mode == 'context_longer':
-            cs = self._cam_avg_scale_context(scene_idx, s, e)
-            avg_scale = cs if cs is not None else self._camera_based_avg_scale(extrinsics)
+            cs = self._cam_dist_mean_context(scene_idx, s, e)
+            norm_scale = cs if cs is not None else self._cam_dist_mean_scale(extrinsics)
         elif _scale_mode == 'first_farthest_135':
             # LagerNVS-style: 1.35 * max ||center - first camera|| over the segment
-            avg_scale = self._first_farthest_scale(extrinsics)
+            norm_scale = self._first_farthest_scale(extrinsics)
         else:
-            avg_scale = self._camera_based_avg_scale(extrinsics)
-        normalized_extrinsics, _, avg_scale, _ = normalize_camera_extrinsics_and_points(
-            extrinsics, avg_scale=avg_scale, max_trans_norm=self.cfg.max_trans_norm)
+            norm_scale = self._cam_dist_mean_scale(extrinsics)
+        normalized_extrinsics, _, norm_scale, _ = normalize_camera_extrinsics_and_points(
+            extrinsics, avg_scale=norm_scale, max_trans_norm=self.cfg.max_trans_norm)
 
         fx = intrinsics[:, 0, 0]
         fy = intrinsics[:, 1, 1]
-        if _scale_mode == 'saved_avg_scale':
+        if _scale_mode == 'avg_scale':
             # SCVideo original intrinsics (dataset_large.py): width/height from principal point
             # (cx*2, cy*2), then normalize relative to the first frame -> frame0 intr = [1,1].
             wv = intrinsics[:, 0, 2] * 2
@@ -736,7 +758,10 @@ class CamDataset(torch.utils.data.Dataset):
             'cam_param': cam_param,
             'intrinsics': intrinsics.float(),
             'first_extrinsic': extrinsics[0].float(),
-            'avg_scale': avg_scale.float(),
+            # the divisor the active scale_mode produced. 'avg_scale' is kept as a legacy
+            # alias of the same tensor (SCVideo's key name) so all consumers keep working.
+            'norm_scale': norm_scale.float(),
+            'avg_scale': norm_scale.float(),
             'text_prompt': caption,
             # per-frame (T,) so collate -> (B, T), matching make_intrinsics(fx_fy (B,T,2))
             'height': torch.full((cam_param.shape[0],), float(h)),

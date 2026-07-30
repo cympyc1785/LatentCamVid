@@ -1,9 +1,9 @@
 """Run the TEXT-ONLY model on the worldtraj validation targets (same GT), so text-only vs
-worldtraj can be compared PER-PAIR on identical targets (both target_cam norm; diff = geo).
+worldtraj can be compared PER-PAIR on identical targets (both cam_dist_mean norm; diff = geo).
 
 No CamDataset load: inputs are reconstructed from the saved worldtraj test files
 (<tid>_transforms_ref.json = denormalized-world OpenGL c2w; <tid>_caption.json = text):
-  ref -> OpenCV w2c -> E0, target_cam avg_scale, intrinsics ; text from caption.
+  ref -> OpenCV w2c -> E0, cam_dist_mean scale, intrinsics ; text from caption.
 Then text-only DDPM sample -> vae decode -> out_to_trajectory -> OpenGL c2w pred.
 
 env: TO_CKPT (textonly ckpt) ; reads worldtraj test dir ; writes textonly preds dir.
@@ -62,7 +62,7 @@ def main():
         E0 = w2c[0].clone()
         e0i = torch.linalg.inv(w2c[0]); nr = w2c @ e0i[None]
         centers = torch.linalg.inv(nr)[:, :3, 3]
-        avg_scale = centers.norm(dim=-1).mean().clamp(min=1e-5).unsqueeze(0)   # target_cam
+        avg_scale = centers.norm(dim=-1).mean().clamp(min=1e-5).unsqueeze(0)   # cam_dist_mean
         T = w2c.shape[0]
         W = float(meta['w']); H = float(meta['h'])
         K = torch.tensor([[meta['fl_x'], 0, meta['cx']], [0, meta['fl_y'], meta['cy']], [0, 0, 1.]]).float()

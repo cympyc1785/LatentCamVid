@@ -1,5 +1,5 @@
 """text-only vs worldtraj, PER-PAIR on the SAME 160 targets (text-only re-inferred on worldtraj's
-targets by infer_textonly_batch.py). Both use target_cam normalization, so the ONLY difference is
+targets by infer_textonly_batch.py). Both use cam_dist_mean normalization, so the ONLY difference is
 geo conditioning (worldtraj = LagerNVS geo, text-only = none) -> isolates the geo effect.
 
 Per-target top-down (first-cam anchored X/-Z): GT (blue) + worldtraj pred (green) + text-only pred
@@ -84,7 +84,7 @@ axs[1].scatter(rt, rw, s=10, alpha=0.6); axs[1].plot([0, lim], [0, lim], "k--", 
 axs[1].set_xlim(0, lim); axs[1].set_ylim(0, lim); axs[1].set_aspect("equal")
 axs[1].set_xlabel("text-only pos_rmse"); axs[1].set_ylabel("worldtraj+geo pos_rmse")
 axs[1].set_title(f"paired (worldtraj<text-only: {(rw < rt).sum()}/{len(ids)})")
-fig.suptitle("text-only vs worldtraj+geo (SAME targets, both target_cam; diff = geo)", fontsize=13)
+fig.suptitle("text-only vs worldtraj+geo (SAME targets, both cam_dist_mean; diff = geo)", fontsize=13)
 fig.tight_layout(); fig.savefig(os.path.join(OUT, "_summary.png"), dpi=120, bbox_inches="tight"); plt.close(fig)
 print(f"text-only pos_rmse={rt.mean():.4f} | worldtraj+geo={rw.mean():.4f} | worldtraj better {(rw<rt).sum()}/{len(ids)}")
 print("saved", OUT)

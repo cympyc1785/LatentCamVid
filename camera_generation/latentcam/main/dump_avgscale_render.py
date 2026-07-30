@@ -54,7 +54,7 @@ for idx in range(len(ds.samples)):
         break
     scene_idx, s, e, caption, data_name = ds.samples[idx]
     seg_key = data_name.split("_")[-1]
-    avg = ds._saved_avg_scale(scene_idx, seg_key)
+    avg = ds._avg_scale(scene_idx, seg_key)
     if avg is None:                       # need the stored point-cloud avg_scale
         continue
     gi = geo_idxs_for(scene_idx, s, e)

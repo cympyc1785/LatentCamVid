@@ -2,7 +2,7 @@
 # Geo (LagerNVS) run on the WorldTraj scope (DL3DV 1K-7K, meta_worldtraj.csv):
 #   context = first camera (frame s) FIXED + (k-1) views from the LONGER out-of-segment side
 #     chosen by greedy coverage of the RESIDUAL space (frame s's own coverage subtracted first).
-#   target normalization = avg_scale (target_cam, mean center-norm of the target segment).
+#   target normalization = avg_scale (cam_dist_mean = mean camera center-norm of the target segment).
 #   LagerNVS encoder/decoder internally normalizes context by 1.35*max||center|| (geo_posed=True).
 #   VAE + CLaTr = defaults (vae_20260302_300.pth, clatr_epoch109_dl3dv_seg_2.ckpt).
 exp_name: dl3dv_geo_worldtraj
@@ -15,4 +15,4 @@ geo_first_view_target_s: true
 geo_cover_subtract_first: true
 geo_anchor_first_frame: true
 geo_posed: true
-scale_mode: target_cam
+scale_mode: cam_dist_mean

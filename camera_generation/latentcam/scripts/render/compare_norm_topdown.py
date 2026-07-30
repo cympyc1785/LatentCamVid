@@ -1,4 +1,4 @@
-"""Compare two normalization schemes (point = target_cam / dist = first_farthest_135) on the
+"""Compare two normalization schemes (point = cam_dist_mean / dist = first_farthest_135) on the
 SAME 160 validation targets: per-target top-down (GT vs both preds + geo-context cameras) and
 scores (world-space pos_rmse/rot + CLaTr score), plus a summary.
 
@@ -115,7 +115,7 @@ axs[1, 1].scatter(pcl, dcl, s=10, alpha=0.6); axs[1, 1].plot([0, cl], [0, cl], "
 axs[1, 1].set_xlim(0, cl); axs[1, 1].set_ylim(0, cl); axs[1, 1].set_aspect("equal")
 axs[1, 1].set_xlabel("point CLaTr"); axs[1, 1].set_ylabel("dist CLaTr")
 axs[1, 1].set_title(f"CLaTr paired (dist>point: {(dcl>pcl).sum()}/{len(ids)})")
-fig.suptitle(f"point (target_cam) vs dist (first_farthest_135)  [world-space, {len(ids)} targets]", fontsize=13)
+fig.suptitle(f"point (cam_dist_mean) vs dist (first_farthest_135)  [world-space, {len(ids)} targets]", fontsize=13)
 fig.tight_layout(); fig.savefig(os.path.join(OUT, "_summary.png"), dpi=120, bbox_inches="tight")
 plt.close(fig)
 

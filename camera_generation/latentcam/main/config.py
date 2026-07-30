@@ -81,13 +81,17 @@ class Config:
     cfg_dropout_p = 0.1        # text CFG dropout prob (per-token/flow path)
     loss_tau_min = 0.02        # tokens with tau < this are context -> excluded from loss
 
-    # Camera translation normalization scale (dataset_dl3dv._camera_based_avg_scale etc.)
-    #   'target_cam'    : mean camera center-norm of the TARGET segment (default; the
-    #                     scale depends on the target -> not available at inference).
-    #   'context_longer': mean per-window camera movement over the LONGER out-of-segment
-    #                     side, chunked into num_frames windows (target-excluded, so
-    #                     leakage-free AND reproducible at inference from context only).
-    scale_mode = 'target_cam'
+    # Camera translation normalization scale (see dataset_dl3dv.py's module docstring).
+    #   'avg_scale'     : STORED point-cloud avg_scale (SCVideo original), i.e.
+    #                     mean ||scene point - first camera|| from avg_scale/<seg>.json.
+    #   'cam_dist_mean' : mean CAMERA center-norm of the TARGET segment (the scale depends
+    #                     on the target -> not available at inference).
+    #   'context_longer': cam_dist_mean over the LONGER out-of-segment side, chunked into
+    #                     num_frames windows (target-excluded, so leakage-free AND
+    #                     reproducible at inference from context only).
+    #   'first_farthest_135' / 'geo_lagernvs' : LagerNVS-style 1.35*max variants.
+    # Legacy names still accepted: 'saved_avg_scale'->'avg_scale', 'target_cam'->'cam_dist_mean'.
+    scale_mode = 'cam_dist_mean'
 
     # VAE (train_latent_cam_dm.py uses vae_intr_large.CameraVAE -> cam_dim=64)
     use_vae = True

@@ -22,6 +22,18 @@ All notable changes to the latentcam sub-project. Follows [Keep a Changelog](htt
   (up=+Y, right=+X, forward=-Z). Drop up(+Y) → ground = X-Z; plot X horizontal, -Z vertical so the
   camera forward points up in the image (map-like). User-confirmed orientation.
 
+### Changed
+- **lazy dataset loading** (`main/dataset_dl3dv.py`, default `lazy_dataset: true`): `__init__` now
+  builds only the lightweight sample/scene index (reading `prompts.json` + an n,h,w probe from
+  `transforms.json`, no per-frame stat) and persists it to `<root>/.latentcam_index/<key>.pt`, so
+  reruns load the index instantly instead of re-scanning all ~6k scenes. Scene poses/paths are
+  parsed on demand in `__getitem__` (`_load_scene` + `_LazyScenes`, cached). Also dropped the
+  per-frame `osp.isfile()` (~330 stats/scene on lustre) for a single `images_4` dir check — this
+  was the main ~28-min init bottleneck. Verified byte-identical to the eager path (samples/cam_param/
+  geo_c2w diff 0.0); `lazy_dataset: false` restores the old eager load. Note: with num_workers the
+  per-worker scene cache grows toward the working set (no COW sharing like eager) — cap workers if
+  RAM-bound.
+
 ### Added
 - **`scale_mode: saved_avg_scale`** (`main/dataset_dl3dv.py`): replicate SCVideo's original
   normalization (`data/dataset_large.py`) — normalize camera translations by the STORED

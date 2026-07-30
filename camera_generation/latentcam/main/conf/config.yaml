@@ -37,6 +37,7 @@ per_token_noise: false
 cfg_dropout_p: 0.1
 loss_tau_min: 0.02
 scale_mode: target_cam
+lazy_dataset: true          # [new] __init__ builds only the sample index (cached); scene poses parsed lazily in __getitem__
 use_vae: true
 num_cam: 13
 cam_dim: 64
@@ -53,39 +54,50 @@ t5_checkpoint_dir: /data1/cympyc1785/LatentCamVid/video_generation/models/DiffSy
 t5_checkpoint_path: models_t5_umt5-xxl-enc-bf16.pth
 t5_tokenizer_path: google/umt5-xxl
 point_encoder: concerto
-dl3dv_root: /data1/cympyc1785/data/DL3DV/DL3DV-960/DL3DV-10K
-meta_csv: meta.csv
-max_scenes: null
-geo_encoder: lagernvs
-geo_latent_dim: 768
-geo_num_views: 4
-geo_image_hw:
+# ===== DL3DV data + geo (scene-image) conditioning (latentcam additions beyond the
+# original SCVideo text->camera config; [new] = added after config.py) =====
+dl3dv_root: /data1/cympyc1785/data/DL3DV/DL3DV-960/DL3DV-10K   # DL3DV-960 dataset root
+meta_csv: meta.csv            # [new] scene-list CSV under dl3dv_root (e.g. meta_worldtraj.csv = 1K-7K − blacklist)
+max_scenes: null              # cap #scenes loaded (null = all; small int for smoke tests)
+train_seg_list: null          # [new] explicit train segment-list file (<batch>/<hash>/<seg>); null = random 90/10 split
+test_seg_list: null           # [new] explicit val/test segment-list file; val = its first (val_max_batches×batch_size) segments
+geo_encoder: lagernvs         # scene-context encoder: lagernvs (frozen VGGT recon -> 768-d tokens) | null (text-only)
+geo_latent_dim: 768           # geo token dim (lagernvs = 768)
+geo_num_views: 4              # #context views for 'even' sampling
+geo_image_hw:                 # context image resolution fed to the geo encoder [H, W]
 - 256
 - 448
-geo_view_sampling: even
-geo_cover_k: 6
-geo_cover_radius: 2.5
-geo_cover_ndepth: 3
-geo_num_inseg: 3
-geo_num_covis: 3
-geo_cover_out_of_seg: false
-geo_posed: false
-geo_lagernvs_skip_ctx_norm: false
-geo_shuffle_order: false
-geo_shuffle_keep_first: false
-geo_first_view_target_s: false
-geo_anchor_first_frame: false
-geo_cover_subtract_first: false
-coverage_blacklist_path: null
-geo_inseg_span: null
-geo_covis_radius: 2.0
-geo_covis_theta0: 10.0
-geo_covis_max_axis_deg: 80.0
-geo_covis_topM: 32
-lagernvs_repo_path: /data1/cympyc1785/lagernvs
-lagernvs_ckpt_path: /data1/cympyc1785/lagernvs/checkpoints/lagernvs_general_512/model.pt
-scenetok_repo_path: null
-scenetok_ckpt_path: null
+geo_view_sampling: even       # context-view selection: even (in-seg uniform) | frustum_cover (greedy coverage)
+                              #   | hybrid (in-seg + covisibility) | random_inseg
+geo_cover_k: 6                # frustum_cover: total #context views (incl. the fixed anchor)
+geo_cover_radius: 2.5         # frustum_cover: coverage ball radius (× segment scale)
+geo_cover_ndepth: 3           # frustum_cover: #depth samples along each ray for coverage scoring
+geo_num_inseg: 3              # hybrid: #in-segment context views
+geo_num_covis: 3              # hybrid: #covisibility-retrieved context views
+geo_cover_out_of_seg: false   # frustum_cover: restrict candidates to OUT-of-target-segment frames (leakage-free)
+geo_cover_before_only: false  # [new] out-of-seg context only from frames BEFORE the target segment (idx < s);
+                              #   target must have earlier frames -> target = 2nd segment onward
+geo_posed: false              # feed posed cam_token (context camera poses) to lagernvs; false = unposed
+geo_lagernvs_skip_ctx_norm: false  # [new] skip lagernvs' own 1.35·max(context) norm; reuse target's initial
+                              #   1.35·max_dist scale so target & geo latent share one frame+scale (full alignment)
+geo_shuffle_order: false      # shuffle the geo context view order
+geo_shuffle_keep_first: false # [new] when shuffling, keep view0 (anchor / frame s) fixed, shuffle only the rest
+geo_first_view_target_s: false # geo view0 = target segment's FIRST camera (frame s) -> aligns geo latent frame
+                              #   with the generation frame; remaining views are retrieved
+geo_anchor_first_frame: false # honest frustum_cover: anchor at target's first frame s only (radius from context,
+                              #   never uses the unseen target [s+1:e])
+geo_cover_subtract_first: false # [new] subtract the fixed first-cam (s) coverage before the greedy pick, so the
+                              #   remaining k-1 views maximize RESIDUAL coverage (what s doesn't already cover)
+coverage_blacklist_path: null # per-segment coverage-blacklist CSV (columns scene,segment); null = no filtering
+geo_inseg_span: null          # in-seg sampling span override (null = full segment)
+geo_covis_radius: 2.0         # covisibility retrieval: ball radius
+geo_covis_theta0: 10.0        # covisibility retrieval: min view-angle separation (deg)
+geo_covis_max_axis_deg: 80.0  # covisibility retrieval: max camera-axis angle vs anchor (deg)
+geo_covis_topM: 32            # covisibility retrieval: candidate pool size (top-M nearest)
+lagernvs_repo_path: /data1/cympyc1785/LatentCamVid/camera_generation/tools/lagernvs    # lagernvs code (for geo encoder)
+lagernvs_ckpt_path: /data1/cympyc1785/LatentCamVid/camera_generation/tools/lagernvs/checkpoints/lagernvs_general_512/model.pt  # lagernvs weights
+scenetok_repo_path: null      # alternative scenetok encoder repo (null = unused)
+scenetok_ckpt_path: null      # scenetok checkpoint (null = unused)
 clip_version: ViT-B/32
 clip_max_length: 77
 clatr_ckpt_path: /data1/cympyc1785/LatentCamVid/camera_generation/latentcam/checkpoints/clatr_epoch109_dl3dv_seg_2.ckpt

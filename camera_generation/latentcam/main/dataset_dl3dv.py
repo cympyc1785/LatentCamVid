@@ -167,6 +167,22 @@ def _read_coverage_blacklist(path):
     return blocked
 
 
+class _LazyScenes:
+    """Scene-indexed view backed by lazy parsing: ds.extrinsics_list[i] parses scene i's
+    transforms.json on first access (cached in ds._scene_cache) and returns the chosen field.
+    Lets existing `self.<list>[scene_idx]` code work unchanged while deferring the heavy parse
+    from __init__ to __getitem__."""
+    def __init__(self, ds, field):
+        self._ds = ds
+        self._field = field
+
+    def __getitem__(self, i):
+        return self._ds._load_scene(i)[self._field]
+
+    def __len__(self):
+        return len(self._ds.scene_dir_list)
+
+
 class CamDataset(torch.utils.data.Dataset):
     def __init__(self, cfg, type='train'):
         self.cfg = cfg
@@ -205,13 +221,97 @@ class CamDataset(torch.utils.data.Dataset):
         self.max_scenes = getattr(cfg, 'max_scenes', None)   # limit #scenes (e.g. smoke test)
 
         # scene-level (indexed by scene) and sample-level (per prompt segment)
-        self.extrinsics_list = []   # [(N,4,4)]
+        self.extrinsics_list = []   # [(N,4,4)]   (eager) or _LazyScenes (lazy)
         self.intrinsics_list = []   # [(N,3,3)]
         self.frame_files_list = []  # [[path,...]]
         self.hw_list = []           # [(h,w)]
         self.scene_dir_list = []    # [scene_dir]  (for saved_avg_scale json lookup)
         self.samples = []           # [(scene_idx, start, end, caption, data_name)]
-        self.load_data()
+        self._scene_cache = {}      # lazy: scene_idx -> {w2c,intr,frame_files,hw}
+        # lazy_dataset (default True): __init__ only builds the sample/scene index (from a persisted
+        # cache when available); scene poses/paths are parsed on demand in __getitem__ + cached.
+        self.lazy = getattr(cfg, 'lazy_dataset', True)
+        if self.lazy:
+            self._load_index()
+            self.extrinsics_list = _LazyScenes(self, 'w2c')
+            self.intrinsics_list = _LazyScenes(self, 'intr')
+            self.frame_files_list = _LazyScenes(self, 'frame_files')
+        else:
+            self.load_data()
+
+    def _load_scene(self, i):
+        """Lazily parse + cache a scene's transforms (used by _LazyScenes and getitem helpers)."""
+        c = self._scene_cache.get(i)
+        if c is None:
+            sd = self.scene_dir_list[i]
+            w2c, intr, ff, hw = self._parse_transforms(sd, osp.join(sd, 'transforms.json'))
+            c = {'w2c': w2c, 'intr': intr, 'frame_files': ff, 'hw': hw}
+            self._scene_cache[i] = c
+        return c
+
+    def _load_index(self):
+        """Build (samples, scene_dir_list, hw_list) — the lightweight index — reading only
+        prompts.json + a per-scene (n,h,w) probe. Persisted to <root>/.latentcam_index/<key>.pt
+        so subsequent runs load instantly instead of re-scanning all scenes."""
+        meta_name = getattr(self.cfg, 'meta_csv', 'meta.csv')
+        cov_path = getattr(self.cfg, 'coverage_blacklist_path', None)
+        key = (f"{meta_name}__nf{self.num_frames}__bo{int(self.geo_cover_before_only)}"
+               f"__k{self.geo_cover_k}__cb{osp.basename(cov_path) if cov_path else 'none'}"
+               f"__ms{self.max_scenes}")
+        cache_dir = osp.join(self.root, '.latentcam_index'); os.makedirs(cache_dir, exist_ok=True)
+        cache_path = osp.join(cache_dir, key.replace('/', '_') + '.pt')
+        if osp.isfile(cache_path):
+            idx = torch.load(cache_path, weights_only=False)
+            self.samples = idx['samples']; self.scene_dir_list = idx['scene_dir_list']
+            self.hw_list = idx['hw_list']
+            print(f"[index cache] {len(self.samples)} samples / {len(self.scene_dir_list)} scenes "
+                  f"<- {cache_path}")
+            return
+        scenes = _read_meta_scenes(self.root, meta_name)
+        blocked = _read_blacklist_hashes(self.root)
+        cov_black = _read_coverage_blacklist(cov_path)
+        print(f"[index build] scanning {len(scenes)} scenes in {meta_name} "
+              f"(prompts + n,h,w probe; cached to {cache_path})")
+        for chunk in tqdm(scenes):
+            if chunk.split('/')[-1] in blocked:
+                continue
+            scene_dir = osp.join(self.root, chunk)
+            tj_path = osp.join(scene_dir, 'transforms.json')
+            pj_path = osp.join(scene_dir, 'prompts.json')
+            if not (osp.isfile(tj_path) and osp.isfile(pj_path)):
+                continue
+            try:
+                tj = json.load(open(tj_path)); prompts = json.load(open(pj_path))
+                n = len(tj['frames']); h, w = int(tj['h']), int(tj['w'])
+            except Exception:
+                continue
+            scene_idx = len(self.scene_dir_list)
+            added = 0
+            for seg_key, seg in prompts.items():
+                fi = seg.get('frame_idx')
+                if not fi or len(fi) != 2:
+                    continue
+                s, e = int(fi[0]), int(fi[1])
+                if e > n or (e - s) < self.num_frames:
+                    continue
+                if (chunk, seg_key) in cov_black:
+                    continue
+                if self.geo_cover_before_only and s < self.geo_cover_k:
+                    continue
+                pcs = seg.get('prompt_camera_with_scene_video')
+                caption = pcs.get('concise', "") if isinstance(pcs, dict) else (pcs or "")
+                self.samples.append((scene_idx, s, e, caption,
+                                     f"{chunk.replace('/', '_')}_{seg_key}"))
+                added += 1
+            if added > 0:
+                self.scene_dir_list.append(scene_dir)
+                self.hw_list.append((h, w))
+                if self.max_scenes is not None and len(self.scene_dir_list) >= self.max_scenes:
+                    break
+        torch.save({'samples': self.samples, 'scene_dir_list': self.scene_dir_list,
+                    'hw_list': self.hw_list}, cache_path)
+        print(f"[index build] {len(self.samples)} samples / {len(self.scene_dir_list)} scenes "
+              f"-> saved {cache_path}")
 
     def load_data(self):
         meta_name = getattr(self.cfg, 'meta_csv', 'meta.csv')
@@ -284,11 +384,11 @@ class CamDataset(torch.utils.data.Dataset):
         K = torch.tensor([[fx, 0, cx], [0, fy, cy], [0, 0, 1]], dtype=torch.float32)
         intr = K.unsqueeze(0).repeat(w2c.shape[0], 1, 1)
 
-        frame_files = []
-        for fr in frames:
-            base = osp.basename(fr['file_path'])
-            p = osp.join(scene_dir, 'images_4', base)
-            frame_files.append(p if osp.isfile(p) else osp.join(scene_dir, fr['file_path']))
+        # single dir check instead of a per-frame osp.isfile() stat (~330 stats/scene on lustre)
+        img_dir = osp.join(scene_dir, 'images_4')
+        use_4 = osp.isdir(img_dir)
+        frame_files = [osp.join(img_dir, osp.basename(fr['file_path'])) if use_4
+                       else osp.join(scene_dir, fr['file_path']) for fr in frames]
         return w2c, intr, frame_files, (h, w)
 
     @staticmethod

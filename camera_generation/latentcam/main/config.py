@@ -123,6 +123,9 @@ class Config:
     # DL3DV-960 data (dataset_dl3dv.CamDataset reads meta.csv, excludes blacklist.csv)
     dl3dv_root = '/data1/cympyc1785/data/DL3DV/DL3DV-960/DL3DV-10K'
     max_scenes = None          # all scenes (set small for smoke)
+    lazy_dataset = True        # __init__ builds only the sample index (persisted cache); poses parsed lazily per __getitem__
+    train_seg_list = None      # explicit train segment-list file (<batch>/<hash>/<seg>); None = random 90/10
+    test_seg_list = None       # explicit val/test segment-list file; val = its first N segments (shuffle=False)
 
     # Geo encoder (image-based scene encoder feeding camera_diffusion_model_latent's geo latent)
     geo_encoder = 'lagernvs'    # ['lagernvs', 'scenetok']
@@ -174,8 +177,8 @@ class Config:
     geo_covis_max_axis_deg = 80.0  # (hybrid) reject candidates whose optical axis differs > this
     geo_covis_topM = 32         # (hybrid) unused (FPS now runs over all gated candidates by direction)
     # lagernvs backend: frozen VGGT reconstructor -> 768-d scene tokens
-    lagernvs_repo_path = '/data1/cympyc1785/lagernvs'
-    lagernvs_ckpt_path = '/data1/cympyc1785/lagernvs/checkpoints/lagernvs_general_512/model.pt'
+    lagernvs_repo_path = '/data1/cympyc1785/LatentCamVid/camera_generation/tools/lagernvs'
+    lagernvs_ckpt_path = '/data1/cympyc1785/LatentCamVid/camera_generation/tools/lagernvs/checkpoints/lagernvs_general_512/model.pt'
     # scenetok backend (stub for now)
     scenetok_repo_path = None
     scenetok_ckpt_path = None

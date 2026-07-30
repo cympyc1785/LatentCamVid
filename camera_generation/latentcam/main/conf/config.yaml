@@ -120,6 +120,16 @@ geo_anchor_first_frame: false # honest frustum_cover: anchor at target's first f
 geo_cover_subtract_first: false # [new] subtract the fixed first-cam (s) coverage before the greedy pick, so the
                               #   remaining k-1 views maximize RESIDUAL coverage (what s doesn't already cover)
 coverage_blacklist_path: null # per-segment coverage-blacklist CSV (columns scene,segment); null = no filtering
+# [new] precomputed frozen geo-latent cache (built by main/cache_geo_embeddings.py). null = OFF,
+# i.e. the original behaviour: load context images and run LagerNVS every step. When set, the
+# dataset loads <dir>/<first_cam_included|first_cam_not_included>/<iK>/<data_name>.pt instead and
+# skips image I/O entirely; any segment missing from the cache silently falls back to the
+# on-the-fly path, so a partial cache is safe. Valid ONLY because GeoEncoder.proj is nn.Identity
+# for lagernvs (native 768 == geo_latent_dim 768) — with geo_latent_dim != 768 proj is a TRAINABLE
+# Linear and its output must not be cached; dataset_dl3dv refuses the cache in that case.
+# The cache is keyed by the geo context selection, so it is only valid for the experiment that
+# built it (geo_worldtraj: frustum_cover + out_of_seg + subtract_first + anchor_first + posed).
+geo_latent_cache_dir: null
 geo_inseg_span: null          # in-seg sampling span override (null = full segment)
 geo_covis_radius: 2.0         # covisibility retrieval: ball radius
 geo_covis_theta0: 10.0        # covisibility retrieval: min view-angle separation (deg)

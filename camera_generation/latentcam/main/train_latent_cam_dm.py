@@ -17,7 +17,7 @@ import torch.nn as nn
 import importlib as _importlib
 from hydra_cfg import load_cfg
 cfg, cfg_dict = load_cfg('config')
-from base import Trainer  # ported to main/base.py (DL3DV-960 dataset)
+from base import Trainer  # ported to main/base.py (DL3DV dataset)
 from models.vae_intr_large import CameraVAE
 from models.t5 import T5EncoderModel
 from utils.data_utils import out_to_trajectory, make_intrinsics, inverse_camera_matrix
@@ -53,6 +53,15 @@ if cfg.load_points:
         from models.pc_encoder_custom import PCEncoder
     elif cfg.point_encoder == 'mosaic':
         from models.pc_encoder_mosaic import PCEncoder
+
+def geo_emb_from_cache(data, device):
+    """Precomputed geo path: the dataset already read the frozen geo_emb off disk, so there is no
+    encoder forward. Mirrors GeoEncoder.forward's contract -> (B, M, 768), (B, M) bool all-ones
+    (the cache stores no mask because lagernvs marks every token valid, geo_encoder.py:139)."""
+    emb = data['geo_emb'].to(device)
+    mask = torch.ones(emb.shape[:2], dtype=torch.bool, device=device)
+    return emb, mask
+
 
 def geo_encode(geo_encoder, data, device):
     """Run the geo encoder on a batch. When cfg.geo_posed and the batch carries geo-view
@@ -355,7 +364,9 @@ def train():
                 else:
                     pc_embeds, pc_masks = None, None
                 # Geo latent conditioning (image-based, frozen) — mirrors the train loop.
-                if geo_encoder is not None and 'images' in data:
+                if 'geo_emb' in data:
+                    pc_embeds, pc_masks = geo_emb_from_cache(data, device)
+                elif geo_encoder is not None and 'images' in data:
                     pc_embeds, pc_masks = geo_encode(geo_encoder, data, device)
                 if cfg.text_encoder == 'T5':
                     text_embeds, text_masks = text_encoder(text_prompt, device)
@@ -602,7 +613,11 @@ def train():
 
             # Geo latent conditioning (image-based, frozen, on-the-fly). Replaces the
             # point-cloud path: feeds the latent model's geo_emb/geo_mask (5th/6th args).
-            if geo_encoder is not None and 'images' in data:
+            # 'geo_emb' present = the dataset served a precomputed cache hit (cfg.
+            # geo_latent_cache_dir); otherwise fall back to the original LagerNVS forward.
+            if 'geo_emb' in data:
+                pc_embeds, pc_masks = geo_emb_from_cache(data, device)
+            elif geo_encoder is not None and 'images' in data:
                 with torch.no_grad():
                     pc_embeds, pc_masks = geo_encode(geo_encoder, data, device)
 

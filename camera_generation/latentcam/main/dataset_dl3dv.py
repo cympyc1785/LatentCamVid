@@ -243,6 +243,23 @@ class CamDataset(torch.utils.data.Dataset):
         self.geo_num_views = getattr(cfg, 'geo_num_views', 4)
         self.geo_hw = tuple(getattr(cfg, 'geo_image_hw', (256, 448)))
         self.geo_enabled = bool(getattr(cfg, 'geo_encoder', None))  # skip image loading for text-only
+        # [new] precomputed frozen geo-latent cache (cache_geo_embeddings.py). None = OFF, i.e.
+        # load images + run LagerNVS every step exactly as before. Only safe when the encoder's
+        # proj is Identity (lagernvs native 768 == geo_latent_dim); otherwise proj is trainable
+        # and its output must not be frozen into a file.
+        self.geo_latent_cache_dir = None
+        _cdir = getattr(cfg, 'geo_latent_cache_dir', None)
+        if _cdir and self.geo_enabled:
+            if int(getattr(cfg, 'geo_latent_dim', 768)) != 768:
+                print(f"[geo cache] DISABLED: geo_latent_dim="
+                      f"{getattr(cfg, 'geo_latent_dim')} != 768 -> GeoEncoder.proj is a trainable "
+                      f"Linear, its output must not be cached")
+            else:
+                sub = ('first_cam_included' if getattr(cfg, 'geo_first_view_target_s', False)
+                       else 'first_cam_not_included')
+                self.geo_latent_cache_dir = osp.join(_cdir, sub)
+                print(f"[geo cache] reading {self.geo_latent_cache_dir}/<iK>/<data_name>.pt "
+                      f"(miss -> on-the-fly LagerNVS)")
         # geo context-view sampling (leakage ablation): 'even' (in-segment) | 'hybrid'
         self.geo_view_sampling = getattr(cfg, 'geo_view_sampling', 'even')
         self.geo_num_inseg = getattr(cfg, 'geo_num_inseg', 3)
@@ -812,7 +829,16 @@ class CamDataset(torch.utils.data.Dataset):
             'width': torch.full((cam_param.shape[0],), float(w)),
         }
 
-        # geo encoder input (multi-view images) — only for the geo path; text-only skips it
+        # geo encoder input (multi-view images) — only for the geo path; text-only skips it.
+        # [new] cache hit short-circuits the whole block: the frozen geo_emb is read straight off
+        # disk, so no images are decoded and no context views are selected. A miss falls through
+        # to the original on-the-fly path below, so a partial cache is safe.
+        if self.geo_enabled and self.geo_latent_cache_dir is not None:
+            _p = osp.join(self.geo_latent_cache_dir, data_name.split('_')[0], f'{data_name}.pt')
+            if osp.exists(_p):
+                out['geo_emb'] = torch.load(_p, map_location='cpu', weights_only=False).float()
+                return out
+
         if self.geo_enabled:
             if self.geo_view_sampling == 'frustum_cover':
                 geo_idxs = self._sample_geo_frustum_cover(scene_idx, s, e)

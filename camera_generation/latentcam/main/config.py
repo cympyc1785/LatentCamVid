@@ -188,6 +188,9 @@ class Config:
     # Per-SEGMENT coverage blacklist (scene,segment CSV from scripts/dump_coverage.py at a
     # chosen tau). None -> no coverage filtering (only the scene-level blacklist.csv applies).
     coverage_blacklist_path = None
+    # [new] precomputed frozen geo-latent cache root (main/cache_geo_embeddings.py). None = OFF,
+    # i.e. run LagerNVS every step as before. See conf/config.yaml for layout + validity caveats.
+    geo_latent_cache_dir = None
     geo_inseg_span = None       # (hybrid) frames from anchor to spread in-segment over (None -> num_frames//8)
     geo_covis_radius = 2.0      # (hybrid) candidate center within R * segment-scale of anchor
     geo_covis_theta0 = 10.0     # (hybrid) preferred triangulation angle (deg) for covis score

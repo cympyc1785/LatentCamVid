@@ -5,6 +5,39 @@ All notable changes to the latentcam sub-project. Follows [Keep a Changelog](htt
 ## [Unreleased]
 
 ### Added
+- **`geo_latent_cache_dir` + a cache-read path in `dataset_dl3dv` / `train_latent_cam_dm`** — the
+  precomputed frozen geo latents built by `cache_geo_embeddings.py` were being written but never
+  read (nothing in the training code loaded them; `load_saved_pc_embeds` is the point-cloud flag
+  and is unrelated). Now `cfg.geo_latent_cache_dir` (default **`null` = off**, i.e. the original
+  per-step LagerNVS forward is completely unchanged) makes `CamDataset.__getitem__` read
+  `<dir>/<first_cam_included|first_cam_not_included>/<iK>/<data_name>.pt` and return it as
+  `geo_emb`, short-circuiting context-view selection and image decoding entirely; the trainer's
+  new `geo_emb_from_cache()` rebuilds the all-ones mask (lagernvs marks every token valid,
+  `geo_encoder.py:139`) and skips the encoder at both the train and validation call sites.
+  A segment missing from the cache falls through to the on-the-fly path, so a partial cache is
+  safe. Verified **bit-exact**: cache-ON vs cache-OFF `geo_emb` for the same segments gives
+  `maxdiff 0.000000`, 3/3, and cache-ON carries no `images` key.
+  Guard: this is only valid because `GeoEncoder.proj` is `nn.Identity` when the lagernvs native
+  dim 768 equals `geo_latent_dim` (confirmed at runtime, `proj: Identity`). With
+  `geo_latent_dim != 768` proj is a **trainable** `Linear` whose output must not be frozen into a
+  file, so the dataset refuses the cache and prints why.
+  Speed, measured on the full corpus (39830 samples, `bs8`, 1 GPU): cache **ON 4.16–4.22 it/s**
+  (~17.8 min/epoch) vs **OFF 2.85 s/it = 0.351 it/s** (~3h33m/epoch) — **~12×**. A smoke-scale
+  `max_scenes=40` comparison had shown *no* difference (ON 1.82/1.81 vs OFF 1.87/1.85 it/s); that
+  measurement is invalid because 40 scenes' context images all fit in the OS page cache.
+- **`conf/experiment/geo_worldtraj.yaml`: `geo_latent_cache_dir` enabled** — points at
+  `/data1/cympyc1785/data/DL3DV/latent_cache`, whose `first_cam_included/` tree was built from
+  exactly this experiment's context selection (`frustum_cover` + `out_of_seg` + `subtract_first`
+  + `anchor_first` + `posed`). All 39830 segments present (missing 0 / extra 0, 266 GB). Set to
+  `null` to force the original per-step LagerNVS forward.
+- **`cache_geo_embeddings.py`: per-`{i}K` output layout, multi-batch runs, resumability, ETA** —
+  the DL3DV scene root is now split into per-1000 batch dirs, so the cache mirrors it. New
+  `CACHE_LAYOUT` selects `batch` (default, `<OUT>/<first_cam_*>/<iK>/<name>.pt`, with the
+  `first_cam_*` level derived from `geo_first_view_target_s` because that flag changes which
+  context views are encoded) or `flat` (**the original pilot layout, byte-for-byte unchanged**).
+  `CACHE_BATCH` now takes one batch, a comma-separated list, or `all`; batches run in order,
+  each resumable (an already-present file is skipped without a forward pass). Progress lines now
+  report seg/s and ETA, and `CACHE_BS` exposes the loader batch size.
 - **`conf/experiment/vae_dl3dv_1_7k.yaml`** — camera-VAE re-fit on the full DL3DV corpus the
   diffusion runs actually use (`meta.csv`, no coverage blacklist → **39830 segments / 6097
   scenes**), replacing the 1K-only fit behind the active default ckpt

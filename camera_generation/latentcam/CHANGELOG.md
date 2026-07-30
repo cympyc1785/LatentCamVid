@@ -23,6 +23,16 @@ All notable changes to the latentcam sub-project. Follows [Keep a Changelog](htt
   camera forward points up in the image (map-like). User-confirmed orientation.
 
 ### Added
+- **`scripts/data/norm_camera_length_stats.py`**: camera-length distribution under the two training
+  normalizations (point=target_cam vs dist=1.35·max) over ~5.4k real training segments (rebuilt
+  standalone from transforms.json + prompts.json, no dataset load). Per-frame ‖center‖/avg_scale,
+  per-segment span + path length (mean/std/var/percentiles) + histograms →
+  `results/compare/normalization_camera_length/`. point var 0.345 (span 1–24, heavy tail) vs dist
+  var 0.054 (span const 0.741, bounded ≤0.741).
+- **`main/cache_geo_embeddings.py`**: precompute + cache frozen geo embeddings (fp16) per DL3DV
+  segment (`data/DL3DV/latent_cache/<data_name>.pt`, (M,768)) so training can skip the per-step
+  LagerNVS forward (frozen + deterministic context). fp16 chosen: geo_emb |max|≈14.6 → no overflow,
+  rel-err 1.8e-4 (training already bf16). ~285GB for full worldtraj scope; pilot = 1K batch.
 - **`main/dump_render_inputs.py`** (+ vendored `tools/lagernvs/render_pred_from_dump.py`, not
   committed): render a results/validation predicted trajectory with LagerNVS. Two-step to avoid the
   latentcam↔lagernvs `models` package clash — step 1 (latentcam) dumps the exact inference-time geo

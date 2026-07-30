@@ -23,6 +23,23 @@ All notable changes to the latentcam sub-project. Follows [Keep a Changelog](htt
   and 0.00466 / 0.00495 / 0.00293. The `raw` ≪ `rel` gap on `intr_L1` (0.00485 vs 0.25884) is
   preserved, i.e. the new ckpt is still a `raw` ckpt and still a strict drop-in.
 
+- **`conf/experiment/textonly_savedscale_bs8.yaml` + `textonly_savedscale_bs32.yaml`** — the two
+  arms of the batch-size comparison as self-contained configs instead of `experiment=
+  textonly_savedscale batch_size=N` CLI overrides. Byte-identical apart from `exp_name` +
+  `batch_size` (verified by resolving both and diffing all 19 relevant keys), and `exp_name`
+  carries the batch size because the wandb run name is `<timestamp>_<exp_name>`
+  (`train_latent_cam_dm.py:183` + `:194`), so each arm lands as its own wandb run without relying
+  on the launcher remembering an override.
+- **First `vae_dl3dv_1_7k` fit completed** (60 epochs, 39830 segments, GPU 2):
+  `epoch 59 loss=0.01186 latent_std=0.635126`; ckpt at `my_checkpoints/vae_dl3dv_1_7k/last.pth`.
+  Measured against the 1K-only ckpt on one basis (1264 segments, `avg_scale`): latent std
+  **0.60943** `raw` (vs 0.46312), recon L1 rot **0.00562** / trans **0.00953** / intr **0.00433**
+  (vs 0.00466 / 0.00495 / 0.00293), and `raw` ≪ `rel` on `intr_L1` (0.00433 vs 0.25666) so it is
+  still a `raw` ckpt and a strict drop-in. Its matching `vae_latent_scale` is **0.635126** (the
+  training-corpus std; `0.4467666` with this ckpt would give input std 1.3641). **Not adopted** —
+  `config.yaml` still points at `vae_20260202_065659_400` + `0.4467666`; no diffusion run has used
+  the new ckpt yet, so the recon-vs-corpus-coverage trade is unevaluated.
+
 ### Changed
 - **`meta_csv: meta_worldtraj.csv` pinned in `textonly_savedscale.yaml` and
   `vae_dl3dv_1_7k.yaml`** (was the `meta.csv` default), matching every other worldtraj-scoped

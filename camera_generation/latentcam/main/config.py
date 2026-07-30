@@ -99,25 +99,25 @@ class Config:
     #   'auto' : legacy coupling, 'rel' iff scale_mode == 'avg_scale' (reproduces pre-fix runs
     #            bit-for-bit; use it only to re-run an old experiment)
     # Mismatch vs the ckpt silently destroys the intr channels — see scripts/vae/vae_scale_matrix.py.
-    # 'raw' is the correct convention for the default 32-dim ckpt below (20260202_065659, fit
-    # before SCVideo added the frame-0 division at data/dataset_large.py:313).
-    intr_norm = 'raw'
+    # 'rel' is the correct convention for the default 64-dim ckpt below (20260302, fit AFTER
+    # SCVideo added the frame-0 division at data/dataset_large.py:313).
+    intr_norm = 'rel'
 
-    # VAE — SCVideo's DL3DV-only config.py setting. cam_dim MUST match the ckpt's latent_dim
-    # (20260202_065659 -> 32, 20260302 -> 64) or the state_dict load hard-crashes on to_mu.
-    # NOTE 0.4467666 is SCVideo's constant; on our 1264 DL3DV SEGMENTS the same triple measures
-    # 0.46312 -> input std 1.0366, not 1.0. Kept verbatim per explicit user decision; see
-    # main/conf/config.yaml's comment for the measured matrix.
+    # VAE — SCVideo's config_large.py setting. cam_dim MUST match the ckpt's latent_dim
+    # (20260302 -> 64, 20260202_065659 -> 32) or the state_dict load hard-crashes on to_mu.
+    # NOTE 0.96032625 was fit over SCVideo's MIXED corpus (DL3DV + DynamicVerse + dynpose-100k);
+    # this triple measures 0.44696 on DL3DV-only -> input std 0.4654, not 1.0. Kept verbatim per
+    # explicit user decision; see main/conf/config.yaml's comment for the measured matrix.
     use_vae = True
     if use_vae:
         num_cam = 13
-        cam_dim = 32
+        cam_dim = 64
     else:
         num_cam = 49
         cam_dim = 11
     vae_beta = 1e-3
-    vae_latent_scale = 0.4467666
-    vae_ckpt_path = osp.join(ckpt_root, 'vae_20260202_065659_400.pth')
+    vae_latent_scale = 0.96032625
+    vae_ckpt_path = osp.join(ckpt_root, 'vae_20260302_300.pth')
 
     num_gpus = 1
     num_thread = 8
@@ -203,9 +203,11 @@ class Config:
     clip_version = 'ViT-B/32'
     clip_max_length = 77
 
-    # All our runs' CLaTr metrics are against this ckpt. config_large.py's clatr_epoch139_large.ckpt
-    # is an architecture-identical drop-in but trained on a different corpus -> incomparable scores.
-    clatr_ckpt_path = osp.join(ckpt_root, 'clatr_epoch109_dl3dv_seg_2.ckpt')
+    # config_large.py's CLaTr ckpt. Architecture-identical drop-in to clatr_epoch109_dl3dv_seg_2
+    # (same 260-key state_dict, both 191,546,118 B; the input standardization lives in
+    # evaluate/CLaTr/configs/dataset/standardization/0120.yaml, not in the ckpt) but trained on a
+    # DIFFERENT corpus -> FD/PRDC/CLaTr-score are NOT comparable with our epoch109 history.
+    clatr_ckpt_path = osp.join(ckpt_root, 'clatr_epoch139_large.ckpt')
 
 
 cfg = Config()

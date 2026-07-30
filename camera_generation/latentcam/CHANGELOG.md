@@ -94,10 +94,13 @@ All notable changes to the latentcam sub-project. Follows [Keep a Changelog](htt
     `auto` == `rel`) and `vae_dl3dv_avgscale.yaml`; `intr_norm: raw` in `textonly_align.yaml`,
     `geo_worldtraj_align.yaml`, `vae_worldtraj.yaml` (fit under `first_farthest_135` → legacy
     `auto` == `raw`), `vae_dl3dv.yaml`, `vae_dl3dv_smoke.yaml` (`geo_lagernvs` → `raw`), and
-    `textonly_savedscale.yaml` (already `raw`; pinned rather than inherited).
+    `textonly_savedscale.yaml`.
   Experiments that use the DEFAULT VAE and only override `scale_mode` (`geo_*`, `textonly`,
-  `textonly_camscale*`, `smoke_*`) are intentionally left unpinned, so they now inherit the 32-dim
-  `vae_20260202_065659_400` + `raw` default.
+  `textonly_camscale*`, `smoke_*`) are intentionally left unpinned, so they inherit whatever
+  `config.yaml` sets.
+  *(Superseded later in this same `[Unreleased]` block — see "reverted to `config_large.py`'s VAE
+  + CLaTr line" below. `textonly_savedscale.yaml` is now `rel`/64, not `raw`, and the unpinned
+  experiments now inherit the 64-dim `vae_20260302_300` + `rel` default.)*
 - **DL3DV root moved** `/data1/cympyc1785/data/DL3DV/DL3DV-960/DL3DV-10K` → `/data1/cympyc1785/data/DL3DV/scenes`
   (done by the user on disk). Updated every live reference: `main/conf/config.yaml` (`dl3dv_root`),
   `main/conf/experiment/geo_worldtraj_seglist.yaml` (`train_seg_list`/`test_seg_list`),
@@ -219,6 +222,43 @@ All notable changes to the latentcam sub-project. Follows [Keep a Changelog](htt
   wandb configs / helper scripts keep resolving; remove it once all runs referencing the old
   path have finished.
 
+- **Reverted to `config_large.py`'s VAE + CLaTr line as the global default** (explicit user
+  decision, reversing the `0.4467666` / `vae_20260202_065659_400` entry above — that entry is
+  superseded, not deleted, so the flip-flop stays legible). `config.yaml` **and** `config.py` now
+  both carry: `vae_latent_scale: 0.96032625`, `vae_ckpt_path: checkpoints/vae_20260302_300.pth`,
+  `clatr_ckpt_path: checkpoints/clatr_epoch139_large.ckpt`, `cam_dim: 64` (matching that ckpt's
+  `latent_dim`), `num_cam: 13`, `intr_norm: rel`, `scale_mode: avg_scale`, `vae_beta: 0.001`.
+  `avg_scale` + `rel` is genuinely `config_large`'s pipeline: `data/dataset_large.py:295-304`
+  divides translations by the stored point-cloud `avg_scale` (our `saved_avg_scale`, an alias of
+  `avg_scale`) and `:313` divides the intrinsics by frame 0.
+  `textonly_savedscale.yaml` / `_bs8.yaml` / `_bs32.yaml` were switched from `intr_norm: raw` /
+  unpinned `cam_dim` to pinned `rel` / `64`, and their comment blocks rewritten (they still
+  claimed the 32-dim `0.4467666` triple and contained a "non-relative intrinsics / divided by
+  frame 0" self-contradiction).
+  Verified end-to-end on the resolved `textonly_savedscale_bs8` config: VAE strict-loads at
+  `latent_dim 64`, `cam_param (1,49,11) → latent (1,13,64)`, `CameraDiffusionModel(cam_dim=64)`
+  = **64.82M** params, recon L1 rot **0.00489** / trans **0.00282** / intr **0.00218** over 375
+  segments (consistent with the 1264-segment 0.00504 / 0.00301 / 0.00222). Both arms smoke-tested
+  to `EXIT=0` including the CLaTr eval path.
+  Two caveats, measured not estimated:
+  * `0.96032625` was fit over SCVideo's MIXED corpus (DL3DV + DynamicVerse + dynpose-100k). On
+    DL3DV-only this triple's latent std is **0.44696** (1264 segments) / 0.43350 (375 segments),
+    so the diffusion input std is **0.4654** / 0.4514, not 1.0 — latents reach the model ~2.15x
+    too small. Kept verbatim per user instruction; `0.44696` is the value for exactly unit-std
+    input on DL3DV-only. (`0.99270` for `cam_dist_mean` + `rel` is coincidentally near 0.96 and is
+    **not** `config_large`'s normalization — it must not be used to justify the constant.)
+  * `clatr_epoch139_large.ckpt` is an architecture-identical drop-in (260-key `state_dict`, no
+    shape mismatch, both ckpts 191,546,118 B) but is trained on a different corpus, so **FD /
+    PRDC / clatr_score from runs using it are not comparable with any number in
+    `EXPERIMENTS.log` before 2026-07-30** — only epoch139-vs-epoch139.
+  Audited all 34 experiment configs + the default by Hydra-composing each and comparing resolved
+  `cam_dim` against the actual `encoder.to_mu.weight` dim of its resolved `vae_ckpt_path`:
+  **0 mismatches**. Configs pinning their own ckpt are unaffected (`ar*`/`rolling*` → CamVLA
+  `causal_vae_v1_240`, `textonly_align`/`geo_worldtraj_align` → `vae_worldtraj/last.pth`); the
+  five VAE-training configs never load `vae_ckpt_path`. The unpinned `geo_*` / `textonly` /
+  `textonly_camscale*` / `smoke_*` configs now inherit 64/`rel`/`vae_20260302_300`/`0.96032625`
+  where they previously inherited 32/`raw`/`vae_20260202_065659_400`/`0.4467666` — intended, but
+  it means results from those configs straddle two different VAEs.
 ### Fixed
 - **cam_param's intrinsics convention was coupled to `scale_mode`, feeding the VAE the wrong
   encoding** (`main/dataset_dl3dv.py`, `main/conf/config.yaml`, `main/config.py`). New option

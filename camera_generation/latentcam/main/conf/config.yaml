@@ -43,35 +43,38 @@ scale_mode: avg_scale
 # destroys the intr channels (recon L1 0.26-0.36 instead of 0.002-0.013) — see dataset_dl3dv
 # docstring and scripts/vae/vae_scale_matrix.py. vae_20260302_300 -> 'rel',
 # vae_20260202_065659_400 -> 'raw'.
-intr_norm: raw
+intr_norm: rel
 lazy_dataset: true          # [new] __init__ builds only the sample index (cached); scene poses parsed lazily in __getitem__
 use_vae: true
 num_cam: 13
-cam_dim: 32                 # MUST match the ckpt's latent_dim (20260202 -> 32, 20260302 -> 64)
+cam_dim: 64                 # MUST match the ckpt's latent_dim (20260302 -> 64, 20260202 -> 32)
 vae_beta: 0.001
-# SCVideo's DL3DV-only setting (its main/config.py, which pairs with core_pkg/models/vae_intr.py =
-# vae_intr_large with latent_dim 32): vae_latent_scale 0.4467666 + 20260202_065659/400.pth,
-# scale_mode avg_scale, intr_norm raw -- all four matched above, SCVideo's constant used verbatim.
-# Provenance (SCVideo git history, see CHANGELOG): that ckpt was fit on DL3DV 1K ONLY, one
-# 49-frame window per scene, with exactly this avg_scale + raw pipeline.
+# SCVideo's config_large.py setting: vae_latent_scale 0.96032625 + 20260302/300.pth,
+# scale_mode avg_scale, intr_norm rel, cam_dim 64 -- all matched above, constant used verbatim.
+# That is genuinely config_large's pipeline: data/dataset_large.py:295-304 divides translations by
+# the STORED point-cloud avg_scale (= our scale_mode 'avg_scale'; 'saved_avg_scale' is an alias)
+# and line 313 divides the intrinsics by frame 0 (= our intr_norm 'rel').
 # !! NOTE vae_latent_scale is supposed to be the MEASURED latent std of the
 # (ckpt, scale_mode, intr_norm) triple, because train/infer do `encode(traj) / vae_latent_scale`.
-# On our 1264 DL3DV SEGMENTS the same triple measures 0.46312, so SCVideo's 0.4467666 gives a
-# diffusion input std of 1.0366 rather than 1.0000 (3.7% over; segment definitions differ from
-# SCVideo's one-window-per-scene). 0.4467666 kept by explicit user decision; use 0.46312 for
-# exactly unit-std input.
+# 0.96032625 was fit over SCVideo's MIXED corpus (DL3DV + DynamicVerse + dynpose-100k); on
+# DL3DV-only this triple measures 0.44696, so the diffusion input std is **0.4654**, not 1.0000
+# (i.e. the latents reach the model ~2.15x too SMALL). Kept verbatim by explicit user decision;
+# use 0.44696 for exactly unit-std input on DL3DV-only.
 # Measured on 1264 DL3DV samples by scripts/vae/vae_scale_matrix.py (lat.std | recon L1
 # rot/trans/intr):
-#   20260202_400 (32) avg_scale raw -> 0.46312 | 0.00466 0.00495 0.00293   <-- active triple
+#   20260302_300 (64) avg_scale rel -> 0.44696 | 0.00504 0.00301 0.00222   <-- active triple
+#                                     (best recon of any cell measured)
+#   20260302_300 (64) cam_dist_mean rel -> 0.99270                          (≈0.96 by coincidence;
+#                                     NOT config_large's normalization -- do not use to justify it)
+#   20260202_400 (32) avg_scale raw -> 0.46312 | 0.00466 0.00495 0.00293   (the DL3DV-only
+#                                     config.py pair; needs cam_dim 32 + intr_norm raw)
 #   20260202_400 (32) avg_scale rel -> 0.63741 | 0.00648 0.01081 0.26291   (wrong intr convention)
-#   20260302_300 (64) avg_scale rel -> 0.44696 | 0.00504 0.00301 0.00222   (config_large's pair,
-#                                     needs cam_dim 64 + intr_norm rel; its 0.96032625 was fit on
-#                                     SCVideo's MIXED corpus -> input std 0.465 on DL3DV-only)
-#   20260302_300 (64) cam_dist_mean rel -> 0.99270
+#   vae_dl3dv_1_7k (32) avg_scale raw -> 0.60943 | 0.00562 0.00953 0.00433 (our 1K-7K re-fit,
+#                                     my_checkpoints/vae_dl3dv_1_7k/last.pth, scale 0.635126)
 # See the dataset_dl3dv docstring: the intr convention is fixed by the CKPT, the scale_mode only
 # rescales the translations. The full 16-cell matrix is in the CHANGELOG.
-vae_latent_scale: 0.4467666
-vae_ckpt_path: /data1/cympyc1785/LatentCamVid/camera_generation/latentcam/checkpoints/vae_20260202_065659_400.pth
+vae_latent_scale: 0.96032625
+vae_ckpt_path: /data1/cympyc1785/LatentCamVid/camera_generation/latentcam/checkpoints/vae_20260302_300.pth
 num_gpus: 1
 num_thread: 8
 num_frames: 49
@@ -128,9 +131,10 @@ scenetok_repo_path: null      # alternative scenetok encoder repo (null = unused
 scenetok_ckpt_path: null      # scenetok checkpoint (null = unused)
 clip_version: ViT-B/32
 clip_max_length: 77
-# All our runs' CLaTr metrics are against this ckpt. config_large.py uses clatr_epoch139_large.ckpt
-# instead — an architecture-identical drop-in (same 260-key state_dict, no shape mismatch, both
-# 191,546,118 B; CLaTr's input standardization comes from
-# evaluate/CLaTr/configs/dataset/standardization/0120.yaml, not from the ckpt) but trained on a
-# different corpus, so swapping it makes FD/PRDC/CLaTr-score incomparable with our history.
-clatr_ckpt_path: /data1/cympyc1785/LatentCamVid/camera_generation/latentcam/checkpoints/clatr_epoch109_dl3dv_seg_2.ckpt
+# config_large.py's CLaTr ckpt. It is an architecture-identical drop-in to the
+# clatr_epoch109_dl3dv_seg_2.ckpt all our earlier runs used (same 260-key state_dict, no shape
+# mismatch, both 191,546,118 B; CLaTr's input standardization comes from
+# evaluate/CLaTr/configs/dataset/standardization/0120.yaml, not from the ckpt) but it is trained on
+# a DIFFERENT corpus — so FD / PRDC / clatr_score from runs using this ckpt are NOT comparable with
+# any number in EXPERIMENTS.log before 2026-07-30. Only compare epoch139-vs-epoch139.
+clatr_ckpt_path: /data1/cympyc1785/LatentCamVid/camera_generation/latentcam/checkpoints/clatr_epoch139_large.ckpt

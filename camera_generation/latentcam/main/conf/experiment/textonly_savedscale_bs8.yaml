@@ -3,14 +3,15 @@
 # Everything except exp_name/batch_size is a verbatim copy of textonly_savedscale.yaml; kept flat
 # (not a Hydra `defaults:` include) to match how vae_dl3dv_smoke.yaml relates to vae_dl3dv.yaml.
 #
-# text-only with SCVideo's ORIGINAL DL3DV-only normalization: camera translations divided by the
-# stored point-cloud avg_scale (scale_mode=avg_scale) + SCVideo's non-relative intrinsics
-# (intr_norm=raw, i.e. fx/2cx, fy/2cy) — the exact pipeline vae_20260202_065659_400 was fit with
-# (SCVideo main/config.py + data/dataset.py, DL3DV 1K only). The VAE triple
-# (vae_20260202_065659_400 / cam_dim 32 / vae_latent_scale 0.4467666) comes from config.yaml.
-# intr_norm is pinned rather than left at the default so the ckpt<->convention pairing survives
-# future default changes (legacy 'auto' would pick the WRONG 'rel' for scale_mode=avg_scale:
-# intr recon L1 0.263 vs 0.0029).
+# text-only with SCVideo config_large.py's normalization: camera translations divided by the
+# stored point-cloud avg_scale (scale_mode=avg_scale) + intrinsics divided by frame 0
+# (intr_norm=rel) — the exact pipeline vae_20260302_300 was fit with
+# (SCVideo config_large.py + data/dataset_large.py:295-304 and :313). The VAE triple
+# (vae_20260302_300 / cam_dim 64 / vae_latent_scale 0.96032625) comes from config.yaml; note
+# 0.96032625 is config_large's mixed-corpus constant, so on DL3DV-only the diffusion input std
+# is 0.4654 rather than 1.0 (kept verbatim by explicit user decision).
+# intr_norm/cam_dim are pinned rather than left at the default so the ckpt<->convention pairing
+# survives future default changes.
 #
 # exp_name carries the batch size so the two arms land as separate wandb runs
 # (wandb name = <timestamp>_<exp_name>, see train_latent_cam_dm.py:183+194).
@@ -18,7 +19,8 @@ exp_name: dl3dv_textonly_savedscale_bs8
 batch_size: 8
 geo_encoder: null
 scale_mode: avg_scale
-intr_norm: raw
+intr_norm: rel              # vae_20260302_300 is a frame-0-relative-intrinsics ckpt
+cam_dim: 64                 # = that ckpt's latent_dim (strict load crashes otherwise)
 # Corpus = meta_worldtraj.csv (DL3DV 1K-7K), the same scene list every other worldtraj-scoped run
 # uses. coverage_blacklist_path stays null (it scores geo context coverage — meaningless without a
 # geo encoder). The scene-level blacklist.csv needs no flag: meta_worldtraj.csv already excludes

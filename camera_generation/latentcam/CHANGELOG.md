@@ -25,6 +25,15 @@ All notable changes to the latentcam sub-project. Follows [Keep a Changelog](htt
   (~17.8 min/epoch) vs **OFF 2.85 s/it = 0.351 it/s** (~3h33m/epoch) — **~12×**. A smoke-scale
   `max_scenes=40` comparison had shown *no* difference (ON 1.82/1.81 vs OFF 1.87/1.85 it/s); that
   measurement is invalid because 40 scenes' context images all fit in the OS page cache.
+- **`conf/experiment/geo_worldtraj.yaml`: `scale_mode` `cam_dist_mean` → `avg_scale`** — matches
+  the `textonly_savedscale_bs8/bs32` runs so geo-vs-text-only differ only in the `geo_*` keys.
+  The geo latent cache stays valid: the geo path reads raw `self.extrinsics_list` for both view
+  selection and the posed `cam_token` (`dataset_dl3dv.py:860-870`) and `geo_lagernvs_skip_ctx_norm`
+  is false, so `build_cam_token` gets `override_scale=None` (`train_latent_cam_dm.py:74-76`) —
+  `geo_emb` never sees `scale_mode`, no re-caching needed. Cost: with `avg_scale` + `intr_norm rel`
+  this VAE measures latent std 0.44696, so `vae_latent_scale 0.96032625` gives a diffusion input
+  std of 0.4654 (~2.15× small) instead of `cam_dist_mean`'s near-unit 1.034 — deliberately the
+  same off-unit input as the text-only arms.
 - **`conf/experiment/geo_worldtraj.yaml`: `geo_latent_cache_dir` enabled** — points at
   `/data1/cympyc1785/data/DL3DV/latent_cache`, whose `first_cam_included/` tree was built from
   exactly this experiment's context selection (`frustum_cover` + `out_of_seg` + `subtract_first`

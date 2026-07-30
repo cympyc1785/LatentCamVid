@@ -2,14 +2,22 @@
 # Geo (LagerNVS) run on the WorldTraj scope (DL3DV 1K-7K, meta_worldtraj.csv):
 #   context = first camera (frame s) FIXED + (k-1) views from the LONGER out-of-segment side
 #     chosen by greedy coverage of the RESIDUAL space (frame s's own coverage subtracted first).
-#   target normalization = avg_scale (cam_dist_mean = mean camera center-norm of the target segment).
+#   target normalization = avg_scale (the STORED point-cloud avg_scale, SCVideo's original),
+#     matching the textonly_savedscale_bs8/bs32 runs so geo-vs-text-only is a clean comparison.
+#     [2026-07-31] switched from cam_dist_mean by explicit user request. The geo latent cache
+#     stays VALID across this change: the geo path reads raw self.extrinsics_list for both view
+#     selection and the posed cam_token (dataset_dl3dv.py:860-870), and geo_lagernvs_skip_ctx_norm
+#     is false so build_cam_token gets override_scale None (train_latent_cam_dm.py:74-76) --
+#     geo_emb never sees scale_mode.
 #   LagerNVS encoder/decoder internally normalizes context by 1.35*max||center|| (geo_posed=True).
 #   VAE + CLaTr = defaults (now vae_20260302_300.pth @ cam_dim 64 / intr_norm rel, and
 #     clatr_epoch139_large.ckpt -- the CLaTr ckpt changed on 2026-07-30, so this run's FD/PRDC/
 #     clatr_score are NOT comparable with the earlier epoch109 geo_worldtraj numbers).
-#     With scale_mode cam_dist_mean this VAE measures latent std 0.99270, so the default
-#     vae_latent_scale 0.96032625 gives a diffusion input std of ~1.034 -- near-unit here, unlike
-#     the avg_scale text-only runs where the same constant lands at 0.4654.
+#     Cost of the avg_scale switch: this VAE measures latent std 0.44696 on DL3DV-only with
+#     avg_scale + intr_norm rel, so vae_latent_scale 0.96032625 gives a diffusion input std of
+#     0.4654 (~2.15x too small) -- the SAME off-unit input the text-only runs have, which is
+#     exactly the point of matching them. (cam_dist_mean measured 0.99270 -> input std ~1.034,
+#     near-unit but a different normalization axis, so not comparable with the text-only runs.)
 exp_name: dl3dv_geo_worldtraj
 meta_csv: meta_worldtraj.csv
 coverage_blacklist_path: null
@@ -20,7 +28,7 @@ geo_first_view_target_s: true
 geo_cover_subtract_first: true
 geo_anchor_first_frame: true
 geo_posed: true
-scale_mode: cam_dist_mean
+scale_mode: avg_scale
 # Read the precomputed frozen geo latents instead of running LagerNVS every step. The cache under
 # first_cam_included/ was built by cache_geo_embeddings.py from THIS experiment's context
 # selection, and cache-ON vs cache-OFF geo_emb was verified bit-exact (maxdiff 0.000000), so this

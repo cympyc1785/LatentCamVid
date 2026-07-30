@@ -24,8 +24,15 @@ All notable changes to the latentcam sub-project. Follows [Keep a Changelog](htt
   are not in `meta_worldtraj.csv`). Pre-flight verified 6098/6098 `meta_worldtraj.csv` scenes and
   7000/7000 scene dirs in 1K–7K match by name with identical frame counts and filenames
   (2,092,998 frames each side). Move runs before any delete, so no scene is ever image-less.
-  Consequences: the geo latent cache (`DATA/DL3DV/latent_cache`) was computed from 960p and is
-  now stale; LagerNVS renders at 512 so 480×270 inputs are upscaled.
+  Consequences: (a) the **training** geo path is essentially unaffected — `geo_image_hw =
+  [256, 448]` vs a 480×270 source is still a downscale (270→256, 480→448), verified by loading
+  a 1K sample post-migration: `scene_image_dir` → `images_8`, PIL size (480, 270),
+  `hw_list` still (2160, 3840) from transforms.json, `images` (6, 3, 256, 448), `cam_param`
+  (49, 11). (b) the standalone LagerNVS render scripts use SIZE=512, so those DO upscale now.
+  (c) the geo latent cache (`DATA/DL3DV/latent_cache`) was computed from 960p → stale.
+  (d) `meta.csv` (8048 rows) includes 1916 scenes in 8K–11K that now have NO image dir
+  (10K:876, 11K:485, 8K:288, 9K:267); `meta_worldtraj.csv` (6098, 1K–7K) is clean. Image-
+  dependent experiments inheriting the default `meta_csv: meta.csv` need switching.
 - **lagernvs moved** `/data1/cympyc1785/lagernvs` → `camera_generation/tools/lagernvs`
   (same-FS rename; data/ are absolute symlinks so unaffected). Updated
   `lagernvs_repo_path`/`lagernvs_ckpt_path` in `main/conf/config.yaml` + `main/config.py` to

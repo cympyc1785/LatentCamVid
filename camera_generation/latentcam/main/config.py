@@ -93,6 +93,13 @@ class Config:
     # Legacy names still accepted: 'saved_avg_scale'->'avg_scale', 'target_cam'->'cam_dist_mean'.
     scale_mode = 'cam_dist_mean'
 
+    # Intrinsics encoding of cam_param[..., 9:11] — a property of the VAE CKPT, NOT of scale_mode.
+    #   'raw'  : fx/2cx, fy/2cy            -> (0.448, 0.796) for DL3DV
+    #   'rel'  : the same, divided by frame 0 -> exactly 1.0 for DL3DV (dataset_large.py:313)
+    #   'auto' : legacy coupling, 'rel' iff scale_mode == 'avg_scale' (default, bit-for-bit compat)
+    # Mismatch vs the ckpt silently destroys the intr channels — see scripts/vae/vae_scale_matrix.py.
+    intr_norm = 'auto'
+
     # VAE (train_latent_cam_dm.py uses vae_intr_large.CameraVAE -> cam_dim=64)
     use_vae = True
     if use_vae:
@@ -102,9 +109,8 @@ class Config:
         num_cam = 49
         cam_dim = 11
     vae_beta = 1e-3
-    # cam_dim=64 VAE (vae_intr_large). vae_20260202 is a 32-dim VAE -> mismatch.
-    vae_latent_scale = 0.96032625
-    vae_ckpt_path = osp.join(ckpt_root, 'vae_20260302_300.pth')
+    vae_latent_scale = 0.4467666
+    vae_ckpt_path = osp.join(ckpt_root, 'vae_20260202_065659_400.pth')
 
     num_gpus = 1
     num_thread = 8
@@ -124,8 +130,8 @@ class Config:
     # Point encoder (legacy point-cloud path; kept for compat, unused when geo_encoder is set)
     point_encoder = 'concerto'  # ['concerto', 'mosaic', 'custom']
 
-    # DL3DV-960 data (dataset_dl3dv.CamDataset reads meta.csv, excludes blacklist.csv)
-    dl3dv_root = '/data1/cympyc1785/data/DL3DV/DL3DV-960/DL3DV-10K'
+    # DL3DV data (dataset_dl3dv.CamDataset reads meta.csv, excludes blacklist.csv)
+    dl3dv_root = '/data1/cympyc1785/data/DL3DV/scenes'
     max_scenes = None          # all scenes (set small for smoke)
     lazy_dataset = True        # __init__ builds only the sample index (persisted cache); poses parsed lazily per __getitem__
     train_seg_list = None      # explicit train segment-list file (<batch>/<hash>/<seg>); None = random 90/10

@@ -1,4 +1,4 @@
-"""DL3DV-960 dataset for the latent (geo-conditioned) camera diffusion model.
+"""DL3DV dataset for the latent (geo-conditioned) camera diffusion model.
 
 Scene list from meta.csv (chunk = '<batch>K/<hash>'), scenes in blacklist.csv
 excluded. Each scene: transforms.json (nerfstudio c2w + intrinsics) + images_4/ or images_8/ +
@@ -28,6 +28,18 @@ scale_mode (what the camera translations are divided by):
   'first_farthest_135' 1.35 * max(||center_i - center_0||) over the segment (LagerNVS-style)
   'geo_lagernvs'       1.35 * max(||geo-context center - frame s||) (full LagerNVS alignment)
 Legacy aliases accepted: 'saved_avg_scale' -> 'avg_scale', 'target_cam' -> 'cam_dist_mean'.
+
+intr_norm (how cam_param's last 2 channels encode the intrinsics) — INDEPENDENT of scale_mode,
+because it is a property of the VAE CHECKPOINT (whichever convention that ckpt was trained on):
+  'raw'   fx/(2cx), fy/(2cy)                     -> (0.448, 0.796) for DL3DV
+  'rel'   the same, divided by frame 0           -> exactly 1.0 for DL3DV (constant intrinsics)
+  'auto'  legacy coupling: 'rel' iff scale_mode == 'avg_scale', else 'raw' (kept as the default
+          so existing configs reproduce bit-for-bit; new configs should set this explicitly).
+SCVideo's current dataset_large.py:313 always applies the frame-0 division ('rel'), but ckpts
+trained before that line was added want 'raw'. Measured recon L1 on the intr channels (1264
+DL3DV samples, scripts/vae/vae_scale_matrix.py): vae_20260302_300 (64-dim) 0.0022-0.0040 with
+'rel' vs 0.361-0.365 with 'raw'; vae_20260202_065659_400 (32-dim) 0.0029-0.0134 with 'raw' vs
+0.259-0.263 with 'rel'. Mismatching it silently destroys the intrinsics channels.
 
 Assumptions to validate (see plan): transforms.json OpenGL c2w -> OpenCV w2c;
 frame_idx indexes the file-sorted transforms frames.
@@ -304,11 +316,22 @@ class CamDataset(torch.utils.data.Dataset):
             return
         if osp.isfile(cache_path):
             idx = torch.load(cache_path, weights_only=False)
-            self.samples = idx['samples']; self.scene_dir_list = idx['scene_dir_list']
-            self.hw_list = idx['hw_list']
-            print(f"[index cache] {len(self.samples)} samples / {len(self.scene_dir_list)} scenes "
-                  f"<- {cache_path}")
-            return
+            self.samples = idx['samples']; self.hw_list = idx['hw_list']
+            # scene dirs are stored RELATIVE to self.root ('scene_chunks') so the cache
+            # survives moving the dataset. Legacy caches hold absolute 'scene_dir_list';
+            # accept them only if they still resolve, else fall through and rebuild.
+            if 'scene_chunks' in idx:
+                self.scene_dir_list = [osp.join(self.root, c) for c in idx['scene_chunks']]
+            else:
+                self.scene_dir_list = idx['scene_dir_list']
+            if self.scene_dir_list and not osp.isdir(self.scene_dir_list[0]):
+                print(f"[index cache] STALE (scene dirs do not exist under {self.root}) "
+                      f"-> rebuilding: {cache_path}")
+                self.samples = []; self.scene_dir_list = []; self.hw_list = []
+            else:
+                print(f"[index cache] {len(self.samples)} samples / "
+                      f"{len(self.scene_dir_list)} scenes <- {cache_path}")
+                return
         scenes = _read_meta_scenes(self.root, meta_name)
         blocked = _read_blacklist_hashes(self.root)
         cov_black = _read_coverage_blacklist(cov_path)
@@ -350,8 +373,9 @@ class CamDataset(torch.utils.data.Dataset):
                 self.hw_list.append((h, w))
                 if self.max_scenes is not None and len(self.scene_dir_list) >= self.max_scenes:
                     break
-        torch.save({'samples': self.samples, 'scene_dir_list': self.scene_dir_list,
-                    'hw_list': self.hw_list}, cache_path)
+        torch.save({'samples': self.samples, 'hw_list': self.hw_list,
+                    'scene_chunks': [osp.relpath(d, self.root) for d in self.scene_dir_list]},
+                   cache_path)
         print(f"[index build] {len(self.samples)} samples / {len(self.scene_dir_list)} scenes "
               f"-> saved {cache_path}")
 
@@ -401,7 +425,7 @@ class CamDataset(torch.utils.data.Dataset):
         scenes = _read_meta_scenes(self.root, meta_name)
         blocked = _read_blacklist_hashes(self.root)
         cov_black = _read_coverage_blacklist(getattr(self.cfg, 'coverage_blacklist_path', None))
-        print(f"Loading DL3DV-960: {len(scenes)} scenes in {meta_name}, {len(blocked)} blacklisted"
+        print(f"Loading DL3DV: {len(scenes)} scenes in {meta_name}, {len(blocked)} blacklisted"
               + (f", {len(cov_black)} segments coverage-blacklisted" if cov_black else ""))
 
         for chunk in tqdm(scenes):
@@ -450,7 +474,7 @@ class CamDataset(torch.utils.data.Dataset):
                 if self.max_scenes is not None and len(self.extrinsics_list) >= self.max_scenes:
                     break
 
-        print(f"DL3DV-960: {len(self.samples)} segment samples from "
+        print(f"DL3DV: {len(self.samples)} segment samples from "
               f"{len(self.extrinsics_list)} scenes")
 
     def _parse_transforms(self, scene_dir, tj_path):
@@ -749,17 +773,22 @@ class CamDataset(torch.utils.data.Dataset):
         normalized_extrinsics, _, norm_scale, _ = normalize_camera_extrinsics_and_points(
             extrinsics, avg_scale=norm_scale, max_trans_norm=self.cfg.max_trans_norm)
 
+        # SCVideo original intrinsics (dataset_large.py): width/height from the principal point
+        # (cx*2, cy*2) -- for DL3DV that is exactly transforms.json's w,h (verified 0/400 scenes
+        # differ), so this also reproduces the legacy fx/w,fy/h branch bit-for-bit.
         fx = intrinsics[:, 0, 0]
         fy = intrinsics[:, 1, 1]
-        if _scale_mode == 'avg_scale':
-            # SCVideo original intrinsics (dataset_large.py): width/height from principal point
-            # (cx*2, cy*2), then normalize relative to the first frame -> frame0 intr = [1,1].
-            wv = intrinsics[:, 0, 2] * 2
-            hv = intrinsics[:, 1, 2] * 2
-            normalized_intrinsics = torch.cat([(fx / wv)[:, None], (fy / hv)[:, None]], dim=-1).float()
+        wv = intrinsics[:, 0, 2] * 2
+        hv = intrinsics[:, 1, 2] * 2
+        normalized_intrinsics = torch.cat([(fx / wv)[:, None], (fy / hv)[:, None]], dim=-1).float()
+        _intr_norm = getattr(self.cfg, 'intr_norm', 'auto')
+        if _intr_norm == 'auto':      # legacy coupling to scale_mode (see module docstring)
+            _intr_norm = 'rel' if _scale_mode == 'avg_scale' else 'raw'
+        if _intr_norm == 'rel':
+            # frame0-relative -> frame0 intr = [1,1] (dataset_large.py:313)
             normalized_intrinsics = normalized_intrinsics / normalized_intrinsics[0:1, :]
-        else:
-            normalized_intrinsics = torch.cat([(fx / w)[:, None], (fy / h)[:, None]], dim=-1).float()
+        elif _intr_norm != 'raw':
+            raise ValueError(f"intr_norm must be 'auto' | 'rel' | 'raw', got {_intr_norm!r}")
 
         cam_param = torch.cat([
             normalized_extrinsics[:, :3, 0],

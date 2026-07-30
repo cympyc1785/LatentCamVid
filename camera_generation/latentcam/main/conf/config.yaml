@@ -37,13 +37,33 @@ per_token_noise: false
 cfg_dropout_p: 0.1
 loss_tau_min: 0.02
 scale_mode: avg_scale
+# [new] intrinsics encoding of cam_param[..., 9:11] — a property of the VAE CKPT, independent of
+# scale_mode. 'raw' = fx/2cx, fy/2cy (0.448, 0.796) | 'rel' = /frame0 (exactly 1.0 for DL3DV)
+# | 'auto' = legacy coupling ('rel' iff scale_mode == avg_scale). Mismatch vs the ckpt silently
+# destroys the intr channels (recon L1 0.26-0.36 instead of 0.002-0.013) — see dataset_dl3dv
+# docstring and scripts/vae/vae_scale_matrix.py. vae_20260302_300 -> 'rel',
+# vae_20260202_065659_400 -> 'raw'.
+intr_norm: raw
 lazy_dataset: true          # [new] __init__ builds only the sample index (cached); scene poses parsed lazily in __getitem__
 use_vae: true
 num_cam: 13
-cam_dim: 64
+cam_dim: 32                 # MUST match the ckpt's latent_dim (20260202 -> 32, 20260302 -> 64)
 vae_beta: 0.001
-vae_latent_scale: 0.96032625
-vae_ckpt_path: /data1/cympyc1785/LatentCamVid/camera_generation/latentcam/checkpoints/vae_20260302_300.pth
+# SCVideo's DL3DV-only setting (its main/config.py, which pairs with core_pkg/models/vae_intr.py =
+# vae_intr_large with latent_dim 32): vae_latent_scale 0.4467666 + 20260202_065659/400.pth,
+# scale_mode avg_scale, intr_norm raw. vae_latent_scale must be the MEASURED latent std of the
+# (ckpt, scale_mode, intr_norm) triple — train divides by it so the diffusion input has unit std —
+# so we use OUR measurement, 0.46312 (SCVideo's 0.4467666 is 3.7% off on our segment definitions;
+# using it verbatim would give input std 1.037). Measured on 1264 DL3DV samples by
+# scripts/vae/vae_scale_matrix.py (lat.std | recon L1 rot/trans/intr):
+#   20260202_400 (32) avg_scale raw -> 0.46312 | 0.00466 0.00495 0.00293   <-- active
+#   20260202_400 (32) avg_scale rel -> 0.63741 | 0.00648 0.01081 0.26291   (wrong intr convention)
+#   20260302_300 (64) avg_scale rel -> 0.44696 | 0.00504 0.00301 0.00222   (the other valid pair)
+#   20260302_300 (64) cam_dist_mean rel -> 0.99270 (the legacy 0.96032625 belongs here, w/ 'rel')
+# See the dataset_dl3dv docstring: the intr convention is fixed by the CKPT, the scale_mode only
+# rescales the translations. The full 16-cell matrix is in the CHANGELOG.
+vae_latent_scale: 0.46312
+vae_ckpt_path: /data1/cympyc1785/LatentCamVid/camera_generation/latentcam/checkpoints/vae_20260202_065659_400.pth
 num_gpus: 1
 num_thread: 8
 num_frames: 49
@@ -56,7 +76,7 @@ t5_tokenizer_path: google/umt5-xxl
 point_encoder: concerto
 # ===== DL3DV data + geo (scene-image) conditioning (latentcam additions beyond the
 # original SCVideo text->camera config; [new] = added after config.py) =====
-dl3dv_root: /data1/cympyc1785/data/DL3DV/DL3DV-960/DL3DV-10K   # DL3DV-960 dataset root
+dl3dv_root: /data1/cympyc1785/data/DL3DV/scenes   # DL3DV scene root (images_8 = 480x270; see dataset_dl3dv.py)
 meta_csv: meta.csv            # [new] scene-list CSV under dl3dv_root (e.g. meta_worldtraj.csv = 1K-7K − blacklist)
 max_scenes: null              # cap #scenes loaded (null = all; small int for smoke tests)
 train_seg_list: null          # [new] explicit train segment-list file (<batch>/<hash>/<seg>); null = random 90/10 split

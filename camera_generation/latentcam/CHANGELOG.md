@@ -5,6 +5,63 @@ All notable changes to the latentcam sub-project. Follows [Keep a Changelog](htt
 ## [Unreleased]
 
 ### Changed
+- **DL3DV root moved** `/data1/cympyc1785/data/DL3DV/DL3DV-960/DL3DV-10K` → `/data1/cympyc1785/data/DL3DV/scenes`
+  (done by the user on disk). Updated every live reference: `main/conf/config.yaml` (`dl3dv_root`),
+  `main/conf/experiment/geo_worldtraj_seglist.yaml` (`train_seg_list`/`test_seg_list`),
+  `main/config.py`, `scripts/render/render_target_from_context.py`,
+  `scripts/data/{make_latentcam_splits,filter_dl3dv,norm_camera_length_stats}.py`,
+  `scripts/viewer/viser_val_cameras.py`, `scripts/context_select/{frustum_cover_sweep,
+  vis_frustum_cover,visualize_covis_retrieval,viz_start_coverage_retrieval,vis_frustum_cover_multi,
+  select_compare,covis_compare}.py`, `scripts/coverage/{dump_coverage_selk,viz_coverage,
+  dump_coverage,analyze_geo_retrieval_coverage,blacklist_by_coverage}.py`. Also dropped the now-wrong
+  "DL3DV-960" wording from `main/dataset_dl3dv.py` prints/docstring, `main/train_latent_cam_dm.py`,
+  `main/train_vae_dl3dv.py`. `main/config.py`'s legacy `DL3DV_DATA_PATH` (used only by the old
+  `dataset_seg.py`) was left as-is.
+- **default VAE triple is now SCVideo's DL3DV-only setting** (`main/conf/config.yaml`,
+  `main/conf/experiment/textonly_savedscale.yaml`): `vae_ckpt_path` → `vae_20260202_065659_400.pth`,
+  `cam_dim: 32`, `intr_norm: raw`, `vae_latent_scale: 0.46312`, with `scale_mode: avg_scale`. This is
+  what SCVideo's `main/config.py` uses (it pairs with `core_pkg/models/vae_intr.py`, i.e.
+  `vae_intr_large` with `latent_dim=32` — the two modules are identical apart from that default and
+  an extra `encode_sample`); `config_large.py`/`config_vae.py` (`0.96032625` + `20260302/300.pth`,
+  64-dim) are the multi-dataset (DL3DV+DynamicVerse+dynpose) line and label the 32-dim pair `# old`.
+  `vae_latent_scale` uses OUR measured std 0.46312 rather than SCVideo's 0.4467666, since
+  `train_latent_cam_dm.py` divides the latent by it and our segment definitions differ (0.4467666
+  verbatim would give diffusion-input std 1.037). Verified end to end: strict VAE load OK,
+  `cam_param (16,49,11)` → `latent (16,13,32)`, diffusion-input std **1.0000** over 1264 samples,
+  roundtrip L1 0.004424, `CameraDiffusionModel(cam_dim=32)` 64.79M params forward OK.
+  Full matrix over 1264 DL3DV samples (`scripts/vae/vae_scale_matrix.py`; latent std | that std
+  divided by each config constant | recon L1 rot/trans/intr):
+  ```
+  ckpt                       dim scale_mode          intr  lat.std /0.96033 /0.44677      rot    trans  intr_L1
+  vae_20260302_300            64 avg_scale           rel   0.44696   0.4654   1.0004  0.00504  0.00301  0.00222
+  vae_20260302_300            64 avg_scale           raw   0.43609   0.4541   0.9761  0.00695  0.00851  0.36288
+  vae_20260202_065659_400     32 avg_scale           rel   0.63741   0.6637   1.4267  0.00648  0.01081  0.26291
+  vae_20260202_065659_400     32 avg_scale           raw   0.46312   0.4822   1.0366  0.00466  0.00495  0.00293  <- active
+  vae_20260302_300            64 cam_dist_mean       rel   0.99270   1.0337   2.2220  0.00792  0.01072  0.00400
+  vae_20260302_300            64 cam_dist_mean       raw   0.98131   1.0219   2.1965  0.00895  0.01588  0.36148
+  vae_20260202_065659_400     32 cam_dist_mean       rel   1.11188   1.1578   2.4887  0.01951  0.03242  0.25974
+  vae_20260202_065659_400     32 cam_dist_mean       raw   1.00625   1.0478   2.2523  0.02013  0.03035  0.01340
+  vae_20260302_300            64 first_farthest_135  rel   0.54116   0.5635   1.2113  0.00571  0.00457  0.00267
+  vae_20260302_300            64 first_farthest_135  raw   0.52944   0.5513   1.1850  0.00718  0.01049  0.36245
+  vae_20260202_065659_400     32 first_farthest_135  rel   0.70409   0.7332   1.5760  0.00840  0.01395  0.26203
+  vae_20260202_065659_400     32 first_farthest_135  raw   0.54560   0.5681   1.2212  0.00691  0.00920  0.00462
+  vae_20260302_300            64 context_longer      rel   1.06565   1.1097   2.3853  0.00804  0.01069  0.00399
+  vae_20260302_300            64 context_longer      raw   1.05523   1.0988   2.3619  0.00910  0.01555  0.36159
+  vae_20260202_065659_400     32 context_longer      rel   1.18505   1.2340   2.6525  0.01973  0.03262  0.26003
+  vae_20260202_065659_400     32 context_longer      raw   1.08236   1.1271   2.4226  0.02123  0.03082  0.01273
+  ```
+  Reading it: the intrinsics convention is fixed by the CKPT (`20260302` → `rel` everywhere,
+  `20260202` → `raw` everywhere; mismatching it costs ~100× on the intr channels), while
+  `scale_mode` only rescales the translations and therefore the latent std. `0.96032625` belongs
+  to `20260302` + `cam_dist_mean` + `rel` (0.99270); `0.4467666` to `20260202` + `avg_scale` +
+  `raw` (0.46312). This SUPERSEDES the earlier version of this entry, which concluded that
+  `0.4467666` belonged to the 64-dim ckpt — that 0.44696 agreement is a coincidence, and the
+  conclusion was an artifact of the `intr_norm` bug below (the correct cell was not expressible).
+  Note `cam_dim` must match the ckpt's `latent_dim` or the state_dict load hard-crashes on
+  `encoder.to_mu.weight`.
+- **`scripts/vae/vae_scale_matrix.py`** (new): measures latent std + per-component recon L1 over the
+  whole (ckpt × scale_mode × intr_norm) grid, so a config constant like `0.4467666` can be traced
+  back to the triple it was measured on. env `MAX_SCENES` / `MODES` / `CKPTS` / `META`.
 - **image dir is now resolved, not hardcoded** (`main/dataset_dl3dv.py` + 6 scripts). Added
   `IMAGE_DIR_NAMES = ('images_4', 'images_8', 'images')` and `scene_image_dir(scene_dir, names)`,
   which returns the first existing candidate (one `isdir` per candidate — no per-frame stat, which
@@ -41,6 +98,27 @@ All notable changes to the latentcam sub-project. Follows [Keep a Changelog](htt
   path have finished.
 
 ### Fixed
+- **cam_param's intrinsics convention was coupled to `scale_mode`, feeding the VAE the wrong
+  encoding** (`main/dataset_dl3dv.py`, `main/conf/config.yaml`, `main/config.py`). New option
+  `intr_norm: 'auto' | 'rel' | 'raw'` — `raw` = `fx/2cx, fy/2cy` (0.448, 0.796 for DL3DV),
+  `rel` = the same divided by frame 0 (exactly 1.0 for DL3DV, i.e. SCVideo `dataset_large.py:313`),
+  `auto` = the old coupling (`rel` iff `scale_mode == 'avg_scale'`) and remains the DEFAULT so
+  existing configs reproduce bit-for-bit (verified `auto == rel` for `avg_scale`, `auto == raw` for
+  `cam_dist_mean`, and the 9 extrinsic channels are byte-identical across the intr axis). The
+  convention is a property of the VAE CKPT, not of the translation normalization, so the old
+  coupling meant every `cam_dist_mean` / `context_longer` / `first_farthest_135` run fed `raw` to a
+  ckpt that wants `rel` → intr recon L1 0.361 instead of 0.004, and the cell SCVideo's DL3DV-only
+  config actually uses (`avg_scale` + `raw`) could not be expressed at all. Silent — no crash, no
+  loss spike, only the 2 intrinsics channels are affected. The `raw` branch now derives width/height
+  from the principal point (`2cx, 2cy`) like SCVideo rather than `transforms.json`'s `w, h`;
+  identical for DL3DV (0 of 400 scenes differ). See `FIX.log` 2026-07-30.
+- **index cache survived the dataset move with dead absolute paths** (`main/dataset_dl3dv.py`).
+  `<root>/.latentcam_index/<key>.pt` stored `scene_dir_list` as ABSOLUTE paths, so after the
+  root move the cache loaded fine but every scene dir pointed at the old location (`isdir` →
+  False) and `__getitem__` would fail. Now the cache persists `scene_chunks` (paths relative to
+  `self.root`) and rejoins them against the current root on load. Legacy absolute caches are
+  still accepted, but only if `scene_dir_list[0]` still resolves; otherwise the cache is declared
+  STALE and the index is rebuilt.
 - **top-down plots were a front/back view, not top-down** (`main/infer_validation_sample.py`,
   `scripts/render/topdown_swap.py`). They hardcoded the x-z plane, but transforms.json stores c2w
   in the nerfstudio frame where DL3DV's `applied_transform` (x↔y swap + z flip) is baked in — there

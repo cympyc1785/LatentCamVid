@@ -5,6 +5,22 @@ All notable changes to the latentcam sub-project. Follows [Keep a Changelog](htt
 ## [Unreleased]
 
 ### Added
+- **`geo_worldtraj_decoupled.yaml` (신규 experiment) — `geo_worldtraj_camembed`에서 camera
+  embedding만 뺀 ablation.** resolved config 기준 차이는 `geo_cam_embed: relfirst → null`
+  단 하나(그 외 전부 동일, `diff`로 확인). 3-way:
+  `geo_worldtraj`(first_view_target_s **true** / cam_embed off / geo_proj 768) vs
+  **THIS**(false / off / 768) vs `geo_worldtraj_camembed`(false / relfirst / 896).
+  즉 `THIS` vs `geo_worldtraj` = context view0를 target 첫 프레임에 고정하던 link를 끊은 비용,
+  `camembed` vs `THIS` = 11-d pose가 그 비용을 얼마나 되사는지.
+  **캐시 재생성 없음** — `geo_cam_embed`는 `_sample_geo_frustum_cover`를 건드리지 않고
+  `geo_cam_param` 텐서만 추가하므로(`dataset_dl3dv.py:917-919`) context view 선택이 camembed run과
+  bit-identical. 캐시 강제 off 상태의 실제 `__getitem__` 300 세그먼트 검증: cached `geo_idxs`
+  300/300 일치, mismatch 0, unusable 0, `view0 == frame s` 0/300.
+  `first_cam_not_included/`를 그대로 재사용한다.
+- **`ctx_side_135max` divisor** (`main/dump_avgscale_render.py`) — windowing 없이 segment 밖
+  **긴 쪽 전체**에 대해 `1.35·max‖c − c_side0‖`. `ctx_longer_135max`(D2, 윈도 평균)의 대조군.
+- **`scripts/render/compare_norm_video.py`: `--layout row`, `--modes`** — 모든 mode를 가로 한 줄로
+  붙인 비교 영상, 그리고 렌더할 mode 부분집합 선택. `ORDER`에 `ctx_side_135max` 추가.
 - **정규화 ablation 렌더 파이프라인 (LagerNVS 자체 normalization 비활성화 + PSNR + 비교 영상)** —
   latentcam의 후보 divisor들을 LagerNVS 렌더로 검증하는 3단계. 기본값은 전부 기존 동작 유지.
   - `main/dump_avgscale_render.py`: `OUT_NAME`(출력 폴더), `ONE_PER_SCENE=1`(기본 0 = 기존처럼
@@ -129,6 +145,16 @@ All notable changes to the latentcam sub-project. Follows [Keep a Changelog](htt
   the new ckpt yet, so the recon-vs-corpus-coverage trade is unevaluated.
 
 ### Changed
+- **`geo_anchor_first_frame` → `geo_cover_centered_at_s` 로 rename** (동작 변화 없음).
+  옛 이름은 "첫 프레임이 anchor **view**로 들어간다"로 읽혔는데, 그건 `geo_first_view_target_s`가
+  하는 일이다. 이 플래그는 `frustum_cover` greedy 탐색의 `anchor`/`ball_center`/`seg_scale`만
+  정할 뿐 encoder context에 view를 추가하지 않는다 — 실측: `geo_first_view_target_s: false`이면
+  `geo_cover_centered_at_s: true`여도 `view0 == frame s`가 **0/500**, `[s,e)` 안의 view가 **0/500**.
+  (`true`이면 500/500.) rename 후 재검증에서도 세 config 전부 동작 동일.
+  **옛 키는 deprecated로 계속 인식**된다(`dataset_dl3dv.py`에서 새 키가 없을 때만 fallback +
+  경고 출력)므로 rename 이전 config/CLI override도 그대로 돌아간다.
+  적용 범위: `main/conf/config.yaml`, `main/config.py`, `main/dataset_dl3dv.py`,
+  `main/conf/experiment/*.yaml` 14개.
 - **`meta_csv: meta_worldtraj.csv` pinned in `textonly_savedscale.yaml` and
   `vae_dl3dv_1_7k.yaml`** (was the `meta.csv` default), matching every other worldtraj-scoped
   experiment. `coverage_blacklist_path` stays `null`.

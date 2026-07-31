@@ -7,7 +7,7 @@
 #   geo_cover_out_of_seg:    true   -> candidates = the LONGER of before(0..s) / after(e..N)
 #                                      (dataset_dl3dv.py:619-625), so [s:e] is fully excluded
 #   geo_cover_subtract_first: false -> nothing is prepicked; plain greedy max coverage over k views
-#   geo_anchor_first_frame:  true   -> the coverage ball is still centered on frame s (known at
+#   geo_cover_centered_at_s:  true   -> the coverage ball is still centered on frame s (known at
 #                                      inference, so leakage-free) and its radius comes from
 #                                      CONTEXT movement, never from the unseen [s+1:e]
 # Camera embeddings still go INTO LagerNVS (geo_posed: true) and LagerNVS keeps its own
@@ -39,7 +39,7 @@ geo_view_sampling: frustum_cover
 geo_cover_out_of_seg: true
 geo_first_view_target_s: false
 geo_cover_subtract_first: false
-geo_anchor_first_frame: true
+geo_cover_centered_at_s: true
 geo_posed: true
 scale_mode: avg_scale
 geo_cam_embed: relfirst

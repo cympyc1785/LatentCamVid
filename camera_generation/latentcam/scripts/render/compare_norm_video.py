@@ -32,7 +32,7 @@ from matplotlib import font_manager
 LAGERNVS = "/data1/cympyc1785/LatentCamVid/camera_generation/tools/lagernvs"
 # render_avgscale.py's filename convention (only avg_scale is abbreviated)
 SFX = {"avg_scale": "avgscale"}
-ORDER = ["lagernvs", "avg_scale", "maxd_seg", "ctx_longer_135max"]
+ORDER = ["lagernvs", "avg_scale", "maxd_seg", "ctx_longer_135max", "ctx_side_135max"]
 
 
 def _font(sz):
@@ -76,10 +76,14 @@ def main():
                                       "results/lagernvs_norm_compare")
     ap.add_argument("--size", type=int, default=512)
     ap.add_argument("--fps", type=int, default=8)
-    ap.add_argument("--layout", choices=["grid", "pair"], default="grid",
-                    help="grid: one 2x3 video; pair: one [GT|render] video per mode")
+    ap.add_argument("--layout", choices=["grid", "pair", "row"], default="grid",
+                    help="grid: one 2x3 video; pair: one [GT|render] video per mode; "
+                         "row: a single [GT | mode... | PSNR] strip, PSNR plots only --modes")
+    ap.add_argument("--modes", default=None,
+                    help="row/grid: comma-separated subset of modes to show (default: all)")
     ap.add_argument("--out", default=None, help="default: <seg>/norm_compare.mp4")
     args = ap.parse_args()
+    want = [m for m in args.modes.split(",") if m] if args.modes else None
 
     fnt, fnt_s = _font(15), _font(12)
     for seg_dir in sorted(_glob.glob(osp.join(args.root, "*"))):
@@ -88,6 +92,11 @@ def main():
             continue
         metrics = json.load(open(mj))
         modes = [m for m in ORDER if m in metrics] + [m for m in metrics if m not in ORDER]
+        if want:                                    # keep the caller's order for --modes
+            missing = [m for m in want if m not in metrics]
+            if missing:
+                print(f"{osp.basename(seg_dir)}: no metrics for {missing} -- skip"); continue
+            modes = want
         vids = {m: np.stack(imageio.mimread(
             osp.join(seg_dir, f"render_{SFX.get(m, m)}.mp4"), memtest=False)) for m in modes}
         T = min(len(v) for v in vids.values())
@@ -116,6 +125,31 @@ def main():
             continue
 
         curve, xat = psnr_panel(metrics, modes, T, (H, W))
+
+        if args.layout == "row":     # [GT | mode... | PSNR] in ONE width-concat strip
+            frames = []
+            for t in range(T):
+                cur = Image.fromarray(curve.copy()); dc = ImageDraw.Draw(cur)
+                x = xat(t); dc.line([(x, 0), (x, H)], fill=(200, 0, 0), width=1)
+                im = Image.fromarray(np.concatenate(
+                    [gt[t]] + [vids[m][t][:, :, :3] for m in modes] + [np.asarray(cur)], axis=1))
+                d = ImageDraw.Draw(im)
+                for i, name in enumerate(["GT"] + modes):
+                    x0 = i * W
+                    d.rectangle([x0, 0, x0 + W, 34], fill=(0, 0, 0))
+                    if name == "GT":
+                        lab, sub = "GT", f"frame {t}/{T-1}"
+                    else:
+                        mm = metrics[name]
+                        lab = f"{name}  div={mm['divisor']:.2f}"
+                        sub = f"PSNR {mm['psnr_per_frame'][t]:.2f}   mean {mm['psnr']:.2f}"
+                    d.text((x0 + 5, 2), lab, fill=(255, 255, 0), font=fnt)
+                    d.text((x0 + 5, 19), sub, fill=(180, 255, 180), font=fnt_s)
+                frames.append(np.asarray(im))
+            out = args.out or osp.join(seg_dir, "norm_compare_row.mp4")
+            imageio.mimwrite(out, frames, fps=args.fps, quality=8, macro_block_size=1)
+            print(f"{osp.basename(seg_dir)}: {T} frames {frames[0].shape} -> {out}", flush=True)
+            continue
 
         tiles = ["GT"] + modes + ["PSNR"]
         tiles = tiles[:6] + [None] * (6 - len(tiles))

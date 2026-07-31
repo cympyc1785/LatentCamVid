@@ -180,10 +180,12 @@ class Config:
                                 #   (+ (k-1) out-of-seg retrieved). LagerNVS anchors to view0 ->
                                 #   geo latent frame == target (frame-s) frame. Needs the start
                                 #   frame IMAGE available at inference.
-    geo_anchor_first_frame = False  # honest context selection: anchor at the target's FIRST
-                                #   frame only (known at inference) + radius from CONTEXT
-                                #   movement, so selection never uses the unseen target
-                                #   [s+1:e]. Default off (legacy target-midpoint anchor).
+    geo_cover_centered_at_s = False  # [renamed 2026-07-31 from geo_anchor_first_frame] center the
+                                #   coverage ball on the target's FIRST frame s (known at
+                                #   inference) + radius from CONTEXT movement, so selection never
+                                #   uses the unseen target [s+1:e]. Steers only WHERE the greedy
+                                #   search looks; adds no view to the encoder (that is
+                                #   geo_first_view_target_s). Default off (legacy target-mid anchor).
 
     # Per-SEGMENT coverage blacklist (scene,segment CSV from scripts/dump_coverage.py at a
     # chosen tau). None -> no coverage filtering (only the scene-level blacklist.csv applies).

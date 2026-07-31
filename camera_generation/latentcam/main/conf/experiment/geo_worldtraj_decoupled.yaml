@@ -1,0 +1,42 @@
+# @package _global_
+# Ablation: geo_worldtraj_camembed MINUS the camera embedding.
+#
+# The point is to separate the two things camembed changed at once, so the 3-way is:
+#                          first_view_target_s  subtract_first  cam_embed   geo_proj in
+#   geo_worldtraj                  true             true          off          768
+#   THIS (decoupled)               false            false         off          768
+#   geo_worldtraj_camembed         false            false       relfirst       896
+#
+# geo_worldtraj pins context view0 = the target segment's FIRST camera (frame s), so LagerNVS
+# encodes that frame's image and the geo latent lands in the generation frame for free. Here that
+# link is cut: all 6 context views are retrieved from the LONGER out-of-segment side, no target
+# frame is encoded, and NOTHING replaces the lost alignment (camembed is off). So THIS vs
+# geo_worldtraj = the cost of cutting the link; camembed vs THIS = what the 11-d pose buys back.
+#
+# geo_cover_centered_at_s stays true, same as BOTH of the other two -- it is a controlled variable,
+# not part of this ablation. It only centers the frustum_cover search ball on frame s; it adds no
+# view to the encoder (verified: with geo_first_view_target_s false, view0 == frame s in 0/500
+# segments, and 0/500 have any view inside [s,e)). Turning it off would switch to the legacy anchor
+# at the target MIDPOINT with radius from the unseen [s+1:e] -- leakier, and a different question.
+#
+# Cache: REUSES first_cam_not_included/ as-is. geo_cam_embed never touches _sample_geo_frustum_cover
+# (it only adds the geo_cam_param tensor at dataset_dl3dv.py:917-919), so this run's context views
+# are bit-identical to geo_worldtraj_camembed's. Verified against the cached geo_idxs on 300 random
+# segments: 300/300 match, 0 mismatch, 0 unusable. On a cache hit the dataset returns early
+# (dataset_dl3dv.py:878-893) without ever setting out['images'], so the train loop takes
+# geo_emb_from_cache instead of geo_encode (train_latent_cam_dm.py:397-400) -> no LagerNVS forward.
+# That early return is shared with camembed; what geo_cam_embed=null adds is the :886-888 branch,
+# which needs only 'emb' and not 'geo_idxs' -- so even v1 cache files would work here.
+exp_name: dl3dv_geo_worldtraj_decoupled
+meta_csv: meta_worldtraj.csv
+coverage_blacklist_path: null
+geo_encoder: lagernvs
+geo_view_sampling: frustum_cover
+geo_cover_out_of_seg: true
+geo_first_view_target_s: false
+geo_cover_subtract_first: false
+geo_cover_centered_at_s: true
+geo_posed: true
+scale_mode: avg_scale
+geo_cam_embed: null
+geo_latent_cache_dir: /data1/cympyc1785/data/DL3DV/latent_cache

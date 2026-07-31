@@ -115,8 +115,11 @@ geo_shuffle_order: false      # shuffle the geo context view order
 geo_shuffle_keep_first: false # [new] when shuffling, keep view0 (anchor / frame s) fixed, shuffle only the rest
 geo_first_view_target_s: false # geo view0 = target segment's FIRST camera (frame s) -> aligns geo latent frame
                               #   with the generation frame; remaining views are retrieved
-geo_anchor_first_frame: false # honest frustum_cover: anchor at target's first frame s only (radius from context,
-                              #   never uses the unseen target [s+1:e])
+geo_cover_centered_at_s: false # [renamed 2026-07-31 from geo_anchor_first_frame] honest frustum_cover: CENTER the
+                              #   coverage ball on frame s (radius from context movement, never the unseen [s+1:e]).
+                              #   This only steers WHERE the greedy search looks -- it never adds frame s (or any
+                              #   target frame) to the encoder's context views; that is geo_first_view_target_s.
+                              #   Verified: with geo_first_view_target_s false, view0 == frame s in 0/500 segments.
 geo_cover_subtract_first: false # [new] subtract the fixed first-cam (s) coverage before the greedy pick, so the
                               #   remaining k-1 views maximize RESIDUAL coverage (what s doesn't already cover)
 coverage_blacklist_path: null # per-segment coverage-blacklist CSV (columns scene,segment); null = no filtering

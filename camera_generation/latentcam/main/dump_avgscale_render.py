@@ -18,6 +18,9 @@ Writes results/<OUT_NAME>/<seg_flat>/render_inputs.pt with:
           maxd_seg          1.35*max||tgt center - tgt0||  (target-derived -> leaks, upper bound)
           ctx_longer_135max longer out-of-segment side chunked into num_frames windows, mean over
                             windows of 1.35*max||c - c_win0||  (leakage-free)
+          ctx_side_135max   [new] the SAME longer out-of-segment side taken as ONE range, no
+                            windowing: 1.35*max||c - c_side0||  (leakage-free; measures the
+                            scene's spatial extent rather than per-num_frames motion)
 env: N (default 10), CACHE_EXP (default geo_worldtraj), OUT_NAME (default lagernvs_avgscale_test),
      SEGS (optional comma-separated data_names, e.g. '1K_<hash>_0,...' -> only those scenes are
      parsed via CamDataset.from_segments; without it the corpus index is built/loaded first)
@@ -73,6 +76,15 @@ def ctx_longer_135max(centers, s, e, T):
                           for c in chunks]))
 
 
+def ctx_side_135max(centers, s, e):
+    """[new] no windowing: 1.35*max||c - c_side0|| over the WHOLE longer out-of-segment side."""
+    N = centers.shape[0]
+    side = list(range(0, s)) if s >= (N - e) else list(range(e, N))
+    if len(side) < 2:
+        return None
+    return 1.35 * float(np.linalg.norm(centers[side] - centers[side[0]], axis=1).max())
+
+
 ONE_PER_SCENE = os.environ.get("ONE_PER_SCENE", "0") == "1"   # [new] N distinct scenes, not N
 seen_scenes = set()                                            # consecutive segments of scene 0
 
@@ -113,6 +125,9 @@ for idx in range(len(ds.samples)):
     d2 = ctx_longer_135max(centers_all, s, e, cfg.num_frames)
     if d2 is not None:
         scales["ctx_longer_135max"] = d2
+    f = ctx_side_135max(centers_all, s, e)
+    if f is not None:
+        scales["ctx_side_135max"] = f
     d = {"image_paths": [frame_files[i] for i in gi], "ctx_c2w": ctx_c2w,
          "ctx_K": K[gi].float(), "hw_full": torch.tensor([float(h), float(w)]),
          "tgt_c2w": tgt_c2w, "avg_scale": float(avg), "seg": data_name,

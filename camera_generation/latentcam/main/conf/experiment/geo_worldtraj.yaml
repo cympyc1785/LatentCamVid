@@ -26,7 +26,7 @@ geo_view_sampling: frustum_cover
 geo_cover_out_of_seg: true
 geo_first_view_target_s: true
 geo_cover_subtract_first: true
-geo_anchor_first_frame: true
+geo_cover_centered_at_s: true
 geo_posed: true
 scale_mode: avg_scale
 # Read the precomputed frozen geo latents instead of running LagerNVS every step. The cache under

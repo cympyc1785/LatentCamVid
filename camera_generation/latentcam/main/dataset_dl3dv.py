@@ -288,7 +288,17 @@ class CamDataset(torch.utils.data.Dataset):
         self.geo_shuffle_order = getattr(cfg, 'geo_shuffle_order', False)
         # honest selection: anchor at the target's FIRST frame only (known at inference);
         # radius scaled by CONTEXT (not the unseen rest of the target segment).
-        self.geo_anchor_first_frame = getattr(cfg, 'geo_anchor_first_frame', False)
+        # [renamed 2026-07-31] geo_anchor_first_frame -> geo_cover_centered_at_s. The old name read
+        # as "the first frame goes in as an anchor VIEW", which is what geo_first_view_target_s
+        # does; this flag only centers the frustum_cover search ball on frame s and never adds a
+        # view. Old key still honored (deprecated) so pre-rename configs / CLI overrides work.
+        _legacy = getattr(cfg, 'geo_anchor_first_frame', None)
+        _cur = getattr(cfg, 'geo_cover_centered_at_s', None)
+        if _cur is None and _legacy is not None:
+            print("[cfg] geo_anchor_first_frame is deprecated -> using it as geo_cover_centered_at_s"
+                  f"={_legacy}")
+        self.geo_cover_centered_at_s = bool(_cur if _cur is not None
+                                            else (_legacy if _legacy is not None else False))
         # geo context view0 = target segment's FIRST camera s (rest = out-of-seg retrieved)
         # -> LagerNVS anchors to s, aligning the geo latent frame with the target frame.
         self.geo_first_view_target_s = getattr(cfg, 'geo_first_view_target_s', False)
@@ -606,11 +616,14 @@ class CamDataset(torch.utils.data.Dataset):
     def _sample_geo_frustum_cover(self, scene_idx, s, e):
         """Frustum max-coverage: k views covering the most nearby space. When
         geo_cover_out_of_seg, candidates are restricted to the LONGER out-of-segment side
-        (no target frames -> leakage-free). Anchor/scale:
-          - geo_anchor_first_frame=True (honest): anchor = target's FIRST frame s (known at
-            inference); radius scaled by CONTEXT movement; look_centroid = candidate mean.
-            -> selection never uses the unseen target [s+1:e].
-          - False (legacy): anchor near the target midpoint, radius from the target seg_scale."""
+        (no target frames -> leakage-free). Search anchor/scale:
+          - geo_cover_centered_at_s=True (honest): the coverage ball is CENTERED on the target's
+            FIRST frame s (known at inference); radius scaled by CONTEXT movement; look_centroid =
+            candidate mean. -> selection never uses the unseen target [s+1:e].
+          - False (legacy): anchor near the target midpoint, radius from the target seg_scale.
+        Neither setting puts frame s (or any target frame) INTO the returned views -- :668 filters
+        s out and only geo_first_view_target_s (:682) prepends it. This flag steers WHERE the
+        greedy search looks, nothing more."""
         w2c = self.extrinsics_list[scene_idx].numpy().astype(np.float64)
         intr = self.intrinsics_list[scene_idx].numpy().astype(np.float64)
         c2w = np.linalg.inv(w2c)
@@ -629,7 +642,7 @@ class CamDataset(torch.utils.data.Dataset):
                 allowed = before
             else:
                 allowed = before if len(before) >= len(after) else after
-            if self.geo_anchor_first_frame:
+            if self.geo_cover_centered_at_s:
                 anchor = s                                  # known first frame only
                 cs = self._np_context_scale(centers, allowed, self.num_frames) if allowed else None
                 if cs is not None:

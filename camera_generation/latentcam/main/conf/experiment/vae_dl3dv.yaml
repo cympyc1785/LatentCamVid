@@ -8,5 +8,5 @@ intr_norm: raw              # reproduce the pre-intr_norm fit (legacy 'auto' -> 
 geo_encoder: null
 geo_cover_out_of_seg: true
 geo_first_view_target_s: true
-geo_anchor_first_frame: true
+geo_cover_centered_at_s: true
 coverage_blacklist_path: /data1/cympyc1785/LatentCamVid/camera_generation/latentcam/data/blacklist_selk_viewS_tau0.7.csv

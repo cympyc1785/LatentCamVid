@@ -5,6 +5,23 @@ All notable changes to the latentcam sub-project. Follows [Keep a Changelog](htt
 ## [Unreleased]
 
 ### Added
+- **정규화 ablation 렌더 파이프라인 (LagerNVS 자체 normalization 비활성화 + PSNR + 비교 영상)** —
+  latentcam의 후보 divisor들을 LagerNVS 렌더로 검증하는 3단계. 기본값은 전부 기존 동작 유지.
+  - `main/dump_avgscale_render.py`: `OUT_NAME`(출력 폴더), `ONE_PER_SCENE=1`(기본 0 = 기존처럼
+    첫 N개 sample 그대로; 1이면 서로 다른 N개 scene), `tgt_image_paths`(PSNR용 GT 프레임),
+    `scales` dict를 dump에 추가. `scales`는 네 divisor —
+    `lagernvs`(=LagerNVS 자체 `1.35·max‖ctx center − ctx0‖`, control),
+    `avg_scale`(현재 latentcam 학습값), `maxd_seg`(target 유래 → leak, 상한),
+    `ctx_longer_135max`(segment 밖 긴 쪽을 `num_frames` 윈도로 나눠 `1.35·max`의 평균, leak 없음).
+  - `tools/lagernvs/render_avgscale.py` (**gitignore된 vendored 트리라 커밋에는 없음, 작업 트리에만
+    존재**): `RD_ROOT` / `RD_MODES`(기본 `avg_scale` → 출력 파일명까지
+    이전과 동일)로 같은 segment를 여러 divisor로 렌더하고, `tgt_image_paths`가 있으면
+    PSNR/SSIM/LPIPS를 `metrics.json`(mode별 평균 + `psnr_per_frame`)에 기록. 2개 이상 mode면
+    `render_norm_compare.png`(행=mode+GT)도 생성.
+  - `scripts/render/compare_norm_video.py` (신규): 위 mp4들을 하나로 합성. `--layout grid`(기본,
+    2×3: GT / lagernvs / avg_scale / maxd_seg / ctx_longer_135max / PSNR 곡선+프레임 커서),
+    `--layout pair`(mode별 `GT | render` width concat). 타일마다 divisor·해당 프레임 PSNR·평균
+    PSNR 라벨.
 - **`geo_cam_embed` — per-context-view camera embedding concatenated onto the geo tokens**
   (default **`null` = off**, geo conditioning byte-identical to before). With `'relfirst'` the
   dataset builds, for each context view `v`, an 11-d pose relative to the TARGET segment's FIRST

@@ -19,6 +19,22 @@ All notable changes to the latentcam sub-project. Follows [Keep a Changelog](htt
   `first_cam_not_included/`를 그대로 재사용한다.
 - **`ctx_side_135max` divisor** (`main/dump_avgscale_render.py`) — windowing 없이 segment 밖
   **긴 쪽 전체**에 대해 `1.35·max‖c − c_side0‖`. `ctx_longer_135max`(D2, 윈도 평균)의 대조군.
+- **`context_longer` divisor** (`main/dump_avgscale_render.py`) — 이미 구현되어 있는 동명의
+  `scale_mode`(`dataset_dl3dv._cam_dist_mean_context`)를 렌더 테스트에도 추가.
+  `ctx_longer_135max`와 **같은 윈도**를 쓰되 집계만 `1.35·max` 대신 `mean‖c − c_win0‖`.
+  이걸로 렌더 스윕이 latentcam이 지금 당장 학습 가능한 leak-free divisor를 전부 덮는다.
+- **`scripts/data/norm_divisor_compare.py` (신규)** — divisor 후보들을 **canonicalization 관점**에서
+  비교. 1200 segment(전부 서로 다른 scene)에 대해 `m = max‖c_t − c_s‖ / D`(diffusion이 회귀해야
+  하는 정규화된 도달거리)와 `r = D_lagernvs / D`(LagerNVS native 단위 대비 편차)를 계산하고,
+  `sd(log10 m)` / `p95/p05` / `m>1` / `m<0.1` / `corr(log D, log maxd)`를 표로 낸다.
+  출력: `results/compare/norm_divisor_compare/{stats.json, summary.md, per_segment.csv,
+  _divisors.png}`. env: `N` / `CACHE_EXP` / `SPLIT` / `SEED`.
+- **`scripts/vae/vae_divisor_recon.py` (신규)** — divisor를 바꾸면 **frozen camera VAE**가 아직
+  멀쩡한지 확인. 400 segment에 대해 `dataset_dl3dv.__getitem__`과 동일하게 `cam_param`을 divisor별로
+  재구성해 encode→decode 하고 `in_trans_std` / `lat_std_{raw,scaled}` / `vae_scale_for_1` /
+  `rec_trans_{norm,world}` / `rec_rot6d`를 보고한다. `rec_trans_world`가 divisor 간 비교 가능한
+  값이고, `vae_scale_for_1`은 그 divisor로 갈아탈 때 써야 할 `vae_latent_scale`이다.
+  출력: `results/compare/norm_divisor_compare/vae_recon.json`.
 - **`scripts/render/compare_norm_video.py`: `--layout row`, `--modes`** — 모든 mode를 가로 한 줄로
   붙인 비교 영상, 그리고 렌더할 mode 부분집합 선택. `ORDER`에 `ctx_side_135max` 추가.
 - **정규화 ablation 렌더 파이프라인 (LagerNVS 자체 normalization 비활성화 + PSNR + 비교 영상)** —

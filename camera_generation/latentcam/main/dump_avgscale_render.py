@@ -21,6 +21,9 @@ Writes results/<OUT_NAME>/<seg_flat>/render_inputs.pt with:
           ctx_side_135max   [new] the SAME longer out-of-segment side taken as ONE range, no
                             windowing: 1.35*max||c - c_side0||  (leakage-free; measures the
                             scene's spatial extent rather than per-num_frames motion)
+          context_longer    [new] the implemented scale_mode of the same name
+                            (dataset_dl3dv._cam_dist_mean_context): the ctx_longer_135max windows
+                            aggregated with mean||c - c_win0|| instead of 1.35*max (leakage-free)
 env: N (default 10), CACHE_EXP (default geo_worldtraj), OUT_NAME (default lagernvs_avgscale_test),
      SEGS (optional comma-separated data_names, e.g. '1K_<hash>_0,...' -> only those scenes are
      parsed via CamDataset.from_segments; without it the corpus index is built/loaded first)
@@ -85,6 +88,22 @@ def ctx_side_135max(centers, s, e):
     return 1.35 * float(np.linalg.norm(centers[side] - centers[side[0]], axis=1).max())
 
 
+def ctx_longer_mean(centers, s, e, T):
+    """[new] the ALREADY-IMPLEMENTED scale_mode 'context_longer' (dataset_dl3dv
+    ._cam_dist_mean_context): same windows as ctx_longer_135max but aggregating mean(||c - c_win0||)
+    instead of 1.35*max. Included so the render test covers every leak-free divisor that latentcam
+    can already train on, not just the 1.35*max-family ones."""
+    N = centers.shape[0]
+    side = list(range(0, s)) if s >= (N - e) else list(range(e, N))
+    chunks = [side[i:i + T] for i in range(0, len(side) - T + 1, T)]
+    if not chunks and len(side) >= 2:
+        chunks = [side]
+    if not chunks:
+        return None
+    return float(np.mean([float(np.linalg.norm(centers[c] - centers[c[0]], axis=1).mean())
+                          for c in chunks]))
+
+
 ONE_PER_SCENE = os.environ.get("ONE_PER_SCENE", "0") == "1"   # [new] N distinct scenes, not N
 seen_scenes = set()                                            # consecutive segments of scene 0
 
@@ -128,6 +147,9 @@ for idx in range(len(ds.samples)):
     f = ctx_side_135max(centers_all, s, e)
     if f is not None:
         scales["ctx_side_135max"] = f
+    m = ctx_longer_mean(centers_all, s, e, cfg.num_frames)
+    if m is not None:
+        scales["context_longer"] = m
     d = {"image_paths": [frame_files[i] for i in gi], "ctx_c2w": ctx_c2w,
          "ctx_K": K[gi].float(), "hw_full": torch.tensor([float(h), float(w)]),
          "tgt_c2w": tgt_c2w, "avg_scale": float(avg), "seg": data_name,

@@ -348,6 +348,13 @@ All notable changes to the latentcam sub-project. Follows [Keep a Changelog](htt
   where they previously inherited 32/`raw`/`vae_20260202_065659_400`/`0.4467666` — intended, but
   it means results from those configs straddle two different VAEs.
 ### Fixed
+- **동시 학습 간 CLaTr `lightning_logs` 버전 충돌로 `clatr_score` 1회 실패**
+  (`main/evaluate/CLaTr/src/extraction.py`). `L.Trainer(...)`에 `logger` 인자가 없어 기본
+  `TensorBoardLogger`가 붙는데, 이 로거는 `lightning_logs/`를 스캔해 다음 `version_<N>`을
+  정한다 → 여러 학습이 같은 cwd에서 clatr eval을 동시에 띄우면 두 프로세스가 같은 N을 골라
+  하나가 `FileExistsError`로 죽는다 (train1 @ `version_1113`). 해당 epoch의 clatr 지표만
+  누락되고 학습 루프는 중단 없이 계속됐다. `logger=False`로 수정 — `trainer.predict`는 로깅을
+  하지 않으므로 지표 값은 불변이고, 빈 version 디렉토리(1119개, 14M) 누적도 멈춘다.
 - **cam_param's intrinsics convention was coupled to `scale_mode`, feeding the VAE the wrong
   encoding** (`main/dataset_dl3dv.py`, `main/conf/config.yaml`, `main/config.py`). New option
   `intr_norm: 'auto' | 'rel' | 'raw'` — `raw` = `fx/2cx, fy/2cy` (0.448, 0.796 for DL3DV),

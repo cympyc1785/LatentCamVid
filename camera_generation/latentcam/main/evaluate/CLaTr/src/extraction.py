@@ -39,6 +39,12 @@ def main(config: DictConfig) -> Optional[float]:
         strategy="auto",
         devices=1,
         num_sanity_val_steps=0,
+        # [fix] logger=False: the default TensorBoardLogger picks lightning_logs/version_<N> by
+        # scanning the dir, so concurrent trainings launching clatr_score from the same cwd can
+        # resolve the SAME N and one dies with FileExistsError (seen: train1 @ version_1113),
+        # losing that epoch's clatr metric. predict() logs nothing, so the logger is pure
+        # overhead -- it only accumulated 1119 empty version dirs.
+        logger=False,
     )
 
     model = instantiate(config.model)

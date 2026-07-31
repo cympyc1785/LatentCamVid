@@ -43,6 +43,17 @@ All notable changes to the latentcam sub-project. Follows [Keep a Changelog](htt
   `rec_trans_{norm,world}` / `rec_rot6d`를 보고한다. `rec_trans_world`가 divisor 간 비교 가능한
   값이고, `vae_scale_for_1`은 그 divisor로 갈아탈 때 써야 할 `vae_latent_scale`이다.
   출력: `results/compare/norm_divisor_compare/vae_recon.json`.
+- **`tools/lagernvs/render_static_probe.py` (신규; gitignore된 vendored 트리라 커밋에는 없음,
+  작업 트리에만 존재)** — "context 카메라가 정지하면 렌더가 되는가"를 divisor 문제와 분리해서 측정.
+  healthy segment의 `render_inputs.pt`를 재사용해 target 궤적은 그대로 두고 context만 4가지로
+  다시 만들어 렌더한다: `ctrl6`(실제 6-view) / `single`(ctx0 하나, `num_cond_views=1` +
+  `split='test'` → `build_cam_cond`가 `camera_scale=0, world_points_scale=1` 토큰 발행) /
+  `dup6_consistent`(ctx0 이미지·포즈를 6배 = 물리적으로 정지한 카메라) /
+  `dup6_contradict`(서로 다른 6장 이미지에 ctx0 포즈만 강제 = 포즈가 깨진 scene 재현).
+  `single` vs `dup6_consistent`가 OOD 토큰 쌍 `(0,0)`의 비용을, `dup6_consistent` vs
+  `dup6_contradict`가 pose-image 모순의 비용을 각각 분리한다.
+  env: `RD_ROOT` / `RD_CKPT` / `RD_SIZE` / `RD_NSEG` / `RD_OUT`.
+  출력: `results/compare/static_ctx_probe/{metrics.json, <seg>.png}`.
 - **`scripts/render/compare_norm_video.py`: `--layout row`, `--modes`** — 모든 mode를 가로 한 줄로
   붙인 비교 영상, 그리고 렌더할 mode 부분집합 선택. `ORDER`에 `ctx_side_135max` 추가.
 - **정규화 ablation 렌더 파이프라인 (LagerNVS 자체 normalization 비활성화 + PSNR + 비교 영상)** —

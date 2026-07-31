@@ -145,6 +145,16 @@ All notable changes to the latentcam sub-project. Follows [Keep a Changelog](htt
   the new ckpt yet, so the recon-vs-corpus-coverage trade is unevaluated.
 
 ### Changed
+- **`scripts/render/compare_textonly_vs_worldtraj.py` 를 2-way 하드코딩에서 N-way 로 일반화.**
+  `--run LABEL=DIR`(반복 가능) / `--ref` / `--out` / `--ctx` / `--contact` / `--per-target` 추가.
+  **인자 없이 실행하면 기존 2-way 동작(text-only vs worldtraj, 같은 출력 경로)이 그대로 재현된다** —
+  기존 호출부는 수정 불필요. 출력물에 `_contact.png`(앞 N개 target 컨택트 시트)가 추가되었고,
+  `_summary.png`는 run 수에 맞춰 `첫 run 대비 산점도 (N-1)개`로 늘어나며 `_scores.csv`도 run 수만큼
+  컬럼이 붙는다. 공통 target은 모든 run이 예측을 남긴 것만 교집합으로 취한다.
+  이걸로 만든 결과: `results/topdown_3way_textonly_worldtraj_camembed/`
+  (text-only vs geo_worldtraj vs geo_worldtraj_camembed, 공통 target 160개).
+  **주의**: 세 run 모두 학습 중이라 `test/`는 epoch이 서로 다른 스냅샷이다 —
+  숫자 해석 시 그 폴더의 `README.md` 경고를 먼저 읽을 것.
 - **`geo_anchor_first_frame` → `geo_cover_centered_at_s` 로 rename** (동작 변화 없음).
   옛 이름은 "첫 프레임이 anchor **view**로 들어간다"로 읽혔는데, 그건 `geo_first_view_target_s`가
   하는 일이다. 이 플래그는 `frustum_cover` greedy 탐색의 `anchor`/`ball_center`/`seg_scale`만

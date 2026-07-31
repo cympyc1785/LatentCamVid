@@ -24,8 +24,16 @@ Compares every candidate divisor D that has come up so far on the two things tha
 Leaky divisors (computed from the target segment, unavailable at inference) are reported as an
 upper bound, clearly marked.
 
-env: N (segments, default 1200), CACHE_EXP (default geo_worldtraj), SPLIT (train), SEED (0)
-out -> results/compare/norm_divisor_compare/{stats.json,summary.md,_divisors.png,per_segment.csv}
+env: N (segments, default 1200; 0 = no cap), CACHE_EXP (default geo_worldtraj), SPLIT (train),
+     SEED (0),
+     [new] ONE_PER_SCENE (default 1 = existing behavior: shuffle and keep the first segment of each
+           distinct scene; 0 = EVERY segment in the split, so scenes with many segments are weighted
+           by how often the model actually sees them),
+     [new] WORKERS (default 1 = existing sequential path; >1 forks a pool over segments. Only the
+           ONE_PER_SCENE=0 path parallelizes -- the dedup path is order-dependent by construction.
+           _sample_geo_frustum_cover is a deterministic greedy, so sharding changes nothing.),
+     [new] OUT_NAME (default norm_divisor_compare -> results/compare/<OUT_NAME>/)
+out -> results/compare/<OUT_NAME>/{stats.json,summary.md,_divisors.png,per_segment.csv}
 """
 import os, sys, json, random
 import numpy as np
@@ -43,7 +51,10 @@ N = int(os.environ.get("N", "1200"))
 EXP = os.environ.get("CACHE_EXP", "geo_worldtraj")
 SPLIT = os.environ.get("SPLIT", "train")
 SEED = int(os.environ.get("SEED", "0"))
-OUT = os.path.join(HERE, "results", "compare", "norm_divisor_compare")
+ONE_PER_SCENE = os.environ.get("ONE_PER_SCENE", "1") == "1"       # [new]
+WORKERS = int(os.environ.get("WORKERS", "1"))                     # [new]
+OUT = os.path.join(HERE, "results", "compare",
+                   os.environ.get("OUT_NAME", "norm_divisor_compare"))
 os.makedirs(OUT, exist_ok=True)
 
 cfg, _ = load_cfg("config", overrides=[f"experiment={EXP}"])
@@ -69,16 +80,9 @@ def windows(side, T):
     return ch
 
 
-# ---------------------------------------------------------------- sample segments (1 per scene)
-order = list(range(len(ds.samples)))
-random.shuffle(order)
-rows, seen = [], set()
-for idx in order:
-    if len(rows) >= N:
-        break
+def row_for(idx):
+    """All divisors for one segment. None = static segment (maxd ~ 0), caller skips it."""
     scene_idx, s, e, caption, data_name = ds.samples[idx]
-    if scene_idx in seen:
-        continue
     c2w = torch.linalg.inv(ds.extrinsics_list[scene_idx].float()).numpy()
     centers = c2w[:, :3, 3]
     N_all = centers.shape[0]
@@ -88,7 +92,7 @@ for idx in order:
     d_tgt = np.linalg.norm(centers[tgt] - centers[s], axis=1)          # dist from frame s
     maxd = float(d_tgt.max())
     if maxd < 1e-6:                                                    # static segment -> skip
-        continue
+        return None
     gi = ds._sample_geo_frustum_cover(scene_idx, s, e)
     d_ctx_s = np.linalg.norm(centers[gi] - centers[s], axis=1)         # ctx dist from frame s
     d_ctx_0 = np.linalg.norm(centers[gi] - centers[gi[0]], axis=1)     # ctx dist from ctx view0
@@ -112,15 +116,50 @@ for idx in order:
     if a is not None:
         D["avg_scale(excl)"] = float(a)
 
-    rows.append(dict(seg=data_name, s=s, e=e, n_frames=N_all,
-                     maxd=maxd, meand=float(d_tgt.mean()),
-                     pathlen=float(np.linalg.norm(np.diff(centers[tgt], axis=0), axis=1).sum()),
-                     maxctx=float(d_ctx_0.max()), D=D))
-    seen.add(scene_idx)
-    if len(rows) % 100 == 0:
-        print(f"  {len(rows)}/{N}", flush=True)
+    return dict(seg=data_name, s=s, e=e, scene=scene_idx, n_frames=N_all,
+                maxd=maxd, meand=float(d_tgt.mean()),
+                pathlen=float(np.linalg.norm(np.diff(centers[tgt], axis=0), axis=1).sum()),
+                maxctx=float(d_ctx_0.max()), D=D)
 
-print(f"{len(rows)} segments from {len(seen)} distinct scenes (exp={EXP} split={SPLIT})")
+
+if ONE_PER_SCENE:
+    # ------------------------------------------------------ sample segments (1 per scene)
+    order = list(range(len(ds.samples)))
+    random.shuffle(order)
+    rows, seen = [], set()
+    for idx in order:
+        if N and len(rows) >= N:
+            break
+        if ds.samples[idx][0] in seen:
+            continue
+        r = row_for(idx)
+        if r is None:
+            continue
+        rows.append(r)
+        seen.add(r["scene"])
+        if len(rows) % 100 == 0:
+            print(f"  {len(rows)}/{N}", flush=True)
+else:
+    # ------------------------------- [new] EVERY segment: scenes weighted as the model sees them
+    idxs = list(range(len(ds.samples)))
+    if N:
+        random.shuffle(idxs); idxs = sorted(idxs[:N])
+    if WORKERS > 1:
+        from multiprocessing import Pool
+        with Pool(WORKERS) as p:                     # fork -> ds shared copy-on-write
+            out = p.map(row_for, idxs, chunksize=64)
+    else:
+        out = []
+        for i, idx in enumerate(idxs):
+            out.append(row_for(idx))
+            if (i + 1) % 1000 == 0:
+                print(f"  {i + 1}/{len(idxs)}", flush=True)
+    rows = [r for r in out if r is not None]
+    seen = {r["scene"] for r in rows}
+    print(f"  {len(idxs) - len(rows)} static segments skipped")
+
+print(f"{len(rows)} segments from {len(seen)} distinct scenes (exp={EXP} split={SPLIT} "
+      f"one_per_scene={int(ONE_PER_SCENE)})")
 
 # --------------------------------------------------------------------------------- aggregate
 NAMES = ["geo_lagernvs", "ctx_longer_135max", "ctx_side_135max", "context_longer",
@@ -155,7 +194,10 @@ for nm in NAMES:
         corr_logD_logmaxd=float(np.corrcoef(ld, np.log10(maxd[ok]))[0, 1]),
     )
 
-json.dump(dict(exp=EXP, split=SPLIT, n_segments=len(rows), num_frames=T, stats=stats),
+json.dump(dict(exp=EXP, split=SPLIT, n_segments=len(rows), n_scenes=len(seen),
+               one_per_scene=ONE_PER_SCENE, num_frames=T,
+               maxd_log10_sd=float(np.log10(np.array([r["maxd"] for r in rows])).std()),
+               stats=stats),
           open(os.path.join(OUT, "stats.json"), "w"), indent=2)
 
 with open(os.path.join(OUT, "per_segment.csv"), "w") as f:
@@ -179,7 +221,8 @@ print("\n" + txt)
 print(f"\nreference: sd(log10 maxd) over the same segments = {np.log10(maxd).std():.4f}")
 print("r = D_lagernvs/D  (1 = LagerNVS sees its native scale) | m = maxd/D (normalized reach)")
 open(os.path.join(OUT, "summary.md"), "w").write(
-    f"# norm divisor comparison (exp={EXP}, split={SPLIT}, {len(rows)} segments / distinct scenes)\n\n"
+    f"# norm divisor comparison (exp={EXP}, split={SPLIT}, {len(rows)} segments / "
+    f"{len(seen)} scenes, one_per_scene={int(ONE_PER_SCENE)})\n\n"
     f"```\n{txt}\n```\n\nsd(log10 maxd) baseline = {np.log10(maxd).std():.4f}\n")
 
 # --------------------------------------------------------------------------------- plots

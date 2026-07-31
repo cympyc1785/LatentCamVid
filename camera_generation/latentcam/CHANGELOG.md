@@ -29,6 +29,14 @@ All notable changes to the latentcam sub-project. Follows [Keep a Changelog](htt
   `sd(log10 m)` / `p95/p05` / `m>1` / `m<0.1` / `corr(log D, log maxd)`를 표로 낸다.
   출력: `results/compare/norm_divisor_compare/{stats.json, summary.md, per_segment.csv,
   _divisors.png}`. env: `N` / `CACHE_EXP` / `SPLIT` / `SEED`.
+- **`scripts/data/norm_divisor_compare.py`: `ONE_PER_SCENE` / `WORKERS` / `OUT_NAME`** —
+  **기본값(`ONE_PER_SCENE=1, WORKERS=1, N=1200`)은 기존 동작 그대로** (1200 segment 결과 재현 확인).
+  `ONE_PER_SCENE=0`이면 scene당 1개로 줄이지 않고 split의 **전 segment**(39,830 / 6,097 scene)를
+  집계하므로 scene이 실제 학습에서 보이는 빈도대로 가중된다. `WORKERS>1`은 그 경로를 fork pool로
+  병렬화(`_sample_geo_frustum_cover`가 결정론적 greedy라 샤딩해도 결과 불변; 32 workers 기준
+  전수 ~2분). `N=0` = 무제한. `OUT_NAME`으로 출력 폴더 분리.
+  `stats.json`에 `n_scenes` / `one_per_scene` / `maxd_log10_sd` 추가.
+  결과: `results/compare/norm_divisor_compare_all/`.
 - **`scripts/vae/vae_divisor_recon.py` (신규)** — divisor를 바꾸면 **frozen camera VAE**가 아직
   멀쩡한지 확인. 400 segment에 대해 `dataset_dl3dv.__getitem__`과 동일하게 `cam_param`을 divisor별로
   재구성해 encode→decode 하고 `in_trans_std` / `lat_std_{raw,scaled}` / `vae_scale_for_1` /

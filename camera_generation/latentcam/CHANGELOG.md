@@ -52,8 +52,20 @@ All notable changes to the latentcam sub-project. Follows [Keep a Changelog](htt
   `dup6_contradict`(서로 다른 6장 이미지에 ctx0 포즈만 강제 = 포즈가 깨진 scene 재현).
   `single` vs `dup6_consistent`가 OOD 토큰 쌍 `(0,0)`의 비용을, `dup6_consistent` vs
   `dup6_contradict`가 pose-image 모순의 비용을 각각 분리한다.
-  env: `RD_ROOT` / `RD_CKPT` / `RD_SIZE` / `RD_NSEG` / `RD_OUT`.
-  출력: `results/compare/static_ctx_probe/{metrics.json, <seg>.png}`.
+  env: `RD_ROOT` / `RD_CKPT` / `RD_SIZE` / `RD_NSEG` / `RD_OUT` / `RD_CONDS`(렌더할 조건 부분집합) /
+  `RD_VIDEO=1`(조건별 mp4 + `GT|cond1|cond2|...` 가로 concat mp4 — 프레임 그리드로는 안 보이는
+  시간축 drift 확인용).
+  출력: `results/compare/static_ctx_probe/{metrics.json, <seg>.png}`,
+  영상은 `results/compare/static_ctx_video/`.
+- **`scripts/data/scan_duplicate_poses.py` (신규)** — COLMAP 등록 실패로 **다수 프레임이 한 좌표에
+  박혀 있는** scene을 전수 검출. scene마다 camera center를 `TOL`(기본 1e-4, scene extent 상대) 격자에
+  버킷팅해서 최대 클러스터의 비율 `dup_frac`과 그 안의 최장 **연속** 구간 `dup_run`을 낸다.
+  `dup_frac >= FRAC`(기본 0.10)이면 flag. env: `TOL` / `FRAC` / `WORKERS`(기본 32) / `CACHE_EXP` /
+  `OUT_NAME`. 출력: `results/compare/scan_duplicate_poses/{per_scene.csv, flagged.csv,
+  blacklist_rows.csv, stats.json}` — `blacklist_rows.csv`는 `<dl3dv_root>/blacklist.csv`에 그대로
+  append 가능한 형식.
+  train 6,097 scene 결과: **flagged 2개**, `dup_frac` p50 0.0030 / p99 0.0061 / p99.9 0.0120 /
+  max 0.5815. 1·2위(0.582, 0.257)와 3위(0.034) 사이가 7.5배로 벌어져 경계가 깨끗하다.
 - **`scripts/render/compare_norm_video.py`: `--layout row`, `--modes`** — 모든 mode를 가로 한 줄로
   붙인 비교 영상, 그리고 렌더할 mode 부분집합 선택. `ORDER`에 `ctx_side_135max` 추가.
 - **정규화 ablation 렌더 파이프라인 (LagerNVS 자체 normalization 비활성화 + PSNR + 비교 영상)** —
@@ -419,6 +431,21 @@ All notable changes to the latentcam sub-project. Follows [Keep a Changelog](htt
   where they previously inherited 32/`raw`/`vae_20260202_065659_400`/`0.4467666` — intended, but
   it means results from those configs straddle two different VAEs.
 ### Fixed
+- **`blacklist.csv`를 고쳐도 index 캐시가 낡은 채로 계속 쓰이던 문제** (`main/dataset_dl3dv.py`).
+  `_load_index`의 캐시 키는 `meta_csv` / `num_frames` / `before_only` / `geo_cover_k` /
+  `coverage_blacklist_path` / `max_scenes`만 담았는데, scene-level blacklist는 캐시를 **만들 때**
+  적용된다(`:374`). 그래서 `blacklist.csv`에 scene을 추가해도 기존 캐시가 히트하면 그 scene이 계속
+  학습에 들어갔다 — 조용히 틀리는 종류의 버그. `_blacklist_fingerprint()`(sha1 앞 8자리)를 추가해
+  키에 `__bl<hash>`를 붙였다. 파일이 없으면 `none`. 내용이 안 바뀌면 키도 그대로라
+  **기존 캐시 재사용 동작은 유지**되고, 편집하면 자동으로 재빌드된다(6,098 scene 스캔 ~37초).
+- **DL3DV blacklist에 `duplicate_camera_centers` 2개 scene 추가** (데이터 파일
+  `<dl3dv_root>/blacklist.csv`, 레포 밖. 백업: `blacklist.csv.bak_20260801`).
+  `4K/50eb3c0d…8d5f`(dup_frac 0.582, 연속 142프레임 정지, N=368),
+  `3K/b7da67fc…b1da`(0.257, 62프레임, N=331). 둘 다 COLMAP 등록이 끊겨 프레임 과반이 한 좌표에
+  박혀 있는데 영상은 멀쩡히 움직인다 → context baseline이 0이라 LagerNVS 렌더가 어떤 divisor로도
+  PSNR ~14.4에 갇히고(`results/norm_degenerate_check/`), `geo_lagernvs` divisor는 1.7e-5로 붕괴해
+  정규화된 도달거리 `m`이 567,215까지 튄다. index 재빌드 결과 **39,830 → 39,817 sample /
+  6,097 → 6,095 scene**.
 - **동시 학습 간 CLaTr `lightning_logs` 버전 충돌로 `clatr_score` 1회 실패**
   (`main/evaluate/CLaTr/src/extraction.py`). `L.Trainer(...)`에 `logger` 인자가 없어 기본
   `TensorBoardLogger`가 붙는데, 이 로거는 `lightning_logs/`를 스캔해 다음 `version_<N>`을

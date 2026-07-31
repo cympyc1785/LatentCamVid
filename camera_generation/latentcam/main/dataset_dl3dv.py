@@ -48,6 +48,7 @@ import os
 import os.path as osp
 import csv
 import json
+import hashlib
 import random
 
 import numpy as np
@@ -203,6 +204,16 @@ def _read_blacklist_hashes(root):
     return blocked
 
 
+def _blacklist_fingerprint(root):
+    """Short content hash of blacklist.csv, for the index-cache key. The cache is built AFTER the
+    blacklist filter (see _load_index), so editing blacklist.csv without this in the key would
+    silently keep serving an index that still contains the newly blocked scenes."""
+    bl_path = osp.join(root, 'blacklist.csv')
+    if not osp.isfile(bl_path):
+        return 'none'
+    return hashlib.sha1(open(bl_path, 'rb').read()).hexdigest()[:8]
+
+
 def _read_coverage_blacklist(path):
     """Per-SEGMENT blacklist CSV (columns: scene, segment) from scripts/dump_coverage.py.
     Returns a set of (scene_chunk, segment_key). None/missing -> empty set (no filtering)."""
@@ -341,7 +352,7 @@ class CamDataset(torch.utils.data.Dataset):
         cov_path = getattr(self.cfg, 'coverage_blacklist_path', None)
         key = (f"{meta_name}__nf{self.num_frames}__bo{int(self.geo_cover_before_only)}"
                f"__k{self.geo_cover_k}__cb{osp.basename(cov_path) if cov_path else 'none'}"
-               f"__ms{self.max_scenes}")
+               f"__ms{self.max_scenes}__bl{_blacklist_fingerprint(self.root)}")
         cache_dir = osp.join(self.root, '.latentcam_index'); os.makedirs(cache_dir, exist_ok=True)
         cache_path = osp.join(cache_dir, key.replace('/', '_') + '.pt')
         if self.only_segments is not None:

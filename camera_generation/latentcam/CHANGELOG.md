@@ -5,6 +5,39 @@ All notable changes to the latentcam sub-project. Follows [Keep a Changelog](htt
 ## [Unreleased]
 
 ### Added
+- **`train_frac` (신규 config, 기본 0.9 = 기존 동작 그대로)** — `base.Trainer._make_batch_generator`의
+  random split train 비율. `train_seg_list`/`test_seg_list`가 있으면 그 경로가 우선이라 영향 없음.
+  `1.0`이면 index 전체를 train으로 쓰고 val은 비운다 — validate를 아예 안 하는 job 전용
+  (`train_vae_dl3dv.py`는 `include_val=False`). 두 VAE experiment를 `train_frac: 1.0`으로 돌려
+  1K~7K 전 segment 39817개를 쓴다(기존 90% split은 35776개 = 559 it/epoch → 622 it/epoch).
+- **`scale_mode: ctx_longer_135max` (신규)** — `dataset_dl3dv._first_farthest_context`.
+  target segment를 제외한 **긴 쪽 = context range**를 겹치지 않는 `num_frames`(49) window로 자르고,
+  window마다 `1.35·max‖camera center − 그 window 첫 camera center‖`를 구해 **window 평균**.
+  target view가 분모에 전혀 들어가지 않아 leak-free이고, 추론 때 context view만으로 재현된다.
+  기존 offline 정의(`scripts/vae/vae_divisor_recon.py:99-103`)와 30 segment 대조 mismatch 0.
+  canonicalization(39817 segment, blacklist 후, `m = max‖target view center − frame s‖ / D`):
+  mean 0.7693 / std 0.2937 / min 0.0299 / max 5.186 / med 0.7661, sd(log10 m) 0.1864,
+  p95/p05 4.04, CV 0.3818 — leak-free 후보 중 최고(정규화 없음 CV 0.4265, `geo_lagernvs` 0.4231,
+  `ctx_side_135max` 0.5078).
+- **`vae_ctxlonger135.yaml` / `vae_geolagernvs_wt.yaml` (신규 VAE experiment)** —
+  normalization을 바꾸면 target cam_param 분포가 바뀌므로 각 arm 전용 CameraVAE를 다시 fit한다.
+  scope·hyperparameter는 `vae_worldtraj`(latent_std 0.569379)와 동일(cam_dim 64 / intr_norm raw /
+  meta_worldtraj.csv / batch 64 / lr 1e-4 / 60 epoch / beta 1e-3)이라 latent_std가 직접 비교된다.
+  `vae_geolagernvs_wt`는 `geo_cover_*` 플래그를 `geo_worldtraj.yaml`에서 그대로 복사한다 —
+  `_geo_lagernvs_scale`이 같은 greedy frustum-cover 선택을 다시 돌려 분모를 만들기 때문에
+  이게 어긋나면 VAE와 diffusion이 다른 분모로 학습된다.
+- **`geo_worldtraj_ctxlonger135.yaml` / `geo_worldtraj_lagernvsnorm.yaml` (신규 experiment)** —
+  **context view 정규화와 target view 정규화를 하나의 분모로 통일**하는 2-arm.
+  `geo_worldtraj` 대비 normalization 외 차이 없음(context 선택 / geo_posed / meta / 모델 동일).
+  - A `geo_worldtraj_ctxlonger135`: 양쪽 다 `ctx_longer_135max`.
+    `geo_lagernvs_skip_ctx_norm: true`로 LagerNVS 자체 context 분모
+    `1.35·max‖ctx center − ctx view0 center‖`를 override_scale로 대체.
+    cam_token이 바뀌므로 **geo latent cache를 새로 빌드**해야 한다
+    (`geo_latent_cache_dir: /data1/cympyc1785/data/DL3DV/latent_cache_ctxlonger135`).
+  - B `geo_worldtraj_lagernvsnorm`: 양쪽 다 LagerNVS 분모. `scale_mode: geo_lagernvs`만 켜고
+    `geo_lagernvs_skip_ctx_norm`은 **false 그대로**. `geo_first_view_target_s`가 context view0을
+    frame s로 고정하므로 `_geo_lagernvs_scale`과 `build_cam_token` 내부 `scene_scale`이 같은 수
+    (40 segment 직접 비교 mismatch 0/40) → cam_token 불변 → **기존 `first_cam_included` 캐시 그대로 유효**.
 - **`geo_worldtraj_decoupled.yaml` (신규 experiment) — `geo_worldtraj_camembed`에서 camera
   embedding만 뺀 ablation.** resolved config 기준 차이는 `geo_cam_embed: relfirst → null`
   단 하나(그 외 전부 동일, `diff`로 확인). 3-way:

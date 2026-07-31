@@ -1,0 +1,23 @@
+# @package _global_
+# Camera VAE re-fit for the UNIFIED ctx_longer_135max normalization (variant A).
+# Divisor D (context view side only, leakage-free) =
+#   mean over the CONTEXT RANGE's non-overlapping 49-frame windows of
+#   1.35 * max||camera center - that window's first camera center||.
+# The same D also replaces LagerNVS's own context normalization in the diffusion run
+# (geo_lagernvs_skip_ctx_norm: true, geo_worldtraj_ctxlonger135.yaml), so context views and
+# target views live in ONE scale. The VAE must be re-fit because this changes the target
+# cam_param translation distribution vs avg_scale / first_farthest_135.
+# Scope + hyperparameters identical to vae_worldtraj (the 1.35*max-over-target-segment fit),
+# so the two latent_std values are directly comparable.
+exp_name: vae_ctxlonger135
+geo_encoder: null
+scale_mode: ctx_longer_135max
+cam_dim: 64                 # same latent dim as vae_worldtraj / vae_20260302_300
+intr_norm: raw              # explicit (scale_mode is not avg_scale, so legacy 'auto' = 'raw')
+meta_csv: meta_worldtraj.csv
+coverage_blacklist_path: null
+train_frac: 1.0             # 1K~7K 전 segment (39817) 사용; VAE는 val을 쓰지 않는다
+batch_size: 64
+lr: 0.0001
+epochs: 60
+vae_beta: 0.001

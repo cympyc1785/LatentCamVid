@@ -89,6 +89,9 @@ class Config:
     #   'context_longer': cam_dist_mean over the LONGER out-of-segment side, chunked into
     #                     num_frames windows (target-excluded, so leakage-free AND
     #                     reproducible at inference from context only).
+    #   'ctx_longer_135max': same context windows as 'context_longer' but with LagerNVS's own
+    #                     denominator form, 1.35*max||center - window's first center||, averaged
+    #                     over the windows (leakage-free; lands in LagerNVS's context units).
     #   'first_farthest_135' / 'geo_lagernvs' : LagerNVS-style 1.35*max variants.
     # Legacy names still accepted: 'saved_avg_scale'->'avg_scale', 'target_cam'->'cam_dist_mean'.
     scale_mode = 'cam_dist_mean'

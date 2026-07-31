@@ -25,6 +25,8 @@ scale_mode (what the camera translations are divided by):
                        mean(||scene point - first camera||)  (SCVideo original; ~10-44)
   'cam_dist_mean'      mean(||camera center_i - center_0||) over the target segment  (~1-2)
   'context_longer'     'cam_dist_mean' computed on out-of-segment context windows instead
+  'ctx_longer_135max'  1.35 * max(||center - window's first center||) averaged over the CONTEXT
+                       RANGE's num_frames windows (LagerNVS's denominator form, leakage-free)
   'first_farthest_135' 1.35 * max(||center_i - center_0||) over the segment (LagerNVS-style)
   'geo_lagernvs'       1.35 * max(||geo-context center - frame s||) (full LagerNVS alignment)
 Legacy aliases accepted: 'saved_avg_scale' -> 'avg_scale', 'target_cam' -> 'cam_dist_mean'.
@@ -249,6 +251,7 @@ class CamDataset(torch.utils.data.Dataset):
         # strings, e.g. '1K_<hash>_0', or (chunk, seg_key) tuples). Only those scenes'
         # prompts.json are read -- no full-corpus scan, no index cache. See from_segments().
         self.only_segments = only_segments
+        self._geo_idx_memo = {}      # (scene_idx, s, e) -> frustum_cover context views
         self.root = cfg.dl3dv_root
         self.num_frames = cfg.num_frames
         self.geo_num_views = getattr(cfg, 'geo_num_views', 4)
@@ -625,6 +628,18 @@ class CamDataset(torch.utils.data.Dataset):
         return max(float(np.mean(sc)), 1e-5)
 
     def _sample_geo_frustum_cover(self, scene_idx, s, e):
+        """Memoized wrapper around _frustum_cover_uncached. The greedy search is deterministic
+        in (scene_idx, s, e) and costs ~54 ms/segment, so re-running it every epoch (and twice
+        per item under scale_mode 'geo_lagernvs', which needs the same views to build the
+        divisor) is pure waste. One dict per worker process, ~40k tiny tuples."""
+        k = (scene_idx, s, e)
+        v = self._geo_idx_memo.get(k)
+        if v is None:
+            v = tuple(self._frustum_cover_uncached(scene_idx, s, e))
+            self._geo_idx_memo[k] = v
+        return list(v)
+
+    def _frustum_cover_uncached(self, scene_idx, s, e):
         """Frustum max-coverage: k views covering the most nearby space. When
         geo_cover_out_of_seg, candidates are restricted to the LONGER out-of-segment side
         (no target frames -> leakage-free). Search anchor/scale:
@@ -756,12 +771,22 @@ class CamDataset(torch.utils.data.Dataset):
         d = (centers[geo_idxs] - centers[s]).norm(dim=-1)              # dist from frame s
         return (1.35 * d.max()).clamp(min=1e-5).unsqueeze(0)
 
-    def _cam_dist_mean_context(self, scene_idx, s, e):
-        """scale_mode='context_longer': cam_dist_mean taken from the LONGER out-of-segment
-        side, chunked into num_frames windows — mean over windows of each window's camera
-        movement (same metric as _cam_dist_mean_scale, relative to the window's first frame).
-        Target-excluded -> leakage-free and reproducible at inference from context only.
-        Returns None when the longer side is too short (caller falls back)."""
+    def _context_window_scale(self, scene_idx, s, e, window_fn=None):
+        """Divisor measured on the CONTEXT RANGE = the longer out-of-target-segment side,
+        chunked into num_frames windows; `window_fn(w2c_window) -> (1,)` is evaluated per
+        window and the windows are averaged. Target-view-excluded -> leakage-free and
+        reproducible at inference from the context views only. Returns None when the context
+        range is too short (caller falls back).
+
+          window_fn=_cam_dist_mean_scale    -> scale_mode 'context_longer'
+                                               mean||center - window's first center||
+          window_fn=_first_farthest_scale   -> scale_mode 'ctx_longer_135max'
+                                               1.35*max||center - window's first center||
+                                               (LagerNVS's own denominator form, measured on
+                                               num_frames-sized context windows so it lands in
+                                               the same units LagerNVS normalizes context with)
+        """
+        window_fn = window_fn or self._cam_dist_mean_scale
         w2c_all = self.extrinsics_list[scene_idx]              # (N,4,4) w2c
         N = w2c_all.shape[0]
         T = self.num_frames
@@ -771,8 +796,16 @@ class CamDataset(torch.utils.data.Dataset):
             chunks = [side]                                    # short side -> one partial window
         if not chunks:
             return None
-        scales = [self._cam_dist_mean_scale(w2c_all[ch]) for ch in chunks]
+        scales = [window_fn(w2c_all[ch]) for ch in chunks]
         return torch.stack(scales, 0).mean(0).clamp(min=1e-5)  # (1,)
+
+    def _cam_dist_mean_context(self, scene_idx, s, e):
+        """scale_mode='context_longer' (unchanged): see _context_window_scale."""
+        return self._context_window_scale(scene_idx, s, e, self._cam_dist_mean_scale)
+
+    def _first_farthest_context(self, scene_idx, s, e):
+        """scale_mode='ctx_longer_135max': see _context_window_scale."""
+        return self._context_window_scale(scene_idx, s, e, self._first_farthest_scale)
 
     def _load_images(self, frame_files, idxs):
         H, W = self.geo_hw
@@ -835,6 +868,12 @@ class CamDataset(torch.utils.data.Dataset):
         elif _scale_mode == 'context_longer':
             cs = self._cam_dist_mean_context(scene_idx, s, e)
             norm_scale = cs if cs is not None else self._cam_dist_mean_scale(extrinsics)
+        elif _scale_mode == 'ctx_longer_135max':
+            # LagerNVS's denominator form (1.35*max) measured on the CONTEXT RANGE's
+            # num_frames windows -> same units as LagerNVS's own context normalization,
+            # and leakage-free (no target view enters the divisor).
+            cs = self._first_farthest_context(scene_idx, s, e)
+            norm_scale = cs if cs is not None else self._first_farthest_scale(extrinsics)
         elif _scale_mode == 'first_farthest_135':
             # LagerNVS-style: 1.35 * max ||center - first camera|| over the segment
             norm_scale = self._first_farthest_scale(extrinsics)

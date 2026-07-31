@@ -93,6 +93,10 @@ max_scenes: null              # cap #scenes loaded (null = all; small int for sm
 train_seg_list: null          # [new] explicit train segment-list file (<batch>/<hash>/<seg>); null = random 90/10 split
 test_seg_list: null           # [new] explicit val/test segment-list file; val = its first (val_max_batches×batch_size) segments
 geo_encoder: lagernvs         # scene-context encoder: lagernvs (frozen VGGT recon -> 768-d tokens) | null (text-only)
+train_frac: 0.9            # [new] random-split train share when train_seg_list/test_seg_list are null.
+                          #   1.0 = use the WHOLE index for train and leave val empty; only for jobs that
+                          #   never validate (the VAE fits, train_vae_dl3dv.py include_val=False).
+
 geo_latent_dim: 768           # geo token dim (lagernvs = 768)
 geo_num_views: 4              # #context views for 'even' sampling
 geo_image_hw:                 # context image resolution fed to the geo encoder [H, W]

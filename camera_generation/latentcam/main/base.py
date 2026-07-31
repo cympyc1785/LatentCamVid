@@ -14,7 +14,7 @@ import torchvision.transforms as transforms
 from torch.nn.parallel.data_parallel import DataParallel
 from torch.utils.data.dataloader import default_collate
 from utils.pc_utils import get_ray_sim_per_point
-from torch.utils.data import random_split
+from torch.utils.data import random_split, Subset
 from models.camera_diffusion_model_latent import get_model
 from dataset_dl3dv import CamDataset
 from torch.nn.utils.rnn import pad_sequence
@@ -53,13 +53,44 @@ class Trainer(Base):
         generator = torch.Generator().manual_seed(self.cfg.random_seed)
 
         dataset = CamDataset(cfg=self.cfg)
-        train_size = int(0.9 * len(dataset))
-        test_size = len(dataset) - train_size
-        self.trainset_loader, self.validset_loader = random_split(
-            dataset,
-            [train_size, test_size],
-            generator=generator
-        )
+        tr_list = getattr(self.cfg, 'train_seg_list', None)
+        te_list = getattr(self.cfg, 'test_seg_list', None)
+        if tr_list and te_list:
+            # Explicit segment-list split (deterministic): train/val come from the given
+            # <batch>/<hash>/<seg_key> lists instead of a random 90/10. val order follows the
+            # test-list file order (shuffle=False) so validation = its first N segments.
+            def _seg_key(sample_id):                     # "<batch>_<hash>_<seg>" -> "<batch>/<hash>/<seg>"
+                bh, seg = sample_id.rsplit('_', 1)
+                batch, h = bh.split('_', 1)
+                return f"{batch}/{h}/{seg}"
+            id2idx = {}
+            for i, s in enumerate(dataset.samples):
+                id2idx.setdefault(_seg_key(s[4]), i)
+            def _load(p):
+                with open(p) as f:
+                    return [ln.strip() for ln in f if ln.strip()]
+            tr_ids, te_ids = _load(tr_list), _load(te_list)
+            tr_idx = [id2idx[x] for x in tr_ids if x in id2idx]
+            te_idx = [id2idx[x] for x in te_ids if x in id2idx]
+            self.trainset_loader = Subset(dataset, tr_idx)
+            self.validset_loader = Subset(dataset, te_idx)
+            print(f"[seg-list split] train {len(tr_idx)}/{len(tr_ids)} , val {len(te_idx)}/{len(te_ids)} "
+                  f"(ids missing from dataset skipped)")
+        else:
+            # cfg.train_frac (default 0.9) = the random split's train share. 1.0 puts the WHOLE
+            # index in train and leaves val empty -- only valid for jobs that never validate
+            # (train_vae_dl3dv.py calls _make_batch_generator(include_val=False)), which is why
+            # the VAE fits use it: holding out 10% of the corpus buys nothing there.
+            frac = float(getattr(self.cfg, 'train_frac', 0.9))
+            train_size = len(dataset) if frac >= 1.0 else int(frac * len(dataset))
+            test_size = len(dataset) - train_size
+            self.trainset_loader, self.validset_loader = random_split(
+                dataset,
+                [train_size, test_size],
+                generator=generator
+            )
+            if frac >= 1.0:
+                print(f"[split] train_frac=1.0 -> train {train_size} / val 0 (no held-out split)")
 
         if include_train:
             self.batch_generator = DataLoader(

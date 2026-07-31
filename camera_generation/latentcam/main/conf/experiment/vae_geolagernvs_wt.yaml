@@ -1,0 +1,30 @@
+# @package _global_
+# Camera VAE re-fit for the UNIFIED LagerNVS normalization (variant B).
+# Divisor D = 1.35 * max||geo-CONTEXT view center - target segment's first camera (frame s)||,
+# which is bit-exactly the scene_scale LagerNVS's build_cam_token computes for those same
+# context views (verified 0/40 mismatch) because geo_first_view_target_s makes context view0 =
+# frame s. So target views and context views are already in ONE scale with
+# geo_lagernvs_skip_ctx_norm left FALSE -- no override needed, and the existing geo latent
+# cache stays valid.
+# The geo_cover_* flags below are NOT decoration: _geo_lagernvs_scale re-runs the same greedy
+# frustum-cover selection to find the context views, so they must match geo_worldtraj.yaml or
+# the VAE would be fit on a different divisor than the diffusion run uses.
+# Scope + hyperparameters identical to vae_worldtraj / vae_ctxlonger135.
+exp_name: vae_geolagernvs_wt
+geo_encoder: null           # no images/encoder needed -- only the divisor uses the selection
+scale_mode: geo_lagernvs
+cam_dim: 64
+intr_norm: raw
+meta_csv: meta_worldtraj.csv
+coverage_blacklist_path: null
+# --- context-view selection, copied verbatim from geo_worldtraj.yaml ---
+geo_view_sampling: frustum_cover
+geo_cover_out_of_seg: true
+geo_first_view_target_s: true
+geo_cover_subtract_first: true
+geo_cover_centered_at_s: true
+train_frac: 1.0             # 1K~7K 전 segment (39817) 사용; VAE는 val을 쓰지 않는다
+batch_size: 64
+lr: 0.0001
+epochs: 60
+vae_beta: 0.001

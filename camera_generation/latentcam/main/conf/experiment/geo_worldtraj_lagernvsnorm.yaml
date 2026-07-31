@@ -1,0 +1,36 @@
+# @package _global_
+# VARIANT B — unified LagerNVS normalization.
+# Everything is geo_worldtraj except the target normalization, which is switched to the divisor
+# LagerNVS ALREADY uses on the context views:
+#   context views : LagerNVS's own 1.35*max||ctx center - ctx view0 center||
+#                   (geo_lagernvs_skip_ctx_norm stays FALSE -- untouched native path)
+#   target views  : scale_mode=geo_lagernvs -> 1.35*max||geo-context center - frame s||
+# Since geo_first_view_target_s makes context view0 == frame s, those two are the SAME number
+# (verified 0/40 segments mismatch vs geo_encoder.build_cam_token's internal scene_scale), so
+# context and target land in one frame + one scale without any override.
+# Consequence: the existing first_cam_included geo latent cache is still bit-exact valid (the
+# cam_token is unchanged), so this run reuses it -- unlike variant A.
+# Canonicalization over 39817 post-blacklist segments (m = max||target view center - frame s||/D):
+#   m mean 0.6197 std 0.2622 min 0.0225 max 7.537 med 0.6096, sd(log10 m) 0.1890, p95/p05 4.18,
+#   CV 0.4231.
+exp_name: dl3dv_geo_worldtraj_lagernvsnorm
+meta_csv: meta_worldtraj.csv
+coverage_blacklist_path: null
+geo_encoder: lagernvs
+geo_view_sampling: frustum_cover
+geo_cover_out_of_seg: true
+geo_first_view_target_s: true
+geo_cover_subtract_first: true
+geo_cover_centered_at_s: true
+geo_posed: true
+scale_mode: geo_lagernvs
+geo_lagernvs_skip_ctx_norm: false
+cam_dim: 64
+intr_norm: raw              # vae_geolagernvs_wt's own convention
+# vae_latent_scale = the MEASURED latent std of this (ckpt, scale_mode, intr_norm) triple, so
+# `encode(traj) / vae_latent_scale` reaches the diffusion model at ~unit std.
+# my_checkpoints/vae_geolagernvs_wt/latent_std.txt: epoch 60 latent_std 0.564380 (train_frac 1.0,
+# 39817 segment). cf. arm A vae_ctxlonger135 0.584795, vae_worldtraj 0.569379.
+vae_ckpt_path: /data1/cympyc1785/LatentCamVid/camera_generation/latentcam/my_checkpoints/vae_geolagernvs_wt/last.pth
+vae_latent_scale: 0.564380
+geo_latent_cache_dir: /data1/cympyc1785/data/DL3DV/latent_cache

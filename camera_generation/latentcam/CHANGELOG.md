@@ -305,6 +305,25 @@ All notable changes to the latentcam sub-project. Follows [Keep a Changelog](htt
   `vae_20260302_300`(0.0050~0.0057)의 4~5배 → **scale_mode 전용 refit 이 공용 ckpt 보다 나쁘다.**
 
 ### Changed
+- **normalization ablation 3-arm 의 VAE / intrinsics 통일 (`geo_worldtraj.yaml`,
+  `geo_worldtraj_ctxlonger135.yaml`, `geo_worldtraj_lagernvsnorm.yaml`).** 기존 비교는
+  normalization 외에 confound 가 3개 있었다 — (1) baseline 의 `vae_latent_scale` 0.96032625 는
+  SCVideo MIXED corpus 값이라 diffusion 입력 std 가 0.4654 (A/B 는 실측값이라 ~1.0),
+  (2) `intr_norm` baseline `rel` vs A/B `raw`, (3) VAE ckpt 가 셋 다 다름.
+  세 arm 을 `intr_norm: rel` + 공용 `checkpoints/vae_20260302_300.pth` + `cam_dim 64` 로 맞춰
+  **`scale_mode` / `geo_lagernvs_skip_ctx_norm` 만 남겼다.**
+  arm 전용 refit(`vae_ctxlonger135`, `vae_geolagernvs_wt`)을 버리는 게 손해가 아닌 이유:
+  `intr rel` 에서 `vae_20260302_300` 이 세 scale_mode 전부 trans recon L1 최저이고,
+  refit 2개는 rot L1 이 4~5배로 underfit 이다 (60 epoch DL3DV-only).
+  `vae_latent_scale` 은 **FULL corpus(39817 segment / 6095 scene)** 재측정치로 pin:
+  baseline `avg_scale` **0.47637**, A `ctx_longer_135max` **0.58341**, B `geo_lagernvs` **0.53716**.
+  `scripts/vae/vae_scale_matrix.py` 의 `MAX_SCENES=200` 기본값(1264 segment)은 meta 앞쪽
+  저속 scene 편중이라 전 모드에서 **4~7% 낮게** 나온다 (0.44696 / 0.55882 / 0.51180) — 계통
+  오차이므로 config 에 박는 값은 반드시 FULL corpus 로 잴 것 (`main/conf/config.yaml` 주석도 정정).
+  geo latent cache 는 **재빌드 불필요**: geo cam_token 의 intrinsics 는 `intr_norm` 과 무관하게
+  항상 raw 이고(`dataset_dl3dv._geo_cam_param`, line 836-838) camera VAE 는 `geo_emb` 에 안 들어간다.
+  이전 config 로 돌던 run 들과는 **비교 불가** (A `7xdbu80e` / B `1mok217e` epoch 47 중단,
+  baseline `c4d2k5y4` 는 epoch 150 정지 후 재기동 예정).
 - **`geo_worldtraj_ctxlonger135.yaml` / `geo_worldtraj_lagernvsnorm.yaml` 주석의 canonicalization
   수치 정정 (주석만 변경, 학습 동작 무관).** 기존엔 `m = max‖target view center − frame s‖ / D` 의
   **전체** sd/CV만 적어서 scene scale 정규화가 실제로 하라는 일을 못 재고 있었다. log10(m)을

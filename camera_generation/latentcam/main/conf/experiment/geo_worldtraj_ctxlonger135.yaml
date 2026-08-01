@@ -42,11 +42,28 @@ geo_posed: true
 scale_mode: ctx_longer_135max
 geo_lagernvs_skip_ctx_norm: true
 cam_dim: 64
-intr_norm: raw              # vae_ctxlonger135's own convention
+intr_norm: rel              # [2026-08-01] see below -- shared with the baseline now
+# [2026-08-01] VAE switched from the per-scale_mode refit my_checkpoints/vae_ctxlonger135 to the
+# BASELINE's checkpoints/vae_20260302_300, and intr_norm raw -> rel, so this arm, arm B
+# (geo_worldtraj_lagernvsnorm) and the baseline (geo_worldtraj) share ONE camera VAE and ONE
+# intrinsics convention. That leaves scale_mode + geo_lagernvs_skip_ctx_norm as the ONLY
+# difference vs the baseline -- previously the arms also differed in VAE ckpt, in intr_norm, and
+# in whether vae_latent_scale was even correct, so nothing could be attributed to normalization.
+# Not a compromise: scripts/vae/vae_scale_matrix.py (1264 samples / 200 scenes, intr rel) says
+# vae_20260302_300 has the LOWEST trans recon L1 in every scale_mode, including this arm's --
+#   ckpt                 scale_mode          rot      trans    intr_L1
+#   vae_20260302_300     ctx_longer_135max   0.00569  0.00455  0.00263   <-- active
+#   vae_ctxlonger135     ctx_longer_135max   0.02569  0.03545  0.26623   (rel; it was fit raw)
+#   vae_ctxlonger135     ctx_longer_135max   0.00534  0.00666  0.00361   (raw = the old setting)
+# i.e. the 60-epoch DL3DV-only refit is simply underfit (rot L1 4-5x) and the shared ckpt beats it
+# on its own scale_mode. Intrinsics are 'rel' by standing decision (DL3DV intrinsics are constant
+# per scene -> rel makes cam_param[9:11] exactly [1,1]).
 # vae_latent_scale = the MEASURED latent std of this (ckpt, scale_mode, intr_norm) triple, so
-# `encode(traj) / vae_latent_scale` reaches the diffusion model at ~unit std.
-# my_checkpoints/vae_ctxlonger135/latent_std.txt: epoch 60 latent_std 0.584795 (train_frac 1.0,
-# 39817 segment). The superseded train_frac=0.9 fit measured 0.562833; vae_worldtraj 0.569379.
-vae_ckpt_path: /data1/cympyc1785/LatentCamVid/camera_generation/latentcam/my_checkpoints/vae_ctxlonger135/last.pth
-vae_latent_scale: 0.584795
+# `encode(traj) / vae_latent_scale` reaches the diffusion model at ~unit std. Measured over the
+# FULL corpus (MAX_SCENES unset -> 39817 segments / 6095 scenes; recon L1 rot/trans/intr
+# 0.00619 / 0.00495 / 0.00277). The script's MAX_SCENES=200 default reads 4-7% LOW on every
+# scale_mode (0.55882 here) -- systematic, that subset is low-motion; do not use it.
+# Superseded: vae_ctxlonger135 @ raw measured 0.584795 (train_frac 1.0) / 0.562833 (0.9).
+vae_ckpt_path: /data1/cympyc1785/LatentCamVid/camera_generation/latentcam/checkpoints/vae_20260302_300.pth
+vae_latent_scale: 0.58341
 geo_latent_cache_dir: /data1/cympyc1785/data/DL3DV/latent_cache_ctxlonger135

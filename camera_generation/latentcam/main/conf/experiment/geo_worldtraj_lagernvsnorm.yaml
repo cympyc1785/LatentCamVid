@@ -42,11 +42,25 @@ geo_posed: true
 scale_mode: geo_lagernvs
 geo_lagernvs_skip_ctx_norm: false
 cam_dim: 64
-intr_norm: raw              # vae_geolagernvs_wt's own convention
+intr_norm: rel              # [2026-08-01] see below -- shared with the baseline now
+# [2026-08-01] VAE switched from the per-scale_mode refit my_checkpoints/vae_geolagernvs_wt to the
+# BASELINE's checkpoints/vae_20260302_300, and intr_norm raw -> rel, so this arm, arm A
+# (geo_worldtraj_ctxlonger135) and the baseline (geo_worldtraj) share ONE camera VAE and ONE
+# intrinsics convention -- leaving scale_mode as the ONLY difference vs the baseline. See
+# geo_worldtraj_ctxlonger135.yaml for the full rationale. The matrix row for THIS scale_mode
+# (scripts/vae/vae_scale_matrix.py, 1264 samples / 200 scenes):
+#   ckpt                 scale_mode     rot      trans    intr_L1
+#   vae_20260302_300     geo_lagernvs   0.00544  0.00390  0.00248   <-- active (rel)
+#   vae_geolagernvs_wt   geo_lagernvs   0.02255  0.01917  0.27431   (rel; it was fit raw)
+#   vae_geolagernvs_wt   geo_lagernvs   0.00517  0.00513  0.00324   (raw = the old setting)
+# !! The matrix must be run with the geo_cover_* flags of THIS config (CFG=... env), because
+# geo_lagernvs is retrieval-DEPENDENT: _geo_lagernvs_scale re-runs _sample_geo_frustum_cover.
 # vae_latent_scale = the MEASURED latent std of this (ckpt, scale_mode, intr_norm) triple, so
-# `encode(traj) / vae_latent_scale` reaches the diffusion model at ~unit std.
-# my_checkpoints/vae_geolagernvs_wt/latent_std.txt: epoch 60 latent_std 0.564380 (train_frac 1.0,
-# 39817 segment). cf. arm A vae_ctxlonger135 0.584795, vae_worldtraj 0.569379.
-vae_ckpt_path: /data1/cympyc1785/LatentCamVid/camera_generation/latentcam/my_checkpoints/vae_geolagernvs_wt/last.pth
-vae_latent_scale: 0.564380
+# `encode(traj) / vae_latent_scale` reaches the diffusion model at ~unit std. Measured over the
+# FULL corpus (MAX_SCENES unset -> 39817 segments / 6095 scenes; recon L1 rot/trans/intr
+# 0.00593 / 0.00430 / 0.00261). The script's MAX_SCENES=200 default reads 4-7% LOW on every
+# scale_mode (0.51180 here) -- systematic, that subset is low-motion; do not use it.
+# Superseded: vae_geolagernvs_wt @ raw measured 0.564380 (train_frac 1.0).
+vae_ckpt_path: /data1/cympyc1785/LatentCamVid/camera_generation/latentcam/checkpoints/vae_20260302_300.pth
+vae_latent_scale: 0.53716
 geo_latent_cache_dir: /data1/cympyc1785/data/DL3DV/latent_cache

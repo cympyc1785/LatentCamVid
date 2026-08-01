@@ -57,9 +57,15 @@ vae_beta: 0.001
 # !! NOTE vae_latent_scale is supposed to be the MEASURED latent std of the
 # (ckpt, scale_mode, intr_norm) triple, because train/infer do `encode(traj) / vae_latent_scale`.
 # 0.96032625 was fit over SCVideo's MIXED corpus (DL3DV + DynamicVerse + dynpose-100k); on
-# DL3DV-only this triple measures 0.44696, so the diffusion input std is **0.4654**, not 1.0000
-# (i.e. the latents reach the model ~2.15x too SMALL). Kept verbatim by explicit user decision;
-# use 0.44696 for exactly unit-std input on DL3DV-only.
+# DL3DV-only this triple measures 0.47637, so the diffusion input std is **0.4960**, not 1.0000
+# (i.e. the latents reach the model ~2.02x too SMALL). Kept verbatim by explicit user decision;
+# use 0.47637 for exactly unit-std input on DL3DV-only.
+# !! [2026-08-01] The per-cell numbers below are the script's MAX_SCENES=200 default (1264
+# samples). That subset is LOW-MOTION and reads 4-7% low on every scale_mode -- systematic, not
+# sampling noise. The FULL corpus (39817 segments / 6095 scenes) for vae_20260302_300 @ intr rel:
+#   avg_scale 0.47637 (was 0.44696) | ctx_longer_135max 0.58341 (0.55882) | geo_lagernvs 0.53716
+#   (0.51180); recon L1 trans 0.00336 / 0.00495 / 0.00430.
+# Any config that pins vae_latent_scale must use a FULL-corpus measurement.
 # Measured on 1264 DL3DV samples by scripts/vae/vae_scale_matrix.py (lat.std | recon L1
 # rot/trans/intr):
 #   20260302_300 (64) avg_scale rel -> 0.44696 | 0.00504 0.00301 0.00222   <-- active triple

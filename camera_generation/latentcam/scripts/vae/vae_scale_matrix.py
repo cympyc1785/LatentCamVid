@@ -15,6 +15,13 @@ the recon L1 columns say whether the ckpt is in-distribution at all.
 
 Run:  python scripts/vae/vae_scale_matrix.py            (from latentcam/, env latentcam)
 env:  MAX_SCENES (default 200), MODES, CKPTS, META (default meta_worldtraj.csv)
+      [new] CFG=k=v,k=v  arbitrary config.py overrides applied before the dataset is built.
+      Needed for the retrieval-DEPENDENT scale_modes ('geo_lagernvs' calls
+      _sample_geo_frustum_cover, so its divisor depends on the geo_cover_* flags): without it
+      config.py's defaults (all off) give a DIFFERENT D than the experiment configs, e.g.
+        CFG=geo_view_sampling=frustum_cover,geo_cover_out_of_seg=true,geo_first_view_target_s=true,
+            geo_cover_subtract_first=true,geo_cover_centered_at_s=true
+      Leakage-free modes ('avg_scale', 'ctx_longer_135max', ...) are unaffected by these.
 """
 
 import os, os.path as osp, sys
@@ -28,6 +35,15 @@ cfg.geo_encoder = None                 # cam_param is geo-independent; skip VGGT
 cfg.max_scenes = int(os.environ.get('MAX_SCENES', 200))
 cfg.meta_csv = os.environ.get('META', 'meta_worldtraj.csv')
 cfg.lazy_dataset = True
+for _kv in os.environ.get('CFG', '').split(','):        # [new] see docstring
+    if _kv.strip():
+        _k, _v = _kv.strip().split('=', 1)
+        _lv = _v.lower()
+        setattr(cfg, _k, True if _lv == 'true' else False if _lv == 'false'
+                else None if _lv in ('none', 'null')
+                else int(_v) if _v.lstrip('-').isdigit()
+                else float(_v) if _v.replace('.', '', 1).lstrip('-').isdigit() else _v)
+        print(f"[CFG] {_k} = {getattr(cfg, _k)!r}")
 from dataset_dl3dv import CamDataset
 from models.vae_intr_large import CameraVAE
 
@@ -39,6 +55,11 @@ CKPTS = {                              # name -> (file relative to checkpoints/,
     # 1K-7K re-fit of the 32-dim ckpt above (experiment=vae_dl3dv_1_7k) -- drop-in, same
     # architecture/keys, so it belongs in the same matrix for a like-for-like comparison
     'vae_dl3dv_1_7k': ('../my_checkpoints/vae_dl3dv_1_7k/last.pth', 32),
+    # [new] the two per-scale_mode re-fits (intr_norm raw, train_frac 1.0) that arms A/B train
+    # against -- included so the shared-ckpt option can be judged against the best achievable
+    # trans recon AT THAT scale_mode, not in the abstract.
+    'vae_ctxlonger135': ('../my_checkpoints/vae_ctxlonger135/last.pth', 64),
+    'vae_geolagernvs_wt': ('../my_checkpoints/vae_geolagernvs_wt/last.pth', 64),
 }
 MODES = os.environ.get(
     'MODES', 'avg_scale,cam_dist_mean,first_farthest_135,context_longer').split(',')

@@ -291,6 +291,18 @@ All notable changes to the latentcam sub-project. Follows [Keep a Changelog](htt
   해당 mode 의 렌더를 같은 폴더가 아니라 **형제 폴더 `<scene><tag>_<k>`** 에서 읽는다.
   arm 마다 target trajectory 자체가 달라 폴더가 갈리는 drift 렌더를 한 영상으로 비교하기 위함.
   tag 없는 기존 `--modes a,b` 는 tag `""` 로 해석되어 **기존 동작 그대로**.
+- **`scripts/vae/vae_scale_matrix.py`: `CFG=k=v,k=v` env override + refit ckpt 2개 등록.**
+  `CFG` 는 dataset 을 만들기 전에 `config.py` 값을 덮어쓴다. retrieval-DEPENDENT 한
+  `scale_mode: geo_lagernvs` 는 `_sample_geo_frustum_cover` 를 다시 돌려 분모를 만들므로
+  `geo_cover_*` 플래그가 experiment config 과 어긋나면 **다른 분모**를 재게 된다
+  (`config.py` 기본값은 전부 off). leak-free mode(`avg_scale`, `ctx_longer_135max`)는 영향 없음.
+  `CFG` 미지정 시 **기존 동작 그대로**. `CKPTS` 에 `vae_ctxlonger135` / `vae_geolagernvs_wt` 를
+  추가해 arm 전용 VAE 와 공용 `vae_20260302_300` 을 한 표에서 비교할 수 있게 했다.
+  측정 결과(1264 samples / 200 scenes, `/tmp/vae_matrix_rel.log`, `intr rel` 행):
+  `vae_20260302_300` 이 세 scale_mode 전부에서 trans L1 최저
+  (avg_scale 0.00301 / ctx_longer_135max 0.00455 / geo_lagernvs 0.00390),
+  latent std 는 각각 0.44696 / 0.55882 / 0.51180. refit 2개는 `rel` 에서 rot L1 0.0225~0.0257 로
+  `vae_20260302_300`(0.0050~0.0057)의 4~5배 → **scale_mode 전용 refit 이 공용 ckpt 보다 나쁘다.**
 
 ### Changed
 - **`geo_worldtraj_ctxlonger135.yaml` / `geo_worldtraj_lagernvsnorm.yaml` 주석의 canonicalization

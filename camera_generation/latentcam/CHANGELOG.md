@@ -14,17 +14,18 @@ All notable changes to the latentcam sub-project. Follows [Keep a Changelog](htt
 
   | scale_mode | DL3DV (39817) | DynamicVerse (1818) | 합침 (41635) |
   |---|---|---|---|
-  | `avg_scale` | 0.47637 | 0.97305 | 0.50829 |
+  | `avg_scale` | 0.47637 | 0.10070 | 0.46632 |
   | `ctx_longer_135max` | 0.58341 | 0.42224 | 0.57732 |
   | `geo_lagernvs` | 0.53716 | 0.32543 | 0.52968 |
 
-  주의 2가지: (1) DynamicVerse엔 저장된 point-cloud `avg_scale`이 없어
-  (`shim._avg_scale` → `None`) `avg_scale` 행은 그쪽 절반이 `_cam_dist_mean_scale`로 fallback —
-  순수 avg_scale 측정이 아니다. (2) DynamicVerse sample은 scene당 겹치지 않는
-  `[k·T,(k+1)·T)` chunk 3개라 DL3DV의 sliding-window segment와 corpus 정의가 다르다.
-  DV의 fallback 행 0.97305가 SCVideo 상수 0.96032625와 거의 같다 — 그 상수가 DL3DV-only 값의
-  약 2배인 이유에 대한 정황 증거. 반대로 context 기반 분모(`ctx_longer_135max`/`geo_lagernvs`)에선
-  DV가 DL3DV보다 오히려 작다(0.42/0.33). 지금 3-arm은 DL3DV-only 학습이라 config엔 DL3DV 열을 쓴다.
+  DynamicVerse sample은 scene당 겹치지 않는 `[k·T,(k+1)·T)` chunk 3개라 DL3DV의 sliding-window
+  segment와 corpus 정의가 다르다 — 합침 열은 그 개수로 가중된 값이다.
+  DV의 `avg_scale` 행 0.10070이 극단적으로 작다: point-cloud avg_scale(장면 depth)이 카메라
+  이동보다 훨씬 커서 translation이 거의 0으로 눌린다(recon L1 trans 0.00131 = 전 cell 최소이지만
+  표적이 작아서지 잘 맞춰서가 아니다). context 기반 분모에서도 DV가 DL3DV보다 작다(0.42/0.33).
+  즉 **DV를 섞어도 SCVideo 상수 0.96032625는 재현되지 않는다** — 그 상수는 dynpose-100k를 포함한
+  원본 corpus 값이고 우리 데이터로는 설명되지 않는다.
+  지금 3-arm은 DL3DV-only 학습이라 config엔 DL3DV 열을 쓴다(변경 없음).
 - **`scripts/relaunch_after_stop.sh` (신규)** — `stop_at_epoch.sh`가 멈춘 run을 같은
   screen/GPU에서 자동 재기동한다(`<experiment> <screen> <gpu> <log>`). 프로세스 소멸 →
   `GRACE`(60s) → GPU 메모리 반납 확인 후 기동하므로 watchdog의 `stop_one`과 경합하지 않고,
@@ -332,6 +333,12 @@ All notable changes to the latentcam sub-project. Follows [Keep a Changelog](htt
   `vae_20260302_300`(0.0050~0.0057)의 4~5배 → **scale_mode 전용 refit 이 공용 ckpt 보다 나쁘다.**
 
 ### Changed
+- **`main/dynamicverse_shim.py`가 저장된 `avg_scale`을 읽는다** (기존엔 `lambda → None`이라
+  `scale_mode: avg_scale`이 조용히 `_cam_dist_mean_scale`로 fallback 됐다). DynamicVerse에도
+  `<scene>/avg_scale/<k>.json`이 있고 **파일 개수가 정확히 `floor(N_frames / num_frames)`** 라
+  우리가 자르는 chunk `[k·T,(k+1)·T)`와 1:1 — DL3DV와 똑같이 `data_name.split('_')[-1]`이
+  seg_key가 된다. 값/clamp/실패시 `None`은 `CamDataset._avg_scale`과 동일.
+  `load_dynamicverse`가 `avg_scale <hit>/<total>` 커버리지를 찍는다(현재 1818/1818).
 - **`main/dynamicverse_shim.py`가 `ds[i]`(진짜 `CamDataset.__getitem__`)를 지원한다.**
   `geo_hw` / `geo_num_views` / `geo_enabled` / `geo_latent_cache_dir` / `geo_cam_embed` /
   `geo_view_sampling` / `geo_posed` / `geo_shuffle_order`를 `CamDataset.__init__`과 같은

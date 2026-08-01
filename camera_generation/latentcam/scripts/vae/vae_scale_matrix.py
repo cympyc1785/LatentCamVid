@@ -24,12 +24,10 @@ env:  MAX_SCENES (default 200), MODES, CKPTS, META (default meta_worldtraj.csv)
       Leakage-free modes ('avg_scale', 'ctx_longer_135max', ...) are unaffected by these.
       [new] DATASET=dl3dv (default, unchanged) | dynamicverse | both, DV_CHUNKS (default 3).
       'both' concatenates the DL3DV CamDataset and the dynamicverse_shim, so the reported
-      latent std is the pooled one. Two caveats when DynamicVerse is in the corpus:
-        - it has no stored point-cloud avg_scale (shim's _avg_scale returns None), so the
-          'avg_scale' row silently falls back to _cam_dist_mean_scale on the DV half -- that
-          row is NOT a pure avg_scale measurement there.
-        - its samples are n_chunks NON-overlapping [k*T,(k+1)*T) chunks per scene, not DL3DV's
-          sliding-window segments, so 'both' weights the two corpora by those counts.
+      latent std is the pooled one. Caveat: DynamicVerse samples are n_chunks NON-overlapping
+      [k*T,(k+1)*T) chunks per scene, not DL3DV's sliding-window segments, so 'both' weights
+      the two corpora by those counts. (Its stored avg_scale IS keyed by that same chunk cut,
+      so the 'avg_scale' row is a real measurement -- see the shim's "avg_scale hit/total".)
 """
 
 import os, os.path as osp, sys
@@ -70,9 +68,9 @@ def build_dataset(mode):
         parts.append(CamDataset(cfg=cfg, type='train'))
     if DATASET in ('dynamicverse', 'both'):
         from dynamicverse_shim import load_dynamicverse
-        if mode == 'avg_scale':
-            print("[warn] DynamicVerse 는 저장된 avg_scale 이 없어 이 행은 그쪽 절반이 "
-                  "_cam_dist_mean_scale 로 fallback 된다 (순수 avg_scale 측정이 아님)")
+        # [2026-08-02] DynamicVerse 도 avg_scale/<k>.json 이 있고 chunk 와 1:1 이다.
+        # 커버리지("avg_scale hit/total")는 load_dynamicverse 가 찍는다 -- 하나라도 비면
+        # 그 chunk 는 조용히 _cam_dist_mean_scale 로 fallback 된다.
         parts.append(load_dynamicverse(cfg, n_chunks=DV_CHUNKS))
     return parts[0] if len(parts) == 1 else torch.utils.data.ConcatDataset(parts)
 

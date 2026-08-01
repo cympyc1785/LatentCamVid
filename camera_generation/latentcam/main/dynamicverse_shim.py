@@ -1,9 +1,12 @@
 """CamDataset-shaped shim over DynamicVerse, so DL3DV-only analysis/render scripts can run on it.
 
-Why a shim and not a real CamDataset subclass: DynamicVerse has no meta CSV, no COLMAP dir and no
-`avg_scale/`, and its `prompts.json` gives ONE segment covering the whole clip -- so there are no
-chunk 0/1/2 to compare. We cut the chunks ourselves, k-th chunk = frames [k*T, (k+1)*T), exactly
-as DL3DV's segments are laid out, and drop scenes shorter than n_chunks*T.
+Why a shim and not a real CamDataset subclass: DynamicVerse has no meta CSV and no COLMAP dir, and
+its `prompts.json` gives ONE segment covering the whole clip -- so there are no chunk 0/1/2 to
+compare. We cut the chunks ourselves, k-th chunk = frames [k*T, (k+1)*T), exactly as DL3DV's
+segments are laid out, and drop scenes shorter than n_chunks*T.
+`avg_scale/<k>.json` DOES exist (unlike what this docstring said before 2026-08-02) and its file
+count is exactly floor(N_frames / num_frames), i.e. keyed by the SAME chunk cut we make -- so
+`scale_mode: avg_scale` is a real measurement here, not a `_cam_dist_mean_scale` fallback.
 
 Only the attributes the retrieval path touches are filled in, so the (deterministic, greedy)
 `_sample_geo_frustum_cover` that defines the `geo_lagernvs` divisor is the REAL one from
@@ -67,7 +70,22 @@ def load_dynamicverse(cfg, root=DV_ROOT, n_chunks=3, scenes=None, with_frames=Fa
     ds.geo_cover_centered_at_s = getattr(cfg, 'geo_cover_centered_at_s', False)
     ds.geo_first_view_target_s = getattr(cfg, 'geo_first_view_target_s', False)
     ds._geo_idx_memo = {}
-    ds._avg_scale = lambda *a, **k: None          # DynamicVerse has no stored avg_scale
+    # [new] DynamicVerse 도 <scene>/avg_scale/<k>.json 을 갖고 있다 (2026-08-02 확인). 개수가
+    # 정확히 floor(N_frames / num_frames) 라 k 는 우리가 자르는 chunk [k*T,(k+1)*T) 와 1:1 이고,
+    # data_name 이 "<subset>/<scene>_<k>" 라 DL3DV 와 똑같이 split('_')[-1] 이 seg_key 가 된다.
+    # 값/clamp/실패시 None 은 CamDataset._avg_scale (dataset_dl3dv.py:744) 과 동일.
+    ds._scene_dirs = []                            # scene_idx -> <root>/<subset>/<scene>
+
+    def _dv_avg_scale(scene_idx, seg_key, _ds=ds):
+        p = os.path.join(_ds._scene_dirs[scene_idx], 'avg_scale', f'{seg_key}.json')
+        if not os.path.isfile(p):
+            return None
+        try:
+            return torch.tensor([float(json.load(open(p)))]).clamp(min=1e-5)
+        except Exception:
+            return None
+
+    ds._avg_scale = _dv_avg_scale
     # [new] `ds[i]` (= the REAL CamDataset.__getitem__) 를 그대로 쓰기 위한 나머지 속성.
     # 이전 사용자(norm_divisor_compare / dump_avgscale_render)는 ds.samples 와 _sample_geo_* 만
     # 건드려서 필요 없었지만, cam_param 을 뽑으려면(vae_scale_matrix DATASET=dynamicverse) 필요하다.
@@ -113,11 +131,17 @@ def load_dynamicverse(cfg, root=DV_ROOT, n_chunks=3, scenes=None, with_frames=Fa
         ds.intrinsics_list.append(torch.from_numpy(K))
         ds.hw_list.append(hw)
         ds.scene_names.append(key)
+        ds._scene_dirs.append(sd)
         ds.frame_files_list.append(
             extract_frames(sd, os.path.join(frame_cache, key), hw) if with_frames else None)
         for k in range(n_chunks):
             ds.samples.append((si, k * T_, (k + 1) * T_, "", f"{key}_{k}"))
     if verbose:
+        # [new] avg_scale 커버리지도 같이 찍는다 -- 하나라도 비면 그 chunk 는 조용히
+        # _cam_dist_mean_scale 로 fallback 되므로 avg_scale 행이 섞인 측정이 된다.
+        hit = sum(ds._avg_scale(si, dn.split('_')[-1]) is not None
+                  for si, _s, _e, _c, dn in ds.samples)
         print(f"[dynamicverse] {len(ds.extrinsics_list)} scenes with >= {need} frames "
-              f"-> {len(ds.samples)} chunks ({n_chunks} per scene)")
+              f"-> {len(ds.samples)} chunks ({n_chunks} per scene), "
+              f"avg_scale {hit}/{len(ds.samples)}")
     return ds

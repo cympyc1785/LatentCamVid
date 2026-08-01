@@ -66,15 +66,17 @@ vae_beta: 0.001
 #   avg_scale 0.47637 (was 0.44696) | ctx_longer_135max 0.58341 (0.55882) | geo_lagernvs 0.53716
 #   (0.51180); recon L1 trans 0.00336 / 0.00495 / 0.00430.
 # Any config that pins vae_latent_scale must use a FULL-corpus measurement.
-# [2026-08-01] DynamicVerse 도 같이 재봤다 (DATASET=dynamicverse|both, 606 scene / 1818 chunk;
-# DV 는 저장된 avg_scale 이 없어 그 행은 _cam_dist_mean_scale fallback 이다). vae_20260302_300 @ rel:
+# [2026-08-02] DynamicVerse 도 같이 재봤다 (DATASET=dynamicverse|both, 606 scene / 1818 chunk,
+# avg_scale 커버리지 1818/1818). vae_20260302_300 @ rel, FULL corpus:
 #   scale_mode          DL3DV     DV       DL3DV+DV(41635)
-#   avg_scale(DV=fallb) 0.47637   0.97305  0.50829
+#   avg_scale           0.47637   0.10070  0.46632
 #   ctx_longer_135max   0.58341   0.42224  0.57732
 #   geo_lagernvs        0.53716   0.32543  0.52968
-# DV 의 cam_dist_mean/avg_scale-fallback 행이 0.973 으로 SCVideo 상수 0.96032625 와 거의 같다 --
-# 그 상수가 왜 DL3DV-only 값의 2배인지에 대한 정황 증거. 반대로 ctx_longer_135max/geo_lagernvs 에서는
-# DV 가 DL3DV 보다 오히려 작다(0.42/0.33): DV 는 context 범위가 넓어 분모가 커진다.
+# DV 의 avg_scale 행이 0.10 으로 극단적으로 작다: point-cloud avg_scale(장면 depth)이 카메라 이동보다
+# 훨씬 커서 translation 이 거의 0 으로 눌린다 (recon L1 trans 0.00131 로 전 cell 중 최소지만
+# 그건 표적이 작아서지 잘 맞춰서가 아니다). context 기반 분모(ctx_longer_135max/geo_lagernvs)에서도
+# DV 가 DL3DV 보다 작다(0.42/0.33). 즉 DV 를 섞어도 0.96032625 는 재현되지 않는다 --
+# 그 상수는 dynpose-100k 를 포함한 SCVideo 원본 corpus 값이고 우리 데이터로는 설명 안 된다.
 # 지금 3-arm 은 DL3DV-only 학습이므로 config 에 박는 값은 DL3DV 열을 쓴다.
 # Measured on 1264 DL3DV samples by scripts/vae/vae_scale_matrix.py (lat.std | recon L1
 # rot/trans/intr):

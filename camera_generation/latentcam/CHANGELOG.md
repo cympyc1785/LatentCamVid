@@ -224,6 +224,16 @@ All notable changes to the latentcam sub-project. Follows [Keep a Changelog](htt
   `config.yaml` still points at `vae_20260202_065659_400` + `0.4467666`; no diffusion run has used
   the new ckpt yet, so the recon-vs-corpus-coverage trade is unevaluated.
 
+### Added (tooling)
+- **`scripts/stop_at_epoch.sh` (신규)** — 돌고 있는 학습을 지정 epoch 에서 멈추는 watchdog.
+  `scripts/stop_at_epoch.sh <TARGET_EPOCH> [screen:log:label ...]`, 인자 없으면 현재 5개 run 기본값.
+  tqdm 진행줄 `^Epoch N |` 을 폴링해 `N >= TARGET` 이면 정지하므로 epoch `0..TARGET-1`(= TARGET 개)은
+  검증/체크포인트까지 끝난 상태다. 정지는 **Ctrl+C → 최대 `STOP_WAIT`초 대기 → SIGTERM → SIGKILL**
+  순서 (바로 kill 하면 DataLoader worker 가 고아가 되어 GPU 를 물고 있음).
+  프로세스 매칭 패턴은 끝을 `$` 로 anchor 한다 — `experiment=geo_worldtraj` 가
+  `geo_worldtraj_camembed`/`_ctxlonger135`/`_lagernvsnorm`/`_decoupled` 의 **prefix** 라
+  anchor 없이는 baseline 하나 멈추려다 5개 run 을 전부 죽인다(실측 96 proc 매치 → anchor 후 run 당 17).
+
 ### Changed
 - **`geo_worldtraj_ctxlonger135.yaml` / `geo_worldtraj_lagernvsnorm.yaml` 주석의 canonicalization
   수치 정정 (주석만 변경, 학습 동작 무관).** 기존엔 `m = max‖target view center − frame s‖ / D` 의

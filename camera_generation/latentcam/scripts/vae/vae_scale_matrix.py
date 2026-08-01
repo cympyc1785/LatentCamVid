@@ -22,6 +22,14 @@ env:  MAX_SCENES (default 200), MODES, CKPTS, META (default meta_worldtraj.csv)
         CFG=geo_view_sampling=frustum_cover,geo_cover_out_of_seg=true,geo_first_view_target_s=true,
             geo_cover_subtract_first=true,geo_cover_centered_at_s=true
       Leakage-free modes ('avg_scale', 'ctx_longer_135max', ...) are unaffected by these.
+      [new] DATASET=dl3dv (default, unchanged) | dynamicverse | both, DV_CHUNKS (default 3).
+      'both' concatenates the DL3DV CamDataset and the dynamicverse_shim, so the reported
+      latent std is the pooled one. Two caveats when DynamicVerse is in the corpus:
+        - it has no stored point-cloud avg_scale (shim's _avg_scale returns None), so the
+          'avg_scale' row silently falls back to _cam_dist_mean_scale on the DV half -- that
+          row is NOT a pure avg_scale measurement there.
+        - its samples are n_chunks NON-overlapping [k*T,(k+1)*T) chunks per scene, not DL3DV's
+          sliding-window segments, so 'both' weights the two corpora by those counts.
 """
 
 import os, os.path as osp, sys
@@ -32,7 +40,8 @@ import torch
 import config as C
 cfg = C.cfg
 cfg.geo_encoder = None                 # cam_param is geo-independent; skip VGGT
-cfg.max_scenes = int(os.environ.get('MAX_SCENES', 200))
+_ms = os.environ.get('MAX_SCENES', '200')          # [new] 'none'/'0' -> FULL corpus (권장)
+cfg.max_scenes = None if _ms.lower() in ('none', 'null', '0', '') else int(_ms)
 cfg.meta_csv = os.environ.get('META', 'meta_worldtraj.csv')
 cfg.lazy_dataset = True
 for _kv in os.environ.get('CFG', '').split(','):        # [new] see docstring
@@ -46,6 +55,26 @@ for _kv in os.environ.get('CFG', '').split(','):        # [new] see docstring
         print(f"[CFG] {_k} = {getattr(cfg, _k)!r}")
 from dataset_dl3dv import CamDataset
 from models.vae_intr_large import CameraVAE
+
+DATASET = os.environ.get('DATASET', 'dl3dv')       # [new] dl3dv | dynamicverse | both
+DV_CHUNKS = int(os.environ.get('DV_CHUNKS', 3))
+if DATASET not in ('dl3dv', 'dynamicverse', 'both'):
+    raise SystemExit(f"DATASET must be dl3dv|dynamicverse|both, got {DATASET!r}")
+
+
+def build_dataset(mode):
+    """[new] DATASET 분기. 'dl3dv' 는 기존 동작 그대로(CamDataset 하나)."""
+    cfg.scale_mode = mode
+    parts = []
+    if DATASET in ('dl3dv', 'both'):
+        parts.append(CamDataset(cfg=cfg, type='train'))
+    if DATASET in ('dynamicverse', 'both'):
+        from dynamicverse_shim import load_dynamicverse
+        if mode == 'avg_scale':
+            print("[warn] DynamicVerse 는 저장된 avg_scale 이 없어 이 행은 그쪽 절반이 "
+                  "_cam_dist_mean_scale 로 fallback 된다 (순수 avg_scale 측정이 아님)")
+        parts.append(load_dynamicverse(cfg, n_chunks=DV_CHUNKS))
+    return parts[0] if len(parts) == 1 else torch.utils.data.ConcatDataset(parts)
 
 dev = 'cuda' if torch.cuda.is_available() else 'cpu'
 CKPT_DIR = osp.join(osp.dirname(__file__), '..', '..', 'checkpoints')
@@ -90,8 +119,7 @@ def main():
     vaes = {k: load_vae(*v) for k, v in CKPTS.items()}
     rows = []
     for mode in MODES:
-        cfg.scale_mode = mode
-        ds = CamDataset(cfg=cfg, type='train')
+        ds = build_dataset(mode)
         dl = torch.utils.data.DataLoader(ds, batch_size=16, shuffle=False, num_workers=8)
         # accumulate per (ckpt, intr convention)
         acc = {(c, iv): {'n': 0, 'sq': 0.0, 'rot': 0.0, 'tr': 0.0, 'intr': 0.0, 'el': 0}
@@ -117,9 +145,10 @@ def main():
             rows.append((cname, CKPTS[cname][1], mode, iv,
                          (a['sq'] / a['el']) ** 0.5,          # latent std (mean 0 assumed)
                          a['rot'] / a['n'], a['tr'] / a['n'], a['intr'] / a['n']))
-        print(f"[{mode}] {n_samples} samples", flush=True)
+        print(f"[{mode}] {n_samples} samples (DATASET={DATASET})", flush=True)
 
-    print(f"\n{'ckpt':<26} {'dim':>3} {'scale_mode':<19} {'intr':<4} "
+    print(f"\nDATASET={DATASET}  META={cfg.meta_csv}  MAX_SCENES={cfg.max_scenes}")
+    print(f"{'ckpt':<26} {'dim':>3} {'scale_mode':<19} {'intr':<4} "
           f"{'lat.std':>8} {'/0.96033':>8} {'/0.44677':>8} {'rot':>8} {'trans':>8} {'intr_L1':>8}")
     for c, dim, mode, iv, std, rot, tr, it in rows:
         print(f"{c:<26} {dim:>3} {mode:<19} {iv:<4} {std:>8.5f} {std/0.96032625:>8.4f} "

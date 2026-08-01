@@ -5,6 +5,33 @@ All notable changes to the latentcam sub-project. Follows [Keep a Changelog](htt
 ## [Unreleased]
 
 ### Added
+- **`scripts/vae/vae_scale_matrix.py`에 `DATASET` 분기 (`dl3dv` 기본 = 기존 동작 그대로 /
+  `dynamicverse` / `both`)** — `dynamicverse_shim.load_dynamicverse`로 DynamicVerse까지
+  같은 (ckpt × scale_mode × intr) 행렬을 잰다. `DV_CHUNKS`(기본 3)로 scene당 chunk 수 지정.
+  `MAX_SCENES=none|null|0`이면 FULL corpus(기존엔 큰 정수를 넣어야 했음). 요약줄에
+  `DATASET/META/MAX_SCENES`를 같이 찍는다.
+  `vae_20260302_300` @ `intr_norm: rel`, FULL corpus 실측:
+
+  | scale_mode | DL3DV (39817) | DynamicVerse (1818) | 합침 (41635) |
+  |---|---|---|---|
+  | `avg_scale` | 0.47637 | 0.97305 | 0.50829 |
+  | `ctx_longer_135max` | 0.58341 | 0.42224 | 0.57732 |
+  | `geo_lagernvs` | 0.53716 | 0.32543 | 0.52968 |
+
+  주의 2가지: (1) DynamicVerse엔 저장된 point-cloud `avg_scale`이 없어
+  (`shim._avg_scale` → `None`) `avg_scale` 행은 그쪽 절반이 `_cam_dist_mean_scale`로 fallback —
+  순수 avg_scale 측정이 아니다. (2) DynamicVerse sample은 scene당 겹치지 않는
+  `[k·T,(k+1)·T)` chunk 3개라 DL3DV의 sliding-window segment와 corpus 정의가 다르다.
+  DV의 fallback 행 0.97305가 SCVideo 상수 0.96032625와 거의 같다 — 그 상수가 DL3DV-only 값의
+  약 2배인 이유에 대한 정황 증거. 반대로 context 기반 분모(`ctx_longer_135max`/`geo_lagernvs`)에선
+  DV가 DL3DV보다 오히려 작다(0.42/0.33). 지금 3-arm은 DL3DV-only 학습이라 config엔 DL3DV 열을 쓴다.
+- **`scripts/relaunch_after_stop.sh` (신규)** — `stop_at_epoch.sh`가 멈춘 run을 같은
+  screen/GPU에서 자동 재기동한다(`<experiment> <screen> <gpu> <log>`). 프로세스 소멸 →
+  `GRACE`(60s) → GPU 메모리 반납 확인 후 기동하므로 watchdog의 `stop_one`과 경합하지 않고,
+  DataLoader worker가 GPU를 물고 있는 상태에서 뜨지 않는다. 이전 로그는 timestamp 붙여 보존
+  (watchdog이 그 로그로 epoch을 읽으므로 새 파일이어야 함). 기동 후 `stopwatch` watchdog을
+  재시작한다(`RESTART_WATCHDOG=0`으로 off) — 기존 watchdog은 멈춘 run을 `done_map`에 박아둬서
+  새로 띄운 run을 다시 안 보기 때문.
 - **`train_frac` (신규 config, 기본 0.9 = 기존 동작 그대로)** — `base.Trainer._make_batch_generator`의
   random split train 비율. `train_seg_list`/`test_seg_list`가 있으면 그 경로가 우선이라 영향 없음.
   `1.0`이면 index 전체를 train으로 쓰고 val은 비운다 — validate를 아예 안 하는 job 전용
@@ -305,6 +332,11 @@ All notable changes to the latentcam sub-project. Follows [Keep a Changelog](htt
   `vae_20260302_300`(0.0050~0.0057)의 4~5배 → **scale_mode 전용 refit 이 공용 ckpt 보다 나쁘다.**
 
 ### Changed
+- **`main/dynamicverse_shim.py`가 `ds[i]`(진짜 `CamDataset.__getitem__`)를 지원한다.**
+  `geo_hw` / `geo_num_views` / `geo_enabled` / `geo_latent_cache_dir` / `geo_cam_embed` /
+  `geo_view_sampling` / `geo_posed` / `geo_shuffle_order`를 `CamDataset.__init__`과 같은
+  `getattr` 기본값으로 채웠다. 기존 사용자(`norm_divisor_compare.py`,
+  `dump_avgscale_render.py`)는 `ds.samples`와 `_sample_geo_*`만 써서 영향 없음.
 - **normalization ablation 3-arm 의 VAE / intrinsics 통일 (`geo_worldtraj.yaml`,
   `geo_worldtraj_ctxlonger135.yaml`, `geo_worldtraj_lagernvsnorm.yaml`).** 기존 비교는
   normalization 외에 confound 가 3개 있었다 — (1) baseline 의 `vae_latent_scale` 0.96032625 는

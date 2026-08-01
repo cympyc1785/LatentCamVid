@@ -68,6 +68,18 @@ def load_dynamicverse(cfg, root=DV_ROOT, n_chunks=3, scenes=None, with_frames=Fa
     ds.geo_first_view_target_s = getattr(cfg, 'geo_first_view_target_s', False)
     ds._geo_idx_memo = {}
     ds._avg_scale = lambda *a, **k: None          # DynamicVerse has no stored avg_scale
+    # [new] `ds[i]` (= the REAL CamDataset.__getitem__) 를 그대로 쓰기 위한 나머지 속성.
+    # 이전 사용자(norm_divisor_compare / dump_avgscale_render)는 ds.samples 와 _sample_geo_* 만
+    # 건드려서 필요 없었지만, cam_param 을 뽑으려면(vae_scale_matrix DATASET=dynamicverse) 필요하다.
+    # 값은 전부 CamDataset.__init__ 과 같은 getattr 기본값이라 기존 경로 동작은 그대로다.
+    ds.geo_hw = tuple(getattr(cfg, 'geo_image_hw', (256, 448)))
+    ds.geo_num_views = getattr(cfg, 'geo_num_views', 4)
+    ds.geo_enabled = bool(getattr(cfg, 'geo_encoder', None))
+    ds.geo_latent_cache_dir = None                # DL3DV 용 캐시라 DynamicVerse 엔 없음
+    ds.geo_cam_embed = getattr(cfg, 'geo_cam_embed', None)
+    ds.geo_view_sampling = getattr(cfg, 'geo_view_sampling', 'even')
+    ds.geo_posed = getattr(cfg, 'geo_posed', False)
+    ds.geo_shuffle_order = getattr(cfg, 'geo_shuffle_order', False)
     ds.extrinsics_list, ds.intrinsics_list, ds.hw_list, ds.samples = [], [], [], []
     ds.frame_files_list, ds.scene_names = [], []
 

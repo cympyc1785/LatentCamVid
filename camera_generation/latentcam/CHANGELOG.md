@@ -246,6 +246,13 @@ All notable changes to the latentcam sub-project. Follows [Keep a Changelog](htt
   chunk 내부 `r` 의 중앙값으로 다시 나눈다 — **1.0 이면 경계가 평범한 프레임 스텝과 구별 불가**.
   기존 `scripts/render/render_scene_stitched.py` 는 LagerNVS 자체 정규화만 쓰고
   (`render_target_from_context.normalize`) 이 divisor 들을 못 받아 재사용 불가였다.
+- **`scripts/data/chunk_divisor_stability.py` (신규)** — chunk 가 넘어갈 때 normalization
+  divisor 가 얼마나 흔들리는지를 카메라 운동(직선성 / 속도)의 함수로 본다. 카메라 생성 후에
+  더 촘촘한 context 로 다시 랜더할 수 있으므로 화질이 아니라 **구조·scale 연속성**이
+  figure of merit 이라는 관점. `spread = (max_k D_k − min_k D_k) / mean_k D_k` (k=chunk).
+  `straight = maxd/pathlen`, `speed = pathlen/D_A` (scene scale 로 정규화해야 scene 간 비교 가능).
+  입력은 `scripts/data/norm_divisor_compare.py` 가 쓴 `per_segment.csv`,
+  출력은 같은 폴더에 `chunk_stability.{png,_summary.md,_per_scene.csv}`.
 
 ### Changed
 - **`geo_worldtraj_ctxlonger135.yaml` / `geo_worldtraj_lagernvsnorm.yaml` 주석의 canonicalization

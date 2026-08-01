@@ -47,7 +47,18 @@ os.makedirs(OUT, exist_ok=True)
 
 torch.manual_seed(cfg.random_seed); np.random.seed(cfg.random_seed); random.seed(cfg.random_seed)
 SEGS = [x for x in os.environ.get("SEGS", "").split(",") if x]
-ds = CamDataset.from_segments(cfg, SEGS) if SEGS else CamDataset(cfg, "train")
+# [new] DATASET=dynamicverse: same dump, but over main/dynamicverse_shim's CamDataset shim.
+# SEGS is then a list of "<subset>/<scene>" (chunks 0..DV_CHUNKS-1 of each are dumped), there is
+# no stored avg_scale (that divisor is simply absent from `scales`), and frames come from the
+# decoded video_input.mp4 cache. Default DATASET=dl3dv keeps the original behaviour verbatim.
+DATASET = os.environ.get("DATASET", "dl3dv")
+if DATASET == "dynamicverse":
+    from dynamicverse_shim import load_dynamicverse, DV_ROOT
+    ds = load_dynamicverse(cfg, os.environ.get("DV_ROOT", DV_ROOT),
+                           int(os.environ.get("DV_CHUNKS", "3")),
+                           scenes=SEGS or None, with_frames=True)
+else:
+    ds = CamDataset.from_segments(cfg, SEGS) if SEGS else CamDataset(cfg, "train")
 
 
 def geo_idxs_for(scene_idx, s, e):
@@ -116,7 +127,7 @@ for idx in range(len(ds.samples)):
         continue
     seg_key = data_name.split("_")[-1]
     avg = ds._avg_scale(scene_idx, seg_key)
-    if avg is None:                       # need the stored point-cloud avg_scale
+    if avg is None and DATASET != "dynamicverse":   # DL3DV needs the stored point-cloud avg_scale
         continue
     gi = geo_idxs_for(scene_idx, s, e)
     w2c = ds.extrinsics_list[scene_idx]
@@ -137,10 +148,11 @@ for idx in range(len(ds.samples)):
     centers_all = torch.linalg.inv(w2c.float())[:, :3, 3].numpy()
     scales = {
         "lagernvs": 1.35 * float(np.linalg.norm(centers_all[gi] - centers_all[gi[0]], axis=1).max()),
-        "avg_scale": float(avg),
         "maxd_seg": 1.35 * float(np.linalg.norm(
             centers_all[tgt_idxs] - centers_all[tgt_idxs[0]], axis=1).max()),
     }
+    if avg is not None:                   # absent on DynamicVerse
+        scales["avg_scale"] = float(avg)
     d2 = ctx_longer_135max(centers_all, s, e, cfg.num_frames)
     if d2 is not None:
         scales["ctx_longer_135max"] = d2
@@ -152,9 +164,12 @@ for idx in range(len(ds.samples)):
         scales["context_longer"] = m
     d = {"image_paths": [frame_files[i] for i in gi], "ctx_c2w": ctx_c2w,
          "ctx_K": K[gi].float(), "hw_full": torch.tensor([float(h), float(w)]),
-         "tgt_c2w": tgt_c2w, "avg_scale": float(avg), "seg": data_name,
+         "tgt_c2w": tgt_c2w, "avg_scale": float(avg) if avg is not None else float("nan"),
+         "seg": data_name,
          "tgt_image_paths": [frame_files[i] for i in tgt_idxs], "scales": scales}
-    od = os.path.join(OUT, data_name); os.makedirs(od, exist_ok=True)
+    # DynamicVerse data_name is "<subset>/<scene>_<k>" -> flatten so every segment stays one
+    # top-level dir (scripts/render/* glob <root>/* non-recursively).
+    od = os.path.join(OUT, data_name.replace("/", "__")); os.makedirs(od, exist_ok=True)
     torch.save(d, os.path.join(od, "render_inputs.pt"))
     print(f"[{done}] {data_name}: ctx {tuple(ctx_c2w.shape)} tgt {tuple(tgt_c2w.shape)} "
           f"geo_idxs={gi} scales=" + " ".join(f"{k}={v:.3f}" for k, v in scales.items()))

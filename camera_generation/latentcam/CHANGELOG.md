@@ -265,6 +265,32 @@ All notable changes to the latentcam sub-project. Follows [Keep a Changelog](htt
   `_avg_scale` 은 항상 `None`. `prompts.json` 이 clip 당 segment 1개만 주므로 chunk 는
   `[k*49, (k+1)*49)` 로 직접 자르고 `49*DV_CHUNKS` 프레임 미만 scene 은 버린다
   (606 scene / 1818 chunk 통과, 그중 590개 = 97% 가 `dynamic_replica` = 합성 데이터).
+- **`main/dynamicverse_shim.py` (신규)** — 위 `load_dynamicverse()` 를 스크립트 밖으로 빼내
+  분석(`norm_divisor_compare.py`)과 렌더 덤프(`dump_avgscale_render.py`)가 **같은 shim** 을 쓰게 함
+  (`norm_divisor_compare.py` 는 인라인 정의를 지우고 import 로 교체, 동작 동일).
+  추가된 것: `scenes=[...]` 로 특정 scene 만 로드, `with_frames=True` 면 `extract_frames()` 가
+  `video_input.mp4` 를 `/data1/cympyc1785/data/dynamicverse_frames/<sub>/<scene>/%05d.png` 로
+  디코드(캐시)해 `ds.frame_files_list` 를 채운다. **모든 subset 이 cx=252 / cy=140** 이라
+  포즈 추정 해상도는 항상 504x280 — 원본 mp4 해상도(1280x720 / 1920x1088)와 무관하게 그 크기로
+  리사이즈해야 intrinsics 와 맞는다.
+- **`main/dump_avgscale_render.py`: `DATASET=dynamicverse` 분기 (기본 `dl3dv` 는 기존 동작 그대로).**
+  `SEGS` 가 `"<subset>/<scene>"` 목록이 되고 각 scene 의 chunk 0..`DV_CHUNKS`-1 을 덤프한다.
+  DynamicVerse 는 저장된 `avg_scale` 이 없으므로 `avg is None` 이어도 skip 하지 않고
+  `scales` 에서 `avg_scale` 키만 빠진다(DL3DV 는 없으면 skip, 종전과 동일).
+  출력 폴더명은 `"/"` → `"__"` 로 평탄화 — `scripts/render/*` 가 `<root>/*` 를 비재귀 glob 하기 때문.
+- **`scripts/render/inject_carry_divisor.py` (신규)** — chunk 간 divisor spread 를 **눈으로 보이게**
+  만드는 렌더 입력 생성기. chunk 마다 자기 `D_k` 로 렌더하면 context 와 target 을 같은 수로
+  나누는 것이라 **전체 scene 의 similarity 변환**일 뿐이고, `camera_scale` 은 LagerNVS 의
+  **조건 토큰**(`tools/lagernvs/data/normalization.py:116-121`)이라 렌더 결과가 거의 안 변한다
+  (실측: divisor 5.7배 차이에도 PSNR 0.3 dB 미만 변화). divisor 는 renderer 의 속성이 아니라
+  **camera DM 출력의 단위**이므로, chained 생성기가 scale 을 chunk 0 에 고정해두고 계속
+  normalized trajectory 를 뱉는 상황 — `world_k = D_0 · t̂_k = (D_0/D_k) · GT_k` — 을 만들어
+  **target translation 만** `D_0/D_k` 배 하고 context 는 그대로 둔다. 그러면 GT 프레임 대비 PSNR 이
+  scale drift 를 직접 잰다. `<root>_drift/<scene>__<arm>_<k>/render_inputs.pt` 로 쓴다.
+- **`scripts/render/stitch_chunk_continuity.py`: `--modes` 에 `<tag>:<mode>` 형식 추가.**
+  해당 mode 의 렌더를 같은 폴더가 아니라 **형제 폴더 `<scene><tag>_<k>`** 에서 읽는다.
+  arm 마다 target trajectory 자체가 달라 폴더가 갈리는 drift 렌더를 한 영상으로 비교하기 위함.
+  tag 없는 기존 `--modes a,b` 는 tag `""` 로 해석되어 **기존 동작 그대로**.
 
 ### Changed
 - **`geo_worldtraj_ctxlonger135.yaml` / `geo_worldtraj_lagernvsnorm.yaml` 주석의 canonicalization

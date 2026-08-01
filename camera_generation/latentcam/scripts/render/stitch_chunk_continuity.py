@@ -114,34 +114,48 @@ def main():
     ap = argparse.ArgumentParser()
     ap.add_argument("--root", default="/data1/cympyc1785/LatentCamVid/camera_generation/latentcam/"
                                       "results/chunk_continuity")
-    ap.add_argument("--modes", default="ctx_longer_135max,lagernvs")
+    ap.add_argument("--modes", default="ctx_longer_135max,lagernvs",
+                    help="comma-separated. '<tag>:<mode>' pulls that mode from the SIBLING dir "
+                         "<scene><tag>_<k> instead of <scene>_<k> -- needed when the arms live in "
+                         "separate dirs because their TARGET trajectories differ "
+                         "(scripts/render/inject_carry_divisor.py). Plain '<mode>' == tag ''.")
     ap.add_argument("--size", type=int, default=512)
     ap.add_argument("--fps", type=int, default=8)
     ap.add_argument("--seam-frames", type=int, default=3,
                     help="how many frames after a boundary keep the red border")
     args = ap.parse_args()
-    modes = [m for m in args.modes.split(",") if m]
+    specs = [m.split(":", 1) if ":" in m else ["", m] for m in args.modes.split(",") if m]
+    TAG = {mode: tag for tag, mode in specs}          # mode -> sibling-dir tag
+    modes = [mode for _, mode in specs]
     import torch
 
     outdir = osp.join(args.root, "_stitched"); _os.makedirs(outdir, exist_ok=True)
     fnt, fnt_s, fnt_b = _font(15), _font(12), _font(26)
 
+    tag0 = TAG[modes[0]]
     scenes = defaultdict(list)
-    for sd in sorted(_glob.glob(osp.join(args.root, "*"))):
-        m = re.match(r"^(.*)_(\d+)$", osp.basename(sd))
+    for sd in sorted(_glob.glob(osp.join(args.root, f"*{tag0}_*"))):
+        m = re.match(rf"^(.*){re.escape(tag0)}_(\d+)$", osp.basename(sd))
         if not osp.isdir(sd) or not m or not osp.exists(osp.join(sd, "metrics.json")):
             continue
         scenes[m.group(1)].append((int(m.group(2)), sd))
+
+    def seg_dir(scene, idx, mode):
+        return osp.join(args.root, f"{scene}{TAG[mode]}_{idx}")
 
     for scene, items in sorted(scenes.items()):
         items.sort()
         segs = []
         for idx, sd in items:
-            met = json.load(open(osp.join(sd, "metrics.json")))
+            met = {}
+            for m in modes:
+                mp = osp.join(seg_dir(scene, idx, m), "metrics.json")
+                met.update({k: v for k, v in json.load(open(mp)).items()} if osp.exists(mp) else {})
             if any(m not in met for m in modes):
                 print(f"{scene}_{idx}: missing {[m for m in modes if m not in met]} -- skip scene"); segs = None; break
-            vids = {m: np.stack(imageio.mimread(osp.join(sd, f"render_{SFX.get(m, m)}.mp4"),
-                                                memtest=False))[:, :, :, :3] for m in modes}
+            vids = {m: np.stack(imageio.mimread(
+                osp.join(seg_dir(scene, idx, m), f"render_{SFX.get(m, m)}.mp4"),
+                memtest=False))[:, :, :, :3] for m in modes}
             T = min(len(v) for v in vids.values())
             H, W = vids[modes[0]].shape[1:3]
             rip = torch.load(osp.join(sd, "render_inputs.pt"), map_location="cpu", weights_only=False)

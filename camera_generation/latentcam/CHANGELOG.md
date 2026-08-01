@@ -253,6 +253,18 @@ All notable changes to the latentcam sub-project. Follows [Keep a Changelog](htt
   `straight = maxd/pathlen`, `speed = pathlen/D_A` (scene scale 로 정규화해야 scene 간 비교 가능).
   입력은 `scripts/data/norm_divisor_compare.py` 가 쓴 `per_segment.csv`,
   출력은 같은 폴더에 `chunk_stability.{png,_summary.md,_per_scene.csv}`.
+- **`scripts/data/norm_divisor_compare.py`: `DATASET=dynamicverse` 분기 (신규, 기본값
+  `DATASET=dl3dv` 는 기존 동작 그대로).** divisor 비교를 DL3DV 밖에서도 돌리기 위한 옵션.
+  추가 env: `DATASET` / `DV_ROOT`(기본 `/data1/cympyc1785/data/dynamicverse`) / `DV_CHUNKS`(기본 3).
+  구현은 `load_dynamicverse()` — `CamDataset.__new__` 로 인스턴스를 만들고
+  `extrinsics_list / intrinsics_list / hw_list / samples / geo_cover_* / _geo_idx_memo` 만 채우는
+  shim 이다. arm B 분모를 정의하는 retrieval 이 **재구현이 아니라 `dataset_dl3dv` 의 실제
+  `_sample_geo_frustum_cover`** 그대로 돌아야 arm A/B 비교가 성립하기 때문.
+  DynamicVerse `cameras.json` 의 `rotation`/`position` 은 **R_w2c / t_w2c**
+  (`utils/camera_utils.get_camera_params_from_json` 과 동일 해석), `avg_scale` 은 없으므로
+  `_avg_scale` 은 항상 `None`. `prompts.json` 이 clip 당 segment 1개만 주므로 chunk 는
+  `[k*49, (k+1)*49)` 로 직접 자르고 `49*DV_CHUNKS` 프레임 미만 scene 은 버린다
+  (606 scene / 1818 chunk 통과, 그중 590개 = 97% 가 `dynamic_replica` = 합성 데이터).
 
 ### Changed
 - **`geo_worldtraj_ctxlonger135.yaml` / `geo_worldtraj_lagernvsnorm.yaml` 주석의 canonicalization

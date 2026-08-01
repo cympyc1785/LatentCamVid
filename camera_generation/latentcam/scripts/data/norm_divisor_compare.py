@@ -53,6 +53,9 @@ SPLIT = os.environ.get("SPLIT", "train")
 SEED = int(os.environ.get("SEED", "0"))
 ONE_PER_SCENE = os.environ.get("ONE_PER_SCENE", "1") == "1"       # [new]
 WORKERS = int(os.environ.get("WORKERS", "1"))                     # [new]
+DATASET = os.environ.get("DATASET", "dl3dv")                      # [new] dl3dv | dynamicverse
+DV_ROOT = os.environ.get("DV_ROOT", "/data1/cympyc1785/data/dynamicverse")
+DV_CHUNKS = int(os.environ.get("DV_CHUNKS", "3"))
 OUT = os.path.join(HERE, "results", "compare",
                    os.environ.get("OUT_NAME", "norm_divisor_compare"))
 os.makedirs(OUT, exist_ok=True)
@@ -60,8 +63,70 @@ os.makedirs(OUT, exist_ok=True)
 cfg, _ = load_cfg("config", overrides=[f"experiment={EXP}"])
 from dataset_dl3dv import CamDataset
 
+
+def load_dynamicverse(cfg, root, n_chunks):
+    """[new] DATASET=dynamicverse: a CamDataset-shaped shim over DynamicVerse's cameras.json.
+
+    Why a shim and not CamDataset: DynamicVerse has no meta CSV, no COLMAP dir and no
+    avg_scale/, and its prompts.json gives ONE segment covering the whole clip -- so there are
+    no chunk 0/1/2 to compare. We therefore cut the chunks ourselves, k-th chunk =
+    frames [k*T, (k+1)*T), exactly as DL3DV's segments are laid out.
+
+    Only the attributes `_frustum_cover_uncached` / `_np_context_scale` / `row_for` touch are
+    filled in, so the (deterministic, greedy) retrieval that defines arm B's divisor is the
+    REAL one from dataset_dl3dv, not a reimplementation. The DL3DV path above is untouched.
+
+    cameras.json convention: `rotation`/`position` are R_w2c/t_w2c -- same as
+    utils/camera_utils.get_camera_params_from_json:356-360. (h,w) is inferred as (2cy, 2cx);
+    it only feeds the frustum FoV in the coverage search.
+    """
+    T_ = cfg.num_frames
+    need = n_chunks * T_
+    ds = CamDataset.__new__(CamDataset)
+    ds.cfg = cfg
+    ds.num_frames = T_
+    ds.geo_cover_k = getattr(cfg, 'geo_cover_k', 6)
+    ds.geo_cover_radius = getattr(cfg, 'geo_cover_radius', 2.0)
+    ds.geo_cover_ndepth = getattr(cfg, 'geo_cover_ndepth', 3)
+    ds.geo_cover_out_of_seg = getattr(cfg, 'geo_cover_out_of_seg', False)
+    ds.geo_cover_before_only = getattr(cfg, 'geo_cover_before_only', False)
+    ds.geo_cover_centered_at_s = getattr(cfg, 'geo_cover_centered_at_s', False)
+    ds.geo_first_view_target_s = getattr(cfg, 'geo_first_view_target_s', False)
+    ds._geo_idx_memo = {}
+    ds._avg_scale = lambda *a, **k: None          # DynamicVerse has no stored avg_scale
+    ds.extrinsics_list, ds.intrinsics_list, ds.hw_list, ds.samples = [], [], [], []
+    subsets = [d for d in sorted(os.listdir(root))
+               if os.path.isdir(os.path.join(root, d)) and d != "eval_index"]
+    for sub in subsets:
+        for name in sorted(os.listdir(os.path.join(root, sub))):
+            cj = os.path.join(root, sub, name, "cameras.json")
+            if not os.path.exists(cj):
+                continue
+            try:
+                cams = json.load(open(cj))
+            except Exception:
+                continue
+            if len(cams) < need:
+                continue
+            w2c = np.tile(np.eye(4, dtype=np.float32), (len(cams), 1, 1))
+            K = np.zeros((len(cams), 3, 3), dtype=np.float32)
+            for i, p in enumerate(cams):
+                w2c[i, :3, :3] = p["rotation"]; w2c[i, :3, 3] = p["position"]
+                K[i] = [[p["fx"], 0, p["cx"]], [0, p["fy"], p["cy"]], [0, 0, 1]]
+            si = len(ds.extrinsics_list)
+            ds.extrinsics_list.append(torch.from_numpy(w2c))
+            ds.intrinsics_list.append(torch.from_numpy(K))
+            ds.hw_list.append((int(round(2 * cams[0]["cy"])), int(round(2 * cams[0]["cx"]))))
+            for k in range(n_chunks):
+                ds.samples.append((si, k * T_, (k + 1) * T_, "", f"{sub}/{name}_{k}"))
+    print(f"[dynamicverse] {len(ds.extrinsics_list)} scenes with >= {need} frames "
+          f"-> {len(ds.samples)} chunks ({n_chunks} per scene)")
+    return ds
+
+
 torch.manual_seed(SEED); np.random.seed(SEED); random.seed(SEED)
-ds = CamDataset(cfg, SPLIT)
+ds = load_dynamicverse(cfg, DV_ROOT, DV_CHUNKS) if DATASET == "dynamicverse" \
+    else CamDataset(cfg, SPLIT)
 T = cfg.num_frames
 
 

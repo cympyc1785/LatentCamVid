@@ -233,6 +233,19 @@ All notable changes to the latentcam sub-project. Follows [Keep a Changelog](htt
   프로세스 매칭 패턴은 끝을 `$` 로 anchor 한다 — `experiment=geo_worldtraj` 가
   `geo_worldtraj_camembed`/`_ctxlonger135`/`_lagernvsnorm`/`_decoupled` 의 **prefix** 라
   anchor 없이는 baseline 하나 멈추려다 5개 run 을 전부 죽인다(실측 96 proc 매치 → anchor 후 run 당 17).
+- **`scripts/render/stitch_chunk_continuity.py` (신규)** — 연속된 segment 들의 per-segment LagerNVS
+  랜더를 **scene 당 하나의 연속 영상**으로 이어붙여 chunk 경계 seam 을 본다. 입력은 기존 2-step
+  ablation 파이프라인 출력(`main/dump_avgscale_render.py` → `tools/lagernvs/render_avgscale.py`)
+  그대로이고 두 스크립트는 수정하지 않았다 — dump 가 `scale_mode` 와 무관하게 모든 divisor 를
+  `scales` dict 에 넣으므로 dump 1회 + `RD_MODES` 로 두 arm 을 모두 커버한다.
+  `<root>/_stitched/` 에 `<scene>_compare.mp4`(`[GT | mode…]`), mode 별 `[GT | render]` mp4,
+  `<scene>_psnr.png`(global frame 별 PSNR + 경계 점선), `<scene>_summary.json` 을 쓴다.
+  경계 직후 `--seam-frames`(기본 3) 프레임은 빨간 테두리 + `CHUNK N` 배너.
+  seam 정량화는 `seam_metric`: 연속 segment 는 frame index 가 이어져 GT 자체도 움직이므로
+  `r(t) = mean|R[t+1]−R[t]| / mean|G[t+1]−G[t]|` 로 GT 변화량으로 나눈 뒤, 경계의 `r` 을
+  chunk 내부 `r` 의 중앙값으로 다시 나눈다 — **1.0 이면 경계가 평범한 프레임 스텝과 구별 불가**.
+  기존 `scripts/render/render_scene_stitched.py` 는 LagerNVS 자체 정규화만 쓰고
+  (`render_target_from_context.normalize`) 이 divisor 들을 못 받아 재사용 불가였다.
 
 ### Changed
 - **`geo_worldtraj_ctxlonger135.yaml` / `geo_worldtraj_lagernvsnorm.yaml` 주석의 canonicalization

@@ -6,11 +6,23 @@
 #   context views : geo_lagernvs_skip_ctx_norm=true -> LagerNVS's own
 #                   1.35*max||ctx center - ctx view0 center|| is REPLACED by the same D
 #                   (train_latent_cam_dm.geo_encode passes it as override_scale).
-# Why this divisor: of the leakage-free candidates it canonicalizes the target reach
-#   m = max||target view center - frame s|| / D best -- over 39817 post-blacklist segments
-#   m mean 0.7693 std 0.2937 min 0.0299 max 5.186 med 0.7661, sd(log10 m) 0.1864, p95/p05 4.04,
-#   CV 0.3818 (no normalization: CV 0.4265; ctx_side_135max, i.e. the same 1.35*max taken over
-#   the WHOLE context range without windowing: CV 0.5078 -- worse than not normalizing).
+# Why this divisor: it removes the BETWEEN-SCENE arbitrary COLMAP scale best of the leakage-free
+#   candidates. Over 39817 post-blacklist segments / 6095 scenes, log10 of the normalized reach
+#   m = max||target view center - frame s|| / D, split into scene-mean (between) and
+#   scene-internal (within) parts:
+#              sd(log10 m)  between  within | corr_btw  corr_wth
+#     no norm     0.2074     0.1340  0.1573 |    -         -
+#     THIS (A)    0.1864     0.0228  0.1850 |  0.986    -0.544     between -83.0%
+#     geo_lagernvs 0.1890    0.0525  0.1816 |  0.923    -0.080     between -60.8%
+#     avg_scale   0.3073     0.2631  0.1577 |  0.101     0.080     between +96.4% (WORSE)
+#   between-scene spread is the pure nuisance (each scene's COLMAP scale is arbitrary) and is what
+#   this is for; the within-scene spread is real signal ("this segment moves more") and should NOT
+#   be cancelled -- so the total sd is the wrong figure of merit. D here is retrieval-INDEPENDENT
+#   (whole context range), unlike geo_lagernvs whose D depends on which context views get picked;
+#   the cost is corr_wth -0.544, a structural artifact of context range = target segment's complement.
+#   ctx_side_135max (same 1.35*max over the WHOLE context range without windowing) is worse than
+#   not normalizing at all.
+#   D distribution: min 0.4987 p0.1 1.890 med 5.382 -- the clamp(min=1e-5) never binds (0 segments).
 #   Windowing to num_frames is what puts D in LagerNVS's own units: render probe cam_scale
 #   med 0.9602 (native 0.7407) and -1.576 dB vs -4.025 dB for ctx_side_135max.
 #

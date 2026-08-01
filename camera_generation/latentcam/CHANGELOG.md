@@ -225,6 +225,19 @@ All notable changes to the latentcam sub-project. Follows [Keep a Changelog](htt
   the new ckpt yet, so the recon-vs-corpus-coverage trade is unevaluated.
 
 ### Changed
+- **`geo_worldtraj_ctxlonger135.yaml` / `geo_worldtraj_lagernvsnorm.yaml` 주석의 canonicalization
+  수치 정정 (주석만 변경, 학습 동작 무관).** 기존엔 `m = max‖target view center − frame s‖ / D` 의
+  **전체** sd/CV만 적어서 scene scale 정규화가 실제로 하라는 일을 못 재고 있었다. log10(m)을
+  scene 평균(between) / scene 내 편차(within)로 분해한 표로 교체
+  (39817 segment / 6095 scene, `results/compare/norm_divisor_compare_postbl/per_segment.csv`):
+  between-scene sd 0.1340(정규화 없음) → **A 0.0228(−83.0%) / B 0.0525(−60.8%)**,
+  `avg_scale`(현 운영)은 0.2631 로 **오히려 악화(+96.4%)**. within-scene 은 A 0.1850 / B 0.1816 으로
+  둘 다 나빠지지만(corr_wth −0.544 / −0.080) 이건 "이 segment 는 많이 움직인다"는 **진짜 신호**라
+  없앨 대상이 아니므로 전체 sd 는 애초에 틀린 figure of merit 이었다.
+  아울러 arm B 의 분모가 **retrieval 된 context view 기준**(`_sample_geo_frustum_cover` 가 뽑은
+  view 에 대해 `1.35*max‖center − center[s]‖`)이라 추론 때 retrieval 이 달라지면 D 가 바뀐다는 점,
+  arm A 의 분모는 context range 전체라 retrieval 과 독립이라는 점을 명시.
+  `clamp(min=1e-5)` 는 실측상 한 번도 걸리지 않음(D min 0.4046 / 0.4987, `D ≤ 1e-2` 0개)도 기록.
 - **`scripts/render/compare_textonly_vs_worldtraj.py` 를 2-way 하드코딩에서 N-way 로 일반화.**
   `--run LABEL=DIR`(반복 가능) / `--ref` / `--out` / `--ctx` / `--contact` / `--per-target` 추가.
   **인자 없이 실행하면 기존 2-way 동작(text-only vs worldtraj, 같은 출력 경로)이 그대로 재현된다** —

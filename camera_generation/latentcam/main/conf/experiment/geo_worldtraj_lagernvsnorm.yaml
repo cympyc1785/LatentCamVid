@@ -10,9 +10,25 @@
 # context and target land in one frame + one scale without any override.
 # Consequence: the existing first_cam_included geo latent cache is still bit-exact valid (the
 # cam_token is unchanged), so this run reuses it -- unlike variant A.
-# Canonicalization over 39817 post-blacklist segments (m = max||target view center - frame s||/D):
-#   m mean 0.6197 std 0.2622 min 0.0225 max 7.537 med 0.6096, sd(log10 m) 0.1890, p95/p05 4.18,
-#   CV 0.4231.
+# This divisor is RETRIEVAL-DEPENDENT: _geo_lagernvs_scale (dataset_dl3dv.py:764-772) takes
+# 1.35*max||center - center[s]|| over the views _sample_geo_frustum_cover actually PICKED, so a
+# different retrieval at inference gives a different D. Variant A's D (whole context range) does not
+# have that coupling.
+# Over 39817 post-blacklist segments / 6095 scenes, log10 of the normalized reach
+# m = max||target view center - frame s|| / D, split into scene-mean (between) and
+# scene-internal (within) parts:
+#            sd(log10 m)  between  within | corr_btw  corr_wth
+#   no norm     0.2074     0.1340  0.1573 |    -         -
+#   THIS (B)    0.1890     0.0525  0.1816 |  0.923    -0.080     between -60.8%
+#   ctxlonger   0.1864     0.0228  0.1850 |  0.986    -0.544     between -83.0%
+#   avg_scale   0.3073     0.2631  0.1577 |  0.101     0.080     between +96.4% (WORSE)
+# between-scene spread is the pure nuisance (arbitrary per-scene COLMAP scale) and is what this is
+# for; within-scene spread is real signal and should NOT be cancelled, so the total sd is the wrong
+# figure of merit. B loses to A on between-scene but is the least anti-correlated within a scene
+# (-0.080 vs -0.544), because its context views adapt locally around frame s.
+# B's edge is elsewhere: r = D_lagernvs/D is exactly 1.000 (sd 0.000), i.e. zero LagerNVS domain
+# shift, vs A's r med 1.262 sd 0.091.
+# D distribution: min 0.4046 p0.1 1.703 med 6.911 -- the clamp(min=1e-5) never binds (0 segments).
 exp_name: dl3dv_geo_worldtraj_lagernvsnorm
 meta_csv: meta_worldtraj.csv
 coverage_blacklist_path: null

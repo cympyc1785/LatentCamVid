@@ -37,3 +37,16 @@ intr_norm: rel
 vae_ckpt_path: /data1/cympyc1785/LatentCamVid/camera_generation/latentcam/checkpoints/vae_20260302_300.pth
 vae_latent_scale: 0.96032625   # baseline c4d2k5y4 와 동일 (실측값 0.58341 이 아님 — 위 주석)
 geo_latent_cache_dir: /data1/cympyc1785/data/DL3DV/latent_cache_ctxlonger135
+
+# [2026-08-03] split 고정. random_split 은 len(dataset) 에 의존해서, blacklist/meta_csv 가 바뀌면
+# seed 42 여도 분할이 통째로 재배치된다 (실측: pool 39830 -> 39817 로 13개 빠지자 wandb val 160개
+# 중 1개만 일치). 그래서 baseline c4d2k5y4(pool 39830) 의 분할을 그대로 덤프한 리스트를 못박아
+# c4d2k5y4 와 같은 train/val 위에서 학습한다.
+#   dump: FROM_CACHE=<...__msNone.pt> OUT_SUFFIX=_c4d2k5y4 scripts/data/make_latentcam_splits.py
+#   train 35847 / test 3983 (현재 frozen-pose blacklist 로 train 10, test 3 이 dataset 에 없어
+#   base.py 가 skip -> 실효 35837 / 3980)
+#   리스트는 random_split 순서 그대로다. 정렬 금지 -- 정렬하면 val 앞 160 이 전부 1K batch 가 되고
+#   (실측 160/160 vs 26/160) c4d2k5y4 의 wandb val 160 과도 달라진다. base.py:106 이 shuffle=False
+#   라 test 리스트 앞 160 이 그대로 val 이 된다.
+train_seg_list: /data1/cympyc1785/data/DL3DV/scenes/latentcam_train_seg_list_c4d2k5y4.txt
+test_seg_list: /data1/cympyc1785/data/DL3DV/scenes/latentcam_test_seg_list_c4d2k5y4.txt

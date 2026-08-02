@@ -301,7 +301,32 @@ All notable changes to the latentcam sub-project. Follows [Keep a Changelog](htt
   `config.yaml` still points at `vae_20260202_065659_400` + `0.4467666`; no diffusion run has used
   the new ckpt yet, so the recon-vs-corpus-coverage trade is unevaluated.
 
+### Changed
+- **`conf/experiment/geo_worldtraj_{ctxlonger135,lagernvsnorm}_scale96.yaml`에 `train_seg_list` /
+  `test_seg_list` 고정** — `base.py:_make_batch_generator`의 `random_split`은 partition이
+  `len(dataset)`에 의존해서, `meta_csv`나 blacklist가 바뀌면 `random_seed: 42`가 같아도 분할이 통째로
+  재배치된다. 실측으로 pool이 세 번 달랐다: 39837(07-23 리스트 덤프) → 39830(`54baa4c`로
+  `meta_worldtraj.csv` 교체, index cache key에 파일명만 있고 content hash가 없어 조용히 재생성) →
+  39817(`0219fcb`로 frozen-pose blacklist가 cache key에 추가). 그 결과 baseline
+  `20260731_001511`(wandb `c4d2k5y4`)의 val과 08-02 cohort의 val은 3983개 중 419개(10.52%)만 겹치고
+  wandb에 찍히는 **앞 160개는 1개만** 겹쳤다. 게다가 새 val의 89.48%가 old cohort의 **train**이라
+  두 cohort를 가로지르는 비교는 전부 오염이었다. 이제 두 arm은 `c4d2k5y4`의 분할을 그대로 덤프한
+  `latentcam_{train,test}_seg_list_c4d2k5y4.txt`를 못박아 쓴다 (train 35847 / test 3983, 현재
+  blacklist로 train 10·test 3이 dataset에 없어 실효 35837/3980; 앞 170개는 영향 없어 wandb val 160은
+  `c4d2k5y4`와 bit-identical). 이건 2026-07-23에 받은 "seg_list 써서 학습하고 validation도 앞에서
+  160개 고정" 지시가 `base.py`·`config.yaml`·`geo_worldtraj_seglist.yaml`까지만 반영되고 이후 실험
+  config 8개에 배선되지 않았던 누락을 메우는 것이다.
+
 ### Changed (tooling)
+- **`scripts/data/make_latentcam_splits.py`에 `FROM_CACHE` / `OUT_SUFFIX`** (스크립트 자체도 이번에
+  처음 커밋). `FROM_CACHE=<index cache .pt>`면 live config로 `CamDataset`을 새로 만드는 대신 **그
+  cache의 `samples`를 그대로** 9:1 `random_split`한다 — 이미 끝난 run의 분할을 재현하려면 그 run이
+  쪼갠 pool 자체가 필요한데, live config는 지금 blacklist(39817)를 달고 있어 `c4d2k5y4`의
+  39830을 만들 방법이 없기 때문. `OUT_SUFFIX`는 `.txt` 앞에 붙어 2026-07-23 리스트를 덮어쓰지 않게
+  한다. 둘 다 비우면 동작·출력 모두 이전과 동일.
+  주의: 리스트는 **`random_split` 순서 그대로** 쓴다. 정렬 금지 — `base.py:106`이 valid loader를
+  `shuffle=False`로 돌려 test 리스트 앞 160개가 곧 wandb val인데, 정렬하면 그 160개가 전부 1K batch가
+  되고(실측 160/160 vs 원 순서 26/160) `c4d2k5y4`의 val과도 달라진다.
 - **testset eval 출력 위치 `results/testset_eval/` → `eval_my/`** (`scripts/eval_testset.py`의
   `EVAL_ROOT` 상수). 사용자 지시. `--out`으로 여전히 override 가능하고
   `scripts/eval_testset_queue.sh`는 경로를 하드코딩하지 않아 그대로 따라간다. 기존 5개 결과 디렉토리

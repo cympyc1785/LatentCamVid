@@ -36,3 +36,8 @@ intr_norm: rel
 vae_ckpt_path: /data1/cympyc1785/LatentCamVid/camera_generation/latentcam/checkpoints/vae_20260302_300.pth
 vae_latent_scale: 0.96032625   # baseline c4d2k5y4 와 동일 (실측값 0.53716 이 아님 — 위 주석)
 geo_latent_cache_dir: /data1/cympyc1785/data/DL3DV/latent_cache
+
+# [2026-08-03] split 고정 — 근거와 덤프 방법은 geo_worldtraj_ctxlonger135_scale96.yaml 주석 참조.
+# baseline c4d2k5y4(pool 39830) 의 분할을 못박아 A'/B'/c4d2k5y4 가 같은 train/val 을 쓰게 한다.
+train_seg_list: /data1/cympyc1785/data/DL3DV/scenes/latentcam_train_seg_list_c4d2k5y4.txt
+test_seg_list: /data1/cympyc1785/data/DL3DV/scenes/latentcam_test_seg_list_c4d2k5y4.txt

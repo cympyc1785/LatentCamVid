@@ -5,6 +5,20 @@ All notable changes to the latentcam sub-project. Follows [Keep a Changelog](htt
 ## [Unreleased]
 
 ### Added
+- **`conf/experiment/geo_worldtraj_{ctxlonger135,lagernvsnorm}_scale96.yaml` (신규)** — arm A/B와
+  전부 동일하되 `vae_latent_scale`만 **0.96032625**. 끝난 baseline
+  `20260731_001511_dl3dv_geo_worldtraj`(wandb `c4d2k5y4`, ep150)가 그 값으로 학습됐는데, 도는
+  A(0.58341)/B(0.53716)는 각 (ckpt, scale_mode, intr_norm) triple의 FULL-corpus 실측 latent std로
+  고쳐 박은 값이라 **diffusion 입력 std**라는 교란변수가 하나 더 있었다. 이 arm은 그 상수를
+  baseline에 맞춰, baseline 대비 `scale_mode`(+A'는 `geo_lagernvs_skip_ctx_norm`과 전용 geo cache)만
+  다르게 만든다. hydra resolved config diff로 검증:
+  `A→A'` / `B→B'` = `exp_name` + `vae_latent_scale` 뿐, `c4d2k5y4→A'/B'` = `scale_mode`(+A'의 2개)
+  및 이름이 바뀌거나 이후 추가된 키(`geo_anchor_first_frame`→`geo_cover_centered_at_s` 둘 다 true,
+  `geo_cam_embed` null, `train_frac` 0.9 = 당시 실효 기본값) 뿐.
+  단서: 0.96032625는 우리 corpus 실측값이 아니라 SCVideo 원본 corpus 상수다. A'/B'의 입력 std는
+  각각 0.6075 / 0.5594배로 눌리고 baseline은 0.4961배 — 눌림 정도까지 같지는 않다(`scale_mode`가
+  divisor를 바꾸는 이상 불가능). 이 arm이 맞추는 건 "같은 상수를 쓴다"는 조건이다.
+  `vae_latent_scale`은 `geo_emb`에 관여하지 않으므로 geo latent cache는 bit-exact 재사용.
 - **`scripts/eval_testset.py` (신규)** — 학습이 끝난 run을 **held-out split 전체**에 대해 추론 +
   CLaTr/caption 평가한다. `train_latent_cam_dm.run_validation`은 `val_max_batches`(20) ×
   `batch_size`(8) = 160개만 보므로 wandb val 곡선은 160-sample 추정치다. 이 스크립트는 같은

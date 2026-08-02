@@ -1,0 +1,38 @@
+# @package _global_
+# VARIANT B' — geo_worldtraj_lagernvsnorm 와 전부 동일하되 vae_latent_scale 만 0.96032625.
+#
+# 왜: 끝난 baseline 20260731_001511_dl3dv_geo_worldtraj (wandb c4d2k5y4, ep150) 는
+# vae_latent_scale 0.96032625 로 학습됐다. 지금 도는 A(0.58341)/B(0.53716) 는 각 (ckpt,
+# scale_mode, intr_norm) triple 의 실측 latent std 로 고쳐 박은 값이라 diffusion 입력 std 가
+# 다르다 -- 즉 A/B 와 c4d2k5y4 사이에는 normalization 말고 "입력 std" 라는 교란변수가 하나 더
+# 있다. 이 arm 은 그 교란변수를 baseline 쪽에 맞춰 제거해서, c4d2k5y4 대비 scale_mode 만 다르게
+# 만든다.
+#
+# 0.96032625 는 우리 corpus 의 실측값이 아니다 (SCVideo 원본 corpus 상수; DL3DV+DynamicVerse 를
+# 다 섞어도 재현 안 됨 -- conf/config.yaml 의 2026-08-02 표 참조). 여기서 이 값을 쓰는 것은
+# "맞는 scale" 이라서가 아니라 baseline 과 같은 off-unit 입력을 재현하기 위해서다.
+# 실제 이 triple 의 FULL-corpus 실측 std 는 0.53716 (= 도는 쪽 arm B) 이므로, 이 arm 의 diffusion
+# 입력 std 는 0.53716/0.96032625 = 0.5594 배로 눌린다. baseline c4d2k5y4 도 같은 방식으로
+# 0.47637/0.96032625 = 0.4961 배 눌려 있었다 -- 둘의 눌림 정도가 완전히 같지는 않다는 점은
+# scale_mode 자체가 divisor 를 바꾸는 이상 피할 수 없다.
+#
+# scale_mode 근거와 "context/target 이 같은 D 라 cache 가 bit-exact 유효" 는 전부
+# conf/experiment/geo_worldtraj_lagernvsnorm.yaml 의 주석을 그대로 따른다 (여기 복제하지 않음).
+# vae_latent_scale 은 geo_emb 에 전혀 관여하지 않으므로 공용 first_cam_included cache 그대로.
+exp_name: dl3dv_geo_worldtraj_lagernvsnorm_scale96
+meta_csv: meta_worldtraj.csv
+coverage_blacklist_path: null
+geo_encoder: lagernvs
+geo_view_sampling: frustum_cover
+geo_cover_out_of_seg: true
+geo_first_view_target_s: true
+geo_cover_subtract_first: true
+geo_cover_centered_at_s: true
+geo_posed: true
+scale_mode: geo_lagernvs
+geo_lagernvs_skip_ctx_norm: false
+cam_dim: 64
+intr_norm: rel
+vae_ckpt_path: /data1/cympyc1785/LatentCamVid/camera_generation/latentcam/checkpoints/vae_20260302_300.pth
+vae_latent_scale: 0.96032625   # baseline c4d2k5y4 와 동일 (실측값 0.53716 이 아님 — 위 주석)
+geo_latent_cache_dir: /data1/cympyc1785/data/DL3DV/latent_cache

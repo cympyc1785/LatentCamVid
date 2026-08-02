@@ -1,0 +1,52 @@
+# @package _global_
+# camembed × arm A — geo_worldtraj_camembed 의 decoupled context 위에 arm A 의 normalization 통일
+# (scale_mode ctx_longer_135max + geo_lagernvs_skip_ctx_norm true) 를 얹는다.
+#
+# 왜 필요한가: 지금 도는 camembed(wandb ek9n9jt5)는 scale_mode 가 avg_scale 이고
+# geo_lagernvs_skip_ctx_norm 도 false 라, geo latent 의 분모(LagerNVS 자체 1.35·max‖center−c_view0‖)
+# 와 diffusion target 의 분모(D = point-cloud avg_scale)가 아무 관계도 없다. 즉 camembed arm 은
+# "context 를 target 카메라에서 떼어냈다" 는 변수와 "normalization 이 통일되지 않았다" 는 변수를
+# 동시에 갖고 있어서, ek9n9jt5 가 baseline 보다 낮게 나온 이유를 둘 중 어느 쪽으로도 돌릴 수 없다.
+# 이 arm 은 뒤쪽 변수를 제거한다.
+#
+# 통일 방식은 arm A 와 동일하게 **구조적**이다: geo_lagernvs_skip_ctx_norm true 로
+# build_cam_token(override_scale=D) 를 강제하므로, geo view 가 무엇이든 geo latent 와 target 이
+# 같은 D 를 쓴다. (arm B 쪽 통일은 "값이 우연히 같아지는" 방식이라 geo_first_view_target_s 가
+# false 인 여기서는 성립하지 않는다 — geo_worldtraj_camembed_lagernvsnorm.yaml 주석 참조.)
+#
+# 알려진 부작용 (실측, train 1500 segment):
+#   camembed 는 geo view0 이 frame s 가 아니라 retrieval 결과다. LagerNVS 는 항상 view0 을 원점으로
+#   잡으므로(models/geo_encoder.py:98-104) 이 arm 이 LagerNVS 에 실제로 넣는 스칼라는
+#   tok = max‖c_ctx − c_view0‖ / D 이고, LagerNVS 고유값 1/1.35 = 0.7407 과 어긋난다:
+#   p01 0.1895 / median 1.0556 / max 3.2284, tok < 0.7407 인 비율 16.00%, 심한 축소 1.73%.
+#   under-scaling 이 치명적인 방향이라(over-scaling 은 거의 무해) 이 arm 의 16% 는 감수하고 가는
+#   조건이다. 이걸 0 으로 만들려면 D 를 frame s 가 아니라 geo view0 에 앵커해야 하고, 그건 새
+#   scale_mode 가 필요하다 (미구현).
+#
+# cache: geo_first_view_target_s 가 false 라 dataset/cache 스크립트 모두 subdir 을
+#   first_cam_not_included/ 로 잡는다 (dataset_dl3dv.py:272-274). override_scale 이 arm A 와 같은
+#   ctx_longer_135max 이므로 트리는 latent_cache_ctxlonger135 를 공유하고, 그 안에서
+#   first_cam_not_included/ 만 새로 굽는다 (first_cam_included/ 는 arm A 것 그대로).
+# vae_latent_scale / seg_list 고정 근거는 geo_worldtraj_ctxlonger135_scale96.yaml 주석 참조.
+exp_name: dl3dv_geo_worldtraj_camembed_ctxlonger135
+meta_csv: meta_worldtraj.csv
+coverage_blacklist_path: null
+geo_encoder: lagernvs
+geo_view_sampling: frustum_cover
+geo_cover_out_of_seg: true
+geo_first_view_target_s: false
+geo_cover_subtract_first: false
+geo_cover_centered_at_s: true
+geo_posed: true
+geo_cam_embed: relfirst
+geo_cam_embed_dim: 128
+scale_mode: ctx_longer_135max
+geo_lagernvs_skip_ctx_norm: true
+cam_dim: 64
+intr_norm: rel
+vae_ckpt_path: /data1/cympyc1785/LatentCamVid/camera_generation/latentcam/checkpoints/vae_20260302_300.pth
+vae_latent_scale: 0.96032625   # baseline c4d2k5y4 / camembed ek9n9jt5 와 동일
+geo_latent_cache_dir: /data1/cympyc1785/data/DL3DV/latent_cache_ctxlonger135
+
+train_seg_list: /data1/cympyc1785/data/DL3DV/scenes/latentcam_train_seg_list_c4d2k5y4.txt
+test_seg_list: /data1/cympyc1785/data/DL3DV/scenes/latentcam_test_seg_list_c4d2k5y4.txt

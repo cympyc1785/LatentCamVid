@@ -301,6 +301,30 @@ All notable changes to the latentcam sub-project. Follows [Keep a Changelog](htt
   `config.yaml` still points at `vae_20260202_065659_400` + `0.4467666`; no diffusion run has used
   the new ckpt yet, so the recon-vs-corpus-coverage trade is unevaluated.
 
+### Added
+- **`conf/experiment/geo_worldtraj_camembed_{ctxlonger135,lagernvsnorm}.yaml` (신규)** — camembed
+  arm(`geo_first_view_target_s: false` + `geo_cam_embed: relfirst`) 위에 arm A/B의 normalization
+  통일을 얹은 2개. 도는 camembed(wandb `ek9n9jt5`)는 `scale_mode: avg_scale` + `skip_ctx_norm: false`
+  라서 **context decoupling**과 **normalization 미통일**이라는 변수를 동시에 갖고 있었고, baseline
+  대비 낮게 나온 이유를 둘 중 어느 쪽으로도 돌릴 수 없었다. 이 2개는 뒤쪽을 제거한다.
+  - `_ctxlonger135`: `scale_mode: ctx_longer_135max` + `geo_lagernvs_skip_ctx_norm: true`.
+  - `_lagernvsnorm`: `scale_mode: geo_lagernvs` + **`geo_lagernvs_skip_ctx_norm: true`**. 원래 arm B는
+    `false`인데도 통일이 됐던 건 `geo_first_view_target_s: true`라 geo view0 == frame s여서 LagerNVS의
+    분모와 `_geo_lagernvs_scale`이 **같은 값**이 됐기 때문이다(값의 우연, 구조 아님). camembed에선
+    view0 ≠ s라 실측(train 1500) 두 분모의 비 r = min 0.0420 / p05 0.5039 / median 1.0997 /
+    p95 1.8912 / max 1.9985, `|r−1|≤1e-4`가 0.13%(대조군 `geo_worldtraj`는 100.00%) — `false`로 두면
+    통일이 성립하지 않으므로 `true`로 `override_scale=D`를 강제한다.
+  - 알려진 부작용: LagerNVS는 항상 geo view0을 원점으로 잡으므로(`models/geo_encoder.py:98-104`)
+    실제 주입 스칼라 `tok = max‖c_ctx − c_view0‖ / D`가 고유값 `1/1.35 = 0.7407`과 어긋난다. 실측
+    `tok < 0.7407` 비율: A쪽 16.00%(심함 1.73%, p01 0.1895 / med 1.0556 / max 3.2284), B쪽
+    36.80%(심함 2.67%, p01 0.1520 / med 0.8146 / max 1.4804). under-scaling이 치명적 방향이라
+    감수 조건이며, 없애려면 D를 frame s가 아니라 geo view0에 앵커하는 새 `scale_mode`가 필요하다(미구현).
+  - cache: 둘 다 `first_cam_not_included/`. A쪽은 `override_scale`이 arm A와 같아 기존
+    `latent_cache_ctxlonger135` 트리를 공유하고 그 안에 서브디렉토리만 추가; B쪽은 native와도 A와도
+    값이 달라 전용 트리 `latent_cache_geolagernvs`를 새로 굽는다 (각 ~266 GB).
+  - `vae_latent_scale`은 config 기본값 0.96032625 그대로(= `c4d2k5y4` / `ek9n9jt5`와 동일),
+    `train_seg_list`/`test_seg_list`는 `c4d2k5y4` 분할로 고정.
+
 ### Changed
 - **`conf/experiment/geo_worldtraj_{ctxlonger135,lagernvsnorm}_scale96.yaml`에 `train_seg_list` /
   `test_seg_list` 고정** — `base.py:_make_batch_generator`의 `random_split`은 partition이

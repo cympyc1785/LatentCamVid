@@ -5,6 +5,11 @@ All notable changes to the latentcam sub-project. Follows [Keep a Changelog](htt
 ## [Unreleased]
 
 ### Added
+- **`scripts/vae/vae_scale_matrix.py`에 `TAILS=1`** — 기존 표는 corpus **평균** latent std만
+  주는데, camera-length `scale_mode`는 카메라가 멈춘 바로 그 샘플에서 분모가 0에 가까워지므로
+  평균으로는 터지는 개별 샘플이 안 보인다. `TAILS=1`이면 같은 행들 아래에 per-sample tail 표를
+  덧붙인다: 샘플별 `max|cam_param[6:9]|`, `max|latent|`, translation recon L1의 median/p99.9/max.
+  기본값 `TAILS=0`이면 출력·동작 모두 이전과 동일. 측정값은 `EXPERIMENTS.log` 2026-08-02 항목.
 - **`scripts/data/static_camera_degeneracy.py` (신규)** — camera-length divisor(arm A
   `ctx_longer_135max` / arm B `geo_lagernvs`)가 **정지 카메라**에서 무너지는 지점을 실측한다.
   기존 `scripts/data/norm_divisor_compare.py`는 `maxd < 1e-6` segment를 `return None`으로 버리고

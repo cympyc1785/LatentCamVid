@@ -23,6 +23,8 @@ env:  MAX_SCENES (default 200), MODES, CKPTS, META (default meta_worldtraj.csv)
             geo_cover_subtract_first=true,geo_cover_centered_at_s=true
       Leakage-free modes ('avg_scale', 'ctx_longer_135max', ...) are unaffected by these.
       [new] DATASET=dl3dv (default, unchanged) | dynamicverse | both, DV_CHUNKS (default 3).
+      [new] TAILS=1 adds a per-sample tail table (max|trans|, max|z|, trans recon L1 at p99.9/max)
+            under the same rows -- the corpus-mean latent std hides single samples that blow up.
       'both' concatenates the DL3DV CamDataset and the dynamicverse_shim, so the reported
       latent std is the pooled one. Caveat: DynamicVerse samples are n_chunks NON-overlapping
       [k*T,(k+1)*T) chunks per scene, not DL3DV's sliding-window segments, so 'both' weights
@@ -33,6 +35,7 @@ env:  MAX_SCENES (default 200), MODES, CKPTS, META (default meta_worldtraj.csv)
 import os, os.path as osp, sys
 sys.path.insert(0, osp.join(osp.dirname(__file__), '..', '..', 'main'))
 sys.path.insert(0, osp.join(osp.dirname(__file__), '..', '..'))
+import numpy as np
 import torch
 
 import config as C
@@ -56,6 +59,7 @@ from models.vae_intr_large import CameraVAE
 
 DATASET = os.environ.get('DATASET', 'dl3dv')       # [new] dl3dv | dynamicverse | both
 DV_CHUNKS = int(os.environ.get('DV_CHUNKS', 3))
+TAILS = os.environ.get('TAILS', '0') == '1'   # [new] per-sample tail table (see main())
 if DATASET not in ('dl3dv', 'dynamicverse', 'both'):
     raise SystemExit(f"DATASET must be dl3dv|dynamicverse|both, got {DATASET!r}")
 
@@ -115,13 +119,19 @@ def intr_variants(intrinsics):
 @torch.no_grad()
 def main():
     vaes = {k: load_vae(*v) for k, v in CKPTS.items()}
-    rows = []
+    rows, trows = [], []
     for mode in MODES:
         ds = build_dataset(mode)
         dl = torch.utils.data.DataLoader(ds, batch_size=16, shuffle=False, num_workers=8)
         # accumulate per (ckpt, intr convention)
         acc = {(c, iv): {'n': 0, 'sq': 0.0, 'rot': 0.0, 'tr': 0.0, 'intr': 0.0, 'el': 0}
                for c in vaes for iv in ('rel', 'raw')}
+        # [new] TAILS=1: the corpus MEAN latent std above says nothing about single samples that
+        # blow up -- and a camera-length scale_mode divides by a near-zero divisor exactly when
+        # the camera is static. Keep per-sample max|translation| / max|z| / trans recon L1 so the
+        # tail (p99.9, max) can be read next to the mean.
+        tails = {(c, iv): {'zmax': [], 'trmax': [], 'trrec': []}
+                 for c in vaes for iv in ('rel', 'raw')} if TAILS else None
         n_samples = 0
         for batch in dl:
             cp = batch['cam_param'].to(dev)                  # (B,T,11)
@@ -139,10 +149,18 @@ def main():
                     a['tr'] += d[..., 6:9].mean().item() * cp.shape[0]
                     a['intr'] += d[..., 9:11].mean().item() * cp.shape[0]
                     a['n'] += cp.shape[0]
+                    if TAILS:
+                        t = tails[(cname, iv)]
+                        t['zmax'] += z.abs().amax(dim=(1, 2)).float().cpu().tolist()
+                        t['trmax'] += x[..., 6:9].abs().amax(dim=(1, 2)).float().cpu().tolist()
+                        t['trrec'] += d[..., 6:9].mean(dim=(1, 2)).float().cpu().tolist()
         for (cname, iv), a in acc.items():
             rows.append((cname, CKPTS[cname][1], mode, iv,
                          (a['sq'] / a['el']) ** 0.5,          # latent std (mean 0 assumed)
                          a['rot'] / a['n'], a['tr'] / a['n'], a['intr'] / a['n']))
+            if TAILS:
+                t = tails[(cname, iv)]
+                trows.append((cname, mode, iv, {k: np.asarray(v) for k, v in t.items()}))
         print(f"[{mode}] {n_samples} samples (DATASET={DATASET})", flush=True)
 
     print(f"\nDATASET={DATASET}  META={cfg.meta_csv}  MAX_SCENES={cfg.max_scenes}")
@@ -151,6 +169,20 @@ def main():
     for c, dim, mode, iv, std, rot, tr, it in rows:
         print(f"{c:<26} {dim:>3} {mode:<19} {iv:<4} {std:>8.5f} {std/0.96032625:>8.4f} "
               f"{std/0.4467666:>8.4f} {rot:>8.5f} {tr:>8.5f} {it:>8.5f}")
+
+    if TAILS:
+        print(f"\nper-sample tails (n={len(trows[0][3]['zmax'])} samples each). "
+              f"trans = max|cam_param[6:9]| in a sample, z = max|latent|, "
+              f"recL1 = that sample's mean |trans recon error|")
+        print(f"{'ckpt':<26} {'scale_mode':<19} {'intr':<4} "
+              f"{'trans med':>9} {'p99.9':>9} {'max':>9} | {'z med':>7} {'p99.9':>8} {'max':>9} "
+              f"| {'recL1 med':>9} {'p99.9':>9} {'max':>9}")
+        for c, mode, iv, t in trows:
+            tr_, z_, r_ = t['trmax'], t['zmax'], t['trrec']
+            print(f"{c:<26} {mode:<19} {iv:<4} "
+                  f"{np.median(tr_):>9.4f} {np.percentile(tr_, 99.9):>9.4f} {tr_.max():>9.4f} | "
+                  f"{np.median(z_):>7.3f} {np.percentile(z_, 99.9):>8.3f} {z_.max():>9.3f} | "
+                  f"{np.median(r_):>9.5f} {np.percentile(r_, 99.9):>9.5f} {r_.max():>9.5f}")
 
 
 if __name__ == '__main__':

@@ -30,9 +30,10 @@ import matplotlib.pyplot as plt
 from matplotlib import font_manager
 
 LAGERNVS = "/data1/cympyc1785/LatentCamVid/camera_generation/tools/lagernvs"
-# render_avgscale.py's filename convention (only avg_scale is abbreviated)
-SFX = {"avg_scale": "avgscale"}
-ORDER = ["lagernvs", "avg_scale", "maxd_seg", "ctx_longer_135max", "ctx_side_135max"]
+# render_avgscale.py's filename convention (only avg_scale is abbreviated; '_pt' = point-scale token)
+SFX = {"avg_scale": "avgscale", "avg_scale_pt": "avgscale_pt"}
+ORDER = ["lagernvs", "lagernvs_pt", "avg_scale", "avg_scale_pt",
+         "maxd_seg", "ctx_longer_135max", "ctx_side_135max"]
 
 
 def _font(sz):
@@ -82,8 +83,16 @@ def main():
     ap.add_argument("--modes", default=None,
                     help="row/grid: comma-separated subset of modes to show (default: all)")
     ap.add_argument("--out", default=None, help="default: <seg>/norm_compare.mp4")
+    ap.add_argument("--stack", default=None,
+                    help="row layout only: also vstack every segment's strip into this ONE mp4, "
+                         "ordered by --tags (segments absent from --tags keep alphabetical order)")
+    ap.add_argument("--tags", default=None,
+                    help="json {seg_name: caption}; caption is drawn on that segment's GT tile and "
+                         "its key order drives --stack row order")
     args = ap.parse_args()
     want = [m for m in args.modes.split(",") if m] if args.modes else None
+    tags = json.load(open(args.tags)) if args.tags else {}
+    stacked = {}
 
     fnt, fnt_s = _font(15), _font(12)
     for seg_dir in sorted(_glob.glob(osp.join(args.root, "*"))):
@@ -138,7 +147,7 @@ def main():
                     x0 = i * W
                     d.rectangle([x0, 0, x0 + W, 34], fill=(0, 0, 0))
                     if name == "GT":
-                        lab, sub = "GT", f"frame {t}/{T-1}"
+                        lab, sub = tags.get(osp.basename(seg_dir), "GT"), f"frame {t}/{T-1}"
                     else:
                         mm = metrics[name]
                         lab = f"{name}  div={mm['divisor']:.2f}"
@@ -146,6 +155,8 @@ def main():
                     d.text((x0 + 5, 2), lab, fill=(255, 255, 0), font=fnt)
                     d.text((x0 + 5, 19), sub, fill=(180, 255, 180), font=fnt_s)
                 frames.append(np.asarray(im))
+            if args.stack:
+                stacked[osp.basename(seg_dir)] = frames
             out = args.out or osp.join(seg_dir, "norm_compare_row.mp4")
             imageio.mimwrite(out, frames, fps=args.fps, quality=8, macro_block_size=1)
             print(f"{osp.basename(seg_dir)}: {T} frames {frames[0].shape} -> {out}", flush=True)
@@ -189,6 +200,13 @@ def main():
         out = args.out or osp.join(seg_dir, "norm_compare.mp4")
         imageio.mimwrite(out, frames, fps=args.fps, quality=8, macro_block_size=1)
         print(f"{osp.basename(seg_dir)}: {len(frames)} frames {frames[0].shape} -> {out}", flush=True)
+
+    if args.stack and stacked:
+        order = [s for s in tags if s in stacked] + [s for s in stacked if s not in tags]
+        Tm = min(len(stacked[s]) for s in order)
+        big = [np.concatenate([stacked[s][t] for s in order], axis=0) for t in range(Tm)]
+        imageio.mimwrite(args.stack, big, fps=args.fps, quality=8, macro_block_size=1)
+        print(f"stacked {len(order)} segments: {Tm} frames {big[0].shape} -> {args.stack}", flush=True)
 
 
 if __name__ == "__main__":

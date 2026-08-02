@@ -302,6 +302,13 @@ All notable changes to the latentcam sub-project. Follows [Keep a Changelog](htt
   the new ckpt yet, so the recon-vs-corpus-coverage trade is unevaluated.
 
 ### Added (tooling)
+- **`scripts/render/compare_norm_video.py`에 `--stack` / `--tags`** — `--layout row`는 segment 하나당
+  strip mp4 하나만 내놓아서, "어떤 조건에서 `avg_scale`이 되고 어떤 조건에서 무너지는가"처럼 **segment
+  사이를** 비교해야 하는 질문은 mp4 6개를 번갈아 봐야 했다. `--stack <out.mp4>`는 모든 segment의 strip을
+  세로로 이어붙여 하나의 영상으로 쓰고, `--tags <json>`은 `{seg_name: caption}`으로 각 행 GT 타일 라벨을
+  덮어쓰면서(`plx 0.026 OUT (under)` 등) **그 key 순서가 stack 행 순서**가 된다(json에 없는 seg는 뒤에
+  알파벳 순). 두 인자 모두 없으면 출력·동작 이전과 동일. 산출물 예:
+  `results/plx_band_render/plx_band_stack.mp4` (6 seg × [GT|lagernvs|avg_scale|PSNR], 1728×2048).
 - **`scripts/stop_at_epoch.sh` (신규)** — 돌고 있는 학습을 지정 epoch 에서 멈추는 watchdog.
   `scripts/stop_at_epoch.sh <TARGET_EPOCH> [screen:log:label ...]`, 인자 없으면 현재 5개 run 기본값.
   tqdm 진행줄 `^Epoch N |` 을 폴링해 `N >= TARGET` 이면 정지하므로 epoch `0..TARGET-1`(= TARGET 개)은

@@ -388,6 +388,24 @@ All notable changes to the latentcam sub-project. Follows [Keep a Changelog](htt
   주의: 리스트는 **`random_split` 순서 그대로** 쓴다. 정렬 금지 — `base.py:106`이 valid loader를
   `shuffle=False`로 돌려 test 리스트 앞 160개가 곧 wandb val인데, 정렬하면 그 160개가 전부 1K batch가
   되고(실측 160/160 vs 원 순서 26/160) `c4d2k5y4`의 val과도 달라진다.
+- **`scripts/eval_testset.py`에 `--set KEY=VALUE`** (반복 가능, 값은 YAML 파싱이라 `null`/`true`/숫자
+  타입 유지) + **`scripts/eval_testset_queue.sh`에 `EXTRA` / `TAG_SUFFIX`**. 목적은
+  `train_seg_list`/`test_seg_list` 못박기다: 07-30~07-31에 끝난 run 5개는 seg_list를 `null`로
+  저장했고 `eval_testset.py`는 `base.Trainer._make_batch_generator`를 그대로 재사용하므로,
+  **오늘 pool(39817)의 `random_split`** 으로 평가된다 — 그 run들이 실제로 쪼갠 39830과 다른 분할이고,
+  그 3982 중 3563(89.48%)이 해당 run의 **train**이었다. 다섯 run 모두 pool 39830을 seed 42 /
+  `train_frac` 0.9로 갈랐고 그 분할이 곧 `latentcam_{train,test}_seg_list_c4d2k5y4.txt`이므로,
+  그 리스트를 `--set`으로 넣으면 진짜 held-out(3980)으로 돌아온다. 측정: pinned list == c4d2k5y4
+  재현 val 3983 (순서까지), 현재 pool 실효 3980(빠진 3개 위치 584/1324/2607, 전부 앞 160 밖),
+  앞 160은 wandb val과 bit-identical, `train ∩ val = 0`.
+  `TAG_SUFFIX`는 출력 디렉토리 뒤에 붙어 기존(오염된) `eval_my/*`를 덮어쓰지 않는다.
+  둘 다 비우면 동작·출력 모두 이전과 동일.
+- **`scripts/stop_at_epoch.sh`의 job spec에 선택 4번째 필드 `experiment`** —
+  `screen:log:label[:experiment]`. 기존엔 `ps -ef | grep "SCREEN -dmS <screen> "`에서 `experiment=`를
+  뽑았는데, 그건 screen을 `-dmS <name> bash -c ...`로 띄웠을 때만 통한다. 이미 떠 있는 빈 screen에
+  `screen -X stuff`로 명령을 밀어넣으면 SCREEN 프로세스 cmdline에 `experiment=`가 없어서 watchdog이
+  **"이미 종료됨"으로 조용히 건너뛴다** — 멈춰야 할 run을 안 멈추는 침묵 실패. 필드를 안 주면 예전
+  방식으로 fallback하므로 기존 호출은 그대로 동작한다.
 - **`scripts/data/norm_divisor_compare.py`에 `D["geo_lagernvs_view0"]`** — 이 스크립트는 분모를
   `centers[s]` 기준으로만 재는데, `_geo_lagernvs_scale`이 이제 `geo_lagernvs_anchor`로 앵커를 고를 수
   있게 돼서 `view0` arm(예: `geo_worldtraj_camembed_lagernvsnorm`)을 재면 그 arm이 실제로 쓰지 않는

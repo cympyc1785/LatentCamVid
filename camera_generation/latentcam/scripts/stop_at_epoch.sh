@@ -1,7 +1,13 @@
 #!/bin/bash
 # 학습을 지정 epoch 에서 멈추는 watchdog.
-#   사용: scripts/stop_at_epoch.sh <TARGET_EPOCH> [screen:log:label ...]
+#   사용: scripts/stop_at_epoch.sh <TARGET_EPOCH> [screen:log:label[:experiment] ...]
 # 인자를 안 주면 현재 돌고 있는 5개 run 기본값을 쓴다.
+#
+# [new 2026-08-03] 4번째 필드 experiment 는 선택. 안 주면 예전처럼
+# `ps -ef | grep "SCREEN -dmS <screen> "` 에서 뽑는데, 그건 screen 을 `-dmS <name> bash -c ...`
+# 로 띄웠을 때만 통한다. 이미 떠 있는 빈 screen 에 `screen -X stuff` 로 명령을 밀어넣으면
+# SCREEN 프로세스의 cmdline 에 experiment= 가 없어서 watchdog 이 "이미 종료됨" 으로 조용히
+# 건너뛴다 -- 멈춰야 할 run 을 안 멈추는 침묵 실패라, 그런 screen 은 반드시 명시할 것.
 #
 # 정지 절차는 반드시 Ctrl+C 먼저 (그냥 kill 하면 DataLoader worker 가 고아가 되어 GPU 를 물고 있음):
 #   screen -X stuff $'\003'  ->  최대 STOP_WAIT 초 대기  ->  그래도 살아있으면 SIGTERM  ->  SIGKILL
@@ -52,10 +58,12 @@ declare -A done_map
 while :; do
   alldone=1
   for j in "${JOBS[@]}"; do
-    IFS=: read -r scr log lab <<< "$j"
+    IFS=: read -r scr log lab exp_arg <<< "$j"
+    exp_arg=${exp_arg:-}
     [ "${done_map[$lab]:-}" = 1 ] && continue
     # 같은 이름의 죽은 screen 항목이 남아있을 수 있으므로 experiment= 를 실제로 가진 줄만 본다
-    exp=$(ps -ef | grep "SCREEN -dmS $scr " | grep -oE 'experiment=[a-z0-9_]+' | head -1 | cut -d= -f2)
+    exp=$exp_arg
+    [ -z "$exp" ] && exp=$(ps -ef | grep "SCREEN -dmS $scr " | grep -oE 'experiment=[a-z0-9_]+' | head -1 | cut -d= -f2)
     if [ -z "$exp" ] || ! pgrep -f "$(pat_for "$exp")" >/dev/null; then
       echo "[$(date +%H:%M:%S)] $lab 이미 종료됨(프로세스 없음) - 건너뜀"; done_map[$lab]=1; continue
     fi

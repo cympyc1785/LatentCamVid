@@ -86,6 +86,14 @@ def main():
                          'different B = a different noise stream = different (equally valid) samples.')
     ap.add_argument('--max-batches', type=int, default=None, help='cap #batches (smoke test only)')
     ap.add_argument('--skip-clatr', action='store_true', help='dump jsons + losses, skip the metric subprocesses')
+    # [new 2026-08-03] arbitrary config override, mainly for train_seg_list / test_seg_list.
+    # The 07-30~07-31 runs saved seg_list null, so _make_batch_generator falls back to
+    # random_split on TODAY's pool (39817) -- a different partition than the 39830 those runs
+    # actually split, and 89.48% of it was their own TRAIN. Pinning
+    # latentcam_{train,test}_seg_list_c4d2k5y4.txt restores their real held-out set.
+    # Value is parsed as YAML so null / true / 3 / 0.5 keep their types.
+    ap.add_argument('--set', dest='sets', action='append', default=[], metavar='KEY=VALUE',
+                    help='override any config key (repeatable), e.g. --set test_seg_list=/path/x.txt')
     args = ap.parse_args()
 
     if args.gpu is not None:
@@ -101,6 +109,14 @@ def main():
     ov = {}
     if args.batch_size:
         ov['batch_size'] = args.batch_size
+    if args.sets:
+        import yaml as _yaml
+        for kv in args.sets:
+            if '=' not in kv:
+                raise SystemExit(f"--set expects KEY=VALUE, got {kv!r}")
+            k, v = kv.split('=', 1)
+            ov[k.strip()] = _yaml.safe_load(v)
+        print(f"[cfg] --set overrides: { {k: ov[k] for k in ov} }")
     cfg, cfg_dict = build_cfg(run_dir, ov)
 
     os.chdir(MAIN)      # CLaTr / eval subprocesses are launched with cwd-relative work dirs

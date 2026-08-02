@@ -144,7 +144,9 @@ def main():
 
     tag = f"{osp.basename(run_dir)}__{args.ckpt[:-4]}"
     out_dir = args.out or osp.join(REPO, EVAL_ROOT, tag)
-    out_dir = osp.abspath(out_dir)
+    # 상대경로 --out 은 REPO 기준. os.chdir(MAIN) 이 이미 돌았기 때문에 그냥 abspath 하면
+    # main/ 밑으로 떨어진다 (기본값은 REPO 를 붙여서 만드니 영향 없고, --out 을 준 경우만 문제).
+    out_dir = out_dir if osp.isabs(out_dir) else osp.join(REPO, out_dir)
     eval_data_dir = osp.join(out_dir, 'test')
     os.makedirs(eval_data_dir, exist_ok=True)
     from hydra_cfg import save_cfg_yaml

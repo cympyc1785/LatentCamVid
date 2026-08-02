@@ -400,6 +400,11 @@ All notable changes to the latentcam sub-project. Follows [Keep a Changelog](htt
   앞 160은 wandb val과 bit-identical, `train ∩ val = 0`.
   `TAG_SUFFIX`는 출력 디렉토리 뒤에 붙어 기존(오염된) `eval_my/*`를 덮어쓰지 않는다.
   둘 다 비우면 동작·출력 모두 이전과 동일.
+- **`scripts/eval_testset.py`: 상대경로 `--out`을 `REPO` 기준으로 해석** — `main()`이 CLaTr
+  서브프로세스 때문에 `os.chdir(MAIN)`을 먼저 부르는데 `out_dir`을 그 뒤에 `osp.abspath`로 풀어서,
+  상대 `--out`이 `main/eval_my/…`로 떨어졌다(기본값은 `osp.join(REPO, …)`로 만들어져 영향 없음 —
+  위 `EXTRA`/`TAG_SUFFIX`로 `--out`을 넘기기 시작하면서 처음 드러난 경로). 위 큐의 첫 job이 실제로
+  `main/eval_my/`에 쓰였고 `eval_my/`로 옮겼다.
 - **`scripts/stop_at_epoch.sh`의 job spec에 선택 4번째 필드 `experiment`** —
   `screen:log:label[:experiment]`. 기존엔 `ps -ef | grep "SCREEN -dmS <screen> "`에서 `experiment=`를
   뽑았는데, 그건 screen을 `-dmS <name> bash -c ...`로 띄웠을 때만 통한다. 이미 떠 있는 빈 screen에

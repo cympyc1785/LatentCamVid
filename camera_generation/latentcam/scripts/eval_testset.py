@@ -24,7 +24,7 @@ with cwd-relative paths):
   python scripts/eval_testset.py --run results/20260731_001511_dl3dv_geo_worldtraj
   python scripts/eval_testset.py --run <dir> --ckpt last.pth --gpu 3 --max-batches 3   # smoke
 
-Output: results/testset_eval/<run>__<ckpt>/ with config.yaml (what was actually used),
+Output: eval_my/<run>__<ckpt>/ with config.yaml (what was actually used),
 eval_meta.json, test/ (per-sample caption + ref/pred transforms = the inputs), seq/ token/
 (CLaTr text feats), preds.npy, metrics.json, preds_scores.csv, losses.json.
 """
@@ -37,6 +37,7 @@ import sys
 import time
 
 REPO = osp.abspath(osp.join(osp.dirname(__file__), '..'))
+EVAL_ROOT = 'eval_my'     # 2026-08-02: was results/testset_eval; --out still overrides
 MAIN = osp.join(REPO, 'main')
 sys.path.insert(0, MAIN)
 sys.path.insert(0, REPO)
@@ -79,7 +80,7 @@ def main():
     ap.add_argument('--run', required=True, help='results/<run_dir> (must contain config.yaml + ckpts/)')
     ap.add_argument('--ckpt', default='best.pth', help='file under <run>/ckpts (best.pth | last.pth)')
     ap.add_argument('--gpu', default=None, help='CUDA_VISIBLE_DEVICES (set before torch import)')
-    ap.add_argument('--out', default=None, help='output dir (default results/testset_eval/<run>__<ckpt>)')
+    ap.add_argument('--out', default=None, help='output dir (default eval_my/<run>__<ckpt>)')
     ap.add_argument('--batch-size', type=int, default=None,
                     help='override eval batch size. NOTE: sample() draws randn(B,...) so a '
                          'different B = a different noise stream = different (equally valid) samples.')
@@ -126,7 +127,7 @@ def main():
     torch.manual_seed(cfg.random_seed)
 
     tag = f"{osp.basename(run_dir)}__{args.ckpt[:-4]}"
-    out_dir = args.out or osp.join(REPO, 'results', 'testset_eval', tag)
+    out_dir = args.out or osp.join(REPO, EVAL_ROOT, tag)
     out_dir = osp.abspath(out_dir)
     eval_data_dir = osp.join(out_dir, 'test')
     os.makedirs(eval_data_dir, exist_ok=True)

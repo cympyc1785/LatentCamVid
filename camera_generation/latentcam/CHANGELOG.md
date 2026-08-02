@@ -49,7 +49,7 @@ All notable changes to the latentcam sub-project. Follows [Keep a Changelog](htt
     `random_split(seed=42)` held-out set과 bit-identical(wandb가 본 160개의 superset).
   - sampling/decode/`out_to_trajectory`/json dump/CLaTr subprocess 체인은 복사가 아니라
     `train_latent_cam_dm`의 헬퍼를 import해서 module-global `cfg`만 rebind → 두 경로가 갈라질 수 없음.
-  - 출력: `results/testset_eval/<run>__<ckpt>/`에 `config.yaml`(실제 사용값), `eval_meta.json`
+  - 출력: `eval_my/<run>__<ckpt>/`에 `config.yaml`(실제 사용값), `eval_meta.json`
     (ckpt/epoch/wandb_id/argv), `test/`(caption + ref/pred transforms = input), `seq/`·`token/`,
     `preds.npy`, `metrics.json`, `metrics_full.json`, `preds_scores.csv`, `losses.json`.
 - **`scripts/eval_testset_queue.sh` (신규)** — `<run_dir>:<ckpt>` 목록을 한 GPU에서 순차 실행
@@ -300,6 +300,13 @@ All notable changes to the latentcam sub-project. Follows [Keep a Changelog](htt
   training-corpus std; `0.4467666` with this ckpt would give input std 1.3641). **Not adopted** —
   `config.yaml` still points at `vae_20260202_065659_400` + `0.4467666`; no diffusion run has used
   the new ckpt yet, so the recon-vs-corpus-coverage trade is unevaluated.
+
+### Changed (tooling)
+- **testset eval 출력 위치 `results/testset_eval/` → `eval_my/`** (`scripts/eval_testset.py`의
+  `EVAL_ROOT` 상수). 사용자 지시. `--out`으로 여전히 override 가능하고
+  `scripts/eval_testset_queue.sh`는 경로를 하드코딩하지 않아 그대로 따라간다. 기존 5개 결과 디렉토리
+  (3.7 GB)는 `eval_my/`로 이동했고 `results/testset_eval/`은 삭제. `eval_my`는 preds.npy 등 대용량
+  산출물이 쌓이므로 `.gitignore`에 추가.
 
 ### Added (tooling)
 - **`scripts/render/compare_norm_video.py`에 `--stack` / `--tags`** — `--layout row`는 segment 하나당

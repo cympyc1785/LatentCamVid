@@ -133,6 +133,24 @@ geo_cover_before_only: false  # [new] out-of-seg context only from frames BEFORE
 geo_posed: false              # feed posed cam_token (context camera poses) to lagernvs; false = unposed
 geo_lagernvs_skip_ctx_norm: false  # [new] skip lagernvs' own 1.35·max(context) norm; reuse target's initial
                               #   1.35·max_dist scale so target & geo latent share one frame+scale (full alignment)
+geo_lagernvs_anchor: s        # [new 2026-08-03] scale_mode 'geo_lagernvs' 의 divisor 를 어느 카메라에서 재는가.
+                              #   's'     (기본, 기존 동작) D = 1.35·max||c_geo - c_s||       — frame s 앵커
+                              #   'view0'                   D = 1.35·max||c_geo - c_geo[0]|| — geo view0 앵커
+                              # 왜 필요한가: geo_encoder.build_cam_token 은 항상 geo_idxs[0] 을 원점으로
+                              #   재정렬한 뒤(models/geo_encoder.py:109-110) 1.35·max 로 나눈다. 그래서
+                              #   override_scale=D 로 넣었을 때 LagerNVS 가 실제로 받는 스칼라
+                              #   tok = max||c_geo - c_geo[0]|| / D 가 고유값 1/1.35 = 0.7407 이 되려면
+                              #   D 도 geo_idxs[0] 앵커여야 한다. geo_first_view_target_s: true 면
+                              #   geo_idxs[0] == s 라 두 앵커가 같은 점이고 값이 bit-identical -- 기존
+                              #   arm B(geo_worldtraj_lagernvsnorm)가 tok 0.7407 을 그냥 얻던 이유가 이것.
+                              #   false(camembed/decoupled)면 두 점이 달라져 실측 r = 1.35·max||·-c_geo[0]||/D
+                              #   가 (0, 2] 로 흩어진다 (min 0.0420 / med 1.0997 / max 1.9985; 상한 2 는
+                              #   c_geo[0] ∈ 집합 이라 삼각부등식에서 나오는 hard bound). 'view0' 이면 r ≡ 1.
+                              # leak 없음: geo view 선택은 frame s 와 out-of-segment 프레임만 보므로 추론
+                              #   시에도 동일하게 계산된다. target 궤적의 원점은 여전히 extrinsics[0] = c_s
+                              #   이고 분모 스칼라만 바뀐다.
+                              # !! geo_shuffle_order 와 병용 금지 (dataset 이 ValueError). 분모는 셔플 전
+                              #   순서로 계산되는데 encoder 는 셔플 후 view0 을 보게 되어 앵커가 또 어긋난다.
 geo_shuffle_order: false      # shuffle the geo context view order
 geo_shuffle_keep_first: false # [new] when shuffling, keep view0 (anchor / frame s) fixed, shuffle only the rest
 geo_first_view_target_s: false # geo view0 = target segment's FIRST camera (frame s) -> aligns geo latent frame

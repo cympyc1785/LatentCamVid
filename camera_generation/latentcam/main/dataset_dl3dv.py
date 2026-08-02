@@ -762,13 +762,36 @@ class CamDataset(torch.utils.data.Dataset):
         return (1.35 * centers.norm(dim=-1).max()).clamp(min=1e-5).unsqueeze(0)
 
     def _geo_lagernvs_scale(self, scene_idx, s, e):
-        """FULL-alignment scale = 1.35*max(||geo-context camera center - frame s||), i.e. the
-        exact scene_scale LagerNVS.build_cam_token uses for the geo views (view0=frame s).
-        Uses the same geo selection so target & geo latent are in one frame+scale. (1)."""
+        """FULL-alignment scale = 1.35*max(||geo-context camera center - ANCHOR||), i.e. the
+        scene_scale LagerNVS.build_cam_token uses for the geo views.
+        Uses the same geo selection so target & geo latent are in one frame+scale. (1).
+
+        anchor (cfg.geo_lagernvs_anchor, see conf/config.yaml for the full rationale):
+          's'     (default, original behaviour) -> frame s
+          'view0' -> geo_idxs[0], i.e. the very camera build_cam_token re-anchors to
+                     (models/geo_encoder.py:109-110). Makes the injected scalar
+                     tok = max||c_geo - c_geo[0]|| / D exactly 1/1.35 = 0.7407 even when
+                     geo_first_view_target_s is false. With it true the two anchors are the
+                     same camera, so both settings return a bit-identical value.
+        """
         geo_idxs = self._sample_geo_frustum_cover(scene_idx, s, e)      # [s] + out-of-seg
         c2w = torch.linalg.inv(self.extrinsics_list[scene_idx].float())
         centers = c2w[:, :3, 3]
-        d = (centers[geo_idxs] - centers[s]).norm(dim=-1)              # dist from frame s
+        anchor = getattr(self.cfg, 'geo_lagernvs_anchor', 's')
+        if anchor == 's':
+            a = centers[s]
+        elif anchor == 'view0':
+            # the divisor is computed here, BEFORE the optional geo_shuffle_order permutation
+            # at __getitem__, so a shuffled run would anchor on a different camera than the
+            # encoder ends up using. Refuse the combination rather than silently mis-anchor.
+            if self.geo_shuffle_order:
+                raise ValueError("geo_lagernvs_anchor='view0' is incompatible with "
+                                 "geo_shuffle_order=True (the encoder's view0 would differ "
+                                 "from the one the divisor was measured against)")
+            a = centers[geo_idxs[0]]
+        else:
+            raise ValueError(f"geo_lagernvs_anchor must be 's' | 'view0', got {anchor!r}")
+        d = (centers[geo_idxs] - a).norm(dim=-1)                       # dist from the anchor
         return (1.35 * d.max()).clamp(min=1e-5).unsqueeze(0)
 
     def _context_window_scale(self, scene_idx, s, e, window_fn=None):

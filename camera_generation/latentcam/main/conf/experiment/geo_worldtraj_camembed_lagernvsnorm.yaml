@@ -14,15 +14,23 @@
 # skip_ctx_norm 을 false 로 두면 통일이 아예 성립하지 않는다. true 로 override_scale=D 를 강제해야
 # arm A 와 같은 구조적 통일이 된다.
 #
-# 알려진 부작용 (실측, train 1500 segment):
-#   LagerNVS 에 실제로 들어가는 스칼라 tok = max‖c_ctx − c_view0‖ / D 는 고유값 0.7407 과 어긋난다:
-#   p01 0.1520 / median 0.8146 / max 1.4804, tok < 0.7407 인 비율 36.80%, 심한 축소 2.67%.
-#   같은 조건의 arm A 는 16.00% / 1.73% 라 이 arm 쪽이 더 자주 축소된다. D 가 frame s 앵커인데
-#   LagerNVS 는 view0 앵커라서 생기는 차이고, camembed 에서는 구조적으로 피할 수 없다.
+# 그리고 geo_lagernvs_anchor 를 **view0** 로 둔다 (기본값 's' = 기존 동작).
+# _geo_lagernvs_scale 은 원래 분모를 frame s 에서 쟀는데(centers[s] 하드코딩), s 가 context 에
+# 들어가든 말든 그렇게 잰다. LagerNVS 는 항상 geo_idxs[0] 을 원점으로 재정렬한 뒤 나누므로
+# (models/geo_encoder.py:109-110) 두 앵커가 다른 카메라면 실제 주입 스칼라
+# tok = max‖c_geo − c_geo[0]‖ / D 가 고유값 1/1.35 = 0.7407 에서 벗어난다. 실측(train 1500)
+# r = 1.35·max‖·−c_geo[0]‖/D 가 min 0.0420 / p05 0.5039 / med 1.0997 / p95 1.8912 / max 1.9985
+# 로 흩어졌다 (상한 2 는 c_geo[0] 이 집합의 원소라 삼각부등식에서 나오는 hard bound; 하한은 없다).
+# anchor 를 view0 로 맞추면 분모와 encoder 의 정규화가 같은 점에서 같은 집합의 max 를 재므로
+# r ≡ 1, tok ≡ 0.7407 이 되어 LagerNVS 를 학습 분포 안에서 쓰면서 D 통일도 유지한다.
+#   leak 없음: geo view 선택은 frame s 와 out-of-segment 프레임만 보고 하므로 추론 시 동일하게
+#   계산된다. target 궤적의 원점은 여전히 extrinsics[0] = c_s 이고 분모 스칼라만 바뀐다.
+#   geo_first_view_target_s: true 인 arm 들(원래 arm B 등)은 geo_idxs[0] == s 라 두 앵커가 같은
+#   카메라 -> 's' 와 'view0' 이 bit-identical, 기존 동작에 영향 없음.
 #
 # cache: geo_first_view_target_s false → subdir first_cam_not_included/. override_scale 이
-#   geo_lagernvs 라 native 정규화와도, arm A 의 ctx_longer_135max 와도 값이 달라 기존 두 트리를
-#   재사용할 수 없다 → 전용 트리 latent_cache_geolagernvs 를 새로 굽는다.
+#   geo_lagernvs(view0 앵커) 라 native 정규화와도, arm A 의 ctx_longer_135max 와도 값이 달라
+#   기존 두 트리를 재사용할 수 없다 → 전용 트리 latent_cache_geolagernvs 를 새로 굽는다.
 #   (geo_first_view_target_s true 였다면 native 와 값이 같아 latent_cache/first_cam_included 를
 #    그대로 쓸 수 있었다. 그게 원래 arm B 가 캐시를 공유하던 이유다.)
 # vae_latent_scale / seg_list 고정 근거는 geo_worldtraj_ctxlonger135_scale96.yaml 주석 참조.
@@ -40,6 +48,7 @@ geo_cam_embed: relfirst
 geo_cam_embed_dim: 128
 scale_mode: geo_lagernvs
 geo_lagernvs_skip_ctx_norm: true
+geo_lagernvs_anchor: view0     # 기본값 's'(frame s 앵커)면 tok 이 0.7407 에서 벗어난다 — 위 주석
 cam_dim: 64
 intr_norm: rel
 vae_ckpt_path: /data1/cympyc1785/LatentCamVid/camera_generation/latentcam/checkpoints/vae_20260302_300.pth

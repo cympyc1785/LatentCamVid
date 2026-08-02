@@ -15,13 +15,22 @@
 # false 인 여기서는 성립하지 않는다 — geo_worldtraj_camembed_lagernvsnorm.yaml 주석 참조.)
 #
 # 알려진 부작용 (실측, train 1500 segment):
-#   camembed 는 geo view0 이 frame s 가 아니라 retrieval 결과다. LagerNVS 는 항상 view0 을 원점으로
-#   잡으므로(models/geo_encoder.py:98-104) 이 arm 이 LagerNVS 에 실제로 넣는 스칼라는
-#   tok = max‖c_ctx − c_view0‖ / D 이고, LagerNVS 고유값 1/1.35 = 0.7407 과 어긋난다:
-#   p01 0.1895 / median 1.0556 / max 3.2284, tok < 0.7407 인 비율 16.00%, 심한 축소 1.73%.
-#   under-scaling 이 치명적인 방향이라(over-scaling 은 거의 무해) 이 arm 의 16% 는 감수하고 가는
-#   조건이다. 이걸 0 으로 만들려면 D 를 frame s 가 아니라 geo view0 에 앵커해야 하고, 그건 새
-#   scale_mode 가 필요하다 (미구현).
+#   LagerNVS 는 항상 geo_idxs[0] 을 원점으로 재정렬한 뒤 1.35·max 로 나눈다
+#   (models/geo_encoder.py:109-117). 그래서 override_scale=D 를 넣으면 실제 주입 스칼라
+#   tok = max‖c_geo − c_geo[0]‖ / D 가 고유값 1/1.35 = 0.7407 에서 벗어난다:
+#   p01 0.1895 / median 1.0556 / max 3.2284 (native 대비 0.26x ~ 4.4x).
+#   이건 arm B 와 달리 camembed 때문에 생긴 게 아니다. ctx_longer_135max 의 D 는 target segment
+#   바깥 긴 쪽 side 를 num_frames window 로 잘라 각 window 의 첫 프레임 기준 1.35·max 를 구한 뒤
+#   window 들을 평균한 값이라(_context_window_scale), LagerNVS 가 재는 "geo view 6개의 view0 기준
+#   max" 와 프레임 집합도 원점도 다르고 평균까지 들어간다 -- geo_first_view_target_s 가 true 든
+#   false 든 애초에 같아질 수 없다. 즉 arm A 는 설계상 이 이탈을 감수하는 arm 이고,
+#   geo_lagernvs_anchor 같은 국소 수정으로 없앨 수 없다 (없애려면 D 자체를 버려야 함).
+#   대가의 크기: 2026-08-02 LagerNVS 랜더 실측(EXPERIMENTS.log)에서 tok 이탈 단독의 손해는 작았다.
+#   dynamic_replica 에서 tok 0.3308 / 0.7407 / 2.5309 의 PSNR 이 22.670 / 22.777 / 22.741 (0.11 dB
+#   이내), 관측된 최대 격차는 DAVIS/lucia_0 의 tok 5.127 (native 6.9배)에서 -0.87 dB 였다. 즉 방향은
+#   over-scaling 쪽이 더 나빴고 under-scaling 이 더 위험하다는 근거는 없다. 그 랜더에서 크게 망가진
+#   변수는 tok 이 아니라 depth = avg_scale/D 폭발이었는데, DL3DV 는 plx<1e-2 가 0.000 이라 그
+#   구간에 들어가지 않는다.
 #
 # cache: geo_first_view_target_s 가 false 라 dataset/cache 스크립트 모두 subdir 을
 #   first_cam_not_included/ 로 잡는다 (dataset_dl3dv.py:272-274). override_scale 이 arm A 와 같은

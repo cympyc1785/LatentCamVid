@@ -302,23 +302,50 @@ All notable changes to the latentcam sub-project. Follows [Keep a Changelog](htt
   the new ckpt yet, so the recon-vs-corpus-coverage trade is unevaluated.
 
 ### Added
+- **`geo_lagernvs_anchor: s | view0`** (`conf/config.yaml`, `dataset_dl3dv._geo_lagernvs_scale`) —
+  `scale_mode: geo_lagernvs`의 divisor를 **어느 카메라에서 재는가**. 기본 `'s'`는 기존 동작
+  (`D = 1.35·max‖c_geo − c_s‖`, `centers[s]` 하드코딩), `'view0'`은 `geo_idxs[0]` 기준.
+  왜: `geo_encoder.build_cam_token`은 `override_scale`을 받든 말든 항상 `geo_idxs[0]`을 원점으로
+  재정렬한 뒤 나눈다(`models/geo_encoder.py:109-110`). 그래서 LagerNVS가 실제로 받는 스칼라
+  `tok = max‖c_geo − c_geo[0]‖ / D`가 학습 분포값 `1/1.35 = 0.7407`이 되려면 D도 같은 카메라에서
+  재야 한다. `geo_first_view_target_s: true`면 `geo_idxs[0] == s`라 두 앵커가 같은 카메라 —
+  기존 arm B가 `tok = 0.7407`을 공짜로 얻던 이유가 이것이고, 이 경우 두 설정은 bit-identical이다
+  (실측 n=40, `max|diff| = 0`; 도는 `geo_worldtraj_lagernvsnorm_scale96` 영향 없음).
+  `false`(camembed/decoupled)면 `s`가 context에 아예 없는데도 `centers[s]`에서 재게 되어
+  `r = 1.35·max‖·−c_geo[0]‖/D`가 흩어진다: min 0.0420 / p05 0.5039 / med 1.0997 / p95 1.8912 /
+  max 1.9985 (상한 2는 `c_geo[0]`이 집합의 원소라 삼각부등식에서 나오는 hard bound, 하한은 없음;
+  대조군 `geo_worldtraj`는 `|r−1|≤1e-4`가 100.00%). `'view0'`이면 `r ≡ 1` — 실측으로
+  camembed×B에서 `tok`이 `s`일 때 min 0.2377 / med 0.8163 / max 1.4646 (0.7407 일치 0.00%)에서
+  `view0`일 때 **min=med=max=0.7407, 일치 100.00%**로 바뀐다.
+  leak 없음: geo view 선택은 frame s와 out-of-segment 프레임만 보므로 추론 시 동일하게 계산되고,
+  target 궤적의 원점은 여전히 `extrinsics[0] = c_s`이며 분모 스칼라만 바뀐다.
+  `geo_shuffle_order: true`와의 병용은 `ValueError` — divisor는 셔플 **전** 순서로 계산되는데
+  encoder는 셔플 **후** view0을 보게 되어 앵커가 다시 어긋나므로, 조용히 잘못 앵커되느니 거부한다.
 - **`conf/experiment/geo_worldtraj_camembed_{ctxlonger135,lagernvsnorm}.yaml` (신규)** — camembed
   arm(`geo_first_view_target_s: false` + `geo_cam_embed: relfirst`) 위에 arm A/B의 normalization
   통일을 얹은 2개. 도는 camembed(wandb `ek9n9jt5`)는 `scale_mode: avg_scale` + `skip_ctx_norm: false`
   라서 **context decoupling**과 **normalization 미통일**이라는 변수를 동시에 갖고 있었고, baseline
   대비 낮게 나온 이유를 둘 중 어느 쪽으로도 돌릴 수 없었다. 이 2개는 뒤쪽을 제거한다.
   - `_ctxlonger135`: `scale_mode: ctx_longer_135max` + `geo_lagernvs_skip_ctx_norm: true`.
-  - `_lagernvsnorm`: `scale_mode: geo_lagernvs` + **`geo_lagernvs_skip_ctx_norm: true`**. 원래 arm B는
-    `false`인데도 통일이 됐던 건 `geo_first_view_target_s: true`라 geo view0 == frame s여서 LagerNVS의
-    분모와 `_geo_lagernvs_scale`이 **같은 값**이 됐기 때문이다(값의 우연, 구조 아님). camembed에선
-    view0 ≠ s라 실측(train 1500) 두 분모의 비 r = min 0.0420 / p05 0.5039 / median 1.0997 /
-    p95 1.8912 / max 1.9985, `|r−1|≤1e-4`가 0.13%(대조군 `geo_worldtraj`는 100.00%) — `false`로 두면
-    통일이 성립하지 않으므로 `true`로 `override_scale=D`를 강제한다.
-  - 알려진 부작용: LagerNVS는 항상 geo view0을 원점으로 잡으므로(`models/geo_encoder.py:98-104`)
-    실제 주입 스칼라 `tok = max‖c_ctx − c_view0‖ / D`가 고유값 `1/1.35 = 0.7407`과 어긋난다. 실측
-    `tok < 0.7407` 비율: A쪽 16.00%(심함 1.73%, p01 0.1895 / med 1.0556 / max 3.2284), B쪽
-    36.80%(심함 2.67%, p01 0.1520 / med 0.8146 / max 1.4804). under-scaling이 치명적 방향이라
-    감수 조건이며, 없애려면 D를 frame s가 아니라 geo view0에 앵커하는 새 `scale_mode`가 필요하다(미구현).
+  - `_lagernvsnorm`: `scale_mode: geo_lagernvs` + **`geo_lagernvs_skip_ctx_norm: true`** +
+    **`geo_lagernvs_anchor: view0`**. 원래 arm B가 `skip_ctx_norm: false`인데도 통일이 됐던 건
+    `geo_first_view_target_s: true`라 `geo_idxs[0] == s`여서 LagerNVS의 분모와 `_geo_lagernvs_scale`이
+    **같은 값**이 됐기 때문이다(값의 우연, 구조 아님). camembed에선 `geo_idxs[0] ≠ s`라 성립하지
+    않으므로 `true`로 `override_scale=D`를 강제하고, 앵커까지 `view0`으로 맞춰 `tok ≡ 0.7407`을
+    되찾는다 (아래 `Added`의 `geo_lagernvs_anchor` 항목).
+  - A쪽 알려진 부작용: LagerNVS는 항상 `geo_idxs[0]`을 원점으로 재정렬한 뒤 나누므로
+    (`models/geo_encoder.py:109-117`) 실제 주입 스칼라 `tok = max‖c_geo − c_geo[0]‖ / D`가 고유값
+    `1/1.35 = 0.7407`에서 벗어난다: p01 0.1895 / med 1.0556 / max 3.2284 (native 대비 0.26x~4.4x).
+    B쪽과 달리 이건 camembed 탓이 아니다 — `ctx_longer_135max`의 D는 context side를 num_frames
+    window로 잘라 **각 window의 첫 프레임** 기준 `1.35·max`를 구한 뒤 **평균**한 값이라
+    (`_context_window_scale`) LagerNVS가 재는 양과 프레임 집합·원점·평균 셋 다 다르고,
+    `geo_first_view_target_s`와 무관하게 애초에 같아질 수 없다. `geo_lagernvs_anchor`로 고칠 수
+    있는 종류가 아니다(고치려면 D 자체를 버려야 함).
+    대가의 크기는 2026-08-02 랜더 실측 기준 작다: dynamic_replica tok 0.3308/0.7407/2.5309 → PSNR
+    22.670/22.777/22.741 (0.11 dB 이내), 최대 격차는 DAVIS/lucia_0 tok 5.127(native 6.9배)에서
+    −0.87 dB. 방향은 over-scaling 쪽이 더 나빴고 under-scaling이 더 위험하다는 근거는 없다
+    (그 랜더에서 크게 망가진 변수는 tok이 아니라 `depth = avg_scale/D` 폭발이었고, DL3DV는
+    `plx<1e-2`가 0.000이라 그 구간에 들어가지 않는다).
   - cache: 둘 다 `first_cam_not_included/`. A쪽은 `override_scale`이 arm A와 같아 기존
     `latent_cache_ctxlonger135` 트리를 공유하고 그 안에 서브디렉토리만 추가; B쪽은 native와도 A와도
     값이 달라 전용 트리 `latent_cache_geolagernvs`를 새로 굽는다 (각 ~266 GB).

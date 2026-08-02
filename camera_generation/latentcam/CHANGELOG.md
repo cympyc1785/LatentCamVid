@@ -5,6 +5,18 @@ All notable changes to the latentcam sub-project. Follows [Keep a Changelog](htt
 ## [Unreleased]
 
 ### Added
+- **`scripts/data/static_camera_degeneracy.py` (신규)** — camera-length divisor(arm A
+  `ctx_longer_135max` / arm B `geo_lagernvs`)가 **정지 카메라**에서 무너지는 지점을 실측한다.
+  기존 `scripts/data/norm_divisor_compare.py`는 `maxd < 1e-6` segment를 `return None`으로 버리고
+  scale-free 비율(`m = maxd/D`, `r = D_lagernvs/D`)만 보고해서 이 현상이 구조적으로 안 보인다 —
+  divisor 자체가 카메라 변위라, 변위를 그걸로 나누면 물리적으로 아무리 안 움직였어도 항상 ~0.74가
+  나오기 때문. 이 스크립트는 chunk를 하나도 버리지 않고 **scale-free가 아닌** 양을 찍는다:
+  `D_raw`와 `clamp(1e-5)` 적중률, `reach = maxd/D` vs `maxd/avg_scale`(조작된 운동량),
+  `depth = avg_scale/D`(LagerNVS 입력 반경), `parallax = maxctx0/avg_scale`(divisor 무관 물리량),
+  `straight = maxd/pathlen`, geo view 중복률, 그리고 **arm A가 실제로 쓰는 divisor**
+  (`dataset_dl3dv.py:876`의 target 유래 `_first_farthest_scale` fallback 포함). DynamicVerse는
+  subset별로 쪼개고 DL3DV는 control. out → `results/compare/<OUT_NAME>/{per_chunk.csv,stats.json,
+  summary.md,_static.png,worst_parallax.csv}`. 측정값은 `EXPERIMENTS.log` 2026-08-02 항목.
 - **`conf/experiment/geo_worldtraj_{ctxlonger135,lagernvsnorm}_scale96.yaml` (신규)** — arm A/B와
   전부 동일하되 `vae_latent_scale`만 **0.96032625**. 끝난 baseline
   `20260731_001511_dl3dv_geo_worldtraj`(wandb `c4d2k5y4`, ep150)가 그 값으로 학습됐는데, 도는

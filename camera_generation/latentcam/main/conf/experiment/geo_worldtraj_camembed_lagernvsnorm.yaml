@@ -28,11 +28,18 @@
 #   geo_first_view_target_s: true 인 arm 들(원래 arm B 등)은 geo_idxs[0] == s 라 두 앵커가 같은
 #   카메라 -> 's' 와 'view0' 이 bit-identical, 기존 동작에 영향 없음.
 #
-# cache: geo_first_view_target_s false → subdir first_cam_not_included/. override_scale 이
-#   geo_lagernvs(view0 앵커) 라 native 정규화와도, arm A 의 ctx_longer_135max 와도 값이 달라
-#   기존 두 트리를 재사용할 수 없다 → 전용 트리 latent_cache_geolagernvs 를 새로 굽는다.
-#   (geo_first_view_target_s true 였다면 native 와 값이 같아 latent_cache/first_cam_included 를
-#    그대로 쓸 수 있었다. 그게 원래 arm B 가 캐시를 공유하던 이유다.)
+# cache: 새로 구울 필요가 없다. anchor='view0' 의 D 는 정의상 LagerNVS 의 native scene_scale 과
+#   **같은 식**이다 -- 둘 다 "geo view 집합을 geo_idxs[0] 기준으로 놓았을 때의 1.35·max‖center‖".
+#   그래서 override_scale=D 를 넣은 결과가 skip_ctx_norm=false(native)와 수치적으로 같다:
+#   실측 |native − D_view0|/native 는 max 5.955e-07 / med 8.969e-08 로, 캐시가 fp16 (eps 9.77e-04)
+#   인 걸 감안하면 저장 정밀도보다 3자리 아래다. 그리고 context view 선택 키
+#   (geo_first_view_target_s / cover_out_of_seg / subtract_first / centered_at_s / view_sampling)가
+#   geo_worldtraj_camembed 와 전부 같으므로 latent_cache/first_cam_not_included 를 그대로 쓴다
+#   (이미 구워져 있고 camembed·decoupled 가 공유 중인 트리. geo_cam_embed 는 캐시에 안 들어가고
+#    geo_idxs 로부터 매번 재구성되므로 cemb 차이는 무관하다).
+#   여기서 skip_ctx_norm 을 굳이 true 로 두는 건 통일을 "값의 우연"이 아니라 강제로 만들기 위해서다.
+#   결과 emb 은 native 와 같지만, 나중에 _geo_lagernvs_scale 이 바뀌어도 geo latent 와 target 이
+#   같은 D 를 쓴다는 사실은 깨지지 않는다.
 # vae_latent_scale / seg_list 고정 근거는 geo_worldtraj_ctxlonger135_scale96.yaml 주석 참조.
 exp_name: dl3dv_geo_worldtraj_camembed_lagernvsnorm
 meta_csv: meta_worldtraj.csv
@@ -53,7 +60,7 @@ cam_dim: 64
 intr_norm: rel
 vae_ckpt_path: /data1/cympyc1785/LatentCamVid/camera_generation/latentcam/checkpoints/vae_20260302_300.pth
 vae_latent_scale: 0.96032625   # baseline c4d2k5y4 / camembed ek9n9jt5 와 동일
-geo_latent_cache_dir: /data1/cympyc1785/data/DL3DV/latent_cache_geolagernvs
+geo_latent_cache_dir: /data1/cympyc1785/data/DL3DV/latent_cache   # camembed 와 공유 — 위 주석
 
 train_seg_list: /data1/cympyc1785/data/DL3DV/scenes/latentcam_train_seg_list_c4d2k5y4.txt
 test_seg_list: /data1/cympyc1785/data/DL3DV/scenes/latentcam_test_seg_list_c4d2k5y4.txt

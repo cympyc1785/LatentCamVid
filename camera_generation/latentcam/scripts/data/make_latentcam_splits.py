@@ -92,7 +92,7 @@ def main():
     # sanity: scene lists are disjoint
     overlap = set(train_scenes) & set(test_scenes)
     print(f"(2) scene split: {ns} scenes -> train={len(train_scenes)} test={len(test_scenes)} "
-          f"overlap={len(overlap)} -> latentcam_{{train,test}}_list.txt")
+          f"overlap={len(overlap)} -> latentcam_{{train,test}}_list{OUT_SUFFIX}.txt")
     print("DONE ->", OUT_DIR)
 
 

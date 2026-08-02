@@ -111,6 +111,11 @@ def row_for(idx):
 
     D = {}
     D["geo_lagernvs"] = 1.35 * float(d_ctx_s.max())                    # implemented scale_mode
+    # [new 2026-08-03] geo_lagernvs_anchor='view0' 변종. dataset 쪽 _geo_lagernvs_scale 은 이제
+    # 앵커를 고를 수 있는데(conf/config.yaml), 이 스크립트는 centers[s] 를 하드코딩하고 있어서
+    # 그 설정으로 도는 arm 을 재면 엉뚱한 분모를 보고하게 된다. 두 변종을 다 내보낸다.
+    # geo_first_view_target_s: true 면 gi[0] == s 라 두 값이 같다.
+    D["geo_lagernvs_view0"] = 1.35 * float(d_ctx_0.max())
     if chs:
         D["ctx_longer_135max"] = float(np.mean(
             [1.35 * float(np.linalg.norm(centers[c] - centers[c[0]], axis=1).max()) for c in chs]))

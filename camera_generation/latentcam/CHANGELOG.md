@@ -347,8 +347,18 @@ All notable changes to the latentcam sub-project. Follows [Keep a Changelog](htt
     (그 랜더에서 크게 망가진 변수는 tok이 아니라 `depth = avg_scale/D` 폭발이었고, DL3DV는
     `plx<1e-2`가 0.000이라 그 구간에 들어가지 않는다).
   - cache: 둘 다 `first_cam_not_included/`. A쪽은 `override_scale`이 arm A와 같아 기존
-    `latent_cache_ctxlonger135` 트리를 공유하고 그 안에 서브디렉토리만 추가; B쪽은 native와도 A와도
-    값이 달라 전용 트리 `latent_cache_geolagernvs`를 새로 굽는다 (각 ~266 GB).
+    `latent_cache_ctxlonger135` 트리를 공유하고 그 안에 서브디렉토리만 추가(~266 GB).
+    B쪽은 **새로 구울 필요가 없다** — `anchor: view0`의 D는 정의상 LagerNVS native `scene_scale`과
+    같은 식(둘 다 geo view 집합을 `geo_idxs[0]` 기준으로 놓은 `1.35·max‖center‖`)이라 실측
+    `|native − D_view0|/native`가 n=60에서 max 5.955e-07 / med 8.969e-08 이고, 캐시가 fp16
+    (eps 9.77e-04)이라 저장 정밀도보다 3자리 아래다. context view 선택 키
+    (`geo_first_view_target_s`/`geo_cover_out_of_seg`/`geo_cover_subtract_first`/
+    `geo_cover_centered_at_s`/`geo_view_sampling`)도 `geo_worldtraj_camembed`와 전부 같으므로
+    이미 구워져 있는 `latent_cache/first_cam_not_included`를 그대로 쓴다(camembed·decoupled와 공유;
+    `geo_cam_embed`는 캐시에 안 들어가고 `geo_idxs`로부터 매번 재구성된다). 재사용 검증: 캐시된
+    `geo_idxs` vs 새로 계산한 선택 200개 — missing 0 / v1 0 / 불일치 0. 굽다 만 전용 트리
+    `latent_cache_geolagernvs`(36 GB)는 삭제했다. `skip_ctx_norm: true`는 그래도 유지 — 결과 emb은
+    native와 같지만, 통일을 "값의 우연"이 아니라 구조로 못박기 위해서다.
   - `vae_latent_scale`은 config 기본값 0.96032625 그대로(= `c4d2k5y4` / `ek9n9jt5`와 동일),
     `train_seg_list`/`test_seg_list`는 `c4d2k5y4` 분할로 고정.
 
@@ -378,6 +388,16 @@ All notable changes to the latentcam sub-project. Follows [Keep a Changelog](htt
   주의: 리스트는 **`random_split` 순서 그대로** 쓴다. 정렬 금지 — `base.py:106`이 valid loader를
   `shuffle=False`로 돌려 test 리스트 앞 160개가 곧 wandb val인데, 정렬하면 그 160개가 전부 1K batch가
   되고(실측 160/160 vs 원 순서 26/160) `c4d2k5y4`의 val과도 달라진다.
+- **`scripts/data/norm_divisor_compare.py`에 `D["geo_lagernvs_view0"]`** — 이 스크립트는 분모를
+  `centers[s]` 기준으로만 재는데, `_geo_lagernvs_scale`이 이제 `geo_lagernvs_anchor`로 앵커를 고를 수
+  있게 돼서 `view0` arm(예: `geo_worldtraj_camembed_lagernvsnorm`)을 재면 그 arm이 실제로 쓰지 않는
+  분모를 보고하게 된다. 두 변종을 다 내보낸다. `geo_first_view_target_s: true`면 `gi[0] == s`라 두
+  값이 같으므로 기존 arm의 출력은 변하지 않는다.
+  아직 안 고친 것: `scripts/data/static_camera_degeneracy.py:119`,
+  `scripts/vae/vae_divisor_recon.py:96`은 여전히 frame-s 앵커 하드코딩.
+- **`scripts/data/make_latentcam_splits.py`의 scene split 출력 문구 수정** — `(2)`행이
+  `OUT_SUFFIX`를 무시하고 항상 `latentcam_{train,test}_list.txt`라고 찍어서, suffix를 준 실행에서
+  실제로 쓴 파일과 다른 이름을 보고했다(파일 자체는 처음부터 suffix를 붙여 썼다).
 - **testset eval 출력 위치 `results/testset_eval/` → `eval_my/`** (`scripts/eval_testset.py`의
   `EVAL_ROOT` 상수). 사용자 지시. `--out`으로 여전히 override 가능하고
   `scripts/eval_testset_queue.sh`는 경로를 하드코딩하지 않아 그대로 따라간다. 기존 5개 결과 디렉토리

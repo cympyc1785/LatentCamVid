@@ -5,6 +5,24 @@ All notable changes to the latentcam sub-project. Follows [Keep a Changelog](htt
 ## [Unreleased]
 
 ### Added
+- **`scripts/eval_testset.py` (신규)** — 학습이 끝난 run을 **held-out split 전체**에 대해 추론 +
+  CLaTr/caption 평가한다. `train_latent_cam_dm.run_validation`은 `val_max_batches`(20) ×
+  `batch_size`(8) = 160개만 보므로 wandb val 곡선은 160-sample 추정치다. 이 스크립트는 같은
+  경로를 3982개 전부에 대해 한 번 돌린다.
+  - config는 **run이 저장한 `results/<run>/config.yaml`**(학습 당시 resolved config)을 현재
+    `conf/config.yaml` 기본값 위에 덮어써서 만든다. 지금 끝난 세 geo run은 전부
+    `vae_latent_scale: 0.96032625`로 학습됐는데 `conf/experiment/geo_worldtraj.yaml`은 이제
+    0.47637이라, live experiment yaml을 읽으면 조용히 틀린 scale로 평가된다.
+    이름이 바뀐 키는 `RENAMED`로 승계한다(`geo_anchor_first_frame` → `geo_cover_centered_at_s`).
+  - split은 `base.Trainer._make_batch_generator()`를 그대로 재사용 → 학습 때의
+    `random_split(seed=42)` held-out set과 bit-identical(wandb가 본 160개의 superset).
+  - sampling/decode/`out_to_trajectory`/json dump/CLaTr subprocess 체인은 복사가 아니라
+    `train_latent_cam_dm`의 헬퍼를 import해서 module-global `cfg`만 rebind → 두 경로가 갈라질 수 없음.
+  - 출력: `results/testset_eval/<run>__<ckpt>/`에 `config.yaml`(실제 사용값), `eval_meta.json`
+    (ckpt/epoch/wandb_id/argv), `test/`(caption + ref/pred transforms = input), `seq/`·`token/`,
+    `preds.npy`, `metrics.json`, `metrics_full.json`, `preds_scores.csv`, `losses.json`.
+- **`scripts/eval_testset_queue.sh` (신규)** — `<run_dir>:<ckpt>` 목록을 한 GPU에서 순차 실행
+  (`GPU=3 scripts/eval_testset_queue.sh a:best.pth a:last.pth`). full pass 1회 ≈ 18분.
 - **`scripts/vae/vae_scale_matrix.py`에 `DATASET` 분기 (`dl3dv` 기본 = 기존 동작 그대로 /
   `dynamicverse` / `both`)** — `dynamicverse_shim.load_dynamicverse`로 DynamicVerse까지
   같은 (ckpt × scale_mode × intr) 행렬을 잰다. `DV_CHUNKS`(기본 3)로 scene당 chunk 수 지정.

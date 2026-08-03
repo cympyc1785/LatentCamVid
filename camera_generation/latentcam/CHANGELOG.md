@@ -20,7 +20,14 @@ All notable changes to the latentcam sub-project. Follows [Keep a Changelog](htt
     바꿔친 context에서 다시 계산한다. `RD_TAG`가 모든 출력 파일명/metrics 키 뒤에 붙어 일반 context
     실행 결과를 덮어쓰지 않는다.
   - 로그/`metrics.json`에 `tgt_reach`(정규화 후 target 최대 변위)와 `divisor_raw` 추가.
-  측정값은 `EXPERIMENTS.log` 2026-08-03 항목.
+  - `RD_SINGLE_VIEW=1`: context를 view0 한 장으로 줄인다(V=1). `build_cam_cond`이
+    `num_cond_views==1 and split=="test"`에서 토큰을 `[ch9=0, ch10=1]`로 강제하므로
+    (`data/normalization.py:109-114`) divisor가 정규화 의미를 잃고 **target 변위 크기만** 결정하게
+    된다 — 정지 카메라 fallback에서 "target 범위를 얼마로 줘야 하나"를 재는 용도.
+  - mode 문법에 `*<f>` 배수 추가(`avg_scale*0.5` → key `avg_scale_x0.5`)와 합성 divisor `one`(=1,
+    정규화 없이 world unit 그대로). divisor sweep을 위한 것.
+  - 로그의 `tok=`는 이제 추정값이 아니라 `cam_tokens[0, -2:]` 실제값을 찍는다.
+  측정값은 `EXPERIMENTS.log` 2026-08-03 두 항목.
 - **`scripts/vae/vae_scale_matrix.py`에 `TAILS=1`** — 기존 표는 corpus **평균** latent std만
   주는데, camera-length `scale_mode`는 카메라가 멈춘 바로 그 샘플에서 분모가 0에 가까워지므로
   평균으로는 터지는 개별 샘플이 안 보인다. `TAILS=1`이면 같은 행들 아래에 per-sample tail 표를

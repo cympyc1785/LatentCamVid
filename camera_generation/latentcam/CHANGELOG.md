@@ -13,7 +13,13 @@ All notable changes to the latentcam sub-project. Follows [Keep a Changelog](htt
   나눠 **점선 원 r=1이 GT 최대 도달반경**이 되게 했다. 패널 축은 `aspect='datalim'`이 `set_xlim`을
   무시하는 문제 때문에 정사각 bbox를 직접 잡아 `adjustable='box'`로 고정한다 — 안 그러면 멀리 있는
   context 마커가 축을 늘려 궤적이 납작해진다. 패널 선정은 `--pick even`(이름 정렬 후 균등, cherry-pick
-  방지) / `dswap-top` / `dswap-low`.
+  방지) / `dswap-top` / `dswap-low`. `--names-from`으로 다른 그림과 같은 segment를 고를 수 있다.
+  - `--fig inseg` — `geo_test_inseg_k` 누수 arm(K=1/3/5)을 겹쳐 그린다. 누수된 context 카메라는
+    저장돼 있지 않지만 `_mix_inseg_context`가 target 프레임을 `linspace(0,T-1,K).round()`로 균등
+    분할하므로 GT 궤적의 그 인덱스로 결정적으로 복원해 마커를 찍는다.
+  - `--ctx-leak-k K` — `--fig seeds`에서 context 앞 K장을 **in-segment 누수 view**(초록 다이아몬드)로,
+    나머지를 out-of-segment(회색 사각)로 구분한다. `_mix_inseg_context`가 `inseg + rest` 순서로
+    돌려주는 것에 의존한다.
 - **`scripts/eval/traj_diversity.py`** — 조건부 diversity / context 민감도 측정. (A) 같은 context에서
   seed만 바꾼 여러 eval 출력(`--seeds`)을 받아 위치 분산을 seed 내(within) / segment 간(between)으로
   분해하고 ICC `R = var_between/(var_between+var_within)`, seed 쌍거리(APD), ADE(mean/best-of-S),

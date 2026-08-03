@@ -82,7 +82,7 @@ def _finish(ax, title):
     ax.set_aspect('equal', adjustable='box')
 
 
-def fig_seeds(run_dirs, names, out_path, ctx_from=None, style='cloud'):
+def fig_seeds(run_dirs, names, out_path, ctx_from=None, style='cloud', ctx_leak_k=0):
     n = len(names)
     cols = min(3, n)
     rows = (n + cols - 1) // cols
@@ -114,9 +114,16 @@ def fig_seeds(run_dirs, names, out_path, ctx_from=None, style='cloud'):
             C = _ctx(ctx_from, nm)
             if C is not None:
                 c = _xz(C, ref, L)
-                ax.scatter(c[:, 0], c[:, 1], marker='s', s=52, facecolors='none',
-                           edgecolors='tab:green', lw=1.6, zorder=7,
-                           label='context view' if k == 0 else None)
+                # geo_test_inseg_k 를 켰으면 _mix_inseg_context 가 누수 view 를 앞쪽 K 장에
+                # 놓으므로(inseg + rest), 앞 K 장만 다른 마커로 구분해 그린다.
+                kk = max(0, min(int(ctx_leak_k), c.shape[0]))
+                if kk:
+                    ax.scatter(c[:kk, 0], c[:kk, 1], marker='D', s=62, facecolors='none',
+                               edgecolors='tab:green', lw=2.0, zorder=8,
+                               label=f'context: IN-segment (leaked, K={kk})' if k == 0 else None)
+                ax.scatter(c[kk:, 0], c[kk:, 1], marker='s', s=52, facecolors='none',
+                           edgecolors='0.35', lw=1.6, zorder=7,
+                           label='context: out-of-segment' if k == 0 else None)
         _finish(ax, nm[:26])
         if k == 0:
             ax.legend(fontsize=8, loc='best')
@@ -174,6 +181,59 @@ def fig_swap(base, swap, names, out_path):
     print('saved', out_path)
 
 
+def fig_inseg(arms, names, out_path):
+    """arms = [(K, run_dir), ...]  K=0 은 없다; K=1 이 학습 조건과 동일한 대조군.
+
+    누수된 context 카메라는 저장돼 있지 않지만 결정적으로 복원된다 --
+    `_mix_inseg_context` 가 target 프레임을 `np.linspace(0, T-1, K).round()` 로 균등 분할하므로
+    GT 궤적의 그 인덱스가 곧 context 로 들어간 카메라다. GT 위에 마커로 찍는다.
+    """
+    n = len(names)
+    cols = min(3, n)
+    rows = (n + cols - 1) // cols
+    fig, axes = plt.subplots(rows, cols, figsize=(4.6 * cols, 4.4 * rows), squeeze=False)
+    style = {1: ('0.45', 'o', 'pred K=1 (= training condition)'),
+             3: ('tab:orange', 's', 'pred K=3'),
+             5: ('tab:purple', '^', 'pred K=5')}
+    for k, nm in enumerate(names):
+        ax = axes[k // cols][k % cols]
+        gt = _tr(arms[0][1], nm, 'ref')
+        ref, L = _frame(gt)
+        g = _xz(gt, ref, L)
+        T = g.shape[0]
+        ax.plot(g[:, 0], g[:, 1], '-', lw=3.0, color='tab:blue',
+                label='GT' if k == 0 else None, zorder=4)
+        ax.scatter(g[-1, 0], g[-1, 1], s=55, color='tab:blue', zorder=5)
+        ds = {}
+        p1 = _xz(_tr(arms[0][1], nm, 'pred'), ref, L)
+        for K, d in arms:
+            p = _tr(d, nm, 'pred')
+            if p is None:
+                continue
+            xy = _xz(p, ref, L)
+            col, mk, lab = style[K]
+            ax.plot(xy[:, 0], xy[:, 1], '-', lw=2.0, color=col,
+                    label=lab if k == 0 else None, zorder=6)
+            ax.scatter(xy[-1, 0], xy[-1, 1], s=32, color=col, zorder=7)
+            if K != 1:
+                ds[K] = float(np.linalg.norm(xy - p1, axis=-1).mean())
+                leak = np.linspace(0, T - 1, K).round().astype(int)
+                ax.scatter(g[leak, 0], g[leak, 1], marker=mk, s=95, facecolors='none',
+                           edgecolors=col, lw=1.8, zorder=8,
+                           label=f'leaked ctx (K={K})' if k == 0 else None)
+        _finish(ax, f"{nm[:20]}  d3={ds.get(3, float('nan')):.3f} d5={ds.get(5, float('nan')):.3f}")
+        if k == 0:
+            ax.legend(fontsize=7.5, loc='best')
+    for k in range(n, rows * cols):
+        axes[k // cols][k % cols].axis('off')
+    fig.suptitle('geo_test_inseg_k leakage — K of the 6 context views replaced by TARGET cameras '
+                 '(top-down; anchored to frame s; X vs -Z; GT reach = 1)', fontsize=11)
+    fig.tight_layout()
+    fig.savefig(out_path, dpi=125, bbox_inches='tight')
+    plt.close(fig)
+    print('saved', out_path)
+
+
 def pick(names, mode, n, base=None, swap=None):
     if mode == 'even':
         idx = np.linspace(0, len(names) - 1, n).round().astype(int)
@@ -193,10 +253,14 @@ def pick(names, mode, n, base=None, swap=None):
 
 def main():
     ap = argparse.ArgumentParser()
-    ap.add_argument('--fig', choices=['seeds', 'swap'], required=True)
+    ap.add_argument('--fig', choices=['seeds', 'swap', 'inseg'], required=True)
     ap.add_argument('--seeds', nargs='*', default=[])
     ap.add_argument('--base', default=None)
     ap.add_argument('--swap', default=None)
+    ap.add_argument('--inseg', nargs='*', default=[],
+                    help="--fig inseg 용. 'DIR:K' 쌍들, K=1 을 먼저. 예: a:1 b:3 c:5")
+    ap.add_argument('--names-from', default=None,
+                    help='패널 후보 이름을 이 run 의 것으로 제한 (다른 그림과 같은 segment 를 뽑을 때)')
     ap.add_argument('--ctx-from', default=None,
                     help='--fig seeds 에서 context 카메라를 가져올 run (geo_ctx/ 있는 것)')
     ap.add_argument('--pick', default='even', choices=['even', 'dswap-top', 'dswap-low'])
@@ -204,6 +268,8 @@ def main():
     ap.add_argument('--out', required=True)
     ap.add_argument('--tag', default='')
     ap.add_argument('--style', default='cloud', choices=['cloud', 'rainbow'])
+    ap.add_argument('--ctx-leak-k', type=int, default=0,
+                    help='geo_test_inseg_k 값. context 앞 K장을 in-segment 누수 view 로 표시')
     args = ap.parse_args()
     os.makedirs(args.out, exist_ok=True)
 
@@ -211,14 +277,26 @@ def main():
         names = _names(args.seeds[0])
         for d in args.seeds[1:]:
             names = [n for n in names if n in set(_names(d))]
-        sel = pick(names, args.pick, args.n, args.base, args.swap)
-        fig_seeds(args.seeds, sel, osp.join(args.out, f'seeds_{args.pick}_{args.style}{args.tag}.png'),
-                  ctx_from=args.ctx_from, style=args.style)
-    else:
+    elif args.fig == 'swap':
         names = [n for n in _names(args.base) if n in set(_names(args.swap))]
-        sel = pick(names, args.pick, args.n, args.base, args.swap)
+    else:
+        arms = [(int(x.rsplit(':', 1)[1]), x.rsplit(':', 1)[0]) for x in args.inseg]
+        names = _names(arms[0][1])
+        for _, d in arms[1:]:
+            names = [n for n in names if n in set(_names(d))]
+    if args.names_from:
+        keep = set(_names(args.names_from))
+        names = [n for n in names if n in keep]
+
+    sel = pick(names, args.pick, args.n, args.base, args.swap)
+    if args.fig == 'seeds':
+        fig_seeds(args.seeds, sel, osp.join(args.out, f'seeds_{args.pick}_{args.style}{args.tag}.png'),
+                  ctx_from=args.ctx_from, style=args.style, ctx_leak_k=args.ctx_leak_k)
+    elif args.fig == 'swap':
         fig_swap(args.base, args.swap, sel,
                  osp.join(args.out, f'swap_{args.pick}{args.tag}.png'))
+    else:
+        fig_inseg(arms, sel, osp.join(args.out, f'inseg_{args.pick}{args.tag}.png'))
 
 
 if __name__ == '__main__':

@@ -60,7 +60,16 @@ All notable changes to the latentcam sub-project. Follows [Keep a Changelog](htt
     둘 중 무엇이 붕괴 원인인지 분리가 안 된다. `@ch9nat`은 pose를 그대로 두고
     `cam_tokens[:, -2]`만 native `1/1.35`로, `@ch9avg`는 `avg_scale` divisor가 만들었을 값
     (`maxctx0 / avg_scale`)으로 덮어쓴다. `FLAGS` 집합에 추가한 것뿐이라 미지정 시 동작 불변.
-  측정값은 `EXPERIMENTS.log` 2026-08-03 세 항목.
+  - **`@g1` flag + `RD_DMIN` 추가 (divisor guard)** — divisor `D`(= 모든 카메라 중심에 걸리는
+    translation 분모, `render_avgscale.py:201`)가 `RD_DMIN`(기본 `1e-2`) 아래로 내려가면
+    카메라 기반 정규화를 포기하고 `D = 1`(world unit 그대로)로 폴백한다. 정지 context에서
+    `D = 1.35·max‖c_ctx − c_ctx0‖ → 0`이 되어 pose가 5~6자릿수 밖으로 튀는 축퇴를 막는 것
+    (실측: `D = 6.6e-07`, `tgt_reach = 8.1e+06`, 13.671 dB → guard 후 `D=1`, 17.772 dB).
+    정상 context에서는 발동하지 않아 `lagernvs@g1`이 `lagernvs`와 PSNR/SSIM/LPIPS 전부 동일.
+    임계값은 정상 D 분포(실측 3.31~43.8)와 축퇴(1e-7 수준) 사이가 5자릿수 비어 있어 둔감하다.
+    `metrics.json`에 `guard_fired` / `d_min` 기록. 주의: `D`는 scene의 world unit이라 절대
+    임계값은 scene scale에 의존한다 — scale-free 판정은 `parallax = maxctx0/avg_scale`가 맞다.
+  측정값은 `EXPERIMENTS.log` 2026-08-03 네 항목.
 - **`scripts/vae/vae_scale_matrix.py`에 `TAILS=1`** — 기존 표는 corpus **평균** latent std만
   주는데, camera-length `scale_mode`는 카메라가 멈춘 바로 그 샘플에서 분모가 0에 가까워지므로
   평균으로는 터지는 개별 샘플이 안 보인다. `TAILS=1`이면 같은 행들 아래에 per-sample tail 표를

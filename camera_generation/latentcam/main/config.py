@@ -189,6 +189,16 @@ class Config:
                                 #   uses the unseen target [s+1:e]. Steers only WHERE the greedy
                                 #   search looks; adds no view to the encoder (that is
                                 #   geo_first_view_target_s). Default off (legacy target-mid anchor).
+    geo_swap_mode = None        # [new] TEST-TIME probe: None | 'inscene'. Take the geo context
+                                #   from a DIFFERENT SEGMENT OF THE SAME SCENE, so only WHICH
+                                #   REGION it covers changes (orthogonal to geo_test_inseg_k's
+                                #   leakage axis). Force-disables the geo latent cache.
+    geo_swap_shift = 1          # donor = the (position + shift)-th other segment of this scene
+    geo_swap_keep_first = True  # after the swap put view0 back to the target's frame s (anchor and
+                                #   frame/scale link untouched; only the other V-1 views move)
+    geo_return_idxs = False     # [new] analysis side-channel: attach 'geo_idxs' + 'geo_ctx_c2w'
+                                #   (OpenCV c2w of the context views) to every item. Never fed to
+                                #   the model; on a geo-cache HIT it costs the frustum_cover search.
 
     # Per-SEGMENT coverage blacklist (scene,segment CSV from scripts/dump_coverage.py at a
     # chosen tau). None -> no coverage filtering (only the scene-level blacklist.csv applies).

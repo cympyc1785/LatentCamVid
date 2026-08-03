@@ -173,6 +173,26 @@ coverage_blacklist_path: null # per-segment coverage-blacklist CSV (columns scen
 #   whether the prediction collapses toward them. Setting it force-disables the geo latent cache
 #   (the cache is keyed by segment, not by context view).
 geo_test_inseg_k: null
+# [new] TEST-TIME probe, orthogonal to geo_test_inseg_k: geo_test_inseg_k moves the context views
+#   INTO the target segment (leakage axis); geo_swap_mode moves them to a DIFFERENT SEGMENT OF THE
+#   SAME SCENE (context-content axis). Everything stays in-distribution -- same scene, same world
+#   frame, real images, unchanged norm_scale -- so the only variable is WHICH REGION the context
+#   covers. Reading: the predicted trajectory follows the donor region -> the model is
+#   context-driven; it does not move -> text-driven. Also force-disables the geo latent cache.
+#   null (default) = OFF | 'inscene' = donor is the (position + geo_swap_shift)-th other segment
+#   of this scene (cyclic; scenes with a single segment are left unswapped and flagged
+#   geo_swapped=0 in the batch so the analysis can drop them).
+geo_swap_mode: null
+geo_swap_shift: 1
+geo_swap_keep_first: true     # put view0 back to the TARGET's frame s after the swap, so the anchor
+                              #   -- and the frame/scale link to the generated trajectory -- is
+                              #   untouched and only the other V-1 views move. false = swap all V
+                              #   (confounds the probe with the geo_first_view_target_s ablation).
+# [new] analysis side-channel: attach the chosen context view indices ('geo_idxs') and their c2w
+#   ('geo_ctx_c2w', OpenCV) to every item so an offline script can measure how close the generated
+#   trajectory sits to the context cameras. Never fed to the model. Off by default because on a
+#   geo-latent-cache HIT it re-runs the frustum_cover search the cache exists to skip.
+geo_return_idxs: false
 # [new] per-context-view camera embedding channel-concatenated onto the geo tokens.
 #   null (default) = OFF, i.e. the geo condition is exactly the (M, 768) LagerNVS tokens as before.
 #   'relfirst'     = for each context view v build an 11-d pose relative to the TARGET segment's

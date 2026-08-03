@@ -234,6 +234,12 @@ def main():
             height = data['height'].to(device)
             intrinsics = data['intrinsics'].to(device)
             B = traj.shape[0]
+            # [new] geo_return_idxs side-channel (absent unless the flag is on). geo_swapped is
+            # only present under geo_swap_mode; default 0 = "not swapped" so the dump is uniform.
+            geo_ctx_c2w = data.get('geo_ctx_c2w')
+            geo_idxs_np = data['geo_idxs'].tolist() if 'geo_idxs' in data else [None] * B
+            geo_swapped_np = (data['geo_swapped'].tolist() if 'geo_swapped' in data
+                              else [0] * B)
 
             pc_embeds, pc_masks = None, None
             if 'geo_emb' in data:
@@ -292,6 +298,19 @@ def main():
                     json.dump(_tj(m_ref, ref_intrinsics), f, indent=4)
                 with open(osp.join(eval_data_dir, f"{data_name[i]}_transforms_pred.json"), 'w') as f:
                     json.dump(_tj(m_pred, pred_intrinsics), f, indent=4)
+                # [new] geo_return_idxs: the context views this prediction was conditioned on,
+                # written next to the trajectories so an offline script can measure how close the
+                # generated cameras sit to them. Same c2w OpenGL convention as the *_transforms_*
+                # files above (m_ref/m_pred flip Y/Z at :272; geo_ctx_c2w is OpenCV, so flip here).
+                if geo_ctx_c2w is not None:
+                    g = geo_ctx_c2w[i].clone()
+                    g[:, :3, 1:3] *= -1
+                    os.makedirs(osp.join(out_dir, 'geo_ctx'), exist_ok=True)
+                    with open(osp.join(out_dir, 'geo_ctx', f"{data_name[i]}.json"), 'w') as f:
+                        json.dump({"geo_idxs": geo_idxs_np[i],
+                                   "geo_swapped": geo_swapped_np[i],
+                                   "norm_scale": float(scale[i]),
+                                   "c2w": g.tolist()}, f)
             names += data_name
 
     losses = {'val/loss_latent': tot_lat / n_seen, 'val/loss_traj': tot_traj / n_seen,

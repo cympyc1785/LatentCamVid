@@ -5,6 +5,36 @@ All notable changes to the latentcam sub-project. Follows [Keep a Changelog](htt
 ## [Unreleased]
 
 ### Added
+- **`scripts/eval/traj_diversity.py`** — 조건부 diversity / context 민감도 측정. (A) 같은 context에서
+  seed만 바꾼 여러 eval 출력(`--seeds`)을 받아 위치 분산을 seed 내(within) / segment 간(between)으로
+  분해하고 ICC `R = var_between/(var_between+var_within)`, seed 쌍거리(APD), ADE(mean/best-of-S),
+  bias(seed평균→GT) vs spread를 낸다. (C) `--base/--swap`으로 context swap arm 쌍을 받아 궤적 이동량
+  `d_swap`을 **(A)의 seed noise 단위**로 환산하고, `geo_ctx/`가 있으면 예측 궤적↔context 카메라
+  nearest-neighbour 거리와 context retrieval R@1(`--retrieval`)까지 낸다. 모든 거리는 segment마다
+  GT reach `max_t‖T_gt(t)−T_gt(0)‖`로 나눠 무차원화한 뒤에만 segment를 가로질러 평균낸다 —
+  segment별 스케일 차이가 통계를 지배하지 않게.
+- **`geo_swap_mode`** (`main/conf/config.yaml`, 기본 `null`) — **test 전용** probe. `geo_test_inseg_k`가
+  누수 축(context를 target segment 안으로 밀어넣음)을 재는 것과 **직교**하게, context를 **같은 scene의
+  다른 segment**로 옮긴다(`'inscene'`). donor는 이 scene의 `(순번 + geo_swap_shift)`번째 다른
+  segment(cyclic)이고, segment가 하나뿐인 scene은 swap하지 않은 채 batch에 `geo_swapped=0`으로
+  표시해 분석에서 뺄 수 있게 한다. 같은 scene·같은 world frame·실제 이미지·동일 `norm_scale`이라
+  분포를 벗어나는 것이 없고 **context가 보는 영역만** 바뀐다. 읽는 법: 예측 궤적이 donor 영역을
+  따라가면 model이 context 주도, 안 움직이면 text 주도.
+  - `geo_swap_keep_first`(기본 `true`) — swap 후 view0를 **target의 프레임 `s`로 되돌린다**. anchor와
+    그에 딸린 frame/scale 링크를 건드리지 않아, 변수가 나머지 `V-1`장의 context 내용으로 한정된다.
+    `false`면 `V`장 전부 swap이라 `geo_first_view_target_s` ablation과 교란된다.
+  - `geo_test_inseg_k`와 같은 이유로(캐시 키가 `data_name`뿐이라 context view 변화를 구분 못 함)
+    켜지면 `geo_latent_cache_dir`를 강제로 끄고 로그로 알린다. 끄지 않으면 swap이 조용히 무효가 된다.
+  - `null`이면 기존 동작과 byte-identical.
+- **`geo_return_idxs`** (`main/conf/config.yaml`, 기본 `false`) — 분석 side-channel. 고른 context view
+  인덱스(`geo_idxs`)와 그 c2w(`geo_ctx_c2w`, OpenCV)를 매 item에 붙여, 생성된 궤적이 context 카메라에
+  얼마나 가까이 붙는지 오프라인으로 잴 수 있게 한다. **모델에는 절대 안 들어간다.** 기본 off인 이유는
+  geo latent cache가 **hit**일 때 캐시가 건너뛰려던 frustum_cover 탐색을 다시 돌려야 하기 때문.
+  `geo_cam_embed: null` 경로(캐시가 `geo_emb`만 넣고 바로 return하던 곳)에서도 동작하도록 재계산 분기를
+  넣었다 — `frustum_cover`는 `(scene_idx, s, e)`에 deterministic이라 캐시가 쓴 선택을 그대로 복원한다.
+  - `scripts/eval_testset.py`: 플래그가 켜져 있으면 `<out>/geo_ctx/<data_name>.json`에
+    `{geo_idxs, geo_swapped, norm_scale, c2w}`를 궤적 json 옆에 쓴다. c2w는 `*_transforms_*.json`과
+    같은 OpenGL 규약으로 맞춰서(Y/Z flip) 내보내므로 바로 같은 좌표계에서 비교된다.
 - **`geo_cam_embed: plucker`** — geo token에 붙이는 camera embedding의 두 번째 종류. 기존
   `relfirst`(view당 11-d `[rot6d(6), trans(3), fx/2cx, fy/2cy]`를 그 view의 patch token 777개에
   broadcast)와 달리 **patch token당 6-d Plücker 광선** `[d(3), o×d(3)]`을 준다 — `d`는 그 패치

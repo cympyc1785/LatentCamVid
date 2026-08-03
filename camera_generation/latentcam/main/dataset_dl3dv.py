@@ -327,6 +327,32 @@ class CamDataset(torch.utils.data.Dataset):
         # geo context view0 = target segment's FIRST camera s (rest = out-of-seg retrieved)
         # -> LagerNVS anchors to s, aligning the geo latent frame with the target frame.
         self.geo_first_view_target_s = getattr(cfg, 'geo_first_view_target_s', False)
+        # [new] test-time probe: swap the geo context to ANOTHER SEGMENT OF THE SAME SCENE.
+        # 'inscene' = donor is the (position+geo_swap_shift)-th other segment of this scene, so the
+        # context views stay real images of the same scene in the same world frame (nothing goes
+        # out of distribution) and the ONLY thing that changes is WHICH REGION they cover.
+        # geo_swap_keep_first puts view0 back to the target's frame s, so the anchor -- and with it
+        # the frame/scale link to the generated trajectory -- is untouched. Reading:
+        #   predicted trajectory follows the DONOR region -> the model is context-driven
+        #   predicted trajectory does not move                -> it is text-driven
+        # geo_test_inseg_k measures the same worry along the leakage axis; this is the orthogonal
+        # (context-content) axis. Test-time only -- the model never saw this during training.
+        self.geo_swap_mode = getattr(cfg, 'geo_swap_mode', None)
+        if self.geo_swap_mode not in (None, 'inscene'):
+            raise ValueError(f"geo_swap_mode must be null | 'inscene', got {self.geo_swap_mode!r}")
+        self.geo_swap_shift = int(getattr(cfg, 'geo_swap_shift', 1) or 1)
+        self.geo_swap_keep_first = bool(getattr(cfg, 'geo_swap_keep_first', True))
+        self._scene2samples = None      # lazily built: scene_idx -> [sample idx, ...]
+        if self.geo_swap_mode and self.geo_latent_cache_dir is not None:
+            # geo_test_inseg_k (:289) 와 같은 이유 -- 캐시 키가 data_name 뿐이라 context view 가
+            # 바뀐 것을 구분하지 못한다. 끄지 않으면 swap 이 조용히 무효가 된다.
+            print(f"[geo cache] DISABLED: geo_swap_mode={self.geo_swap_mode} changes the "
+                  f"context views, but the cache is keyed by segment only")
+            self.geo_latent_cache_dir = None
+        # [new] attach the chosen context view indices (+ their c2w) to every item so an offline
+        # script can measure how close the generated trajectory sits to the context cameras.
+        # Off by default: on a cache HIT it costs the frustum_cover search the cache exists to skip.
+        self.geo_return_idxs = bool(getattr(cfg, 'geo_return_idxs', False))
         self.max_scenes = getattr(cfg, 'max_scenes', None)   # limit #scenes (e.g. smoke test)
 
         # scene-level (indexed by scene) and sample-level (per prompt segment)
@@ -966,6 +992,29 @@ class CamDataset(torch.utils.data.Dataset):
         m = torch.cross(o[:, None, :].expand_as(d), d, dim=-1)            # (V,P,3) moment
         return torch.cat([d, m], dim=-1).float()                          # (V,P,6)
 
+    def _swap_donor(self, idx, scene_idx):
+        """geo_swap_mode='inscene': (s, e) of ANOTHER segment of the same scene, or None when the
+        scene holds only this one segment (the caller then leaves the context unswapped and flags
+        the item so the analysis can drop it)."""
+        if self._scene2samples is None:
+            m = {}
+            for j, sm in enumerate(self.samples):
+                m.setdefault(sm[0], []).append(j)
+            self._scene2samples = m
+        sibs = self._scene2samples.get(scene_idx, [])
+        if len(sibs) < 2:
+            return None
+        j = sibs[(sibs.index(idx) + self.geo_swap_shift) % len(sibs)]
+        return None if j == idx else (self.samples[j][1], self.samples[j][2])
+
+    def _attach_geo_ctx(self, out, scene_idx, geo_idxs):
+        """geo_return_idxs bookkeeping: the selected context view indices and their c2w (OpenCV),
+        so an offline script can measure generated-trajectory vs context-camera distances. Never
+        fed to the model -- purely an analysis side-channel."""
+        gi = list(geo_idxs)
+        out['geo_idxs'] = torch.tensor(gi, dtype=torch.long)
+        out['geo_ctx_c2w'] = torch.linalg.inv(self.extrinsics_list[scene_idx][gi].float())
+
     def _geo_cam_cond(self, scene_idx, geo_idxs, w2c_s, norm_scale, hw_orig):
         """geo_cam_embed dispatch -- 'relfirst' -> (V,11), 'plucker' -> (V,P,6)."""
         if self.geo_cam_embed == 'plucker':
@@ -1069,6 +1118,14 @@ class CamDataset(torch.utils.data.Dataset):
                 _emb = (_c['emb'] if isinstance(_c, dict) else _c).float()
                 if self.geo_cam_embed is None:
                     out['geo_emb'] = _emb
+                    if self.geo_return_idxs:
+                        # the cache short-circuit never selected any views, so redo the (memoized,
+                        # deterministic) greedy search purely to report what the cached emb used.
+                        if _idxs is None and self.geo_view_sampling == 'frustum_cover' \
+                                and not self.geo_shuffle_order:
+                            _idxs = list(self._sample_geo_frustum_cover(scene_idx, s, e))
+                        if _idxs is not None:
+                            self._attach_geo_ctx(out, scene_idx, _idxs)
                     return out
                 # [new 2026-08-03] v1 캐시는 geo_idxs 를 안 들고 있지만, frustum_cover 는
                 # extrinsics 와 (s,e) 만 보는 deterministic greedy 라 캐시를 만든 그 선택을 그대로
@@ -1083,18 +1140,36 @@ class CamDataset(torch.utils.data.Dataset):
                     out['geo_emb'] = _emb
                     out['geo_cam_param'] = self._geo_cam_cond(
                         scene_idx, _idxs, extrinsics[0], norm_scale, (h, w))
+                    if self.geo_return_idxs:
+                        self._attach_geo_ctx(out, scene_idx, _idxs)
                     return out
                 # v1 cache + geo_cam_embed -> fall through to the on-the-fly path below
 
         if self.geo_enabled:
+            # [new] geo_swap_mode='inscene': run the context selection for a DONOR segment of the
+            # same scene instead of this one. Everything downstream (images, poses, norm_scale) is
+            # still this scene's, so the swap only moves WHERE the context looks.
+            g_s, g_e, swapped = s, e, False
+            if self.geo_swap_mode == 'inscene':
+                _d = self._swap_donor(idx, scene_idx)
+                if _d is not None:
+                    g_s, g_e = _d
+                    swapped = True
             if self.geo_view_sampling == 'frustum_cover':
-                geo_idxs = self._sample_geo_frustum_cover(scene_idx, s, e)
+                geo_idxs = self._sample_geo_frustum_cover(scene_idx, g_s, g_e)
             elif self.geo_view_sampling == 'hybrid':
-                geo_idxs = self._sample_geo_hybrid(scene_idx, s, e)
+                geo_idxs = self._sample_geo_hybrid(scene_idx, g_s, g_e)
             elif self.geo_view_sampling == 'random_inseg':
-                geo_idxs = self._sample_geo_random_inseg(s, e)
+                geo_idxs = self._sample_geo_random_inseg(g_s, g_e)
             else:   # 'even': evenly-spaced in-segment (baseline, leaks trajectory)
-                geo_idxs = [s + i for i in self._even_indices(e - s, self.geo_num_views)]
+                geo_idxs = [g_s + i for i in self._even_indices(g_e - g_s, self.geo_num_views)]
+            if swapped and self.geo_swap_keep_first:
+                # view0 back to the TARGET's frame s. The slice keeps V exactly: if s was already
+                # in the donor's picks, rest has V-1 entries; if not, the extra one is dropped.
+                rest = [i for i in geo_idxs if i != s]
+                geo_idxs = ([s] + rest)[:len(geo_idxs)]
+            if self.geo_swap_mode:
+                out['geo_swapped'] = torch.tensor(int(swapped))
             if self.geo_test_inseg_k:    # [new] test-time in-segment context probe
                 geo_idxs = self._mix_inseg_context(list(geo_idxs), s, e)
             if self.geo_shuffle_order:   # permute context view order
@@ -1109,6 +1184,8 @@ class CamDataset(torch.utils.data.Dataset):
             # to the latent so a cache hit can rebuild geo_cam_param without redoing the greedy
             # coverage search; harmless (a (V,) int tensor) on every other path.
             out['geo_idxs'] = torch.tensor(list(geo_idxs), dtype=torch.long)
+            if self.geo_return_idxs:
+                self._attach_geo_ctx(out, scene_idx, geo_idxs)
             if self.geo_cam_embed is not None:
                 out['geo_cam_param'] = self._geo_cam_cond(
                     scene_idx, geo_idxs, extrinsics[0], norm_scale, (h, w))

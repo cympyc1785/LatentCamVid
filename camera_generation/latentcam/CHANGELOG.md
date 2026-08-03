@@ -32,6 +32,13 @@ All notable changes to the latentcam sub-project. Follows [Keep a Changelog](htt
     `RD_STATIC_CTX=1`(= `render_static_probe.py`의 `dup6_consistent`, pose·intrinsics·이미지 전부
     view0 복사), `posedup`이 `dup6_contradict`(이미지는 진짜 V장, pose만 view0 복사), `--ctx-n 1`이
     기존 `RD_SINGLE_VIEW=1`. `--traj {tgt,pred}`로 `render_pred_from_dump.py`의 예측 궤적 렌더도 흡수.
+  - **분모 이름 `lagernvs_orig`** — `--ctx static` / `--ctx-n`으로 context를 바꿔치면 `lagernvs`
+    분모가 바뀐 context 기준으로 다시 계산되는데, 덮어쓰기 전 값(진짜 context가 만들었을
+    `1.35*max||c_ctx - c_ctx0||`)을 `lagernvs_orig`로 남긴다. "context는 정지시키되 target은 원래
+    분모로 정규화"(`--modes one/lagernvs_orig`) 같은 조합에 필요하다.
+  - **`@ch9div` flag** — `cam_token` `(V,11)`의 채널 9(`camera_scale`)에 "정규화 후 context reach"
+    대신 **분모 자체**를 넣는다. 정지 context는 context translation이 정확히 0이라 채널 9가 어떤
+    분모를 써도 clamp 하한 1e-06으로 눌리는데, 그 자리에 실제로 나눈 scene scale을 알려주는 변형.
   - `@pt` / `@q` / `@qe` / `@ch9nat` / `@ch9avg` / `@g1` flag, `*<f>` 배수, `tok<v>` 합성 분모,
     `metrics.json` 병합, cross-mode 비교 그리드는 `render_avgscale.py`와 동일. `@q`/`@g1`은 ctx/tgt
     분모에 각각 독립으로 적용되고 어느 쪽이 발동했는지 로그에 찍는다.
@@ -43,6 +50,14 @@ All notable changes to the latentcam sub-project. Follows [Keep a Changelog](htt
     셋 다 `render_avgscale.py`의 `lagernvs` / `one_st` / `one_sv`와 소수점 3자리까지 일치.
 
 ### Changed
+- **`scripts/data/extract_geo_context.py`에 argparse 추가** — `--testdir` / `--out` / `--experiment`
+  / `--split` / `--set K=V`(hydra override, 반복 가능). 인자 없이 돌리면 예전 160 target 기본값
+  그대로. `eval_testset.py`로 뽑은 전체 held-out 3,980 target처럼 기본 `seg_list`가 아닌 집합을
+  쓸 때 필요하다.
+- **`scripts/render/compare_textonly_vs_worldtraj.py`: `_contact.png`에도 geo context 카메라 표시.**
+  per-target PNG에만 찍히던 magenta 별(context view의 world center)을 contact sheet 타일과 하단
+  legend에도 추가. 그리고 `summary()`가 run 1개일 때 빈 비교 산점도 axis를 만들지 않는다
+  (`ncmp = len(labels) - 1`; 예전에는 항상 1개가 비어 남았다).
 - **`main/dataset_dl3dv.py`: v1 geo latent cache를 `geo_cam_embed` arm에서도 쓴다.** 기존에는 v1 캐시
   (bare `(M,768)`, `geo_idxs` 미포함)가 `geo_cam_embed`와 만나면 on-the-fly LagerNVS forward로
   폴백해 스텝당 ~12배 느려졌다. `geo_view_sampling == 'frustum_cover'`이고 `geo_shuffle_order`가
@@ -401,6 +416,16 @@ All notable changes to the latentcam sub-project. Follows [Keep a Changelog](htt
   training-corpus std; `0.4467666` with this ckpt would give input std 1.3641). **Not adopted** —
   `config.yaml` still points at `vae_20260202_065659_400` + `0.4467666`; no diffusion run has used
   the new ckpt yet, so the recon-vs-corpus-coverage trade is unevaluated.
+
+### Fixed
+- **`scripts/data/extract_geo_context.py`가 geo latent cache가 채워진 트리에서 전 target을
+  건너뛰던 문제.** `ds[idx]['geo_c2w']`를 읽었는데 cache hit이면 `__getitem__`이
+  `dataset_dl3dv.py:960-976`에서 조기 return하고 `geo_c2w`는 on-the-fly 경로(`:1011`)에서만 붙는다
+  — 그래서 3,980개 전부 "no geo_c2w"로 빠지고 마지막 `len(next(iter(out.values())))`에서
+  `StopIteration`으로 죽었다. 필요한 건 context view의 world center뿐이라 sampler
+  (`_sample_geo_frustum_cover` / `_sample_geo_hybrid`)를 직접 부르고
+  `inv(extrinsics_list[scene_idx][geo_idxs])`에서 뽑는다 — 이미지/latent 로딩도 건너뛰어 훨씬 빠르다.
+  재실행: 3,980 targets, missing 0, 6 views/target.
 
 ### Added
 - **`geo_lagernvs_anchor: s | view0`** (`conf/config.yaml`, `dataset_dl3dv._geo_lagernvs_scale`) —

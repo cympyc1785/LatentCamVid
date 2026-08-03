@@ -141,8 +141,9 @@ def draw(ax, tid, g, ps, rs, cc, runs):
 
 
 def summary(out, labels, R, RO, n):
+    # [new] run 이 하나면 비교 산점도가 없으므로 빈 axis 를 만들지 않는다 (예전엔 항상 1개 남았다)
     ncmp = len(labels) - 1
-    fig, axs = plt.subplots(1, 1 + max(ncmp, 1), figsize=(6.5 * (1 + max(ncmp, 1)), 5.5), squeeze=False)
+    fig, axs = plt.subplots(1, 1 + ncmp, figsize=(6.5 * (1 + ncmp), 5.5), squeeze=False)
     axs = axs[0]
     o = np.argsort(R[:, 0])
     for j, l in enumerate(labels):
@@ -172,6 +173,9 @@ def contact(out, gallery, runs):
         for j, p in enumerate(ps):
             ax.plot(p[:, 0], -p[:, 2], "-", lw=1.1, c=COLORS[j % len(COLORS)])
         ax.scatter(g[0, 0], -g[0, 2], c="k", s=30, marker="*", zorder=6)
+        if cc is not None:      # [new] per-target PNG 과 마찬가지로 geo context 카메라도 찍는다
+            ax.scatter(cc[:, 0], -cc[:, 2], c="magenta", s=28, marker="*", edgecolors="k",
+                       linewidths=0.4, zorder=7)
         ax.set_aspect("equal", "datalim"); ax.set_xticks([]); ax.set_yticks([])
         ax.set_title(tid.split("_")[1][:8] + "_" + tid.split("_")[-1] + "\n"
                      + " / ".join(f"{r:.2f}" for r in rs), fontsize=6)
@@ -179,6 +183,9 @@ def contact(out, gallery, runs):
         axs[k // ncol][k % ncol].axis("off")
     handles = [plt.Line2D([], [], c="tab:blue", lw=2, label="GT")] + [
         plt.Line2D([], [], c=COLORS[j % len(COLORS)], lw=2, label=lab) for j, (lab, _) in enumerate(runs)]
+    if any(cc is not None for *_, cc in gallery):
+        handles.append(plt.Line2D([], [], c="magenta", lw=0, marker="*", ms=10,
+                                  markeredgecolor="k", label="geo context"))
     fig.legend(handles=handles, loc="lower center", ncol=len(handles), fontsize=10)
     fig.suptitle("top-down contact sheet (titles: pos_rmse in legend order)", fontsize=13)
     fig.tight_layout(rect=[0, 0.03, 1, 1])

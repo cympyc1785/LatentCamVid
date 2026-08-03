@@ -5,6 +5,33 @@ All notable changes to the latentcam sub-project. Follows [Keep a Changelog](htt
 ## [Unreleased]
 
 ### Added
+- **`main/conf/experiment/geo_worldtraj_camembed_with_anchor.yaml`** — anchor(`geo_first_view_target_s`
+  + `geo_cover_subtract_first`)를 켠 채 `geo_cam_embed: relfirst`를 얹는 2×2 ablation의 네 번째 칸.
+  `geo_worldtraj_camembed`와는 anchor 2개 키만, `geo_worldtraj`와는 camembed 2개 키
+  (+ `vae_latent_scale` 0.47637 → 0.96032625, 사용자 지시)만 다르다. `cam_dim`/`intr_norm`/
+  `vae_ckpt_path`/`vae_latent_scale`은 `config.yaml` 기본값과 값이 같고 명시만 한 것.
+- **`scripts/data/dump_geo_cache_idxs.py`** — geo latent cache가 어떤 view index로 만들어졌는지
+  매니페스트로 덤프. `frustum_cover`가 deterministic이라 v1 캐시(index 미저장)도 재계산으로 복원한다.
+  트리당 `<subdir>__geo_idxs.csv` + `.pt` 2개 파일만 쓴다(per-file sidecar 대신 — inode 절약).
+  v2 트리 300 샘플에서 저장된 `geo_idxs`와 300/300 일치 확인.
+- **`scripts/render/viz_avgscale_context_topdown.py`** — `avg_scale` 정규화로 LagerNVS를 돌렸을 때의
+  붕괴를 진단하는 top-down 시각화. 기존 `<seg>/topdown_context_gt.png`가 raw world 단위라 범위 이탈
+  여부를 볼 수 없던 것을 divisor로 나눈 좌표에서 그리고, context reach 0.7407 / target bound 1.0
+  원을 겹쳐 `avg_scale` vs `geo_lagernvs`를 나란히 비교한다. `ranges.json` + `_summary.png` 동반.
+
+### Changed
+- **`main/dataset_dl3dv.py`: v1 geo latent cache를 `geo_cam_embed` arm에서도 쓴다.** 기존에는 v1 캐시
+  (bare `(M,768)`, `geo_idxs` 미포함)가 `geo_cam_embed`와 만나면 on-the-fly LagerNVS forward로
+  폴백해 스텝당 ~12배 느려졌다. `geo_view_sampling == 'frustum_cover'`이고 `geo_shuffle_order`가
+  꺼져 있으면 `_sample_geo_frustum_cover`를 재계산해 폴백을 막는다 (extrinsics와 `(s,e)`만 보는
+  deterministic greedy라 캐시를 만든 그 선택이 그대로 재현된다). shuffle이 켜져 있으면 캐시된
+  emb의 view 순서와 어긋나므로 기존대로 폴백. 검증: 실제 `__getitem__` 40개에서 캐시 히트 40/40,
+  on-the-fly 호출 0회.
+- **`results/topdown_3way_textonly_worldtraj_camembed/`** — `plots_last_full3980/` 추가.
+  학습 중 `test/` 스냅샷 160 target(epoch 64/44/40) 대신 각 run의 `last.pth`로 전체 held-out
+  3,980 target을 재추론한 `eval_my/*__last__c4d2k5y4/`를 쓴다. 기존 `plots/`는 지우지 않고 보존하고
+  README를 두 섹션으로 재구성. text-only는 ep105라 두 geo arm(ep149)과 여전히 어긋난다는 점 명시.
+
 - **`tools/lagernvs/render_avgscale.py`에 GenDoP식 scale guard/양자화 + 정지 context 모드**
   (**gitignore된 vendored 트리라 커밋에는 없음, 작업 트리에만 존재**). 기본값(`RD_MODES=avg_scale`,
   `RD_STATIC_CTX=0`, `RD_TAG=''`)이면 출력 파일명까지 이전과 byte-identical.

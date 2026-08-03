@@ -1,0 +1,51 @@
+# @package _global_
+# camembed × ANCHOR — 2×2 ablation 의 비어 있던 네 번째 칸.
+#
+#   anchor = geo_first_view_target_s (+ geo_cover_subtract_first): context view0 을
+#            target 의 첫 프레임 s 로 강제해서 LagerNVS 를 s 에 정렬
+#   camembed = geo_cam_embed: relfirst: context view 별 11-d pose(= s 기준 상대 pose)를
+#            그 view 의 모든 patch token 에 channel-concat
+#
+#   geo_worldtraj                      anchor O / camembed X   (wandb c4d2k5y4)
+#   geo_worldtraj_camembed             anchor X / camembed O   (wandb ek9n9jt5)
+#   geo_worldtraj_decoupled            anchor X / camembed X
+#   geo_worldtraj_camembed_with_anchor anchor O / camembed O   <-- 여기
+#
+# 왜 둘을 같이 켜나: anchor 만으로는 LagerNVS 가 s 에 '정렬'만 되고, LagerNVS 내부의
+# 1.35*max 정규화가 context 의 절대 scale 을 지워버려서 target(avg_scale 로 정규화)과
+# scale 이 끊긴다. camembed 의 trans = rel[:, :3, 3] / norm_scale 은 avg_scale 로 나눈
+# 값이라 그 scale 링크를 되살린다. 즉 anchor=회전/원점 정렬, camembed=scale 정렬.
+#
+# 부작용: anchor 가 켜져 있으면 view0 == s 라 view0 의 rel 이 identity 가 되어 11-d 가
+# 상수 [1,0,0, 0,1,0, 0,0,0, fx/2cx, fy/2cy] 가 된다 (정보 없는 token 1개). 나머지
+# V-1 개 view 가 정보를 나른다.
+#
+# vae_latent_scale: 사용자 지시로 config.yaml 기본값 0.96032625 를 그대로 쓴다
+#   (c4d2k5y4 / ek9n9jt5 와 동일. geo_worldtraj.yaml 의 0.47637 pin 은 A/B 대조군용이라 미적용).
+# Cache: first_cam_included/ 트리(39,817개)를 그대로 재사용. 전부 v1(geo_idxs 없음)이지만
+#   2026-08-03 dataset_dl3dv.py 패치가 frustum_cover 를 재계산해서 camembed arm 에서도
+#   캐시가 hit 한다 (재계산 검증: v2 트리 300/300 일치).
+exp_name: dl3dv_geo_worldtraj_camembed_with_anchor
+
+meta_csv: meta_worldtraj.csv
+coverage_blacklist_path: null
+
+geo_encoder: lagernvs
+geo_view_sampling: frustum_cover
+geo_cover_out_of_seg: true
+geo_first_view_target_s: true
+geo_cover_subtract_first: true
+geo_cover_centered_at_s: true
+geo_posed: true
+scale_mode: avg_scale
+
+geo_cam_embed: relfirst
+geo_cam_embed_dim: 128
+
+cam_dim: 64
+intr_norm: rel
+
+vae_ckpt_path: /data1/cympyc1785/LatentCamVid/camera_generation/latentcam/checkpoints/vae_20260302_300.pth
+vae_latent_scale: 0.96032625
+
+geo_latent_cache_dir: /data1/cympyc1785/data/DL3DV/latent_cache

@@ -959,6 +959,15 @@ class CamDataset(torch.utils.data.Dataset):
                 if self.geo_cam_embed is None:
                     out['geo_emb'] = _emb
                     return out
+                # [new 2026-08-03] v1 캐시는 geo_idxs 를 안 들고 있지만, frustum_cover 는
+                # extrinsics 와 (s,e) 만 보는 deterministic greedy 라 캐시를 만든 그 선택을 그대로
+                # 재계산할 수 있다. 이걸로 폴백을 막아 first_cam_included/ 트리(39,830개 전부 v1)를
+                # camembed arm 에서도 쓴다 -- 없으면 매 스텝 LagerNVS forward 라 ~12x 느려진다.
+                # shuffle 이 켜져 있으면 캐시된 emb 의 view 순서와 어긋나므로 재계산하지 않고
+                # 기존대로 폴백한다.
+                if _idxs is None and self.geo_view_sampling == 'frustum_cover' \
+                        and not self.geo_shuffle_order:
+                    _idxs = list(self._sample_geo_frustum_cover(scene_idx, s, e))
                 if _idxs is not None:            # v1 files carry no view indices -> can't rebuild
                     out['geo_emb'] = _emb
                     out['geo_cam_param'] = self._geo_cam_param(

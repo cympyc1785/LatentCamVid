@@ -5,6 +5,19 @@ All notable changes to the latentcam sub-project. Follows [Keep a Changelog](htt
 ## [Unreleased]
 
 ### Added
+- **`scripts/viewer/viser_arms_gs.py`** — segment 하나를 DL3DV `scene.ply`(3DGS) 위에 올려놓고
+  GT / arm별 pred / 각 arm의 context 카메라를 색이 다른 frustum으로 겹쳐 보는 viser 뷰어.
+  `viser_val_cameras.py`는 run 하나를 훑는 브라우저라 arm 비교도 splat 표시도 안 돼서 새로 만들었고,
+  `load_transforms` / `add_frustums` / `scene_chunk`는 그대로 재사용한다(기존 스크립트는 미수정).
+  arm은 `--arm 'label:run_dir:R,G,B'`, context는 `--ctx 'label:run_dir:R,G,B[:leak_K]'`로 여러 개
+  지정하고, `leak_K>0`이면 `_mix_inseg_context`의 `inseg + rest` 순서에 따라 앞 K장을 누수 view로
+  따로 표시한다. 그룹마다 GUI 체크박스가 붙는다. ply 로더는 표준 3DGS 레이아웃(62 float props)을
+  memmap으로 읽어 SH DC항만 색으로 쓰고 `--gs-max`(기본 600k) / `--gs-min-opacity`(기본 0.05)로 솎는다.
+  - **좌표계**: DL3DV `transforms.json`의 `applied_transform`(nerfstudio가 기록한 world 재정렬)을
+    `c2w_ply = applied_transform4 @ c2w_gl`로 좌측 곱해야 `scene.ply`와 겹쳐진다 — 이걸 빼면 카메라가
+    점군과 어긋난다. `tools/gaussian-splatting-lightning/custom_utils/custom_panel.py`의
+    `get_cameras_from_transforms`와 같은 처리. 재정렬된 frame은 COLMAP world라 viser up을 `-y`로
+    둔다(`--up`으로 덮어쓰기, `--no-applied-transform`으로 예전 동작 유지).
 - **`scripts/eval/viz_diversity_topdown.py`** — 위 숫자의 top-down 그림. `--fig seeds`는 같은 context에서
   seed만 바꾼 궤적들(기본 `--style cloud`: 단색 빨강 + alpha로 구름 형태를 보여줌; `rainbow`는 seed 구분용)
   + GT + context 카메라를, `--fig swap`은 orig/donor context와 각각으로 뽑은 궤적을 겹쳐 그린다.

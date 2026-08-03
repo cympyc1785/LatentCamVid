@@ -5,6 +5,15 @@ All notable changes to the latentcam sub-project. Follows [Keep a Changelog](htt
 ## [Unreleased]
 
 ### Added
+- **`scripts/eval/viz_diversity_topdown.py`** — 위 숫자의 top-down 그림. `--fig seeds`는 같은 context에서
+  seed만 바꾼 궤적들(기본 `--style cloud`: 단색 빨강 + alpha로 구름 형태를 보여줌; `rainbow`는 seed 구분용)
+  + GT + context 카메라를, `--fig swap`은 orig/donor context와 각각으로 뽑은 궤적을 겹쳐 그린다.
+  좌표계는 target 첫 프레임 `s`의 카메라 프레임 anchor 후 X vs −Z로
+  `viz_avgscale_context_topdown.py` / `topdown_swap.py`와 동일하고, 거리는 segment마다 GT reach로
+  나눠 **점선 원 r=1이 GT 최대 도달반경**이 되게 했다. 패널 축은 `aspect='datalim'`이 `set_xlim`을
+  무시하는 문제 때문에 정사각 bbox를 직접 잡아 `adjustable='box'`로 고정한다 — 안 그러면 멀리 있는
+  context 마커가 축을 늘려 궤적이 납작해진다. 패널 선정은 `--pick even`(이름 정렬 후 균등, cherry-pick
+  방지) / `dswap-top` / `dswap-low`.
 - **`scripts/eval/traj_diversity.py`** — 조건부 diversity / context 민감도 측정. (A) 같은 context에서
   seed만 바꾼 여러 eval 출력(`--seeds`)을 받아 위치 분산을 seed 내(within) / segment 간(between)으로
   분해하고 ICC `R = var_between/(var_between+var_within)`, seed 쌍거리(APD), ADE(mean/best-of-S),

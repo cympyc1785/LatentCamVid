@@ -40,8 +40,23 @@ import time
 
 import numpy as np
 import viser
+import viser.transforms as vtf
 
 from viewer.viser_val_cameras import DL3DV_ROOT, add_frustums, load_transforms, scene_chunk
+
+# gaussian-splatting-lightning 의 spline frustum. viser 기본 add_camera_frustum 은 선 두께가
+# 화면 픽셀 단위라 잘 안 먹는데, 저쪽은 frustum 을 catmull-rom spline 8개로 그려서
+# line_width 가 실제로 먹는다. custom_panel.py 의 visualize_camera_frustum 이 쓰는 그 함수다.
+GSPL_ROOT = osp.join(osp.dirname(osp.dirname(osp.dirname(osp.dirname(osp.abspath(__file__))))),
+                     'tools', 'gaussian-splatting-lightning')
+if GSPL_ROOT not in _sys.path:
+    _sys.path.append(GSPL_ROOT)
+try:
+    from custom_utils.render_frustum import add_frustum_spline
+except ImportError:                                   # repo 가 없으면 viser 스타일만 쓴다
+    add_frustum_spline = None
+
+_GL2CV = np.diag([1.0, -1.0, -1.0, 1.0])
 
 # 3DGS ply 표준 레이아웃: xyz, normals, f_dc(3), f_rest(45), opacity, scale(3), rot(4)
 _PLY_D = 62
@@ -94,6 +109,31 @@ def load_splats(path, max_splats=600_000, min_opacity=0.05, seed=0):
     return centers, cov, rgbs, opacities.astype(np.float32)
 
 
+def add_frustums_spline(server, name, c2w_gl, fx, fy, w, h, color, scale, thickness,
+                        downsample=1):
+    """`add_frustums` 와 같은 인자로 spline frustum 을 올린다.
+
+    반환은 카메라 1대당 handle 리스트의 리스트 -> [[h,...], ...]. interval 슬라이더가
+    카메라 단위로 visible 을 껐다 켜야 해서 평평하게 펴지 않는다.
+    geometry 는 scale 을 굽지 않고 1.0 으로 만들고 node scale 로 조절한다 (슬라이더 실시간 반영).
+    """
+    fov = 2 * np.arctan2(h / 2, fy)
+    aspect = w / h
+    col = tuple(int(c) for c in color)
+    out = []
+    for i in range(0, len(c2w_gl), downsample):
+        c2w_cv = c2w_gl[i] @ _GL2CV
+        wxyz = vtf.SO3.from_matrix(c2w_cv[:3, :3]).wxyz
+        hs = add_frustum_spline(scene=server.scene, name=f'{name}/cam_{i:04d}',
+                                fov_y=float(fov), aspect=float(aspect), wxyz=wxyz,
+                                position=c2w_cv[:3, 3].astype(np.float32), far=1.0,
+                                scale=1.0, thickness=float(thickness), color=col)
+        for hh in hs.values():
+            hh.scale = float(scale)
+        out.append(list(hs.values()))
+    return out
+
+
 def applied_transform4(scene_transforms):
     """transforms.json 의 world 재정렬을 4x4 로. 없으면 None."""
     if not osp.isfile(scene_transforms):
@@ -141,6 +181,11 @@ def main():
                     help='>0 이면 scene 의 나머지 카메라를 회색으로 (N개마다 1개)')
     ap.add_argument('--frustum-scale', type=float, default=0.08,
                     help='target extent 대비 frustum 크기')
+    ap.add_argument('--frustum-style', default='spline', choices=['spline', 'viser'],
+                    help="'spline'=gspl add_frustum_spline (선 두께 조절됨), 'viser'=add_camera_frustum")
+    ap.add_argument('--frustum-thickness', type=float, default=2.0)
+    ap.add_argument('--frustum-interval', type=int, default=1,
+                    help='궤적 카메라를 N개마다 하나만 표시 (context 는 항상 전부)')
     ap.add_argument('--no-applied-transform', action='store_true',
                     help='transforms.json 의 world 재정렬을 적용하지 않는다 (예전 동작; ply 와 어긋남)')
     ap.add_argument('--up', default=None, choices=['+x', '-x', '+y', '-y', '+z', '-z'],
@@ -168,21 +213,71 @@ def main():
     fscale = float(max(ext, 1e-3)) * args.frustum_scale
     print(f'{args.name}: GT frames {len(ref_c2w)}, reach {ext:.4f}, frustum {fscale:.4f}', flush=True)
 
-    groups = {}          # label -> (handles, checkbox)
-    sized = []           # (frustum handle, fscale 대비 상대 배율) — 슬라이더로 한꺼번에 조절
+    if args.frustum_style == 'spline' and add_frustum_spline is None:
+        print(f'[warn] {GSPL_ROOT} 에서 custom_utils.render_frustum 를 못 읽어 viser 스타일로 폴백',
+              flush=True)
+        args.frustum_style = 'viser'
 
-    def add(label, handles, rel=None):
-        if not handles:
+    # --- GUI 컨트롤 (그룹보다 먼저 만들어야 콜백에서 값을 읽을 수 있다) -------------------
+    gui_fs = server.gui.add_slider('frustum scale (x reach)', min=0.005, max=0.5, step=0.005,
+                                   initial_value=float(args.frustum_scale))
+    gui_fs_txt = server.gui.add_text('frustum (world units)', initial_value=f'{fscale:.4f}',
+                                     disabled=True)
+    # thickness 는 slider 가 아니라 number 다. viser 1.0.30 의 SplineCatmullRomHandle /
+    # CameraFrustumHandle 에는 line_width 가 설정 가능한 prop 으로 없어서 (scale/visible/
+    # position/wxyz/positions 뿐) 두께를 바꾸려면 frustum 을 지우고 다시 그려야 하는데,
+    # slider 로 하면 드래그 중 매 스텝마다 전체 재생성이 돌아 버린다. custom_panel.py 도
+    # add_number 로 두고 build 시점에만 thickness 를 읽는다.
+    gui_th = server.gui.add_number('frustum thickness (rebuild)',
+                                   initial_value=float(args.frustum_thickness),
+                                   min=0.5, max=20.0, step=0.5,
+                                   disabled=args.frustum_style != 'spline')
+    gui_iv = server.gui.add_slider('frustum interval (traj)', min=1, max=24, step=1,
+                                   initial_value=max(1, int(args.frustum_interval)))
+
+    groups = {}          # label -> checkbox
+    specs = []           # 재생성용 그룹 스펙 (thickness 변경 시 지우고 다시 그린다)
+
+    def _vis(sp, i):
+        iv = int(gui_iv.value) if sp['iv_ok'] else 1
+        n = len(sp['handles'])
+        # interval 로 솎아도 마지막 카메라는 남긴다 (궤적 끝을 잃지 않게).
+        on = bool(sp['cb'].value) and (iv <= 1 or i % iv == 0 or i == n - 1)
+        for hh in sp['handles'][i]:
+            hh.visible = on
+
+    def _vis_all(sp):
+        for i in range(len(sp['handles'])):
+            _vis(sp, i)
+
+    def add(label, per_cam, rel=None, allow_interval=False, build=None):
+        """per_cam = 카메라 1대당 handle 리스트의 리스트."""
+        if not per_cam:
             return
         cb = server.gui.add_checkbox(label, initial_value=True)
+        sp = dict(cb=cb, handles=per_cam, rel=rel, iv_ok=allow_interval, build=build)
 
         @cb.on_update
-        def _(_, _handles=handles):
-            for x in _handles:
-                x.visible = cb.value
-        groups[label] = (handles, cb)
+        def _(_, _sp=sp):
+            with server.atomic():
+                _vis_all(_sp)
+        groups[label] = cb
         if rel is not None:
-            sized.extend((x, rel) for x in handles)
+            specs.append(sp)
+
+    def add_cams(label, gname, c2w, ifx, ify, iw, ih, col, rel, allow_interval,
+                 downsample=1):
+        """스타일에 따라 frustum 을 올리고 그룹으로 등록. 반환 handle 은 카메라 단위."""
+        def build(thickness):
+            s = fscale * rel
+            if args.frustum_style == 'spline':
+                return add_frustums_spline(server, gname, c2w, ifx, ify, iw, ih, col, s,
+                                           thickness, downsample=downsample)
+            # viser 기본 frustum 은 선 두께 인자가 없다 (thickness 무시).
+            return [[x] for x in add_frustums(server, gname, c2w, ifx, ify, iw, ih, col, s,
+                                              downsample=downsample)]
+
+        add(label, build(gui_th.value), rel=rel, allow_interval=allow_interval, build=build)
 
     if not args.no_gs:
         ply = args.ply or osp.join(scene_dir, 'scene.ply')
@@ -190,7 +285,7 @@ def main():
         c, cov, rgb, opa = load_splats(ply, args.gs_max, args.gs_min_opacity)
         gs = server.scene.add_gaussian_splats('/gs', centers=c, covariances=cov,
                                               rgbs=rgb, opacities=opa)
-        add('3DGS scene', [gs])
+        add('3DGS scene', [[gs]])
 
     if args.grey_downsample > 0:
         sc = osp.join(scene_dir, 'transforms.json')
@@ -201,13 +296,11 @@ def main():
             eps = max(fscale * 0.05, 1e-4)
             dmin = np.min(np.linalg.norm(sc_c2w[:, :3, 3][:, None] - ref_c2w[:, :3, 3][None],
                                          axis=-1), axis=1)
-            add('scene cams (rest)',
-                add_frustums(server, 'grey', sc_c2w[dmin > eps], dj['fl_x'], dj['fl_y'],
-                             dj['w'], dj['h'], (150, 150, 150), fscale * 0.6,
-                             downsample=args.grey_downsample), rel=0.6)
+            add_cams('scene cams (rest)', 'grey', sc_c2w[dmin > eps], dj['fl_x'], dj['fl_y'],
+                     dj['w'], dj['h'], (150, 150, 150), 0.6, True,
+                     downsample=args.grey_downsample)
 
-    add(f'GT ({len(ref_c2w)})',
-        add_frustums(server, 'gt', ref_c2w, fx, fy, w, h, (40, 90, 230), fscale), rel=1.0)
+    add_cams(f'GT ({len(ref_c2w)})', 'gt', ref_c2w, fx, fy, w, h, (40, 90, 230), 1.0, True)
 
     for label, run, col in arms:
         p = osp.join(run, 'test', f'{args.name}_transforms_pred.json')
@@ -217,9 +310,8 @@ def main():
         c2w, afx, afy, aw, ah = load_transforms(p)
         c2w = W(c2w)
         d = np.linalg.norm(c2w[:, :3, 3] - ref_c2w[:, :3, 3], axis=-1).mean() / max(ext, 1e-9)
-        add(f'pred: {label}  (ADE/reach {d:.3f})',
-            add_frustums(server, f'pred_{len(groups)}', c2w, afx, afy, aw, ah, col, fscale),
-            rel=1.0)
+        add_cams(f'pred: {label}  (ADE/reach {d:.3f})', f'pred_{len(groups)}',
+                 c2w, afx, afy, aw, ah, col, 1.0, True)
 
     for label, run, col, k in ctxs:
         C = _ctx_c2w(run, args.name)
@@ -230,31 +322,56 @@ def main():
         kk = max(0, min(k, len(C)))
         if kk:
             # _mix_inseg_context 는 inseg + rest 순서라 앞 kk 장이 누수 view 다.
-            add(f'{label} [leaked {kk}]',
-                add_frustums(server, f'ctx_{len(groups)}', C[:kk], fx, fy, w, h, col, fscale * 1.3),
-                rel=1.3)
+            add_cams(f'{label} [leaked {kk}]', f'ctx_{len(groups)}', C[:kk],
+                     fx, fy, w, h, col, 1.3, False)
             if kk < len(C):
-                add(f'{label} [kept out-of-seg {len(C) - kk}]',
-                    add_frustums(server, f'ctx_{len(groups)}', C[kk:], fx, fy, w, h,
-                                 (120, 120, 120), fscale * 1.3), rel=1.3)
+                add_cams(f'{label} [kept out-of-seg {len(C) - kk}]', f'ctx_{len(groups)}',
+                         C[kk:], fx, fy, w, h, (120, 120, 120), 1.3, False)
         else:
-            add(f'{label} ({len(C)})',
-                add_frustums(server, f'ctx_{len(groups)}', C, fx, fy, w, h, col, fscale * 1.3),
-                rel=1.3)
-
-    # frustum 크기 실시간 조절. 값은 target reach 대비 비율이라 segment 가 바뀌어도 뜻이 같다.
-    gui_fs = server.gui.add_slider('frustum scale (x reach)', min=0.005, max=0.5, step=0.005,
-                                   initial_value=float(args.frustum_scale))
-    gui_fs_txt = server.gui.add_text('frustum (world units)', initial_value=f'{fscale:.4f}',
-                                     disabled=True)
+            add_cams(f'{label} ({len(C)})', f'ctx_{len(groups)}', C,
+                     fx, fy, w, h, col, 1.3, False)
 
     @gui_fs.on_update
     def _(_):
+        # 크기는 node scale 이라 재생성 없이 바로 먹는다 (geometry 는 scale=1 로 구웠다).
         s = float(max(ext, 1e-3)) * gui_fs.value
         gui_fs_txt.value = f'{s:.4f}'
         with server.atomic():
-            for hnd, rel in sized:
-                hnd.scale = s * rel
+            for sp in specs:
+                for hs in sp['handles']:
+                    for hh in hs:
+                        hh.scale = s * sp['rel']
+
+    @gui_th.on_update
+    def _(_):
+        if args.frustum_style != 'spline':
+            return
+        th = float(gui_th.value)
+        t0 = time.time()
+        with server.atomic():
+            for sp in specs:
+                for hs in sp['handles']:
+                    for hh in hs:
+                        hh.remove()
+                sp['handles'] = sp['build'](th)
+                # 재생성하면 gui_fs 로 바꿔놓은 크기가 초기값으로 돌아가므로 다시 입힌다.
+                s = float(max(ext, 1e-3)) * gui_fs.value * sp['rel']
+                for hs in sp['handles']:
+                    for hh in hs:
+                        hh.scale = s
+                _vis_all(sp)
+        print(f'  thickness -> {th} (rebuild {time.time() - t0:.2f}s)', flush=True)
+
+    @gui_iv.on_update
+    def _(_):
+        with server.atomic():
+            for sp in specs:
+                _vis_all(sp)
+
+    if int(gui_iv.value) > 1:
+        with server.atomic():
+            for sp in specs:
+                _vis_all(sp)
 
     cap = osp.join(gt_run, 'test', f'{args.name}_caption.json')
     if osp.isfile(cap):

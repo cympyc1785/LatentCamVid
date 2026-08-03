@@ -16,6 +16,20 @@ All notable changes to the latentcam sub-project. Follows [Keep a Changelog](htt
   - `frustum scale (x reach)` 슬라이더로 frustum 크기를 실시간 조절한다. 값은 target reach 대비
     비율이라 segment가 바뀌어도 뜻이 같고, 그룹별 상대 배율(pred/GT 1.0, context 1.3, scene cams 0.6)은
     유지된 채 한꺼번에 스케일된다. 초기값은 `--frustum-scale`.
+  - frustum 그리기 방식을 `--frustum-style {spline,viser}`로 고른다. 기본 `spline`은
+    `tools/gaussian-splatting-lightning/custom_utils/render_frustum.py`의 `add_frustum_spline`
+    (= `custom_panel.py`의 `visualize_camera_frustum`이 쓰는 그 함수)로 frustum을 catmull-rom
+    spline 8개(ray 4 + far-plane rect 4)로 그려 **선 두께**를 줄 수 있다. `viser`는 기존
+    `add_camera_frustum` 경로 그대로(두께 인자 없음). gspl repo를 import 못 하면 경고 후 `viser`로 폴백.
+  - `frustum thickness (rebuild)`(number, 초기값 `--frustum-thickness` 2.0)로 선 두께를 바꾼다.
+    viser 1.0.30의 `SplineCatmullRomHandle` / `CameraFrustumHandle`에는 `line_width`가 설정 가능한
+    prop으로 없어서(`scale`/`visible`/`position`/`wxyz`/`positions`뿐) 값이 바뀌면 frustum을
+    `remove()` 후 다시 그린다. 드래그마다 전체 재생성이 도는 걸 막으려고 slider가 아닌 number다
+    (`custom_panel.py`도 build 시점에만 thickness를 읽는다). 재생성 후 `frustum scale`과 체크박스·
+    interval 상태는 다시 입힌다. `viser` 스타일에서는 disabled.
+  - `frustum interval (traj)` 슬라이더(초기값 `--frustum-interval`)로 궤적 카메라를 N개마다 하나만
+    표시한다. 솎아도 마지막 프레임은 항상 남겨 궤적 끝을 잃지 않는다. GT / pred / scene cams에만
+    걸리고 context(6장)는 항상 전부 보인다.
   - **좌표계**: DL3DV `transforms.json`의 `applied_transform`(nerfstudio가 기록한 world 재정렬)을
     `c2w_ply = applied_transform4 @ c2w_gl`로 좌측 곱해야 `scene.ply`와 겹쳐진다 — 이걸 빼면 카메라가
     점군과 어긋난다. `tools/gaussian-splatting-lightning/custom_utils/custom_panel.py`의

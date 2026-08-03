@@ -80,23 +80,33 @@ def geo_encode(geo_encoder, data, device):
 
 
 def attach_geo_cam(emb, data, device):
-    """[new] cfg.geo_cam_embed: append each context view's 11-d camera pose (relative to the
-    target's FIRST camera, dataset_dl3dv._geo_cam_param) to every patch token of that view.
+    """[new] cfg.geo_cam_embed: append a raw camera embedding to every geo patch token.
 
-      emb (B, M, C) with M = V*P  ->  (B, M, C + 11)
+      'relfirst' -- (B, V, 11) each context view's pose relative to the target's FIRST camera
+                    (dataset_dl3dv._geo_cam_param), broadcast over that view's P patches.
+      'plucker'  -- (B, V, P, 6) a Plücker ray PER patch token in the same frame/units
+                    (dataset_dl3dv._geo_cam_plucker); no broadcast, one value per token.
+
+      emb (B, M, C) with M = V*P  ->  (B, M, C + 11) or (B, M, C + 6)
 
     The raw dims ride along inside geo_emb so no call site's signature changes; the model splits
     them off and lifts them with a trainable MLP (CameraDiffusionModel._lift_geo_cam). No-op when
     geo_cam_embed is off or the batch carries no geo_cam_param."""
     if not getattr(cfg, 'geo_cam_embed', None) or 'geo_cam_param' not in data:
         return emb
-    cam = data['geo_cam_param'].to(device).to(emb.dtype)          # (B, V, 11)
+    cam = data['geo_cam_param'].to(device).to(emb.dtype)   # (B,V,11) | (B,V,P,6)
     B, M, _ = emb.shape
     V = cam.shape[1]
     if M % V:
         raise ValueError(f"geo token count {M} not divisible by #views {V}")
     P = M // V
-    cam = cam.unsqueeze(2).expand(B, V, P, cam.shape[-1]).reshape(B, M, cam.shape[-1])
+    if cam.dim() == 4:            # plucker: per-patch, must line up with the token grid
+        if cam.shape[2] != P:
+            raise ValueError(f"plucker grid {cam.shape[2]} != tokens per view {P} "
+                             f"(M={M}, V={V}); check geo_image_hw vs _geo_patch_grid()")
+        cam = cam.reshape(B, M, cam.shape[-1])
+    else:                         # relfirst: per-view, broadcast over the view's patches
+        cam = cam.unsqueeze(2).expand(B, V, P, cam.shape[-1]).reshape(B, M, cam.shape[-1])
     return torch.cat([emb, cam], dim=-1)
 
 
@@ -292,8 +302,11 @@ def train():
     # geo_latent_dim + geo_cam_embed_dim instead of geo_latent_dim. Off (0) -> identical model.
     _geo_kw = {}
     if getattr(cfg, 'geo_cam_embed', None):
+        # relfirst = 11 raw dims per view (rot6d + trans + fx/2cx, fy/2cy);
+        # plucker  = 6 raw dims per patch token (direction + moment).
+        _raw = 6 if cfg.geo_cam_embed == 'plucker' else 11
         _geo_kw = dict(geo_latent_dim=getattr(cfg, 'geo_latent_dim', 768),
-                       geo_cam_raw_dim=11,
+                       geo_cam_raw_dim=_raw,
                        geo_cam_embed_dim=getattr(cfg, 'geo_cam_embed_dim', 128))
         print(f"(model) geo_cam_embed={cfg.geo_cam_embed}: geo_proj input = "
               f"{_geo_kw['geo_latent_dim']} + {_geo_kw['geo_cam_embed_dim']}")

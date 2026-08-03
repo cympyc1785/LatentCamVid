@@ -163,6 +163,16 @@ geo_cover_centered_at_s: false # [renamed 2026-07-31 from geo_anchor_first_frame
 geo_cover_subtract_first: false # [new] subtract the fixed first-cam (s) coverage before the greedy pick, so the
                               #   remaining k-1 views maximize RESIDUAL coverage (what s doesn't already cover)
 coverage_blacklist_path: null # per-segment coverage-blacklist CSV (columns scene,segment); null = no filtering
+# [new] TEST-TIME probe: force K of the V context views to be TARGET-SEGMENT cameras (the frames
+#   the model is asked to generate). null/0 = OFF, i.e. the sampler's pick is used unchanged.
+#   The K views are evenly spaced over the target frames, so K=1 -> [s] exactly reproduces
+#   geo_worldtraj's training condition (geo_first_view_target_s: true puts frame s in context and
+#   geo_cover_out_of_seg: true keeps every other target frame out), K=3 -> [s, mid, last],
+#   K=5 -> [s, 1/4, 2/4, 3/4, last]. They REPLACE the first K coverage views, so V is unchanged
+#   and view0 is still s. Deliberate leakage: it asks whether the extra target views help and
+#   whether the prediction collapses toward them. Setting it force-disables the geo latent cache
+#   (the cache is keyed by segment, not by context view).
+geo_test_inseg_k: null
 # [new] per-context-view camera embedding channel-concatenated onto the geo tokens.
 #   null (default) = OFF, i.e. the geo condition is exactly the (M, 768) LagerNVS tokens as before.
 #   'relfirst'     = for each context view v build an 11-d pose relative to the TARGET segment's
@@ -173,14 +183,26 @@ coverage_blacklist_path: null # per-segment coverage-blacklist CSV (columns scen
 #                    geo_emb arrives as (M, 768+11); the MODEL splits them off, runs them through a
 #                    trainable MLP (11 -> geo_cam_embed_dim) and concatenates, giving geo_proj an
 #                    input of geo_latent_dim + geo_cam_embed_dim. Only the raw 11 dims are cached.
+#   'plucker'      = same frame and units, but a 6-d Plücker ray PER PATCH TOKEN instead of one
+#                    11-d pose per view: for patch (i,j) of view v, d = normalize(R^T K^-1 [x,y,1])
+#                    and moment = o x d with o = -R^T t the camera center (both in frame s, t
+#                    divided by the same norm_scale). geo_emb arrives as (M, 768+6) and the same
+#                    trainable MLP (6 -> geo_cam_embed_dim) lifts it, so geo_proj input is
+#                    unchanged at geo_latent_dim + geo_cam_embed_dim. Differences vs 'relfirst':
+#                    the embedding VARIES WITHIN a view (each token gets its own ray, so a token
+#                    knows which direction it looks at, not just which camera it came from) and
+#                    there are no explicit intrinsics channels -- FoV is already in d. The patch
+#                    grid is derived from geo_image_hw by the encoder's own resize rule
+#                    (dataset_dl3dv._geo_patch_grid; (256,448) -> 21x37 = 777 per view) and
+#                    attach_geo_cam asserts it against the real token count.
 #   Intended for the ablation where the target's own first camera is NOT a context view
 #   (geo_first_view_target_s: false): LagerNVS then anchors to an arbitrary context view, and this
 #   embedding is what tells the model where each view sits in the generation frame.
 #   Context intrinsics are kept RAW (fx/2cx, fy/2cy) regardless of intr_norm: under intr_norm 'rel'
 #   the target's own intr channels are ~[1,1] by construction, so raw is the only way the context
-#   FoV reaches the model.
+#   FoV reaches the model. ('plucker' sidesteps this -- K enters through the ray directions.)
 geo_cam_embed: null
-geo_cam_embed_dim: 128        # width of the trainable MLP that lifts the 11 raw dims (geo_cam_embed only)
+geo_cam_embed_dim: 128        # width of the trainable MLP that lifts the raw dims (11 relfirst / 6 plucker)
 # [new] precomputed frozen geo-latent cache (built by main/cache_geo_embeddings.py). null = OFF,
 # i.e. the original behaviour: load context images and run LagerNVS every step. When set, the
 # dataset loads <dir>/<first_cam_included|first_cam_not_included>/<iK>/<data_name>.pt instead and

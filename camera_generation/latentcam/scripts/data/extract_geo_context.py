@@ -78,6 +78,8 @@ for n, tid in enumerate(ids):
         continue
     scene_idx, s, e = ds.samples[idx][:3]
     geo_idxs = list(sampler(scene_idx, s, e))
+    if ds.geo_test_inseg_k:   # [new] --set geo_test_inseg_k=K 로 돌린 eval 과 같은 context
+        geo_idxs = ds._mix_inseg_context(geo_idxs, s, e)
     gc2w = torch.linalg.inv(ds.extrinsics_list[scene_idx][geo_idxs].float())   # (V,4,4) c2w
     centers = gc2w[:, :3, 3].cpu().numpy()   # (V,3) world camera centers
     out[tid] = centers.tolist()

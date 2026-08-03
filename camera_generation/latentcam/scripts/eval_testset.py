@@ -179,7 +179,9 @@ def main():
 
     _geo_kw = {}
     if getattr(cfg, 'geo_cam_embed', None):
-        _geo_kw = dict(geo_latent_dim=getattr(cfg, 'geo_latent_dim', 768), geo_cam_raw_dim=11,
+        # relfirst = 11 per-view dims, plucker = 6 per-patch dims (train_latent_cam_dm.py 와 동일)
+        _raw = 6 if cfg.geo_cam_embed == 'plucker' else 11
+        _geo_kw = dict(geo_latent_dim=getattr(cfg, 'geo_latent_dim', 768), geo_cam_raw_dim=_raw,
                        geo_cam_embed_dim=getattr(cfg, 'geo_cam_embed_dim', 128))
     model = CameraDiffusionModel(cam_dim=cfg.cam_dim, **_geo_kw)
     sd = torch.load(ckpt_path, map_location='cpu')

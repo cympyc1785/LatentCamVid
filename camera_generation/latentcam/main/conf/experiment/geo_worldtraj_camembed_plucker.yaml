@@ -1,0 +1,38 @@
+# @package _global_
+# geo_worldtraj_camembed 에서 camera embedding 만 relfirst -> plucker 로 바꾼 arm.
+#
+# geo_worldtraj_camembed 와 다른 키는 `geo_cam_embed` 하나뿐이다 (+ exp_name). 나머지
+# (meta_worldtraj.csv, frustum_cover / geo_cover_out_of_seg / geo_first_view_target_s: false /
+# geo_cover_subtract_first: false / geo_cover_centered_at_s, geo_posed, scale_mode avg_scale,
+# geo_latent_cache_dir) 는 전부 그대로라 **같은 latent cache 트리(first_cam_not_included/)** 를
+# 쓴다 -- camera embedding 은 캐시에 안 들어가고 geo_idxs 로 매 스텝 다시 만든다.
+#
+# relfirst 와 plucker 의 차이 (둘 다 target segment 의 첫 카메라 s 기준 프레임, translation 은
+# 같은 norm_scale 로 나눔 -- 생성되는 궤적과 같은 단위):
+#   relfirst : view 당 11-d = [rot6d(6), trans(3), fx/2cx, fy/2cy]. 그 view 의 patch token
+#              777 개에 **똑같은 값**을 broadcast 한다. 토큰은 "어느 카메라에서 왔는지"만 안다.
+#   plucker  : patch token 당 6-d = [d(3), o x d(3)]. d 는 그 패치 중심을 지나는 광선의 방향
+#              (프레임 s), o = -R^T t 는 카메라 중심. 즉 토큰마다 **자기가 보고 있는 광선**을
+#              들고 있어서 view 안에서 값이 변한다. intrinsics 채널이 따로 없다 -- FoV 는
+#              이미 d 에 들어 있다 (그래서 intr_norm 'rel' 에서 raw fx/2cx 를 끼워 넣던
+#              relfirst 의 예외 처리가 필요 없다).
+# patch grid 는 encoder 의 resize 규칙(긴 변 518, 14 의 배수)을 그대로 따라 계산한다:
+# geo_image_hw (256,448) -> 294x518 -> 21x37 = 777 tokens/view, M = 6*777 = 4662 (캐시된 emb 와
+# 같은 shape). attach_geo_cam 이 실제 M//V 와 대조해서 어긋나면 바로 죽는다.
+#
+# 모델 쪽은 geo_cam_raw_dim 만 11 -> 6 으로 바뀐다. MLP 폭(geo_cam_embed_dim 128)과 geo_proj
+# 입력(768+128=896)은 동일하므로 파라미터 수는 사실상 같다 (geo_cam_mlp 첫 Linear 만 11->6).
+exp_name: dl3dv_geo_worldtraj_camembed_plucker
+meta_csv: meta_worldtraj.csv
+coverage_blacklist_path: null
+geo_encoder: lagernvs
+geo_view_sampling: frustum_cover
+geo_cover_out_of_seg: true
+geo_first_view_target_s: false
+geo_cover_subtract_first: false
+geo_cover_centered_at_s: true
+geo_posed: true
+scale_mode: avg_scale
+geo_cam_embed: plucker
+geo_cam_embed_dim: 128
+geo_latent_cache_dir: /data1/cympyc1785/data/DL3DV/latent_cache

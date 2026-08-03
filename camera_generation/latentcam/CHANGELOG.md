@@ -5,6 +5,39 @@ All notable changes to the latentcam sub-project. Follows [Keep a Changelog](htt
 ## [Unreleased]
 
 ### Added
+- **`geo_cam_embed: plucker`** — geo token에 붙이는 camera embedding의 두 번째 종류. 기존
+  `relfirst`(view당 11-d `[rot6d(6), trans(3), fx/2cx, fy/2cy]`를 그 view의 patch token 777개에
+  broadcast)와 달리 **patch token당 6-d Plücker 광선** `[d(3), o×d(3)]`을 준다 — `d`는 그 패치
+  중심을 지나는 광선의 방향, `o = -R^T t`는 카메라 중심, 둘 다 target segment 첫 카메라 `s`의
+  프레임에서 같은 `norm_scale`로 나눈 단위(생성되는 궤적과 같은 단위). intrinsics 채널이 따로
+  없다 — FoV가 이미 `d`에 들어 있다. `geo_cam_embed: null`(OFF) / `relfirst`는 그대로 동작한다.
+  - `main/dataset_dl3dv.py`: `_geo_patch_grid()`(encoder의 resize 규칙 = 긴 변 518, 나머지는 14의
+    배수로 내림 → `geo_image_hw (256,448)`이면 `21×37 = 777` tokens/view, `M = 6*777 = 4662`),
+    `_geo_cam_plucker()`, 그리고 `relfirst`/`plucker`를 갈라 주는 `_geo_cam_cond()` 추가.
+    `__getitem__`의 캐시 히트 경로와 on-the-fly 경로 둘 다 `_geo_cam_cond`를 부른다.
+  - `main/train_latent_cam_dm.py`: `attach_geo_cam`이 4-D `(B,V,P,6)`이면 broadcast 없이
+    `(B,M,6)`으로 reshape하고 `P`가 실제 `M//V`와 다르면 즉시 죽는다(어긋난 채 조용히 학습되는 걸
+    막음). 모델 생성 시 `geo_cam_raw_dim`이 `plucker`면 6, 아니면 11.
+  - `scripts/eval_testset.py`: 같은 분기 — plucker 체크포인트를 11-d MLP로 로드하지 않게.
+  - 검증(실데이터): grid `(21,37)`, `geo_cam_param (6,777,6)`, `geo_emb (4662,768)`에서 `P=777`
+    일치, `|d| ∈ [0.9999999, 1.0000001]`, `d·m` max `1.54e-08`, 패치 중심 재투영 오차
+    `u 0.00092 px / v 0.00085 px`, `z>0` 전부 True, moment를 `-R^T t`로 다시 만든 것과 max abs
+    diff `0.0`.
+- **`main/conf/experiment/geo_worldtraj_camembed_plucker.yaml`** — `geo_worldtraj_camembed`에서
+  `geo_cam_embed`만 `relfirst` → `plucker`로 바꾼 arm. resolved config diff 확인 결과 다른 키는
+  `exp_name`과 `geo_cam_embed` 둘뿐이다. camera embedding은 캐시에 안 들어가므로 같은 latent
+  cache 트리(`first_cam_not_included/`)를 그대로 쓴다.
+- **`geo_test_inseg_k`** (`main/conf/config.yaml`, 기본 `null`) — **test 전용** probe. context
+  `V`장 중 앞의 `K`장을 **target segment 카메라**(모델이 생성해야 할 프레임들)로 바꾼다.
+  `K=1 → [s]`, `K=3 → [s, 중간, 마지막]`, `K=5 → [s, 1/4, 2/4, 3/4, 마지막]`이고 나머지 `V-K`장은
+  원래 sampler가 고른 coverage view가 순서대로 채우므로 `V`는 그대로, `view0 == s`도 그대로다.
+  `geo_worldtraj`는 학습 때 이미 target 카메라 하나(프레임 `s`)를 context에 넣으므로 **`K=1`은
+  학습 조건과 완전히 동일한 대조군**이다. `null`/`0`이면 기존 동작과 byte-identical.
+  - context view가 바뀌면 캐시 키(segment만 봄)가 못 구분하므로 `geo_test_inseg_k`가 켜지면
+    `geo_latent_cache_dir`를 강제로 끈다(로그로 알림) — 즉 세 K 전부 on-the-fly LagerNVS로 돈다.
+    부수 효과로 `K=1`은 "캐시 없이 재현되는가"까지 같이 검증한다.
+  - `scripts/data/extract_geo_context.py`도 같은 `--set geo_test_inseg_k=K`를 받아 top-down
+    시각화의 context 별표가 eval이 실제로 쓴 view와 일치한다.
 - **`main/conf/experiment/geo_worldtraj_camembed_with_anchor.yaml`** — anchor(`geo_first_view_target_s`
   + `geo_cover_subtract_first`)를 켠 채 `geo_cam_embed: relfirst`를 얹는 2×2 ablation의 네 번째 칸.
   `geo_worldtraj_camembed`와는 anchor 2개 키만, `geo_worldtraj`와는 camembed 2개 키

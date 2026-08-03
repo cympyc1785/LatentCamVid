@@ -276,10 +276,21 @@ class CamDataset(torch.utils.data.Dataset):
                       f"(miss -> on-the-fly LagerNVS)")
         # [new] per-context-view camera embedding concatenated onto the geo tokens.
         # None = OFF (unchanged geo condition). 'relfirst' = 11-d pose relative to the target's
-        # first camera; see conf/config.yaml and _geo_cam_param below.
+        # first camera (per-VIEW, broadcast over that view's patches); 'plucker' = 6-d Plücker ray
+        # per PATCH token in the same frame. See conf/config.yaml and _geo_cam_param /
+        # _geo_cam_plucker below.
         self.geo_cam_embed = getattr(cfg, 'geo_cam_embed', None)
-        if self.geo_cam_embed not in (None, 'relfirst'):
-            raise ValueError(f"geo_cam_embed must be null | 'relfirst', got {self.geo_cam_embed!r}")
+        if self.geo_cam_embed not in (None, 'relfirst', 'plucker'):
+            raise ValueError(f"geo_cam_embed must be null | 'relfirst' | 'plucker', "
+                             f"got {self.geo_cam_embed!r}")
+        # [new] test-time probe: force K of the V context views to be TARGET-SEGMENT cameras.
+        # null/0 = OFF (unchanged). See _mix_inseg_context and conf/config.yaml.
+        self.geo_test_inseg_k = getattr(cfg, 'geo_test_inseg_k', None) or 0
+        if self.geo_test_inseg_k and self.geo_latent_cache_dir is not None:
+            # 캐시 키는 data_name 뿐이라 context view 가 바뀐 걸 구분 못 한다 -> 반드시 끈다.
+            print(f"[geo cache] DISABLED: geo_test_inseg_k={self.geo_test_inseg_k} changes the "
+                  f"context views, but the cache is keyed by segment only")
+            self.geo_latent_cache_dir = None
         # geo context-view sampling (leakage ablation): 'even' (in-segment) | 'hybrid'
         self.geo_view_sampling = getattr(cfg, 'geo_view_sampling', 'even')
         self.geo_num_inseg = getattr(cfg, 'geo_num_inseg', 3)
@@ -838,6 +849,37 @@ class CamDataset(torch.utils.data.Dataset):
             imgs.append(torch.from_numpy(np.array(im)).permute(2, 0, 1).float() / 255.0)
         return torch.stack(imgs)
 
+    def _target_frame_idxs(self, s, e):
+        """__getitem__ 이 실제로 생성 대상으로 삼는 프레임 인덱스 (segment 가 num_frames 보다
+        길면 균등 subsample 한 그것). _mix_inseg_context 가 '진짜 target 프레임'만 context 로
+        넣기 위해 쓴다."""
+        idxs = list(range(s, e))
+        if len(idxs) > self.num_frames:
+            idxs = [idxs[i] for i in self._even_indices(len(idxs), self.num_frames)]
+        return idxs
+
+    def _mix_inseg_context(self, geo_idxs, s, e):
+        """[new] geo_test_inseg_k=K: context V 장 중 앞의 K 장을 TARGET SEGMENT 카메라로 바꾼다
+        (V 는 그대로, 나머지 V-K 장은 원래 sampler 가 고른 coverage view 를 순서대로 채움).
+
+        누수 실험 전용 -- 학습 때 못 본 조건을 test 에서 주는 것이다. geo_worldtraj 는
+        geo_first_view_target_s: true / geo_cover_out_of_seg: true 라 학습 중 context 에 들어간
+        target 카메라가 프레임 s 하나뿐인데, 그 수를 K 로 늘리면 (a) 지표가 좋아지는지 (b) 예측
+        궤적이 그 view 들 쪽으로 치우치는지 본다.
+
+        고르는 방식: _target_frame_idxs 를 균등 분할 -- K=1 -> [s] 로 학습 조건과 완전히 같고
+        (재현 대조군), K=3 -> [s, 중간, 마지막], K=5 -> [s, 1/4, 2/4, 3/4, 마지막]. 항상
+        geo_idxs[0] == s 라 view0 anchor 도 학습 때와 같다."""
+        K = int(self.geo_test_inseg_k)
+        if K <= 0:
+            return geo_idxs
+        V = len(geo_idxs)
+        tgt = self._target_frame_idxs(s, e)
+        inseg = [tgt[i] for i in self._even_indices(len(tgt), min(K, len(tgt)))]
+        seen = set(inseg)
+        rest = [i for i in geo_idxs if i not in seen]
+        return inseg + rest[:max(V - len(inseg), 0)]
+
     def _geo_cam_param(self, scene_idx, geo_idxs, w2c_s, norm_scale):
         """[new] geo_cam_embed='relfirst': (V, 11) pose of each context view RELATIVE to the
         target segment's first camera s, in exactly the target's cam_param parametrization.
@@ -860,6 +902,75 @@ class CamDataset(torch.utils.data.Dataset):
         intr = torch.stack([K[:, 0, 0] / (K[:, 0, 2] * 2),
                             K[:, 1, 1] / (K[:, 1, 2] * 2)], dim=-1)       # (V,2) raw
         return torch.cat([rel[:, :3, 0], rel[:, :3, 1], trans, intr], dim=-1).float()
+
+    def _geo_patch_grid(self):
+        """[new] the (Gh, Gw) VGGT patch grid the geo encoder produces for self.geo_hw images.
+
+        Mirrors models/encoder_decoder.py:193-202 (LagerNVS Reconstructor.forward): the longer side
+        is resized to 518 and the other side is floored to a multiple of the ViT patch size 14; the
+        aggregator's non-patch tokens are stripped (encoder_decoder.py:213-215), so the token count
+        per view is exactly Gh*Gw. For the default geo_image_hw (256, 448) -> (21, 37) = 777 tokens
+        per view, i.e. M = 6*777 = 4662 -- the shape the geo latent cache holds. attach_geo_cam
+        asserts this against the real M, so a mismatch fails loudly instead of silently
+        misaligning rays with tokens."""
+        H, W = self.geo_hw
+        p, S = 14, 518
+        if H > W:
+            tgt_h, tgt_w = S, (int(S * W / H) // p) * p
+        else:
+            tgt_w, tgt_h = S, (int(S * H / W) // p) * p
+        return tgt_h // p, tgt_w // p
+
+    def _geo_cam_plucker(self, scene_idx, geo_idxs, w2c_s, norm_scale, hw_orig):
+        """[new] geo_cam_embed='plucker': (V, Gh*Gw, 6) Plücker ray per geo patch token, in the
+        SAME frame and units as the trajectory being generated (target segment's first camera s,
+        translations / norm_scale).
+
+          rel_v = w2c_v @ inv(w2c_s)              # frame-s world -> cam v  (as in _geo_cam_param)
+          R, t  = rel_v[:3,:3], rel_v[:3,3] / norm_scale
+          o     = -R^T t                          # camera center, frame s, target units
+          d     = normalize(R^T K^-1 [x, y, 1])   # patch-center ray direction, frame s
+          out   = [d (3), o x d (3)]              # standard Plücker (direction, moment)
+
+        Patch centers are taken in NORMALIZED image coords ((j+.5)/Gw, (i+.5)/Gh) and mapped back
+        to the ORIGINAL pixel grid before applying the original K. Both resizes on the way to the
+        encoder (원본 -> geo_hw in _load_images, geo_hw -> 518-long-side inside the reconstructor)
+        are full-frame scalings, so normalized coords survive them exactly -- including the slight
+        anisotropic stretch when geo_hw's aspect differs from the scene's.
+
+        Row-major (i over rows, j over cols) to match the ViT token order that
+        `einops.rearrange(tokens, "b v p c -> b (v p) c")` flattens (geo_encoder.py:138).
+
+        Unlike 'relfirst' there are no explicit intrinsics channels: FoV is already in d."""
+        Gh, Gw = self._geo_patch_grid()
+        H0, W0 = float(hw_orig[0]), float(hw_orig[1])
+        w2c_v = self.extrinsics_list[scene_idx][list(geo_idxs)].float()   # (V,4,4)
+        K = self.intrinsics_list[scene_idx][list(geo_idxs)].float()       # (V,3,3) original px
+        rel = w2c_v @ torch.linalg.inv(w2c_s.float()).unsqueeze(0)        # (V,4,4)
+        R = rel[:, :3, :3]                                                # (V,3,3)
+        t = rel[:, :3, 3] / norm_scale                                    # (V,3)
+        Rt = R.transpose(1, 2)                                            # (V,3,3) = c2w rotation
+        o = -torch.einsum('vij,vj->vi', Rt, t)                            # (V,3) camera center
+
+        ys = (torch.arange(Gh, dtype=torch.float32) + 0.5) / Gh * H0      # (Gh,)
+        xs = (torch.arange(Gw, dtype=torch.float32) + 0.5) / Gw * W0      # (Gw,)
+        yy, xx = torch.meshgrid(ys, xs, indexing='ij')                    # row-major
+        xx, yy = xx.reshape(-1), yy.reshape(-1)                           # (P,)
+        fx, fy = K[:, 0, 0], K[:, 1, 1]
+        cx, cy = K[:, 0, 2], K[:, 1, 2]
+        d_cam = torch.stack([(xx.unsqueeze(0) - cx[:, None]) / fx[:, None],
+                             (yy.unsqueeze(0) - cy[:, None]) / fy[:, None],
+                             torch.ones(K.shape[0], xx.numel())], dim=-1)   # (V,P,3)
+        d = torch.einsum('vij,vpj->vpi', Rt, d_cam)                       # (V,P,3) frame s
+        d = d / d.norm(dim=-1, keepdim=True).clamp(min=1e-8)
+        m = torch.cross(o[:, None, :].expand_as(d), d, dim=-1)            # (V,P,3) moment
+        return torch.cat([d, m], dim=-1).float()                          # (V,P,6)
+
+    def _geo_cam_cond(self, scene_idx, geo_idxs, w2c_s, norm_scale, hw_orig):
+        """geo_cam_embed dispatch -- 'relfirst' -> (V,11), 'plucker' -> (V,P,6)."""
+        if self.geo_cam_embed == 'plucker':
+            return self._geo_cam_plucker(scene_idx, geo_idxs, w2c_s, norm_scale, hw_orig)
+        return self._geo_cam_param(scene_idx, geo_idxs, w2c_s, norm_scale)
 
     def __len__(self):
         return len(self.samples)
@@ -970,8 +1081,8 @@ class CamDataset(torch.utils.data.Dataset):
                     _idxs = list(self._sample_geo_frustum_cover(scene_idx, s, e))
                 if _idxs is not None:            # v1 files carry no view indices -> can't rebuild
                     out['geo_emb'] = _emb
-                    out['geo_cam_param'] = self._geo_cam_param(
-                        scene_idx, _idxs, extrinsics[0], norm_scale)
+                    out['geo_cam_param'] = self._geo_cam_cond(
+                        scene_idx, _idxs, extrinsics[0], norm_scale, (h, w))
                     return out
                 # v1 cache + geo_cam_embed -> fall through to the on-the-fly path below
 
@@ -984,6 +1095,8 @@ class CamDataset(torch.utils.data.Dataset):
                 geo_idxs = self._sample_geo_random_inseg(s, e)
             else:   # 'even': evenly-spaced in-segment (baseline, leaks trajectory)
                 geo_idxs = [s + i for i in self._even_indices(e - s, self.geo_num_views)]
+            if self.geo_test_inseg_k:    # [new] test-time in-segment context probe
+                geo_idxs = self._mix_inseg_context(list(geo_idxs), s, e)
             if self.geo_shuffle_order:   # permute context view order
                 geo_idxs = list(geo_idxs)
                 if getattr(self.cfg, 'geo_shuffle_keep_first', False) and len(geo_idxs) > 1:
@@ -997,8 +1110,8 @@ class CamDataset(torch.utils.data.Dataset):
             # coverage search; harmless (a (V,) int tensor) on every other path.
             out['geo_idxs'] = torch.tensor(list(geo_idxs), dtype=torch.long)
             if self.geo_cam_embed is not None:
-                out['geo_cam_param'] = self._geo_cam_param(
-                    scene_idx, geo_idxs, extrinsics[0], norm_scale)
+                out['geo_cam_param'] = self._geo_cam_cond(
+                    scene_idx, geo_idxs, extrinsics[0], norm_scale, (h, w))
 
             # posed geo: raw geo-view camera geometry (geo_encoder builds the lagernvs
             # cam_token from these). c2w OpenCV, intrinsics (fx,fy,cx,cy) px, image hw.

@@ -5,6 +5,22 @@ All notable changes to the latentcam sub-project. Follows [Keep a Changelog](htt
 ## [Unreleased]
 
 ### Added
+- **`tools/lagernvs/render_avgscale.py`에 GenDoP식 scale guard/양자화 + 정지 context 모드**
+  (**gitignore된 vendored 트리라 커밋에는 없음, 작업 트리에만 존재**). 기본값(`RD_MODES=avg_scale`,
+  `RD_STATIC_CTX=0`, `RD_TAG=''`)이면 출력 파일명까지 이전과 byte-identical.
+  - `parse_mode`를 `@pt` 전용에서 flag 집합(`@pt`/`@q`/`@qe`, 조합 가능)으로 일반화. `@q`/`@qe`는
+    divisor에 GenDoP `core/provider.py:170-182`의 처리를 그대로 적용한다 — clamp가 아니라 덧셈
+    guard `div + RD_EPS`(기본 1e-5), log10 공간에서 `bin = long((log10(div_g)+2)/4·BINS)`를
+    `[0, BINS]`로 clip(`RD_BINS` 기본 256 → 표현 가능 범위 `div ∈ [1e-2, 1e2]`), 역양자화는 `@q`가
+    `10**(·)`(자기일관), `@qe`가 `exp(·)`(GenDoP `infer.py:221` 그대로 = log10로 encode하고 exp로
+    decode하는 왕복 불일치, `div**0.4343`). `metrics.json`에 `div_raw/div_guard/bin_raw/bin/div_q`
+    기록.
+  - `RD_STATIC_CTX=1`: context view V개를 전부 view0의 복사본(pose·intrinsics·이미지 모두)으로
+    바꿔 `div → 0` 축퇴 케이스를 실제로 렌더한다. 이때 `lagernvs` divisor는 dump에 적힌 값이 아니라
+    바꿔친 context에서 다시 계산한다. `RD_TAG`가 모든 출력 파일명/metrics 키 뒤에 붙어 일반 context
+    실행 결과를 덮어쓰지 않는다.
+  - 로그/`metrics.json`에 `tgt_reach`(정규화 후 target 최대 변위)와 `divisor_raw` 추가.
+  측정값은 `EXPERIMENTS.log` 2026-08-03 항목.
 - **`scripts/vae/vae_scale_matrix.py`에 `TAILS=1`** — 기존 표는 corpus **평균** latent std만
   주는데, camera-length `scale_mode`는 카메라가 멈춘 바로 그 샘플에서 분모가 0에 가까워지므로
   평균으로는 터지는 개별 샘플이 안 보인다. `TAILS=1`이면 같은 행들 아래에 per-sample tail 표를

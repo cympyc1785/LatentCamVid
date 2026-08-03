@@ -54,7 +54,13 @@ All notable changes to the latentcam sub-project. Follows [Keep a Changelog](htt
   - mode 문법에 `*<f>` 배수 추가(`avg_scale*0.5` → key `avg_scale_x0.5`)와 합성 divisor `one`(=1,
     정규화 없이 world unit 그대로). divisor sweep을 위한 것.
   - 로그의 `tok=`는 이제 추정값이 아니라 `cam_tokens[0, -2:]` 실제값을 찍는다.
-  측정값은 `EXPERIMENTS.log` 2026-08-03 두 항목.
+  - **`@ch9nat` / `@ch9avg` flag 추가** — `camera_scale`(cam_token 채널 9, 이하 ch9) 토큰을 pose와
+    분리해 원인을 가른다. `data/normalization.py:51`에서 ch9는 **이미 정규화된 pose로부터 파생**
+    (`max‖c_ctx‖` of normalized poses)되므로 divisor만 바꾸면 pose와 ch9가 항상 같이 움직여
+    둘 중 무엇이 붕괴 원인인지 분리가 안 된다. `@ch9nat`은 pose를 그대로 두고
+    `cam_tokens[:, -2]`만 native `1/1.35`로, `@ch9avg`는 `avg_scale` divisor가 만들었을 값
+    (`maxctx0 / avg_scale`)으로 덮어쓴다. `FLAGS` 집합에 추가한 것뿐이라 미지정 시 동작 불변.
+  측정값은 `EXPERIMENTS.log` 2026-08-03 세 항목.
 - **`scripts/vae/vae_scale_matrix.py`에 `TAILS=1`** — 기존 표는 corpus **평균** latent std만
   주는데, camera-length `scale_mode`는 카메라가 멈춘 바로 그 샘플에서 분모가 0에 가까워지므로
   평균으로는 터지는 개별 샘플이 안 보인다. `TAILS=1`이면 같은 행들 아래에 per-sample tail 표를

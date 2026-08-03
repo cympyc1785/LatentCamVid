@@ -18,6 +18,29 @@ All notable changes to the latentcam sub-project. Follows [Keep a Changelog](htt
   붕괴를 진단하는 top-down 시각화. 기존 `<seg>/topdown_context_gt.png`가 raw world 단위라 범위 이탈
   여부를 볼 수 없던 것을 divisor로 나눈 좌표에서 그리고, context reach 0.7407 / target bound 1.0
   원을 겹쳐 `avg_scale` vs `geo_lagernvs`를 나란히 비교한다. `ranges.json` + `_summary.png` 동반.
+- **`tools/lagernvs/render.py` (신규, gitignore된 vendored 트리라 커밋에는 없음 — 작업 트리에만
+  존재)** — `render_avgscale.py` / `render_static_probe.py` / `render_pred_from_dump.py` 세 스크립트가
+  env 변수와 하드코딩으로 나눠 갖고 있던 축을 하나의 argparse CLI로 합쳤다. 세 스크립트는 남겨 두므로
+  기존 실행은 그대로 재현된다.
+  - **context와 target의 정규화 분모를 따로 준다** — `--modes '<ctx분모>/<tgt분모>[@flag]...'`.
+    `/` 없이 쓰면 예전처럼 divisor `D`(= 모든 카메라 중심에 걸리는 translation 분모) 하나를 양쪽에
+    똑같이 적용하고 키·파일명도 이전과 같다(`avg_scale` → `render_avgscale.mp4`). 나뉜 경우만
+    `c<ctx>-t<tgt>` 키(예 `clagernvs-tmaxd_tgt`). `metrics.json`에 `divisor_ctx` / `divisor_tgt` /
+    `split_div` 추가. 지금까지 divisor 하나가 context baseline과 target 변위를 동시에 정해서
+    자유도가 1개뿐이었던 것을 2개로 푼 것.
+  - `--ctx {real,static,posedup}` + `--ctx-n N`으로 context 구성 통합: `static`이 기존
+    `RD_STATIC_CTX=1`(= `render_static_probe.py`의 `dup6_consistent`, pose·intrinsics·이미지 전부
+    view0 복사), `posedup`이 `dup6_contradict`(이미지는 진짜 V장, pose만 view0 복사), `--ctx-n 1`이
+    기존 `RD_SINGLE_VIEW=1`. `--traj {tgt,pred}`로 `render_pred_from_dump.py`의 예측 궤적 렌더도 흡수.
+  - `@pt` / `@q` / `@qe` / `@ch9nat` / `@ch9avg` / `@g1` flag, `*<f>` 배수, `tok<v>` 합성 분모,
+    `metrics.json` 병합, cross-mode 비교 그리드는 `render_avgscale.py`와 동일. `@q`/`@g1`은 ctx/tgt
+    분모에 각각 독립으로 적용되고 어느 쪽이 발동했는지 로그에 찍는다.
+  - env 변수(`RD_ROOT` `RD_MODES` `RD_CKPT` `RD_SIZE` `RD_TAG` `RD_EPS` `RD_BINS` `RD_DMIN`
+    `RD_STATIC_CTX` `RD_SINGLE_VIEW`)를 CLI 기본값으로 그대로 읽어서, env만 쓰면 호출 방식까지
+    `render_avgscale.py`와 같다.
+  - 재현 검증(2 seg, `lagernvs_general_512`, 512px, GPU1): `--modes lagernvs` 20.328 / 22.668 dB,
+    `--ctx static --modes one` 17.772 / 16.039 dB, `--ctx-n 1 --modes one` 18.998 / 19.751 dB —
+    셋 다 `render_avgscale.py`의 `lagernvs` / `one_st` / `one_sv`와 소수점 3자리까지 일치.
 
 ### Changed
 - **`main/dataset_dl3dv.py`: v1 geo latent cache를 `geo_cam_embed` arm에서도 쓴다.** 기존에는 v1 캐시
@@ -69,7 +92,20 @@ All notable changes to the latentcam sub-project. Follows [Keep a Changelog](htt
     임계값은 정상 D 분포(실측 3.31~43.8)와 축퇴(1e-7 수준) 사이가 5자릿수 비어 있어 둔감하다.
     `metrics.json`에 `guard_fired` / `d_min` 기록. 주의: `D`는 scene의 world unit이라 절대
     임계값은 scene scale에 의존한다 — scale-free 판정은 `parallax = maxctx0/avg_scale`가 맞다.
-  측정값은 `EXPERIMENTS.log` 2026-08-03 네 항목.
+  - **합성 divisor `maxd_tgt` 추가** — `maxd_seg / 1.35 = max‖c_tgt − c_tgt0‖`. `maxd_seg`가
+    1.35배라 `tgt_reach`(정규화 후 target 최대 변위)가 0.7407이 되는 것과 달리 **정확히 1.0**이
+    된다. "target을 0~1로 정규화"가 필요할 때 쓴다. `maxd_seg`와 마찬가지로 target 유래라 GT leak.
+  측정값은 `EXPERIMENTS.log` 2026-08-03 항목들.
+- **`scripts/render/compare_norm_video.py`에 `--layout rows` + 파일명 해석 수정.**
+  - `_sfx()` 헬퍼 — `SFX` dict로만 찾던 것을 접두 치환으로 일반화. `render_avgscale.py`의
+    `suffix()`가 mode 안의 `avg_scale`만 `avgscale`로 줄이고 뒤에 `RD_TAG`를 붙이기 때문에,
+    tag/flag가 붙은 키(`avg_scale_st`, `avg_scale_sv`, `avg_scale_ch9nat` …)를 dict가 놓쳐
+    `render_avg_scale_st.mp4`(없는 파일)를 찾고 있었다.
+  - `--layout rows`: `--rows`에 `;`로 구분한 mode 목록을 주면 목록 하나가 격자 한 줄이 되고 각
+    줄의 0번 칸은 GT다 (R × (1+M)). 같은 분모 집합을 **context 구성만 바꿔** 비교할 때 쓴다
+    (예: 정지 복사 context vs single view). `--labels`로 열 이름, `--row-tags`로 줄 이름을 직접
+    준다. 기존 `row`와 달리 PSNR 곡선 열은 붙지 않는다. `--out`에 seg가 여럿이면 파일명에 seg를
+    덧붙이고, `--stack`으로 seg들을 세로로 더 쌓을 수도 있다.
 - **`scripts/vae/vae_scale_matrix.py`에 `TAILS=1`** — 기존 표는 corpus **평균** latent std만
   주는데, camera-length `scale_mode`는 카메라가 멈춘 바로 그 샘플에서 분모가 0에 가까워지므로
   평균으로는 터지는 개별 샘플이 안 보인다. `TAILS=1`이면 같은 행들 아래에 per-sample tail 표를

@@ -8,6 +8,10 @@ Inputs are the outputs of the two-step ablation pipeline:
                            GT | lagernvs | avg_scale
                            maxd_seg | ctx_longer_135max | PSNR curve w/ cursor
 --layout pair: one video PER MODE, [GT | render] concatenated along width.
+--layout rows: [new] R x (1+M) 격자. --rows 에 ';' 로 구분한 mode 목록을 주면 목록 하나가 한 줄이
+               되고, 각 줄의 0번 칸은 GT 다. 같은 분모 집합을 context 구성만 바꿔 (예: 정지 복사
+               context vs single view) 비교할 때 쓴다. --labels 로 열 이름을, --row-tags 로 줄
+               이름을 직접 준다. PSNR 패널 열은 붙지 않는다.
 Each render tile is labelled with mode / divisor / this-frame PSNR / mean PSNR.
 
 Run (lagernvs env -- needs load_and_preprocess_images for GT frames identical to the PSNR ones):
@@ -32,6 +36,20 @@ from matplotlib import font_manager
 LAGERNVS = "/data1/cympyc1785/LatentCamVid/camera_generation/tools/lagernvs"
 # render_avgscale.py's filename convention (only avg_scale is abbreviated; '_pt' = point-scale token)
 SFX = {"avg_scale": "avgscale", "avg_scale_pt": "avgscale_pt"}
+
+
+def _sfx(m):
+    """metrics.json 의 mode key -> render_avgscale.py 가 실제로 쓴 파일명.
+
+    render_avgscale.py:143 의 suffix() 는 mode 안의 'avg_scale' 을 'avgscale' 로 바꾼 뒤
+    RD_TAG 를 덧붙인다. SFX dict 로만 찾으면 tag/flag 가 붙은 key('avg_scale_st',
+    'avg_scale_ch9nat' ...)를 놓치므로 접두 치환으로 일반화한다.
+    """
+    if m in SFX:
+        return SFX[m]
+    return "avgscale" + m[len("avg_scale"):] if m.startswith("avg_scale") else m
+
+
 ORDER = ["lagernvs", "lagernvs_pt", "avg_scale", "avg_scale_pt",
          "maxd_seg", "ctx_longer_135max", "ctx_side_135max"]
 
@@ -77,11 +95,18 @@ def main():
                                       "results/lagernvs_norm_compare")
     ap.add_argument("--size", type=int, default=512)
     ap.add_argument("--fps", type=int, default=8)
-    ap.add_argument("--layout", choices=["grid", "pair", "row"], default="grid",
+    ap.add_argument("--layout", choices=["grid", "pair", "row", "rows"], default="grid",
                     help="grid: one 2x3 video; pair: one [GT|render] video per mode; "
-                         "row: a single [GT | mode... | PSNR] strip, PSNR plots only --modes")
+                         "row: a single [GT | mode... | PSNR] strip, PSNR plots only --modes; "
+                         "rows: R x (1+M) 격자, --rows 로 줄마다 mode 목록 지정")
     ap.add_argument("--modes", default=None,
                     help="row/grid: comma-separated subset of modes to show (default: all)")
+    ap.add_argument("--rows", default=None,
+                    help="layout=rows: ';' 로 줄을, ',' 로 열을 구분한 mode 목록 "
+                         "(예 'one_st,avg_scale_st,maxd_tgt_st;one_sv,avg_scale_sv,maxd_tgt_sv')")
+    ap.add_argument("--labels", default=None,
+                    help="layout=rows: 열 이름 (GT 포함, ',' 구분). 주면 mode 키 대신 이걸 그린다")
+    ap.add_argument("--row-tags", default=None, help="layout=rows: 줄 이름 (',' 구분)")
     ap.add_argument("--out", default=None, help="default: <seg>/norm_compare.mp4")
     ap.add_argument("--stack", default=None,
                     help="row layout only: also vstack every segment's strip into this ONE mp4, "
@@ -91,6 +116,13 @@ def main():
                          "its key order drives --stack row order")
     args = ap.parse_args()
     want = [m for m in args.modes.split(",") if m] if args.modes else None
+    grid_rows = [[m for m in r.split(",") if m] for r in args.rows.split(";")] if args.rows else None
+    if args.layout == "rows":
+        if not grid_rows:
+            ap.error("--layout rows 는 --rows 가 필요하다")
+        if len({len(r) for r in grid_rows}) != 1:
+            ap.error(f"--rows 의 줄마다 열 수가 달라야 안 된다: {[len(r) for r in grid_rows]}")
+        want = [m for r in grid_rows for m in r]      # 로드할 mode 전체 (중복 허용 안 함)
     tags = json.load(open(args.tags)) if args.tags else {}
     stacked = {}
 
@@ -107,7 +139,7 @@ def main():
                 print(f"{osp.basename(seg_dir)}: no metrics for {missing} -- skip"); continue
             modes = want
         vids = {m: np.stack(imageio.mimread(
-            osp.join(seg_dir, f"render_{SFX.get(m, m)}.mp4"), memtest=False)) for m in modes}
+            osp.join(seg_dir, f"render_{_sfx(m)}.mp4"), memtest=False)) for m in modes}
         T = min(len(v) for v in vids.values())
         H, W = vids[modes[0]].shape[1:3]
 
@@ -128,9 +160,47 @@ def main():
                     d.text((W + 5, 19), f"PSNR {mm['psnr_per_frame'][t]:.2f}   mean {mm['psnr']:.2f}",
                            fill=(180, 255, 180), font=fnt_s)
                     frames.append(np.asarray(im))
-                out = osp.join(seg_dir, f"gt_vs_{SFX.get(m, m)}.mp4")
+                out = osp.join(seg_dir, f"gt_vs_{_sfx(m)}.mp4")
                 imageio.mimwrite(out, frames, fps=args.fps, quality=8, macro_block_size=1)
                 print(f"{osp.basename(seg_dir)} [{m}]: {T} frames {frames[0].shape} -> {out}", flush=True)
+            continue
+
+        if args.layout == "rows":      # R x (1+M): 0번 열은 GT, 줄마다 다른 mode 목록
+            cols = ["GT"] + list(grid_rows[0])
+            labels = ([x for x in args.labels.split(",")] if args.labels else cols)
+            if len(labels) != len(cols):
+                print(f"--labels 개수({len(labels)}) != 열 개수({len(cols)}) -- skip"); continue
+            rtags = args.row_tags.split(",") if args.row_tags else [""] * len(grid_rows)
+            frames = []
+            for t in range(T):
+                strips = []
+                for r, rmodes in enumerate(grid_rows):
+                    strips.append(np.concatenate(
+                        [gt[t]] + [vids[m][t][:, :, :3] for m in rmodes], axis=1))
+                im = Image.fromarray(np.concatenate(strips, axis=0))
+                d = ImageDraw.Draw(im)
+                for r, rmodes in enumerate(grid_rows):
+                    for c, name in enumerate(["GT"] + list(rmodes)):
+                        x0, y0 = c * W, r * H
+                        if name == "GT":
+                            lab = labels[0] if not rtags[r] else f"{labels[0]}  [{rtags[r]}]"
+                            sub = f"frame {t}/{T-1}"
+                        else:
+                            mm = metrics[name]
+                            lab = f"{labels[c]}  div={mm['divisor']:.2f}"
+                            sub = (f"PSNR {mm['psnr_per_frame'][t]:.2f}   "
+                                   f"mean {mm['psnr']:.2f}")
+                        d.rectangle([x0, y0, x0 + W, y0 + 34], fill=(0, 0, 0))
+                        d.text((x0 + 5, y0 + 2), lab, fill=(255, 255, 0), font=fnt)
+                        d.text((x0 + 5, y0 + 19), sub, fill=(180, 255, 180), font=fnt_s)
+                frames.append(np.asarray(im))
+            if args.stack:
+                stacked[osp.basename(seg_dir)] = frames
+            out = args.out or osp.join(seg_dir, "norm_rows.mp4")
+            if args.out and len(_glob.glob(osp.join(args.root, "*", "metrics.json"))) > 1:
+                out = f"{osp.splitext(args.out)[0]}_{osp.basename(seg_dir)[:16]}.mp4"
+            imageio.mimwrite(out, frames, fps=args.fps, quality=8, macro_block_size=1)
+            print(f"{osp.basename(seg_dir)}: {T} frames {frames[0].shape} -> {out}", flush=True)
             continue
 
         curve, xat = psnr_panel(metrics, modes, T, (H, W))

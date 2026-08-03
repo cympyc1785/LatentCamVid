@@ -169,8 +169,9 @@ def main():
     print(f'{args.name}: GT frames {len(ref_c2w)}, reach {ext:.4f}, frustum {fscale:.4f}', flush=True)
 
     groups = {}          # label -> (handles, checkbox)
+    sized = []           # (frustum handle, fscale 대비 상대 배율) — 슬라이더로 한꺼번에 조절
 
-    def add(label, handles):
+    def add(label, handles, rel=None):
         if not handles:
             return
         cb = server.gui.add_checkbox(label, initial_value=True)
@@ -180,6 +181,8 @@ def main():
             for x in _handles:
                 x.visible = cb.value
         groups[label] = (handles, cb)
+        if rel is not None:
+            sized.extend((x, rel) for x in handles)
 
     if not args.no_gs:
         ply = args.ply or osp.join(scene_dir, 'scene.ply')
@@ -201,10 +204,10 @@ def main():
             add('scene cams (rest)',
                 add_frustums(server, 'grey', sc_c2w[dmin > eps], dj['fl_x'], dj['fl_y'],
                              dj['w'], dj['h'], (150, 150, 150), fscale * 0.6,
-                             downsample=args.grey_downsample))
+                             downsample=args.grey_downsample), rel=0.6)
 
     add(f'GT ({len(ref_c2w)})',
-        add_frustums(server, 'gt', ref_c2w, fx, fy, w, h, (40, 90, 230), fscale))
+        add_frustums(server, 'gt', ref_c2w, fx, fy, w, h, (40, 90, 230), fscale), rel=1.0)
 
     for label, run, col in arms:
         p = osp.join(run, 'test', f'{args.name}_transforms_pred.json')
@@ -215,7 +218,8 @@ def main():
         c2w = W(c2w)
         d = np.linalg.norm(c2w[:, :3, 3] - ref_c2w[:, :3, 3], axis=-1).mean() / max(ext, 1e-9)
         add(f'pred: {label}  (ADE/reach {d:.3f})',
-            add_frustums(server, f'pred_{len(groups)}', c2w, afx, afy, aw, ah, col, fscale))
+            add_frustums(server, f'pred_{len(groups)}', c2w, afx, afy, aw, ah, col, fscale),
+            rel=1.0)
 
     for label, run, col, k in ctxs:
         C = _ctx_c2w(run, args.name)
@@ -227,14 +231,30 @@ def main():
         if kk:
             # _mix_inseg_context 는 inseg + rest 순서라 앞 kk 장이 누수 view 다.
             add(f'{label} [leaked {kk}]',
-                add_frustums(server, f'ctx_{len(groups)}', C[:kk], fx, fy, w, h, col, fscale * 1.3))
+                add_frustums(server, f'ctx_{len(groups)}', C[:kk], fx, fy, w, h, col, fscale * 1.3),
+                rel=1.3)
             if kk < len(C):
                 add(f'{label} [kept out-of-seg {len(C) - kk}]',
                     add_frustums(server, f'ctx_{len(groups)}', C[kk:], fx, fy, w, h,
-                                 (120, 120, 120), fscale * 1.3))
+                                 (120, 120, 120), fscale * 1.3), rel=1.3)
         else:
             add(f'{label} ({len(C)})',
-                add_frustums(server, f'ctx_{len(groups)}', C, fx, fy, w, h, col, fscale * 1.3))
+                add_frustums(server, f'ctx_{len(groups)}', C, fx, fy, w, h, col, fscale * 1.3),
+                rel=1.3)
+
+    # frustum 크기 실시간 조절. 값은 target reach 대비 비율이라 segment 가 바뀌어도 뜻이 같다.
+    gui_fs = server.gui.add_slider('frustum scale (x reach)', min=0.005, max=0.5, step=0.005,
+                                   initial_value=float(args.frustum_scale))
+    gui_fs_txt = server.gui.add_text('frustum (world units)', initial_value=f'{fscale:.4f}',
+                                     disabled=True)
+
+    @gui_fs.on_update
+    def _(_):
+        s = float(max(ext, 1e-3)) * gui_fs.value
+        gui_fs_txt.value = f'{s:.4f}'
+        with server.atomic():
+            for hnd, rel in sized:
+                hnd.scale = s * rel
 
     cap = osp.join(gt_run, 'test', f'{args.name}_caption.json')
     if osp.isfile(cap):

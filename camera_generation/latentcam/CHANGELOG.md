@@ -13,6 +13,9 @@ All notable changes to the latentcam sub-project. Follows [Keep a Changelog](htt
   지정하고, `leak_K>0`이면 `_mix_inseg_context`의 `inseg + rest` 순서에 따라 앞 K장을 누수 view로
   따로 표시한다. 그룹마다 GUI 체크박스가 붙는다. ply 로더는 표준 3DGS 레이아웃(62 float props)을
   memmap으로 읽어 SH DC항만 색으로 쓰고 `--gs-max`(기본 600k) / `--gs-min-opacity`(기본 0.05)로 솎는다.
+  - `frustum scale (x reach)` 슬라이더로 frustum 크기를 실시간 조절한다. 값은 target reach 대비
+    비율이라 segment가 바뀌어도 뜻이 같고, 그룹별 상대 배율(pred/GT 1.0, context 1.3, scene cams 0.6)은
+    유지된 채 한꺼번에 스케일된다. 초기값은 `--frustum-scale`.
   - **좌표계**: DL3DV `transforms.json`의 `applied_transform`(nerfstudio가 기록한 world 재정렬)을
     `c2w_ply = applied_transform4 @ c2w_gl`로 좌측 곱해야 `scene.ply`와 겹쳐진다 — 이걸 빼면 카메라가
     점군과 어긋난다. `tools/gaussian-splatting-lightning/custom_utils/custom_panel.py`의

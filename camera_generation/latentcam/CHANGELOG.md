@@ -58,6 +58,10 @@ All notable changes to the latentcam sub-project. Follows [Keep a Changelog](htt
   nearest-neighbour 거리와 context retrieval R@1(`--retrieval`)까지 낸다. 모든 거리는 segment마다
   GT reach `max_t‖T_gt(t)−T_gt(0)‖`로 나눠 무차원화한 뒤에만 segment를 가로질러 평균낸다 —
   segment별 스케일 차이가 통계를 지배하지 않게.
+  - `--only <name...>` — 이 segment들만 쓴다. run마다 평가한 segment 수가 달라도(예: 400개 vs 2개)
+    같은 집합으로 맞춰서 arm 간 비교가 되게. `viz_diversity_topdown.py --only`와 같은 뜻.
+  - `--per-seg` — segment별 APD / ADE(mean·best·worst) / `pred_reach/GT` / GT reach를 그대로 출력.
+    segment가 2~3개뿐이면 `var_between`·`icc`는 표본이 없는 거나 마찬가지라 집계값이 오해를 부른다.
 - **`geo_swap_mode`** (`main/conf/config.yaml`, 기본 `null`) — **test 전용** probe. `geo_test_inseg_k`가
   누수 축(context를 target segment 안으로 밀어넣음)을 재는 것과 **직교**하게, context를 **같은 scene의
   다른 segment**로 옮긴다(`'inscene'`). donor는 이 scene의 `(순번 + geo_swap_shift)`번째 다른

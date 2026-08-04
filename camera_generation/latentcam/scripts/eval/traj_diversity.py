@@ -217,6 +217,10 @@ def main():
                     help='seed 별 eval 출력 디렉토리들 (>=2 개)')
     ap.add_argument('--base', default=None, help='context swap 안 한 arm')
     ap.add_argument('--swap', default=None, help='context swap 한 arm')
+    ap.add_argument('--only', nargs='*', default=None,
+                    help='이 segment 이름들만 쓴다 (run 마다 평가 segment 수가 다를 때 맞춰 비교용)')
+    ap.add_argument('--per-seg', action='store_true',
+                    help='segment 별 seed 통계(APD/ADE)도 출력. segment 가 몇 개뿐일 때 유용')
     ap.add_argument('--retrieval', action='store_true',
                     help='context retrieval R@1 도 계산 (O(N^2), geo_ctx 필요)')
     ap.add_argument('--out', default=None, help='결과 json 저장 경로')
@@ -229,6 +233,11 @@ def main():
         names = _names(args.seeds[0])
         for d in args.seeds[1:]:
             names = [n for n in names if n in set(_names(d))]
+        if args.only:
+            names = [n for n in names if n in set(args.only)]
+            miss = sorted(set(args.only) - set(names))
+            if miss:
+                print(f'[warn] --only 인데 없는 segment: {miss}')
         P, G, L, kept = _collect(args.seeds, names)
         report['A'] = arm_a(P, G)
         report['A']['runs'] = [osp.basename(d.rstrip('/')) for d in args.seeds]
@@ -237,6 +246,22 @@ def main():
         print('=== A: seed diversity (fixed context) ===')
         for k, v in report['A'].items():
             print(f'  {k:20s} {v}')
+        if args.per_seg:
+            # segment 가 2~3개뿐이면 var_between / icc 는 표본이 없는 거나 마찬가지라
+            # segment 별 APD(seed 쌍거리) / ADE 를 그대로 본다. 단위는 그 segment 의 GT reach.
+            ade = np.linalg.norm(P - G[:, None], axis=-1).mean(-1)          # [N,S]
+            report['A']['per_segment'] = []
+            print('  --- per segment (unit = that segment GT reach) ---')
+            for j, nm in enumerate(kept):
+                row = dict(name=nm, gt_reach=float(L[j]), apd=float(seed_within[j]),
+                           ade_mean=float(ade[j].mean()), ade_best=float(ade[j].min()),
+                           ade_worst=float(ade[j].max()),
+                           pred_reach_over_gt=float(
+                               (np.linalg.norm(P[j], axis=-1).max(-1)).mean()))
+                report['A']['per_segment'].append(row)
+                print(f"  {nm[:24]:24s} APD {row['apd']:.4f}  ADE {row['ade_mean']:.4f} "
+                      f"(best {row['ade_best']:.4f} / worst {row['ade_worst']:.4f})  "
+                      f"pred_reach/GT {row['pred_reach_over_gt']:.4f}  |L| {row['gt_reach']:.3f}")
 
     if args.base and args.swap:
         if seed_within is None:

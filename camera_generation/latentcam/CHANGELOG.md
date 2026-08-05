@@ -5,6 +5,27 @@ All notable changes to the latentcam sub-project. Follows [Keep a Changelog](htt
 ## [Unreleased]
 
 ### Added
+- **`models/custom_geo_encoder.py` + `geo_encoder: custom`** — LagerNVS 대신 쓰는 자체 설계
+  scene context encoder. **frozen DINOv2 ViT-L/14**(`checkpoints/dinov2-large`, `Dinov2Model`,
+  hidden 1024) + **trainable `GeoTokenizer`**(8ch = Plücker 6 + log-depth 1 + valid 1)를 patch
+  단위로 concat → `Linear(1024+256 → geo_latent_dim)` → `(B, V*P, 768)`. LagerNVS와 달리 카메라가
+  view당 11-d `cam_token`이 아니라 **픽셀당 Plücker ray**로 들어간다.
+  - DINO 입력은 DINO 규약대로: `preprocessor_config.json`의 `image_mean/std`로 정규화하고, H·W가
+    patch(14) 배수가 아니면 내림해서 리사이즈한다(`geo_image_hw` (256,448) → (252,448) → 격자
+    **18×32 = 576 tok/view**, V=6이면 M=3456). `interpolate_pos_encoding=True`로 518 이외 해상도 지원.
+    DINO는 `requires_grad_(False)` + `torch.no_grad()` (실측 trainable 2.44M / frozen 304.37M).
+  - geo mask는 **일단 전부 True**(depth 없는 view를 context에 섞지 않는다는 전제). pose prefix와
+    RoPE는 넣지 않았다 — 현재 DM의 geo cross-attention이 평범한 MHA라 key에만 걸린 rotary는 상대
+    위치가 되지 못하고 절대 위치 인코딩으로 degenerate하기 때문.
+  - 기존 lagernvs / scenetok 경로는 그대로다. `GeoEncoder`에 `trainable` / `wants_batch` 플래그와
+    `forward_batch(batch)` 진입점을 추가했고(custom은 `images` 외에 Plücker/depth/valid가 더
+    필요해서 batch dict을 받는다), lagernvs는 `wants_batch=False`라 `forward(images, cam_token)`
+    호출 경로가 바뀌지 않는다(회귀 확인: backend lagernvs / trainable False / proj Identity).
+  - config: `custom_geo_dino_path`(null → `<ckpt_root>/dinov2-large`), `custom_geo_freeze_dino`,
+    `custom_geo_input_hw`, `custom_geo_ray_dim`, `custom_geo_geo_dim`.
+  - **아직 미완**: dataset이 `geo_plucker_map (B,V,6,H,W)` / `geo_logd` / `geo_valid`를 내보내지
+    않는다(RGBD 학습 데이터 구성 대기). 학습 배선(optimizer에 geo 파라미터 추가, `no_grad` 분기,
+    ckpt에 encoder state 저장/복원, geo latent cache 강제 OFF)도 아직 안 붙였다.
 - **`scripts/viewer/viser_arms_gs.py`** — segment 하나를 DL3DV `scene.ply`(3DGS) 위에 올려놓고
   GT / arm별 pred / 각 arm의 context 카메라를 색이 다른 frustum으로 겹쳐 보는 viser 뷰어.
   `viser_val_cameras.py`는 run 하나를 훑는 브라우저라 arm 비교도 splat 표시도 안 돼서 새로 만들었고,

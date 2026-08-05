@@ -148,7 +148,7 @@ class Config:
     test_seg_list = None       # explicit val/test segment-list file; val = its first N segments (shuffle=False)
 
     # Geo encoder (image-based scene encoder feeding camera_diffusion_model_latent's geo latent)
-    geo_encoder = 'lagernvs'    # ['lagernvs', 'scenetok']
+    geo_encoder = 'lagernvs'    # ['lagernvs', 'scenetok', 'custom']
     geo_latent_dim = 768        # must match CameraDiffusionModel(geo_latent_dim=...)
     geo_num_views = 4           # (even path only) multi-view images fed per scene
     geo_image_hw = [256, 448]   # (H, W) images are loaded/resized to for the geo encoder
@@ -223,6 +223,13 @@ class Config:
     # scenetok backend (stub for now)
     scenetok_repo_path = None
     scenetok_ckpt_path = None
+    # custom backend: models/custom_geo_encoder.py (frozen DINOv2 + trainable Plücker/depth
+    # tokenizer). lagernvs 와 달리 TRAINABLE 이고 batch dict 을 받는다 (GeoEncoder.forward_batch).
+    custom_geo_dino_path = None     # None -> osp.join(ckpt_root, 'dinov2-large')
+    custom_geo_freeze_dino = True
+    custom_geo_input_hw = None      # None -> geo_image_hw 를 patch(14) 배수로 내림
+    custom_geo_ray_dim = 64
+    custom_geo_geo_dim = 256
 
     clip_version = 'ViT-B/32'
     clip_max_length = 77

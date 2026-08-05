@@ -140,6 +140,42 @@ class _LagerNVSBackend(nn.Module):
         return tokens, mask
 
 
+class _CustomBackend(nn.Module):
+    """custom_geo_encoder.SceneEncoder 래퍼 — RGB + Plücker + depth 를 받는 자체 설계 encoder.
+
+    lagernvs 와 두 가지가 다르다:
+      1) TRAINABLE (frozen 은 안쪽 DINOv2 뿐) -> optimizer / no_grad / ckpt 저장이 달라진다.
+      2) forward 인자가 images 하나가 아니라 batch dict (Plücker/depth/valid 가 더 필요) ->
+         wants_batch=True 로 표시하고 GeoEncoder.forward_batch 로 부른다.
+    """
+
+    trainable = True
+    wants_batch = True
+
+    def __init__(self, cfg):
+        super().__init__()
+        from models.custom_geo_encoder import SceneEncoder
+        self.net = SceneEncoder(
+            out_dim=int(getattr(cfg, 'geo_latent_dim', 768)),
+            dino_path=getattr(cfg, 'custom_geo_dino_path', None),
+            freeze_dino=bool(getattr(cfg, 'custom_geo_freeze_dino', True)),
+            input_hw=getattr(cfg, 'custom_geo_input_hw', None),
+            c_ray=int(getattr(cfg, 'custom_geo_ray_dim', 64)),
+            c_geo=int(getattr(cfg, 'custom_geo_geo_dim', 256)),
+        )
+        self.out_dim = self.net.out_dim
+        self.camera_encoding_dim = 0     # 카메라는 cam_token 이 아니라 픽셀 Plücker 로 들어간다
+
+    def forward(self, batch):
+        """batch: 'images'/'geo_plucker_map'/'geo_logd'/'geo_valid' -> (B, M, C), (B, M) bool"""
+        tokens = self.net(batch['images'], batch['geo_plucker_map'],
+                          batch['geo_logd'], batch['geo_valid'])
+        # mask 는 일단 전부 유효로 둔다 (depth 없는 view 를 context 에 섞지 않는다는 전제).
+        # 섞게 되면 valid 비율이 낮은 patch 를 여기서 False 로 내려야 한다.
+        mask = torch.ones(tokens.shape[:2], dtype=torch.bool, device=tokens.device)
+        return tokens, mask
+
+
 class _SceneTokBackend(nn.Module):
     """SceneTok scene-token encoder (stub). Wire when needed:
     load the SceneTok encoder, run on multi-view input -> scene tokens (B, M, D),
@@ -155,7 +191,8 @@ class _SceneTokBackend(nn.Module):
 # GeoEncoder wrapper (pc_encoder-style interface)
 # --------------------------------------------------------------------------- #
 class GeoEncoder(nn.Module):
-    def __init__(self, backend="lagernvs", out_dim=768, repo_path=None, ckpt_path=None):
+    def __init__(self, backend="lagernvs", out_dim=768, repo_path=None, ckpt_path=None,
+                 cfg=None):
         super().__init__()
         self.backend_name = backend
         self.out_dim = out_dim
@@ -164,8 +201,14 @@ class GeoEncoder(nn.Module):
             self.backend = _LagerNVSBackend(repo_path=repo_path, ckpt_path=ckpt_path)
         elif backend == "scenetok":
             self.backend = _SceneTokBackend(repo_path=repo_path, ckpt_path=ckpt_path)
+        elif backend == "custom":
+            self.backend = _CustomBackend(cfg)
         else:
             raise ValueError(f"unknown geo_encoder backend: {backend}")
+
+        # lagernvs/scenetok 은 frozen + images 인자, custom 은 trainable + batch dict 인자
+        self.trainable = bool(getattr(self.backend, "trainable", False))
+        self.wants_batch = bool(getattr(self.backend, "wants_batch", False))
 
         native = self.backend.out_dim
         # align to geo_latent_dim; Identity when they already match (lagernvs -> 768)
@@ -175,7 +218,18 @@ class GeoEncoder(nn.Module):
 
     def forward(self, images, cam_token=None):
         """-> geo_embeds (B, M, out_dim), geo_masks (B, M) bool"""
+        if self.wants_batch:
+            raise TypeError(f"geo backend '{self.backend_name}' 는 batch dict 이 필요하다 "
+                            f"-> forward_batch(batch) 를 써라")
         tokens, mask = self.backend(images, cam_token)   # backend is frozen / no_grad
+        return self.proj(tokens), mask
+
+    def forward_batch(self, batch):
+        """batch dict 을 통째로 받는 backend(custom)용 진입점. lagernvs 는 images/cam_token 만
+        쓰므로 이 경로로 들어와도 기존과 동일하게 동작한다 (cam_token 은 호출자가 붙여 넘길 것)."""
+        if not self.wants_batch:
+            return self(batch['images'], batch.get('cam_token'))
+        tokens, mask = self.backend(batch)
         return self.proj(tokens), mask
 
     def build_cam_token(self, geo_c2w, geo_fxfycxcy, geo_hw, override_scale=None):
@@ -195,4 +249,12 @@ def build_geo_encoder(cfg):
         return GeoEncoder(backend, out_dim,
                           repo_path=getattr(cfg, "scenetok_repo_path", None),
                           ckpt_path=getattr(cfg, "scenetok_ckpt_path", None))
+    elif backend == "custom":
+        # dino 경로는 cfg 에 없으면 checkpoints/dinov2-large 로 떨어뜨린다 (hydra_cfg 가
+        # ckpt_root 를 런타임에 채운다). cfg 를 통째로 넘기는 유일한 backend.
+        if not getattr(cfg, "custom_geo_dino_path", None):
+            root = getattr(cfg, "ckpt_root", None)
+            if root:
+                cfg.custom_geo_dino_path = os.path.join(root, "dinov2-large")
+        return GeoEncoder(backend, out_dim, cfg=cfg)
     raise ValueError(f"unknown geo_encoder backend: {backend}")

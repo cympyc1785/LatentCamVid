@@ -23,7 +23,7 @@ SCR = osp.dirname(osp.abspath(__file__)); sys.path.insert(0, SCR)
 from render_scene_stitched import frustum_cover_select
 from render_scene_longer import ctx_scale
 from blacklist_by_coverage import load_scene   # numpy: -> centers, faxis, w2c, K, w, h
-ROOT = '/data1/cympyc1785/data/DL3DV/DL3DV-960/DL3DV-10K'
+ROOT = '/data1/cympyc1785/data/DL3DV/scenes'
 
 
 def select(centers, faxis, w2c, K, w, h, s, e, N, k, radius):

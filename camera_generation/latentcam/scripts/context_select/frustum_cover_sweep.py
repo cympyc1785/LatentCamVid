@@ -17,7 +17,7 @@ sys.path.insert(0, osp.join(osp.dirname(__file__), '..', 'main'))
 import numpy as np
 from dataset_dl3dv import frustum_cover_select
 
-ROOT = '/data1/cympyc1785/data/DL3DV/DL3DV-960/DL3DV-10K'
+ROOT = '/data1/cympyc1785/data/DL3DV/scenes'
 _GL2CV = np.diag([1.0, -1.0, -1.0, 1.0])
 N_SCENES, K_VIEWS = 10, 6
 RADII = [1.0, 1.5, 2.0, 2.5, 3.0, 4.0]

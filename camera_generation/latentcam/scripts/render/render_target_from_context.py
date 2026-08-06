@@ -45,7 +45,7 @@ def _img_dir(sd, names=('images_4', 'images_8', 'images')):
 
 _GL2CV = np.diag([1.0, -1.0, -1.0, 1.0])
 CKPT = osp.join(LAGER, "checkpoints/lagernvs_general_512/model.pt")
-ROOT = "/data1/cympyc1785/data/DL3DV/DL3DV-960/DL3DV-10K"
+ROOT = "/data1/cympyc1785/data/DL3DV/scenes"
 
 
 def load_scene(sd):

@@ -58,7 +58,7 @@ def parse_centers(tj_path):
 
 def main():
     ap = argparse.ArgumentParser()
-    ap.add_argument('--root', default='/data1/cympyc1785/data/DL3DV/DL3DV-960/DL3DV-10K')
+    ap.add_argument('--root', default='/data1/cympyc1785/data/DL3DV/scenes')
     ap.add_argument('--max-scenes', type=int, default=500)
     ap.add_argument('--num-frames', type=int, default=49)
     ap.add_argument('--seed', type=int, default=42)

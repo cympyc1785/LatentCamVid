@@ -19,7 +19,7 @@ for _d in [_SCR, *sorted(p for p in _glob.glob(_os.path.join(_SCR, '*')) if _os.
 import os, os.path as osp, csv, json, argparse, re, glob
 import numpy as np
 
-ROOT = "/data1/cympyc1785/data/DL3DV/DL3DV-960/DL3DV-10K"
+ROOT = "/data1/cympyc1785/data/DL3DV/scenes"
 
 
 def check_teleport(c2w):

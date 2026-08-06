@@ -28,7 +28,7 @@ import numpy as np
 import viser
 import viser.transforms as vtf
 
-DL3DV_ROOT = '/data1/cympyc1785/data/DL3DV/DL3DV-960/DL3DV-10K'
+DL3DV_ROOT = '/data1/cympyc1785/data/DL3DV/scenes'
 _GL2CV = np.diag([1.0, -1.0, -1.0, 1.0])
 
 

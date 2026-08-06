@@ -12,7 +12,7 @@ import numpy as np
 import matplotlib; matplotlib.use('Agg'); import matplotlib.pyplot as plt
 from dataset_dl3dv import frustum_cover_select
 
-ROOT = '/data1/cympyc1785/data/DL3DV/DL3DV-960/DL3DV-10K'
+ROOT = '/data1/cympyc1785/data/DL3DV/scenes'
 OUT = osp.join(osp.dirname(__file__), 'frustum_cover_multi.png')
 _GL2CV = np.diag([1.0, -1.0, -1.0, 1.0])
 N_SCENES, K_VIEWS, RADIUS = 4, 6, 2.0

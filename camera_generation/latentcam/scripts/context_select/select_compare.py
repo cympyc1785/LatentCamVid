@@ -25,7 +25,7 @@ SCR = osp.dirname(osp.abspath(__file__)); sys.path.insert(0, SCR)
 from blacklist_by_coverage import read_meta, read_blacklist, load_scene
 from dump_coverage_selk import frustum_cover_select, select_context, viewpoint_coverage
 
-ROOT = '/data1/cympyc1785/data/DL3DV/DL3DV-960/DL3DV-10K'
+ROOT = '/data1/cympyc1785/data/DL3DV/scenes'
 
 
 def rand_in_sphere(n, r, rng):

@@ -183,6 +183,13 @@ All notable changes to the latentcam sub-project. Follows [Keep a Changelog](htt
     셋 다 `render_avgscale.py`의 `lagernvs` / `one_st` / `one_sv`와 소수점 3자리까지 일치.
 
 ### Changed
+- **DL3DV 루트 경로를 `/data1/cympyc1785/data/DL3DV/scenes`로 통일** — 옛 경로
+  `/data1/cympyc1785/data/DL3DV/DL3DV-960/DL3DV-10K`는 **이제 존재하지 않아서** 하드코딩한
+  스크립트가 전부 죽는다. 16개 스크립트의 `ROOT` / `--root` 기본값을 바꿨다
+  (`scripts/context_select/*` 7개, `scripts/coverage/*` 5개, `scripts/data/filter_dl3dv.py`,
+  `scripts/data/norm_camera_length_stats.py`, `scripts/render/render_target_from_context.py`,
+  `scripts/viewer/viser_val_cameras.py`). `main/train_vae_dl3dv.py`는 docstring의
+  "DL3DV-960" 표기만 "DL3DV"로 정정(코드 변화 없음).
 - **`scripts/data/extract_geo_context.py`에 argparse 추가** — `--testdir` / `--out` / `--experiment`
   / `--split` / `--set K=V`(hydra override, 반복 가능). 인자 없이 돌리면 예전 160 target 기본값
   그대로. `eval_testset.py`로 뽑은 전체 held-out 3,980 target처럼 기본 `seg_list`가 아닌 집합을

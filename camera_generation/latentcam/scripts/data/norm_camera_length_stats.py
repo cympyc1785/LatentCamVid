@@ -15,7 +15,7 @@ import matplotlib
 matplotlib.use("Agg")
 import matplotlib.pyplot as plt
 
-ROOT10K = "/data1/cympyc1785/data/DL3DV/DL3DV-960/DL3DV-10K"
+ROOT10K = "/data1/cympyc1785/data/DL3DV/scenes"
 OUT = "/data1/cympyc1785/LatentCamVid/camera_generation/latentcam/results/compare/normalization_camera_length"
 os.makedirs(OUT, exist_ok=True)
 NUM_FRAMES = 49

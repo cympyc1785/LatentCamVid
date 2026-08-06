@@ -1,6 +1,6 @@
-"""Re-fit the camera VAE (vae_intr_large.CameraVAE) on DL3DV-960 via base.Trainer, using the
+"""Re-fit the camera VAE (vae_intr_large.CameraVAE) on DL3DV via base.Trainer, using the
 dataset's cam_param under the configured scale_mode (e.g. 'geo_lagernvs' full-alignment).
-Mirrors train_vae.py's loss but on the DL3DV-960 dataloader. Saves ckpts + prints the latent
+Mirrors train_vae.py's loss but on the DL3DV dataloader. Saves ckpts + prints the latent
 std (use as vae_latent_scale for the generation model).
 
 Run: CUDA_VISIBLE_DEVICES=3 LATENTCAM_CONFIG=config_vae_dl3dv PYTHONPATH=..:. \

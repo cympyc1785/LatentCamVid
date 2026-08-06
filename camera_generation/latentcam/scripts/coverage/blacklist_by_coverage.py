@@ -81,7 +81,7 @@ def seg_coverage(centers, faxis, w2c, K, w, h, s, e, rho, angle_deg):
 
 def main():
     ap = argparse.ArgumentParser()
-    ap.add_argument('--root', default='/data1/cympyc1785/data/DL3DV/DL3DV-960/DL3DV-10K')
+    ap.add_argument('--root', default='/data1/cympyc1785/data/DL3DV/scenes')
     ap.add_argument('--max-segments', type=int, default=10)
     ap.add_argument('--num-frames', type=int, default=49)
     ap.add_argument('--rho', type=float, default=1.0)       # position radius (x seg_scale)

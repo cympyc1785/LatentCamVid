@@ -23,7 +23,7 @@ def _img_dir(sd, names=('images_4', 'images_8', 'images')):
     return None
 
 
-ROOT = '/data1/cympyc1785/data/DL3DV/DL3DV-960/DL3DV-10K'
+ROOT = '/data1/cympyc1785/data/DL3DV/scenes'
 OUT = osp.join(osp.dirname(__file__), 'frustum_cover_demo.png')
 _GL2CV = np.diag([1.0, -1.0, -1.0, 1.0])
 K_VIEWS, RADIUS = 6, 2.0

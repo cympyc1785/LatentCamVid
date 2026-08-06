@@ -5,6 +5,18 @@ All notable changes to the latentcam sub-project. Follows [Keep a Changelog](htt
 ## [Unreleased]
 
 ### Added
+- **`main/infer_swap_ablation.py`** — geo camera-DM이 geo context를 실제로 쓰는지 보는 swap
+  ablation 추론. validation sample N개를 고정해 놓고 3가지 모드를 각각 돌려 저장한다:
+  `normal`(자기 context + 자기 text) / `ctxswap`(anchor view0 = frame s만 남기고 나머지
+  context view를 옆 sample에서 가져옴, cyclic `i → (i+1)%N`) / `textswap`(context는 그대로,
+  text만 교체). 모델·VAE·geo encoder는 run의 Hydra experiment config 그대로 짓고
+  (`experiment=<name>` override), ckpt/출력은 환경변수 `SWAP_CKPT` / `SWAP_OUT` / `SWAP_N` /
+  `SWAP_TAG`로 준다.
+- **`scripts/data/viz_scene_chunk_scale.py`** — 같은 scene 안에서 chunk가 바뀔 때 arm B
+  (`scale_mode: geo_lagernvs`)의 divisor `D = 1.35·max‖c_geo − c_anchor‖`가 얼마나 흔들리는지
+  top-down으로 본다. geo context가 chunk마다 새로 검색(frustum max-coverage)되므로 B는 scene
+  단위 canonical scale이 아니라 **chunk 단위 scale**이라는 걸 보이는 게 목적. D는 학습 경로
+  그대로(`CamDataset._sample_geo_frustum_cover` + `_geo_lagernvs_scale`) 계산한다.
 - **`models/custom_geo_encoder.py` + `geo_encoder: custom`** — LagerNVS 대신 쓰는 자체 설계
   scene context encoder. **frozen DINOv2 ViT-L/14**(`checkpoints/dinov2-large`, `Dinov2Model`,
   hidden 1024) + **trainable `GeoTokenizer`**(8ch = Plücker 6 + log-depth 1 + valid 1)를 patch

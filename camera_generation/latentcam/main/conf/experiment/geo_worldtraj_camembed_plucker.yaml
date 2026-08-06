@@ -22,9 +22,18 @@
 #
 # 모델 쪽은 geo_cam_raw_dim 만 11 -> 6 으로 바뀐다. MLP 폭(geo_cam_embed_dim 128)과 geo_proj
 # 입력(768+128=896)은 동일하므로 파라미터 수는 사실상 같다 (geo_cam_mlp 첫 Linear 만 11->6).
+#
+# [fix 2026-08-03] train_seg_list / test_seg_list 를 c4d2k5y4 로 못 박는다. 둘 다 null 이면
+#   base.py:87 의 random_split(seed=42, frac=0.9) 이 split 을 정하는데 그 permutation 은
+#   **dataset index 길이에 의존**한다. blacklist.csv 가 2026-08-01 02:24 에 바뀌어 index 가
+#   39,830 -> 39,817 로 줄면서, 비교 대상인 c4d2k5y4(geo_worldtraj) 의 held-out 3,983 중
+#   3,561 개(89.4%)가 TRAIN 으로 새어 들어갔다. 자세한 계산은
+#   geo_worldtraj_camembed_with_anchor.yaml 주석 참고.
 exp_name: dl3dv_geo_worldtraj_camembed_plucker
 meta_csv: meta_worldtraj.csv
 coverage_blacklist_path: null
+train_seg_list: /data1/cympyc1785/data/DL3DV/scenes/latentcam_train_seg_list_c4d2k5y4.txt
+test_seg_list: /data1/cympyc1785/data/DL3DV/scenes/latentcam_test_seg_list_c4d2k5y4.txt
 geo_encoder: lagernvs
 geo_view_sampling: frustum_cover
 geo_cover_out_of_seg: true

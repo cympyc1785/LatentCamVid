@@ -558,6 +558,16 @@ All notable changes to the latentcam sub-project. Follows [Keep a Changelog](htt
   the new ckpt yet, so the recon-vs-corpus-coverage trade is unevaluated.
 
 ### Fixed
+- **camembed arm 2개의 train/test split이 비교 대상과 어긋나 test set이 새던 문제.**
+  `conf/experiment/geo_worldtraj_camembed_plucker.yaml` /
+  `geo_worldtraj_camembed_with_anchor.yaml`에 `train_seg_list` / `test_seg_list`를
+  `latentcam_{train,test}_seg_list_c4d2k5y4.txt`로 못 박았다. 둘 다 `null`이면 `base.py:87`의
+  `random_split(seed=42, frac=0.9)`이 split을 정하는데 그 permutation은 **dataset index 길이에
+  의존**한다. `blacklist.csv`가 2026-08-01 02:24에 바뀌어(`duplicate_camera_centers` 2 scene 추가)
+  index가 39,830 → 39,817로 줄자 split이 통째로 재섞였고, 비교 대상인 c4d2k5y4(geo_worldtraj)의
+  held-out 3,983개 중 **3,561개(89.4%)가 이 arm들의 TRAIN으로 들어갔다**. seg list를 주면
+  c4d2k5y4의 split을 그대로 재현한다(train 35,837/35,847, val 3,980/3,983 — 빠진 3개는 새로
+  blacklist된 scene의 segment).
 - **`scripts/data/extract_geo_context.py`가 geo latent cache가 채워진 트리에서 전 target을
   건너뛰던 문제.** `ds[idx]['geo_c2w']`를 읽었는데 cache hit이면 `__getitem__`이
   `dataset_dl3dv.py:960-976`에서 조기 return하고 `geo_c2w`는 on-the-fly 경로(`:1011`)에서만 붙는다

@@ -41,13 +41,16 @@ SFX = {"avg_scale": "avgscale", "avg_scale_pt": "avgscale_pt"}
 def _sfx(m):
     """metrics.json 의 mode key -> render_avgscale.py 가 실제로 쓴 파일명.
 
-    render_avgscale.py:143 의 suffix() 는 mode 안의 'avg_scale' 을 'avgscale' 로 바꾼 뒤
-    RD_TAG 를 덧붙인다. SFX dict 로만 찾으면 tag/flag 가 붙은 key('avg_scale_st',
-    'avg_scale_ch9nat' ...)를 놓치므로 접두 치환으로 일반화한다.
+    render_avgscale.py:143 / render.py 의 suffix() 는 mode 안의 'avg_scale' 을 'avgscale' 로
+    바꾼 뒤 RD_TAG 를 덧붙인다. SFX dict 로만 찾으면 tag/flag 가 붙은 key('avg_scale_st',
+    'avg_scale_ch9nat' ...)를 놓치므로 치환으로 일반화한다.
+
+    [fix] 예전엔 'avg_scale' 로 **시작**할 때만 바꿔서, 'one_ch9-avg_scale_stfix' 처럼 중간에
+    끼는 key(= render.py 의 '@ch9=<분모>' flag)를 놓쳤다. suffix() 와 똑같이 전역 치환한다.
     """
     if m in SFX:
         return SFX[m]
-    return "avgscale" + m[len("avg_scale"):] if m.startswith("avg_scale") else m
+    return m.replace("avg_scale", "avgscale")
 
 
 ORDER = ["lagernvs", "lagernvs_pt", "avg_scale", "avg_scale_pt",

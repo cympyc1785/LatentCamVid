@@ -558,6 +558,10 @@ All notable changes to the latentcam sub-project. Follows [Keep a Changelog](htt
   the new ckpt yet, so the recon-vs-corpus-coverage trade is unevaluated.
 
 ### Fixed
+- **`scripts/render/compare_norm_video.py`의 `_sfx()`가 중간에 낀 mode key를 놓치던 문제.**
+  `m.startswith('avg_scale')`일 때만 치환해서, `render.py`의 `@ch9=<분모>` flag가 붙은
+  `'one_ch9-avg_scale_stfix'`처럼 `avg_scale`이 **문자열 중간**에 오는 key는 파일명을 못 찾았다.
+  `suffix()`와 똑같이 `m.replace('avg_scale', 'avgscale')` 전역 치환으로 바꿨다.
 - **camembed arm 2개의 train/test split이 비교 대상과 어긋나 test set이 새던 문제.**
   `conf/experiment/geo_worldtraj_camembed_plucker.yaml` /
   `geo_worldtraj_camembed_with_anchor.yaml`에 `train_seg_list` / `test_seg_list`를

@@ -1,0 +1,34 @@
+# @package _global_
+# da3 코퍼스(DL3DV 1K)를 **da3 가 예측한 pose 로** 학습하는 text-only 기준선.
+# da3_1k_textonly.yaml 과 `pose_source` 한 줄만 다르다 — 그쪽은 GT(transforms.json) pose 를 쓰는
+# 짝 arm 이고, 나머지(seg 리스트 / meta / scale_mode / intr_norm / cam_dim)는 완전히 동일하다.
+#
+# pose_source: da3 가 바꾸는 것 (dataset_dl3dv 의 _POSE_SOURCES 주석 참고)
+#   pose        <scene>/da3/pose.npz  extrinsics (N,3,4) = **OpenCV w2c**, intrinsics (N,3,3)
+#               504x280 픽셀 공간. transforms.json 과 달리 GL->CV flip 도 역행렬도 필요 없다.
+#   caption     <scene>/da3/prompts.json 의 prompt_camera_with_scene_video.concise
+#   avg_scale   <scene>/da3/avg_scale/<seg>.json  (da3 예측 depth 로 만든 값 = da3 pose 와 같은
+#               스케일 공간. 최상위 avg_scale/ 는 COLMAP point cloud 기준이라 섞으면 안 된다)
+#
+# 실측으로 확인한 것 (2026-08-06, 표본 12 scene):
+#   - da3 pose 를 GT 와 Umeyama 정렬하면 11/12 가 ATE/extent <= 0.004, 회전 평균 <= 0.32deg.
+#     남은 1개(8a1b61638a)가 0.194 / 3.49deg. 즉 예측 pose지만 사실상 GT 급이라 이 arm 과
+#     da3_1k_textonly arm 의 타깃 궤적 차이는 크지 않을 것으로 예상된다.
+#   - 다만 intrinsics 는 da3 가 프레임마다 따로 예측한다(scene 내 fx std/mean 7e-4~3e-3).
+#     transforms.json 은 scene 당 상수였으므로, intr_norm='rel' 에서 cam_param[9:11] 이
+#     정확히 [1,1] 이 아니라 1.000 +- 0.003 인 약한 노이즈 채널이 된다.
+#   - <scene>/pose_eval_vs_gt.json (da3 ATE_norm 0.4764 / Rot_mean 172deg) 과
+#     da3_camcond_report.json 의 "convention":"c2w" 는 규약을 c2w 로 잘못 읽어 만든 수치다.
+#     5개 방법(vipe/ttt3r/recal3r/streamvggt/da3)이 전부 172~176deg 로 나오는 게 그 증거.
+#     이 arm 의 근거로 쓰지 말 것.
+exp_name: da3_1k_da3pose
+pose_source: da3
+batch_size: 8
+geo_encoder: null
+scale_mode: avg_scale
+intr_norm: rel              # vae_20260302_300 = frame-0-relative-intrinsics ckpt
+cam_dim: 64                 # = 그 ckpt 의 latent_dim
+meta_csv: meta_da3_1k.csv
+train_seg_list: /data1/cympyc1785/data/DL3DV/scenes/latentcam_da3_1k_train_seg_list.txt
+test_seg_list: /data1/cympyc1785/data/DL3DV/scenes/latentcam_da3_1k_test_seg_list.txt
+coverage_blacklist_path: null

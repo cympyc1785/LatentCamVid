@@ -1,0 +1,14 @@
+# @package _global_
+# Step 1 B-arm — cam_param[6:9] = 카메라 중심 c (c2w translation).
+# A-arm(vae_transrepr_w2c.yaml)과 **trans_repr 한 줄만** 다르다. 주석은 A-arm 참고.
+exp_name: vae_transrepr_c2w
+trans_repr: c2w
+batch_size: 64
+epochs: 60
+scale_mode: avg_scale
+intr_norm: rel
+cam_dim: 64
+geo_encoder: null
+random_seed: 42
+train_seg_list: /data1/cympyc1785/data/DL3DV/scenes/latentcam_train_seg_list_c4d2k5y4.txt
+test_seg_list: /data1/cympyc1785/data/DL3DV/scenes/latentcam_test_seg_list_c4d2k5y4.txt

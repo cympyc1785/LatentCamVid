@@ -1,0 +1,20 @@
+# @package _global_
+# Step 1 A-arm — cam_param[6:9] = w2c translation t (= -Rc), 현재 규약.
+# B-arm(vae_transrepr_c2w.yaml)과 **trans_repr 한 줄만** 다르다. 나머지(데이터, seg list, 시드,
+# 에폭, 배치, cam_dim, scale_mode, intr_norm)는 전부 동일해야 비교가 성립한다.
+#
+# triple 은 현재 프로덕션 VAE(vae_20260302_300)와 같은 (avg_scale, intr_norm rel, cam_dim 64)로
+# 맞췄다 -- 결론을 지금 돌아가는 DM arm 들에 그대로 옮기기 위해서다.
+# seg list 를 못 박아 두 arm 이 같은 35,847 seg 로 학습하고, 평가는 학습에서 한 번도 안 본
+# test_seg_list 3,983 seg 로 한다 (train_vae_dl3dv.py 는 include_val=False 라 학습 중엔 안 쓴다).
+exp_name: vae_transrepr_w2c
+trans_repr: w2c
+batch_size: 64
+epochs: 60
+scale_mode: avg_scale
+intr_norm: rel
+cam_dim: 64
+geo_encoder: null
+random_seed: 42
+train_seg_list: /data1/cympyc1785/data/DL3DV/scenes/latentcam_train_seg_list_c4d2k5y4.txt
+test_seg_list: /data1/cympyc1785/data/DL3DV/scenes/latentcam_test_seg_list_c4d2k5y4.txt

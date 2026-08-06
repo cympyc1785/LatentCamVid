@@ -31,6 +31,11 @@ scale_mode (what the camera translations are divided by):
   'geo_lagernvs'       1.35 * max(||geo-context center - frame s||) (full LagerNVS alignment)
 Legacy aliases accepted: 'saved_avg_scale' -> 'avg_scale', 'target_cam' -> 'cam_dist_mean'.
 
+pose_source (pose/caption/avg_scale 를 어느 코퍼스에서 읽을지) — 자세한 근거는 아래
+_POSE_SOURCES 주석 참고. 'transforms'(기본)는 기존 동작 그대로.
+  'transforms'  <scene>/{transforms.json, prompts.json, avg_scale/}
+  'da3'         <scene>/da3/{pose.npz, prompts.json, avg_scale/}   (Depth Anything 3 예측 pose)
+
 intr_norm (how cam_param's last 2 channels encode the intrinsics) — INDEPENDENT of scale_mode,
 because it is a property of the VAE CHECKPOINT (whichever convention that ckpt was trained on):
   'raw'   fx/(2cx), fy/(2cy)                     -> (0.448, 0.796) for DL3DV
@@ -72,6 +77,35 @@ _SCALE_MODE_ALIASES = {'saved_avg_scale': 'avg_scale', 'target_cam': 'cam_dist_m
 def resolve_scale_mode(cfg):
     m = getattr(cfg, 'scale_mode', 'cam_dist_mean')
     return _SCALE_MODE_ALIASES.get(m, m)
+
+
+# [new 2026-08-06] pose_source -- scene 의 pose / intrinsics / caption / avg_scale 를 어느
+# 코퍼스에서 읽을지. 'transforms' 가 기본이고 기존 동작과 bit-identical 하다.
+#   'transforms'  <scene>/transforms.json (nerfstudio OpenGL c2w) + <scene>/prompts.json
+#                 + <scene>/avg_scale/<seg>.json                     [기존]
+#   'da3'         <scene>/da3/pose.npz    (Depth Anything 3 가 예측한 pose)
+#                 + <scene>/da3/prompts.json + <scene>/da3/avg_scale/<seg>.json
+#
+# da3/pose.npz 의 규약 (실측으로 확정, 2026-08-06):
+#   extrinsics (N,3,4) = **w2c, OpenCV** — transforms.json 과 달리 GL->CV flip 이 필요 없고
+#     역행렬도 필요 없다. w2c 로 읽고 GT(transforms.json 을 OpenCV w2c 로 변환한 것)와
+#     Umeyama 정렬하면 12개 표본 scene 중 11개가 ATE/extent <= 0.004, 회전 평균 <= 0.32deg 다
+#     (나머지 1개 8a1b61638a 는 0.194 / 3.49deg). c2w 로 잘못 읽으면 회전 오차가 137~178deg 로
+#     튄다.  !! <scene>/pose_eval_vs_gt.json 과 da3_camcond_report.json("convention":"c2w",
+#     da3 ATE_norm 0.4764 / Rot_mean 172deg)은 바로 이 잘못된 c2w 해석으로 만들어진 수치라
+#     신뢰하면 안 된다 (5개 방법 전부 172~176deg 로 나오는 게 그 증거).
+#   intrinsics (N,3,3) = 504x280 픽셀 공간. cx*2=504, cy*2=280 로 전 프레임 상수라
+#     cam_param 의 fx/(2cx), fy/(2cy) 는 해상도와 무관하게 그대로 성립한다. 다만 fx 는
+#     **프레임마다 조금씩 다르다** (scene 내 std/mean 7e-4 ~ 3e-3). transforms.json 은 scene 당
+#     상수였으므로 intr_norm='rel' 에서 [1,1] 정확히가 아니라 1.000 +- 0.003 이 된다.
+_POSE_SOURCES = ('transforms', 'da3')
+
+
+def resolve_pose_source(cfg):
+    ps = getattr(cfg, 'pose_source', 'transforms') or 'transforms'
+    if ps not in _POSE_SOURCES:
+        raise ValueError(f"pose_source must be one of {_POSE_SOURCES}, got {ps!r}")
+    return ps
 
 
 # per-scene image dir, in preference order: 'images_4' = DL3DV-960 (960x540),
@@ -252,6 +286,9 @@ class CamDataset(torch.utils.data.Dataset):
         # prompts.json are read -- no full-corpus scan, no index cache. See from_segments().
         self.only_segments = only_segments
         self._geo_idx_memo = {}      # (scene_idx, s, e) -> frustum_cover context views
+        # pose / caption / avg_scale 를 어느 코퍼스에서 읽을지 (모듈 상단 _POSE_SOURCES 주석 참고).
+        # 'transforms' = 기존 동작.
+        self.pose_source = resolve_pose_source(cfg)
         self.root = cfg.dl3dv_root
         self.num_frames = cfg.num_frames
         self.geo_num_views = getattr(cfg, 'geo_num_views', 4)
@@ -374,12 +411,67 @@ class CamDataset(torch.utils.data.Dataset):
         else:
             self.load_data()
 
+    # ---- pose_source 별 경로/파싱 ------------------------------------------------------
+    # 아래 4개가 'transforms' 와 'da3' 의 유일한 차이점이다. 세그먼트 경계와 키('0','1',...)는
+    # 두 prompts.json 이 동일하므로 seg 리스트/샘플 인덱싱 로직은 공유한다.
+
+    def _prompts_path(self, scene_dir):
+        return osp.join(scene_dir, 'da3', 'prompts.json') if self.pose_source == 'da3' \
+            else osp.join(scene_dir, 'prompts.json')
+
+    def _avg_scale_dir(self, scene_dir):
+        return osp.join(scene_dir, 'da3', 'avg_scale') if self.pose_source == 'da3' \
+            else osp.join(scene_dir, 'avg_scale')
+
+    def _scene_probe(self, scene_dir):
+        """인덱스 빌드용 경량 프로브 -> (n_frames, h, w). 포즈 전체를 파싱하지 않는다."""
+        if self.pose_source == 'da3':
+            K = np.load(osp.join(scene_dir, 'da3', 'pose.npz'))['intrinsics']
+            n = int(K.shape[0])
+            return n, int(round(float(K[0, 1, 2]) * 2)), int(round(float(K[0, 0, 2]) * 2))
+        tj = json.load(open(osp.join(scene_dir, 'transforms.json')))
+        return len(tj['frames']), int(tj['h']), int(tj['w'])
+
+    def _parse_da3(self, scene_dir):
+        """<scene>/da3/pose.npz -> (w2c (N,4,4), intr (N,3,3), frame_files, (h,w)).
+
+        extrinsics 는 이미 **OpenCV w2c** 라 _parse_transforms 의 GL->CV flip + inv 가 둘 다
+        필요 없다 (모듈 상단 _POSE_SOURCES 주석의 실측 근거 참고). (N,3,4) 를 (N,4,4) 로 채운다.
+        frame_files 는 이미지 디렉토리를 정렬해 쓴다 — da3 는 파일명을 따로 저장하지 않고
+        (predictions.npz 는 1000 scene 중 3개에만 있다), 정렬 순서가 transforms.json 의
+        file_path 정렬 순서와 일치하는 것은 실측 확인했다."""
+        z = np.load(osp.join(scene_dir, 'da3', 'pose.npz'))
+        E = torch.from_numpy(np.asarray(z['extrinsics'], dtype=np.float32))     # (N,3,4) w2c
+        intr = torch.from_numpy(np.asarray(z['intrinsics'], dtype=np.float32))  # (N,3,3)
+        n = E.shape[0]
+        w2c = torch.eye(4, dtype=torch.float32).repeat(n, 1, 1)
+        w2c[:, :3, :4] = E
+        h = int(round(float(intr[0, 1, 2]) * 2))
+        w = int(round(float(intr[0, 0, 2]) * 2))
+
+        img_dir = scene_image_dir(scene_dir,
+                                  getattr(self.cfg, 'image_dir_names', IMAGE_DIR_NAMES))
+        if img_dir is None:
+            frame_files = [osp.join(scene_dir, 'images', f'frame_{i + 1:05d}.png')
+                           for i in range(n)]
+        else:
+            names = sorted(f for f in os.listdir(img_dir)
+                           if f.lower().endswith(('.png', '.jpg', '.jpeg')))
+            if len(names) != n:
+                raise ValueError(f"{scene_dir}: da3 pose has {n} frames but {img_dir} has "
+                                 f"{len(names)} images")
+            frame_files = [osp.join(img_dir, f) for f in names]
+        return w2c, intr, frame_files, (h, w)
+
     def _load_scene(self, i):
-        """Lazily parse + cache a scene's transforms (used by _LazyScenes and getitem helpers)."""
+        """Lazily parse + cache a scene's poses (used by _LazyScenes and getitem helpers)."""
         c = self._scene_cache.get(i)
         if c is None:
             sd = self.scene_dir_list[i]
-            w2c, intr, ff, hw = self._parse_transforms(sd, osp.join(sd, 'transforms.json'))
+            if self.pose_source == 'da3':
+                w2c, intr, ff, hw = self._parse_da3(sd)
+            else:
+                w2c, intr, ff, hw = self._parse_transforms(sd, osp.join(sd, 'transforms.json'))
             c = {'w2c': w2c, 'intr': intr, 'frame_files': ff, 'hw': hw}
             self._scene_cache[i] = c
         return c
@@ -393,6 +485,9 @@ class CamDataset(torch.utils.data.Dataset):
         key = (f"{meta_name}__nf{self.num_frames}__bo{int(self.geo_cover_before_only)}"
                f"__k{self.geo_cover_k}__cb{osp.basename(cov_path) if cov_path else 'none'}"
                f"__ms{self.max_scenes}__bl{_blacklist_fingerprint(self.root)}")
+        if self.pose_source != 'transforms':
+            # 기본값일 때는 키를 건드리지 않는다 -> 기존 캐시 파일이 그대로 재사용된다.
+            key += f"__ps{self.pose_source}"
         cache_dir = osp.join(self.root, '.latentcam_index'); os.makedirs(cache_dir, exist_ok=True)
         cache_path = osp.join(cache_dir, key.replace('/', '_') + '.pt')
         if self.only_segments is not None:
@@ -425,13 +520,14 @@ class CamDataset(torch.utils.data.Dataset):
             if chunk.split('/')[-1] in blocked:
                 continue
             scene_dir = osp.join(self.root, chunk)
-            tj_path = osp.join(scene_dir, 'transforms.json')
-            pj_path = osp.join(scene_dir, 'prompts.json')
-            if not (osp.isfile(tj_path) and osp.isfile(pj_path)):
+            pose_path = (osp.join(scene_dir, 'da3', 'pose.npz') if self.pose_source == 'da3'
+                         else osp.join(scene_dir, 'transforms.json'))
+            pj_path = self._prompts_path(scene_dir)
+            if not (osp.isfile(pose_path) and osp.isfile(pj_path)):
                 continue
             try:
-                tj = json.load(open(tj_path)); prompts = json.load(open(pj_path))
-                n = len(tj['frames']); h, w = int(tj['h']), int(tj['w'])
+                prompts = json.load(open(pj_path))
+                n, h, w = self._scene_probe(scene_dir)
             except Exception:
                 continue
             scene_idx = len(self.scene_dir_list)
@@ -484,11 +580,11 @@ class CamDataset(torch.utils.data.Dataset):
         for chunk, seg_key in want:
             scene_dir = osp.join(self.root, chunk)
             if chunk not in chunk_idx:
-                tj = json.load(open(osp.join(scene_dir, 'transforms.json')))
+                _n, _h, _w = self._scene_probe(scene_dir)
                 chunk_idx[chunk] = len(self.scene_dir_list)
                 self.scene_dir_list.append(scene_dir)
-                self.hw_list.append((int(tj['h']), int(tj['w'])))
-            seg = json.load(open(osp.join(scene_dir, 'prompts.json')))[seg_key]
+                self.hw_list.append((_h, _w))
+            seg = json.load(open(self._prompts_path(scene_dir)))[seg_key]
             s, e = int(seg['frame_idx'][0]), int(seg['frame_idx'][1])
             pcs = seg.get('prompt_camera_with_scene_video')
             caption = pcs.get('concise', "") if isinstance(pcs, dict) else (pcs or "")
@@ -518,11 +614,15 @@ class CamDataset(torch.utils.data.Dataset):
                 continue
             scene_dir = osp.join(self.root, chunk)
             tj_path = osp.join(scene_dir, 'transforms.json')
-            pj_path = osp.join(scene_dir, 'prompts.json')
-            if not (osp.isfile(tj_path) and osp.isfile(pj_path)):
+            pose_path = (osp.join(scene_dir, 'da3', 'pose.npz') if self.pose_source == 'da3'
+                         else tj_path)
+            pj_path = self._prompts_path(scene_dir)
+            if not (osp.isfile(pose_path) and osp.isfile(pj_path)):
                 continue
             try:
-                extr, intr, frame_files, (h, w) = self._parse_transforms(scene_dir, tj_path)
+                extr, intr, frame_files, (h, w) = (
+                    self._parse_da3(scene_dir) if self.pose_source == 'da3'
+                    else self._parse_transforms(scene_dir, tj_path))
                 prompts = json.load(open(pj_path))
             except Exception:
                 continue
@@ -781,8 +881,10 @@ class CamDataset(torch.utils.data.Dataset):
     def _avg_scale(self, scene_idx, seg_key):
         """scale_mode='avg_scale' (SCVideo original): the STORED point-cloud avg_scale,
         scene_dir/avg_scale/<seg_key>.json = mean(||scene point - first camera||).
-        Mirrors dataset_large.py. Returns None if the json is missing (caller falls back)."""
-        p = osp.join(self.scene_dir_list[scene_idx], 'avg_scale', f'{seg_key}.json')
+        Mirrors dataset_large.py. Returns None if the json is missing (caller falls back).
+        pose_source='da3' 이면 <scene>/da3/avg_scale/<seg>.json 을 읽는다 (da3 예측 depth 로
+        만든 값이라 da3 pose 와 같은 스케일 공간에 있다)."""
+        p = osp.join(self._avg_scale_dir(self.scene_dir_list[scene_idx]), f'{seg_key}.json')
         if not osp.isfile(p):
             return None
         try:
@@ -1082,10 +1184,28 @@ class CamDataset(torch.utils.data.Dataset):
         elif _intr_norm != 'raw':
             raise ValueError(f"intr_norm must be 'auto' | 'rel' | 'raw', got {_intr_norm!r}")
 
+        # [new 2026-08-06] translation 채널(6:9)의 표현. rotation 채널(0:6)은 어느 쪽이든 w2c R 의
+        # 앞 두 열 그대로다 -- R 과 R^T 는 정보량도 프레임간 geodesic 거리도 같아서 규약 비교의
+        # 변수가 되지 못한다. 실제로 달라지는 건 translation 하나뿐이라 그것만 분기한다.
+        #   'w2c' (기본, 기존 동작) t      = normalized_extrinsics[:, :3, 3]
+        #   'c2w'                  c      = -R^T t = 카메라 중심
+        # ||t|| == ||c|| 이라 norm_scale 분모는 그대로 통하고 크기 분포도 동일하다; 방향만 다르다.
+        # w2c 는 Δt = -R_i·Δc - ΔR·c_{i+1} 로 회전이 translation 에 섞여 들어온다
+        # (scripts/data/cam_repr_w2c_vs_c2w.py 의 Step 0 진단 참고).
+        # !! 디코드 경로도 같이 맞춰야 한다: utils/data_utils.out_to_trajectory(..., trans_repr=...).
+        _trans_repr = getattr(self.cfg, 'trans_repr', 'w2c')
+        if _trans_repr == 'w2c':
+            normalized_trans = normalized_extrinsics[:, :3, 3]
+        elif _trans_repr == 'c2w':
+            normalized_trans = -torch.einsum(
+                'tji,tj->ti', normalized_extrinsics[:, :3, :3], normalized_extrinsics[:, :3, 3])
+        else:
+            raise ValueError(f"trans_repr must be 'w2c' | 'c2w', got {_trans_repr!r}")
+
         cam_param = torch.cat([
             normalized_extrinsics[:, :3, 0],
             normalized_extrinsics[:, :3, 1],
-            normalized_extrinsics[:, :3, 3],
+            normalized_trans,
             normalized_intrinsics,
         ], dim=-1).float()                                    # (T,11)
 

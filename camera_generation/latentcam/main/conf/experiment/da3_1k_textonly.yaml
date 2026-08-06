@@ -1,0 +1,27 @@
+# @package _global_
+# da3 코퍼스(DL3DV 1K)의 **배선 확인용 text-only 기준선**. 새 geo_encoder 를 붙이기 전에
+# scene-disjoint seg 리스트 + meta_da3_1k.csv 경로가 실제로 물리는지 여기서 먼저 확인한다.
+#
+# 코퍼스: scripts/data/make_da3_splits.py 가 만든다 (재생성 = 그 스크립트 재실행).
+#   meta_da3_1k.csv                        957 scene (1K 1000 - blacklist 27 - 검증 탈락 16)
+#   latentcam_da3_1k_train_seg_list.txt    861 scene / 5479 segment
+#   latentcam_da3_1k_test_seg_list.txt      96 scene /  616 segment
+#   **scene-disjoint** 분할이다. c4d2k5y4(기존 리스트)는 segment 단위 random_split 이라 같은
+#   scene 이 train/test 양쪽에 걸쳐 있었다(docs/known_issues.md). da3 는 새 코퍼스라 물려받을
+#   비교 대상이 없어서 처음부터 scene 을 겹치지 않게 나눴다.
+#   -> 이 리스트로 낸 수치는 c4d2k5y4 기반 수치와 **비교 불가**다. held-out 이 더 어렵다.
+#
+# 이 arm 은 **GT pose arm** 이다: 세그먼트만 da3 코퍼스에서 가져오고 카메라/캡션/avg_scale 은
+# 여전히 최상위 transforms.json + prompts.json + avg_scale/ 에서 온다 (pose_source 기본값
+# 'transforms'). da3 예측 pose 로 도는 짝 arm 은 da3_1k_da3pose.yaml — pose_source 한 줄만
+# 다르고 seg 리스트/meta/scale_mode/intr_norm/cam_dim 은 동일해서 그대로 비교 가능하다.
+exp_name: da3_1k_textonly
+batch_size: 8
+geo_encoder: null
+scale_mode: avg_scale
+intr_norm: rel              # vae_20260302_300 = frame-0-relative-intrinsics ckpt
+cam_dim: 64                 # = 그 ckpt 의 latent_dim
+meta_csv: meta_da3_1k.csv
+train_seg_list: /data1/cympyc1785/data/DL3DV/scenes/latentcam_da3_1k_train_seg_list.txt
+test_seg_list: /data1/cympyc1785/data/DL3DV/scenes/latentcam_da3_1k_test_seg_list.txt
+coverage_blacklist_path: null

@@ -1,0 +1,15 @@
+# @package _global_
+# Step 1 smoke — vae_transrepr_{w2c,c2w} 의 배선(trans_repr 분기, seg-list split, 저장 경로)만
+# 확인한다. TRANS_REPR 은 커맨드라인에서 override: `experiment=vae_transrepr_smoke trans_repr=c2w`.
+exp_name: vae_transrepr_smoke
+trans_repr: w2c
+batch_size: 16
+epochs: 2
+scale_mode: avg_scale
+intr_norm: rel
+cam_dim: 64
+geo_encoder: null
+random_seed: 42
+max_scenes: 20
+train_seg_list: /data1/cympyc1785/data/DL3DV/scenes/latentcam_train_seg_list_c4d2k5y4.txt
+test_seg_list: /data1/cympyc1785/data/DL3DV/scenes/latentcam_test_seg_list_c4d2k5y4.txt

@@ -44,7 +44,31 @@ scale_mode: avg_scale
 # docstring and scripts/vae/vae_scale_matrix.py. vae_20260302_300 -> 'rel',
 # vae_20260202_065659_400 -> 'raw'.
 intr_norm: rel
-lazy_dataset: true          # [new] __init__ builds only the sample index (cached); scene poses parsed lazily in __getitem__
+# [new 2026-08-06] cam_param[..., 6:9] 의 표현. intr_norm 과 마찬가지로 **VAE CKPT 의 속성**이라
+# 학습 때와 다르게 주면 recon 이 조용히 망가진다.
+#   'w2c' (기본, 기존 ckpt 전부) w2c translation t = -Rc
+#   'c2w'                       카메라 중심 c
+# ||t|| == ||c|| 이므로 norm_scale 분모와 크기 분포는 동일하고 방향만 다르다. w2c 는
+# Δt = -R_i·Δc - ΔR·c_{i+1} 로 회전이 translation 에 섞인다 (Step 0 진단:
+# scripts/data/cam_repr_w2c_vs_c2w.py, DL3DV 35,845 seg 에서 bleed p50 0.500 / curv 비 p50 1.078).
+# 어느 쪽이 실제로 회귀하기 쉬운지는 VAE 를 양쪽으로 fit 해서 잰다
+# (vae_transrepr_{w2c,c2w}.yaml + scripts/vae/vae_trans_repr_recon.py).
+# !! 디코드 경로(utils/data_utils.out_to_trajectory)에 trans_repr 인자는 있지만 DM/추론 스크립트는
+#    아직 그걸 넘기지 않는다. 'c2w' ckpt 를 DM 에 쓰려면 그 호출부부터 배선해야 한다.
+trans_repr: w2c
+# [new 2026-08-06] scene 의 pose / intrinsics / caption / avg_scale 을 어느 코퍼스에서 읽을지.
+#   'transforms' (기본, 기존 동작) <scene>/{transforms.json, prompts.json, avg_scale/}
+#   'da3'                          <scene>/da3/{pose.npz, prompts.json, avg_scale/}
+# da3/pose.npz 의 extrinsics 는 **OpenCV w2c** 다 (transforms.json 처럼 GL->CV flip 하거나
+# 역행렬 취하면 안 된다). GT 와 Umeyama 정렬 시 12개 표본 scene 중 11개가 ATE/extent <= 0.004,
+# 회전 평균 <= 0.32deg 로 사실상 GT 급이다.
+# !! <scene>/pose_eval_vs_gt.json 과 da3_camcond_report.json 의 "convention":"c2w" / da3
+#    ATE_norm 0.4764 / Rot_mean 172deg 는 이 규약을 c2w 로 잘못 읽어서 나온 값이라 무시할 것.
+# da3 intrinsics 는 프레임마다 미세하게 다르므로(scene 내 std/mean 7e-4~3e-3) intr_norm='rel'
+# 에서 cam_param[9:11] 이 정확히 [1,1] 이 아니라 1.000 +- 0.003 이 된다.
+# 인덱스 캐시 키에는 'transforms' 가 아닐 때만 __ps<source> 가 붙는다(기존 캐시 재사용 보존).
+pose_source: transforms
+lazy_dataset: true         # [new] __init__ builds only the sample index (cached); scene poses parsed lazily in __getitem__
 use_vae: true
 num_cam: 13
 cam_dim: 64                 # MUST match the ckpt's latent_dim (20260302 -> 64, 20260202 -> 32)

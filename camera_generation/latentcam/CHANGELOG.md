@@ -5,6 +5,66 @@ All notable changes to the latentcam sub-project. Follows [Keep a Changelog](htt
 ## [Unreleased]
 
 ### Added
+- **`cfg.trans_repr`** (`main/conf/config.yaml`, 기본 `w2c`) — `cam_param[..., 6:9]` 를 w2c
+  translation `t = −Rc` 로 둘지(기존) 카메라 중심 `c` 로 둘지 고르는 분기. rotation 채널(0:6)은
+  어느 쪽이든 w2c `R` 의 앞 두 열 그대로다 — `R` 과 `Rᵀ` 는 정보량도 프레임간 geodesic 거리도
+  같아서 규약 비교의 변수가 되지 못하고, 실제로 달라지는 건 translation 하나뿐이다.
+  `‖t‖ == ‖c‖` 라 `norm_scale` 분모와 크기 분포는 동일하고 방향만 다르다.
+  `intr_norm` 과 마찬가지로 **VAE ckpt 의 속성**이라 학습 때와 다르게 주면 recon 이 조용히
+  망가진다. 디코드 경로 `utils/data_utils.out_to_trajectory(..., trans_repr=...)` 에도 같은
+  인자를 붙였다(기본 `'w2c'` = 기존 동작과 bit-identical).
+  - !! 미배선: DM/추론 스크립트의 `out_to_trajectory` 호출부(~30곳)는 아직 `trans_repr` 를
+    넘기지 않는다. 전부 기본값 `'w2c'` 라 기존 동작은 그대로지만, `'c2w'` ckpt 를 DM 에
+    쓰려면 그 호출부부터 배선해야 한다.
+- **`main/conf/experiment/vae_transrepr_{w2c,c2w,smoke}.yaml`** — 위 규약 중 어느 쪽이 실제로
+  회귀하기 쉬운지 재는 Step 1 의 paired arm 설정. 두 arm 은 `trans_repr` 한 줄만 다르고
+  나머지(`scale_mode=avg_scale` / `intr_norm=rel` / `cam_dim=64` / bs 64 / 60 epoch / seed /
+  seg 리스트)는 동일하다. `_smoke` 는 `max_scenes: 20`, 2 epoch 배선 확인용.
+- **`scripts/vae/vae_trans_repr_recon.py`** — Step 1 평가기. GT 를 `trans_repr='w2c'` 로 한 번만
+  로드해 두 arm 이 문자 그대로 같은 segment·순서·`norm_scale` 을 보게 하고, 각 arm 의 디코드
+  결과를 **두 표현 모두로 환산**해 대칭 비교한다(`err_center` 주 지표 / `err_t` 대칭 확인용 /
+  `err_rot_deg` / `err_intr` / `lat_std`). 출력은
+  `results/compare/cam_repr_w2c_vs_c2w/vae_step1.json`. env: `W2C_CKPT` / `C2W_CKPT` / `EXP` /
+  `N` / `BS`.
+- **`scripts/data/make_da3_splits.py`** — DL3DV 1K 의 da3 코퍼스를 **scene-disjoint** train/test
+  segment 리스트로 분할한다. `CamDataset` 을 세우지 않고 `da3/prompts.json` 을 직접 읽는다.
+  scene 별로 blacklist / `da3/{prompts.json,pose.npz,depth.npz,conf.npz}` + `da3/avg_scale/`
+  존재 / `0 <= s < e <= nframes` / `avg_scale` 유한 양수 / `prompt_camera` 비어있지 않음을
+  검증하고 탈락 사유를 집계해 출력한다. `meta_<tag>.csv` 도 같이 뱉어(인덱스 빌드를 8배 아낌),
+  `meta.csv` 에 없던 da3 scene 은 `filter_dl3dv.valid_scene` 을 **그대로 호출**해 통과분만
+  추가한다(규칙 복제 안 함). 두 리스트 모두 셔플한다 — `base.py` 의 val 로더가 `shuffle=False`
+  로 test 리스트 앞에서부터 자르기 때문.
+  결과: 1K 1000 scene − blacklist 27 − 검증 탈락 16(`too_small` 15 / `teleport` 1) = **957
+  scene / 6095 segment**, scene-disjoint 0.90/0.10 (seed 42) → train 861 scene / 5479 seg,
+  test 96 scene / 616 seg.
+  - c4d2k5y4(기존 리스트)는 segment 단위 `random_split` 이라 같은 scene 이 train/test 양쪽에
+    걸쳐 있었다(`docs/known_issues.md`). da3 는 물려받을 비교 대상이 없어서 처음부터 scene 을
+    겹치지 않게 나눴다 → **이 리스트 수치는 c4d2k5y4 기반 수치와 비교 불가**(held-out 이 더 어렵다).
+- **`main/conf/experiment/da3_1k_textonly.yaml`** — 위 seg 리스트 + `meta_da3_1k.csv` 배선
+  확인용 text-only arm. pose/caption/avg_scale 은 최상위 `transforms.json` 쪽을 쓰는 **GT pose
+  arm** 이고, da3 예측 pose arm(`da3_1k_da3pose.yaml`)과 짝을 이룬다.
+- **`cfg.pose_source`** (`main/conf/config.yaml`, 기본 `transforms`) — scene 의 pose /
+  intrinsics / caption / avg_scale 을 어느 코퍼스에서 읽을지 고르는 `dataset_dl3dv` 분기.
+  `transforms` 는 기존 동작 그대로(`<scene>/{transforms.json, prompts.json, avg_scale/}`),
+  `da3` 는 `<scene>/da3/{pose.npz, prompts.json, avg_scale/}` 를 읽는다. 두 prompts.json 의
+  세그먼트 경계와 키(`'0','1',...`)가 동일해서 seg 리스트·샘플 인덱싱 로직은 공유한다.
+  구현: `resolve_pose_source()` + `_prompts_path()` / `_avg_scale_dir()` / `_scene_probe()` /
+  `_parse_da3()`, 그리고 `_load_scene` · `_load_index` · `_load_index_subset` · `load_data` ·
+  `_avg_scale` 의 분기. 인덱스 캐시 키에는 `transforms` 가 **아닐 때만** `__ps<source>` 가
+  붙어서 기존 캐시 파일이 그대로 재사용된다.
+  - `da3/pose.npz` 의 `extrinsics (N,3,4)` 는 **OpenCV w2c** 다 — `transforms.json` 과 달리
+    GL→CV flip 도 역행렬도 적용하면 안 된다. 표본 12 scene 을 GT 와 Umeyama 정렬한 결과
+    11개가 ATE/extent ≤ 0.004 · 회전 평균 ≤ 0.32°, 나머지 1개(`8a1b61638a`)가 0.194 / 3.49°.
+    c2w 로 잘못 읽으면 회전 오차가 137~178° 로 튄다.
+  - `intrinsics (N,3,3)` 는 504×280 픽셀 공간이고 `cx*2, cy*2` 가 상수라 `fx/(2cx)` 형태는
+    그대로 성립한다. 다만 fx 를 프레임마다 따로 예측해서(scene 내 std/mean 7e-4~3e-3)
+    `intr_norm: rel` 에서 `cam_param[9:11]` 이 정확히 `[1,1]` 이 아니라 `1.000 ± 0.003` 이 된다.
+  - `frame_files` 는 이미지 디렉토리 정렬 순서로 만든다 (`da3/predictions.npz` 는 1000 scene
+    중 3개에만 있어 파일명 소스로 못 쓴다; 정렬 순서가 `transforms.json` 의 `file_path` 정렬
+    순서와 일치하는 것은 실측 확인).
+- **`main/conf/experiment/da3_1k_da3pose.yaml`** — da3 예측 pose 로 도는 text-only arm.
+  `da3_1k_textonly.yaml`(GT pose arm)과 `pose_source` 한 줄만 다르고 seg 리스트 / `meta_csv` /
+  `scale_mode` / `intr_norm` / `cam_dim` 은 동일해서 그대로 짝 비교가 된다.
 - **`scripts/data/cam_repr_w2c_vs_c2w.py`** — `cam_param[:, 6:9]`를 w2c translation `t = −Rc`로
   두는 현재 규약과, c2w translation(= camera center `c`)으로 두는 대안 규약 중 어느 쪽이
   회귀 타깃으로 더 쉬운지 재는 Step 0 진단. 학습 없이 `transforms.json`만 읽어

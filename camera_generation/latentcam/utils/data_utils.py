@@ -53,7 +53,7 @@ def normalize_camera_extrinsics_and_points(extrinsics, points=None, avg_scale=No
 
     return normalized_extrinsics, normalized_points, avg_scale, mask
 
-def out_to_trajectory(out, scale, e0, device=None, max_trans_norm=False):
+def out_to_trajectory(out, scale, e0, device=None, max_trans_norm=False, trans_repr='w2c'):
 
     """
     out: (B, N, 9)
@@ -61,6 +61,10 @@ def out_to_trajectory(out, scale, e0, device=None, max_trans_norm=False):
     e0: (B, 4, 4)
 
     matrix_trajectory: (B, N, 4, 4)
+
+    trans_repr: out[..., 6:9] 가 담고 있는 값. dataset_dl3dv 의 cfg.trans_repr 과 반드시 일치해야 한다.
+        'w2c' (기본, 기존 동작) w2c translation t -> 그대로 행렬의 [:3,3] 에 넣는다.
+        'c2w'                  카메라 중심 c      -> t = -R c 로 바꿔서 넣는다.
     """
     if device is None:
         device = out.device
@@ -75,12 +79,17 @@ def out_to_trajectory(out, scale, e0, device=None, max_trans_norm=False):
         raw_trans = out[:, :, 6:] * scale.unsqueeze(-1) * max_trans_scale.unsqueeze(-1)
     else:
         raw_trans = out[:, :, 6:] * scale.unsqueeze(-1)
-    matrix_trajectory[:, :, :3, 3] = raw_trans
 
     rot6d = out[:, :, :6]
     for idx, rot in enumerate(rot6d):
         raw_rot = compute_rotation_matrix_from_ortho6d(rot)
         matrix_trajectory[idx, :, :3, :3] = raw_rot
+    if trans_repr == 'c2w':
+        # raw_trans 는 카메라 중심 c. w2c 행렬을 만들려면 t = -R c (R 은 위에서 채운 회전).
+        raw_trans = -torch.einsum('bnij,bnj->bni', matrix_trajectory[:, :, :3, :3], raw_trans)
+    elif trans_repr != 'w2c':
+        raise ValueError(f"trans_repr must be 'w2c' | 'c2w', got {trans_repr!r}")
+    matrix_trajectory[:, :, :3, 3] = raw_trans
     matrix_trajectory = matrix_trajectory @ e0.unsqueeze(1)
 
     return matrix_trajectory

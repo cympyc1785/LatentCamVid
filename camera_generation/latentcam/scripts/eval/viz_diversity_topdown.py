@@ -65,6 +65,31 @@ def _xz(mats, ref, L):
     return np.stack([c[:, 0], -c[:, 2]], axis=-1)
 
 
+def _fwd_xz(mats, ref):
+    """(N,4,4) -> (N,2) 카메라 forward 를 같은 top-down 평면에 투영.
+
+    dump 된 transform_matrix 는 OpenGL c2w 이므로 forward = -R[:,2].
+    XZ 평면에 그대로 투영하므로 위/아래를 보는 카메라일수록 화살표가 짧아진다
+    (tilt 가 눈에 보이도록 일부러 정규화하지 않는다).
+    """
+    R = np.einsum('ij,njk->nik', ref, mats)[:, :3, :3]
+    d = -R[:, :, 2]
+    return np.stack([d[:, 0], -d[:, 2]], axis=-1)
+
+
+def _arrows(ax, xy, mats, ref, color, every, scale, alpha=1.0, zorder=9):
+    """궤적 위 `every` 프레임마다 카메라 시선 화살표."""
+    if not every:
+        return
+    idx = np.arange(0, len(xy), every)
+    if idx[-1] != len(xy) - 1:
+        idx = np.append(idx, len(xy) - 1)
+    d = _fwd_xz(mats, ref)[idx]
+    ax.quiver(xy[idx, 0], xy[idx, 1], d[:, 0], d[:, 1], color=color, alpha=alpha,
+              angles='xy', scale_units='xy', scale=1.0 / scale, width=0.006,
+              headwidth=3.2, headlength=4.0, zorder=zorder)
+
+
 def _finish(ax, title):
     ax.add_artist(plt.Circle((0, 0), 1.0, fill=False, ls=':', lw=1.0, color='0.55'))
     ax.scatter([0], [0], c='k', s=80, marker='*', zorder=7)      # frame s (anchor)
@@ -137,7 +162,20 @@ def fig_seeds(run_dirs, names, out_path, ctx_from=None, style='cloud', ctx_leak_
     print('saved', out_path)
 
 
-def fig_swap(base, swap, names, out_path):
+def fig_swap(base, swap, names, out_path, arrow_every=0, arrow_scale=0.16,
+             label_set='swap', swap_leak_k=0):
+    """두 arm(base / swap)을 겹쳐 그린다. 같은 seed, context 만 다른 쌍을 보는 용도.
+
+    label_set='swap' : arm C (같은 scene 다른 segment 로 donor context).
+    label_set='leak' : geo_test_inseg_k 누수 arm. swap 쪽 context 앞 `swap_leak_k` 장이
+                       target segment 안 카메라이므로 마커를 갈라 그린다.
+    """
+    LAB = {
+        'swap': ('context (orig)', 'context (donor)',
+                 'pred (orig ctx)', 'pred (donor ctx)'),
+        'leak': ('context: out-of-segment', f'context: IN-segment (leaked, K={swap_leak_k})',
+                 'pred (out-of-seg ctx)', f'pred (in-seg ctx, K={swap_leak_k})'),
+    }[label_set]
     n = len(names)
     cols = min(3, n)
     rows = (n + cols - 1) // cols
@@ -146,15 +184,26 @@ def fig_swap(base, swap, names, out_path):
         ax = axes[k // cols][k % cols]
         gt = _tr(base, nm, 'ref')
         ref, L = _frame(gt)
-        for C, mk, col, lab in ((_ctx(base, nm), 's', 'tab:green', 'context (orig)'),
-                                (_ctx(swap, nm), '^', 'tab:red', 'context (donor)')):
+        for C, mk, col, lab, kk in ((_ctx(base, nm), 's', 'tab:green', LAB[0], 0),
+                                    (_ctx(swap, nm), '^', 'tab:red', LAB[1], swap_leak_k)):
             if C is None:
                 continue
             c = _xz(C, ref, L)
-            ax.scatter(c[:, 0], c[:, 1], marker=mk, s=58, facecolors='none',
-                       edgecolors=col, lw=1.7, zorder=7, label=lab if k == 0 else None)
-        for d, col, lab in ((base, 'tab:orange', 'pred (orig ctx)'),
-                            (swap, 'tab:purple', 'pred (donor ctx)')):
+            kk = max(0, min(int(kk), c.shape[0]))
+            if kk:
+                # 누수 view 는 앞쪽 K 장 (_mix_inseg_context = inseg + rest)
+                ax.scatter(c[:kk, 0], c[:kk, 1], marker='D', s=64, facecolors='none',
+                           edgecolors=col, lw=2.0, zorder=8, label=lab if k == 0 else None)
+                ax.scatter(c[kk:, 0], c[kk:, 1], marker=mk, s=58, facecolors='none',
+                           edgecolors=col, lw=1.7, zorder=7, alpha=0.55,
+                           label='context: out-of-segment (kept)' if k == 0 else None)
+            else:
+                ax.scatter(c[:, 0], c[:, 1], marker=mk, s=58, facecolors='none',
+                           edgecolors=col, lw=1.7, zorder=7, label=lab if k == 0 else None)
+            # context 카메라는 6장뿐이므로 every=1 로 전부 시선을 그린다.
+            _arrows(ax, c, C, ref, col, 1 if arrow_every else 0, arrow_scale, alpha=0.85)
+        for d, col, lab in ((base, 'tab:orange', LAB[2]),
+                            (swap, 'tab:purple', LAB[3])):
             p = _tr(d, nm, 'pred')
             if p is None:
                 continue
@@ -162,10 +211,12 @@ def fig_swap(base, swap, names, out_path):
             ax.plot(xy[:, 0], xy[:, 1], '-', lw=2.0, color=col,
                     label=lab if k == 0 else None)
             ax.scatter(xy[-1, 0], xy[-1, 1], s=34, color=col, zorder=6)
+            _arrows(ax, xy, p, ref, col, arrow_every, arrow_scale, alpha=0.9)
         g = _xz(gt, ref, L)
         ax.plot(g[:, 0], g[:, 1], '-', lw=3.0, color='tab:blue',
                 label='GT' if k == 0 else None, zorder=5)
         ax.scatter(g[-1, 0], g[-1, 1], s=55, color='tab:blue', zorder=6)
+        _arrows(ax, g, gt, ref, 'tab:blue', arrow_every, arrow_scale, alpha=0.9, zorder=8)
         pb, ps = _tr(base, nm, 'pred'), _tr(swap, nm, 'pred')
         dsw = float(np.linalg.norm(_xz(pb, ref, L) - _xz(ps, ref, L), axis=-1).mean())
         _finish(ax, f'{nm[:22]}   d_swap(2D)={dsw:.3f}')
@@ -173,8 +224,12 @@ def fig_swap(base, swap, names, out_path):
             ax.legend(fontsize=8, loc='best')
     for k in range(n, rows * cols):
         axes[k // cols][k % cols].axis('off')
-    fig.suptitle('context swap (same scene, other segment) — top-down (anchored to frame s; '
-                 'X vs -Z; GT reach = 1)', fontsize=11)
+    sub = (f'; arrows = camera forward every {arrow_every} frames, XZ-projected '
+           f'(shorter = looking up/down)') if arrow_every else ''
+    head = ('context swap (same scene, other segment)' if label_set == 'swap' else
+            f'out-of-segment context  vs  geo_test_inseg_k={swap_leak_k} leakage (same seed)')
+    fig.suptitle(f'{head} — top-down (anchored to frame s; '
+                 f'X vs -Z; GT reach = 1{sub})', fontsize=11)
     fig.tight_layout()
     fig.savefig(out_path, dpi=125, bbox_inches='tight')
     plt.close(fig)
@@ -270,6 +325,16 @@ def main():
     ap.add_argument('--style', default='cloud', choices=['cloud', 'rainbow'])
     ap.add_argument('--ctx-leak-k', type=int, default=0,
                     help='geo_test_inseg_k 값. context 앞 K장을 in-segment 누수 view 로 표시')
+    ap.add_argument('--only', nargs='*', default=None,
+                    help='패널로 그릴 segment 이름을 직접 지정 (--pick/--n 무시)')
+    ap.add_argument('--arrow-every', type=int, default=0,
+                    help='--fig swap 용. N 프레임마다 카메라 forward 화살표 (0=끄기)')
+    ap.add_argument('--arrow-scale', type=float, default=0.16,
+                    help='화살표 길이 (GT reach 단위)')
+    ap.add_argument('--label-set', default='swap', choices=['swap', 'leak'],
+                    help="--fig swap 의 범례. 'leak' 이면 --swap 을 in-segment 누수 arm 으로 표기")
+    ap.add_argument('--swap-leak-k', type=int, default=0,
+                    help="--label-set leak 에서 --swap 쪽 context 앞 K 장을 누수 view 로 표시")
     args = ap.parse_args()
     os.makedirs(args.out, exist_ok=True)
 
@@ -288,13 +353,21 @@ def main():
         keep = set(_names(args.names_from))
         names = [n for n in names if n in keep]
 
-    sel = pick(names, args.pick, args.n, args.base, args.swap)
+    if args.only:
+        miss = [n for n in args.only if n not in set(names)]
+        if miss:
+            raise SystemExit(f'--only 에 없는 segment: {miss}')
+        sel = list(args.only)
+    else:
+        sel = pick(names, args.pick, args.n, args.base, args.swap)
     if args.fig == 'seeds':
         fig_seeds(args.seeds, sel, osp.join(args.out, f'seeds_{args.pick}_{args.style}{args.tag}.png'),
                   ctx_from=args.ctx_from, style=args.style, ctx_leak_k=args.ctx_leak_k)
     elif args.fig == 'swap':
         fig_swap(args.base, args.swap, sel,
-                 osp.join(args.out, f'swap_{args.pick}{args.tag}.png'))
+                 osp.join(args.out, f'swap_{args.pick}{args.tag}.png'),
+                 arrow_every=args.arrow_every, arrow_scale=args.arrow_scale,
+                 label_set=args.label_set, swap_leak_k=args.swap_leak_k)
     else:
         fig_inseg(arms, sel, osp.join(args.out, f'inseg_{args.pick}{args.tag}.png'))
 

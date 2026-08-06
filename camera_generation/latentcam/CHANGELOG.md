@@ -195,6 +195,17 @@ All notable changes to the latentcam sub-project. Follows [Keep a Changelog](htt
     셋 다 `render_avgscale.py`의 `lagernvs` / `one_st` / `one_sv`와 소수점 3자리까지 일치.
 
 ### Changed
+- **`scripts/eval/viz_diversity_topdown.py`: 카메라 시선 화살표 + `--only` + leak 라벨.**
+  - `--arrow-every N` / `--arrow-scale`(기본 0.16, GT reach 단위): `--fig swap`에서 N 프레임마다
+    카메라 forward를 같은 top-down 평면(X vs −Z)에 투영해 그린다. dump된 `transform_matrix`가
+    OpenGL c2w라 forward = `−R[:,2]`이고, **정규화하지 않으므로 위/아래를 보는 카메라일수록
+    화살표가 짧다**(tilt가 눈에 보이도록 일부러). context 카메라는 6장뿐이라 항상 전부 그린다.
+    기본 `0`(= 끔)이라 예전 그림은 그대로 나온다.
+  - `--only <seg> ...`: 패널로 그릴 segment를 직접 지정(`--pick` / `--n` 무시). 목록에 없는
+    이름을 주면 바로 에러.
+  - `--label-set leak` + `--swap-leak-k K`: `--fig swap`을 context-swap이 아니라 `geo_test_inseg_k`
+    누수 arm 비교로 읽게 하는 범례/제목 세트. swap 쪽 context 앞 K장(`_mix_inseg_context`가
+    `inseg + rest` 순으로 넣는다)을 마름모 마커로 갈라 그린다.
 - **DL3DV 루트 경로를 `/data1/cympyc1785/data/DL3DV/scenes`로 통일** — 옛 경로
   `/data1/cympyc1785/data/DL3DV/DL3DV-960/DL3DV-10K`는 **이제 존재하지 않아서** 하드코딩한
   스크립트가 전부 죽는다. 16개 스크립트의 `ROOT` / `--root` 기본값을 바꿨다

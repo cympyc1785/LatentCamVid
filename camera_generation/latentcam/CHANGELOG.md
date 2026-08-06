@@ -5,6 +5,10 @@ All notable changes to the latentcam sub-project. Follows [Keep a Changelog](htt
 ## [Unreleased]
 
 ### Added
+- **`.vscode/settings.json`에 `git.scanRepositories`** — `camera_generation/tools/gaussian-splatting-lightning`
+  (자체 `.git`을 가진 별도 repo, 부모 `.gitignore:221`의 `tools` 패턴으로 무시됨)을 VSCode
+  Source Control 패널에 독립 repo로 띄운다. VSCode의 `git.repositoryScanMaxDepth` 기본값이 1이라
+  워크스페이스 루트 기준 depth 3인 이 경로는 자동 탐지되지 않았다.
 - **`docs/` 3편을 추적 대상으로 추가** — `geo_context_ablations.md`(geo context view sampling의
   trajectory leakage와 그 대응 ablation 설계 노트), `known_issues.md`(segment 단위 random_split
   으로 인한 scene-level val leakage 등 미해결 이슈), `vae_verification.md`

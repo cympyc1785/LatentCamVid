@@ -1,0 +1,7 @@
+{
+  // 부모 repo 가 .gitignore 로 무시하는 중첩 git repo 를 Source Control 패널에 따로 띄운다.
+  // (git.repositoryScanMaxDepth 기본값 1 이라 depth 3 인 이 경로는 자동 탐지가 안 된다)
+  "git.scanRepositories": [
+    "camera_generation/tools/gaussian-splatting-lightning"
+  ]
+}

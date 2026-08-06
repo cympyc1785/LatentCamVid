@@ -17,6 +17,7 @@
 # 다르고 seg 리스트/meta/scale_mode/intr_norm/cam_dim 은 동일해서 그대로 비교 가능하다.
 exp_name: da3_1k_textonly
 batch_size: 8
+epochs: 150                 # 기존 DM run 들과 동일 (전에는 stop_at_epoch.sh 150 watchdog 로 맞췄다)
 geo_encoder: null
 scale_mode: avg_scale
 intr_norm: rel              # vae_20260302_300 = frame-0-relative-intrinsics ckpt

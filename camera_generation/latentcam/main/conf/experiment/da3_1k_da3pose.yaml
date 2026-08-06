@@ -24,6 +24,7 @@
 exp_name: da3_1k_da3pose
 pose_source: da3
 batch_size: 8
+epochs: 150                 # 기존 DM run 들과 동일 (전에는 stop_at_epoch.sh 150 watchdog 로 맞췄다)
 geo_encoder: null
 scale_mode: avg_scale
 intr_norm: rel              # vae_20260302_300 = frame-0-relative-intrinsics ckpt

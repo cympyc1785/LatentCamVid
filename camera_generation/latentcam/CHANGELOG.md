@@ -5,6 +5,18 @@ All notable changes to the latentcam sub-project. Follows [Keep a Changelog](htt
 ## [Unreleased]
 
 ### Added
+- **`scripts/vae/vae_pose_source_recon.py`** — frozen 카메라 VAE 가 `pose_source` 별 `cam_param`
+  분포를 아직 감당하는지 재는 스크립트. arm 마다 `in_trans_std` / `in_c_norm` / `divisor_mean` /
+  `lat_std_raw` / `lat_std_scaled`(= diffusion 타깃 std) / `vae_scale_for_1` / recon L1
+  (`rec_trans`, arm 간 비교 가능한 `rec_trans_world` = ×divisor, `rec_rot6d`, `rec_intr`).
+  env `EXPS` / `N` / `SPLIT` / `SEED`, 출력
+  `results/compare/camera_jumps/vae_pose_source_recon.json`.
+  - **결과 (N=800): da3 arm 은 VAE 재학습이 필요 없다.** `rec_trans_world` da3 **0.03713** <
+    transforms **0.04568** (da3 가 오히려 낫다), `lat_std_scaled` da3 **0.744** vs transforms
+    **0.465** (da3 가 1.0 에 더 가깝다). 즉 "da3/avg_scale 이 3.2배 작아 recon 이 열화된다"던
+    이전 우려는 실측으로 **기각**. `vae_latent_scale` 도 `0.96032625` 그대로 둔다 — transforms
+    arm 의 `lat_std_raw` 0.44667 은 config 주석의 기록값(0.44696 / full-corpus 0.47637)과 일치해
+    현행 DL3DV run 전부와 같은 상태이고, 두 arm 이 같은 상수를 써야 paired 비교가 성립한다.
 - **`scripts/data/scan_camera_jumps.py`** — **세그먼트 단위** teleport(프레임간 카메라 점프)
   스캐너. 기존 `scripts/data/filter_dl3dv.py::check_teleport` 는 (1) scene 단위라 한 프레임만
   튀어도 scene 전체를 버리고 반대로 세그먼트 하나의 점프는 통계에 묻히며, (2) 절대 임계값
@@ -293,6 +305,9 @@ All notable changes to the latentcam sub-project. Follows [Keep a Changelog](htt
     셋 다 `render_avgscale.py`의 `lagernvs` / `one_st` / `one_sv`와 소수점 3자리까지 일치.
 
 ### Changed
+- **`main/conf/experiment/da3_1k_{textonly,da3pose}.yaml`: `epochs: 150` 을 yaml 에 명시.**
+  기존 DM run 들은 default `epochs: 2000` 으로 띄운 뒤 `scripts/stop_at_epoch.sh 150` watchdog
+  으로 멈췄다. 두 arm 은 watchdog 없이 config 만으로 같은 지점에서 끝나게 한다.
 - **`main/conf/experiment/da3_1k_{textonly,da3pose}.yaml`: `coverage_blacklist_path` 를
   `null` → `data/seg_blacklist_jump_da3_1k.csv`.** 두 arm 이 **같은** 파일을 가리킨다 —
   세그먼트 집합이 어긋나면 GT pose arm 과 da3 pose arm 의 paired 비교가 깨지기 때문.

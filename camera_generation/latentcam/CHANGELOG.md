@@ -5,6 +5,11 @@ All notable changes to the latentcam sub-project. Follows [Keep a Changelog](htt
 ## [Unreleased]
 
 ### Added
+- **`docs/` 3편을 추적 대상으로 추가** — `geo_context_ablations.md`(geo context view sampling의
+  trajectory leakage와 그 대응 ablation 설계 노트), `known_issues.md`(segment 단위 random_split
+  으로 인한 scene-level val leakage 등 미해결 이슈), `vae_verification.md`
+  (`vae_20260302_300.pth`, `cam_dim=64` 재구성 검증 결과). 리포지토리 루트 `CLAUDE.md`도 함께
+  추적한다(지금까지 untracked였다).
 - **`main/infer_swap_ablation.py`** — geo camera-DM이 geo context를 실제로 쓰는지 보는 swap
   ablation 추론. validation sample N개를 고정해 놓고 3가지 모드를 각각 돌려 저장한다:
   `normal`(자기 context + 자기 text) / `ctxswap`(anchor view0 = frame s만 남기고 나머지

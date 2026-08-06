@@ -5,6 +5,18 @@ All notable changes to the latentcam sub-project. Follows [Keep a Changelog](htt
 ## [Unreleased]
 
 ### Added
+- **`scripts/data/cam_repr_w2c_vs_c2w.py`** — `cam_param[:, 6:9]`를 w2c translation `t = −Rc`로
+  두는 현재 규약과, c2w translation(= camera center `c`)으로 두는 대안 규약 중 어느 쪽이
+  회귀 타깃으로 더 쉬운지 재는 Step 0 진단. 학습 없이 `transforms.json`만 읽어
+  (dataset 로드 없이, `norm_camera_length_stats.py` 방식) segment별로 두 지표를 뽑는다:
+  `bleed = mean‖ΔR·c‖ / mean‖Δc‖`(w2c의 `Δt = −R_iΔc − ΔR·c_{i+1}` 중 두 번째 항, 즉 이동이
+  없어도 회전만으로 t가 움직이는 "회전 bleed"의 상대 크기)와
+  `ratio = curv_t / curv_c`(2차 차분 norm의 비, w2c 궤적이 c2w 궤적보다 얼마나 덜 매끄러운가).
+  회전량(`th_path` 프레임간 geodesic 각 총합, `th_net` 첫↔마지막 순 회전각)과 `reach`(정규화 후
+  max‖c‖)에 대한 상관까지 같이 계산해 메커니즘이 실제로 작동하는지 검증한다.
+  출력은 `results/compare/cam_repr_w2c_vs_c2w/`에 `.png`(2×2: bleed/ratio 히스토그램 +
+  bleed-vs-th_path / bleed-vs-reach 산점도), `summary.json`, `per_seg.npz`(segment 이름 + 7개
+  지표 배열 — 이후 arm별 per-segment 오차와 join 하려고 남긴다).
 - **`.vscode/settings.json`에 `git.scanRepositories`** — `camera_generation/tools/gaussian-splatting-lightning`
   (자체 `.git`을 가진 별도 repo, 부모 `.gitignore:221`의 `tools` 패턴으로 무시됨)을 VSCode
   Source Control 패널에 독립 repo로 띄운다. VSCode의 `git.repositoryScanMaxDepth` 기본값이 1이라

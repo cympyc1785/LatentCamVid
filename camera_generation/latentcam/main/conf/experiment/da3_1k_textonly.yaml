@@ -24,4 +24,9 @@ cam_dim: 64                 # = 그 ckpt 의 latent_dim
 meta_csv: meta_da3_1k.csv
 train_seg_list: /data1/cympyc1785/data/DL3DV/scenes/latentcam_da3_1k_train_seg_list.txt
 test_seg_list: /data1/cympyc1785/data/DL3DV/scenes/latentcam_da3_1k_test_seg_list.txt
-coverage_blacklist_path: null
+# teleport(프레임간 카메라 점프) 세그먼트 제외. scripts/data/scan_camera_jumps.py 가
+# jr>6 | msf>0.2 | rmax>30 (전부 스케일 불변 지표) 로 뽑은 123/6095 세그먼트(2.02%).
+# transforms pose 와 da3 pose 의 **합집합**이라 da3_1k_da3pose arm 과 같은 세그먼트를 본다
+# (한쪽만 망가진 경우가 양방향으로 있다: transforms 만 105, da3 만 98, 교집합 80).
+# 기존 blacklist.csv 의 filter_teleport 는 scene 단위 + 절대 임계값이라 이건 그 위에 얹는다.
+coverage_blacklist_path: /data1/cympyc1785/LatentCamVid/camera_generation/latentcam/data/seg_blacklist_jump_da3_1k.csv

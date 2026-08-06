@@ -5,6 +5,23 @@ All notable changes to the latentcam sub-project. Follows [Keep a Changelog](htt
 ## [Unreleased]
 
 ### Added
+- **`scripts/data/scan_camera_jumps.py`** — **세그먼트 단위** teleport(프레임간 카메라 점프)
+  스캐너. 기존 `scripts/data/filter_dl3dv.py::check_teleport` 는 (1) scene 단위라 한 프레임만
+  튀어도 scene 전체를 버리고 반대로 세그먼트 하나의 점프는 통계에 묻히며, (2) 절대 임계값
+  (`|dt|>10`, `‖dt‖>15`, `|c|>50`)이라 COLMAP 월드 단위에만 맞아 da3 예측 pose 에는 못 쓴다
+  (`blacklist.csv` 의 `filter_teleport` 21건 + `filter_teleport_manual` 1건이 그 필터의 결과).
+  여기서는 49프레임 세그먼트마다 **스케일 불변 지표**를 뽑는다 — `jr`=max(step)/median(step),
+  `msf`=max(step)/path_len, `mse`=max(step)/extent, `gap`=max(step)/p90(step),
+  `rmax`=프레임간 최대 회전(deg). `--source transforms|da3|both` 로 두 pose 소스를 같은 잣대로
+  재고, 임계값을 주면 `dataset_dl3dv._read_coverage_blacklist` 가 그대로 읽는 `scene,segment`
+  CSV 를 뱉는다(`--out-blacklist`; `--source both` 면 **합집합**). per-segment 원시 지표는
+  `results/compare/camera_jumps/seg_jump_stats.csv`.
+- **`data/seg_blacklist_jump_da3_1k.csv`** — 위 스캐너를 da3 1K 코퍼스 6,095 세그먼트에
+  `jr>6 | msf>0.2 | rmax>30` 으로 돌려 나온 **123 세그먼트(2.02%, 70 scene)** 제외 목록.
+  두 pose 소스의 합집합이다(transforms 만 105 / da3 만 98 / 교집합 80 — 한쪽만 망가진 경우가
+  양방향으로 있다. 예: `a3efe59e3f9e` seg4 는 transforms 가 `rmax=179.95°` 인데 da3 는 `2.29°`).
+  전 세그먼트가 다 걸린 scene 은 0개라 scene 손실은 없다. 임계값 근거: 두 소스 모두 p98 까지
+  `jr≈4.3` 으로 완만하다가 p98.5~p99 에서 `jr` 10→28, `msf` 0.15→0.30, `rmax` 19→35 로 꺾인다.
 - **`cfg.trans_repr`** (`main/conf/config.yaml`, 기본 `w2c`) — `cam_param[..., 6:9]` 를 w2c
   translation `t = −Rc` 로 둘지(기존) 카메라 중심 `c` 로 둘지 고르는 분기. rotation 채널(0:6)은
   어느 쪽이든 w2c `R` 의 앞 두 열 그대로다 — `R` 과 `Rᵀ` 는 정보량도 프레임간 geodesic 거리도
@@ -276,6 +293,11 @@ All notable changes to the latentcam sub-project. Follows [Keep a Changelog](htt
     셋 다 `render_avgscale.py`의 `lagernvs` / `one_st` / `one_sv`와 소수점 3자리까지 일치.
 
 ### Changed
+- **`main/conf/experiment/da3_1k_{textonly,da3pose}.yaml`: `coverage_blacklist_path` 를
+  `null` → `data/seg_blacklist_jump_da3_1k.csv`.** 두 arm 이 **같은** 파일을 가리킨다 —
+  세그먼트 집합이 어긋나면 GT pose arm 과 da3 pose arm 의 paired 비교가 깨지기 때문.
+  실측 결과 두 arm 모두 6,095 → **5,972 sample / 957 scene** (scene 손실 0). 인덱스 캐시 키에
+  `__cb<파일명>` 이 들어가므로 이전 캐시와 충돌하지 않고 새로 빌드된다.
 - **`scripts/eval/viz_diversity_topdown.py`: 카메라 시선 화살표 + `--only` + leak 라벨.**
   - `--arrow-every N` / `--arrow-scale`(기본 0.16, GT reach 단위): `--fig swap`에서 N 프레임마다
     카메라 forward를 같은 top-down 평면(X vs −Z)에 투영해 그린다. dump된 `transform_matrix`가

@@ -31,4 +31,6 @@ cam_dim: 64                 # = 그 ckpt 의 latent_dim
 meta_csv: meta_da3_1k.csv
 train_seg_list: /data1/cympyc1785/data/DL3DV/scenes/latentcam_da3_1k_train_seg_list.txt
 test_seg_list: /data1/cympyc1785/data/DL3DV/scenes/latentcam_da3_1k_test_seg_list.txt
-coverage_blacklist_path: null
+# da3_1k_textonly.yaml 과 **같은** teleport 세그먼트 blacklist (합집합). 짝 arm 과 세그먼트
+# 집합이 어긋나면 paired 비교가 깨지므로 여기서 da3 쪽만 거르면 안 된다.
+coverage_blacklist_path: /data1/cympyc1785/LatentCamVid/camera_generation/latentcam/data/seg_blacklist_jump_da3_1k.csv

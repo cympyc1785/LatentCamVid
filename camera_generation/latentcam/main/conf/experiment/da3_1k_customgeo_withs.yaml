@@ -1,0 +1,62 @@
+# @package _global_
+# custom geo encoder (models/custom_geo_encoder.py) arm A — **geo_worldtraj 형** context 선택.
+#
+# 두 arm 의 차이는 **context view 선택 하나뿐**이다:
+#   withs (이 파일)  geo_first_view_target_s: true  + geo_cover_subtract_first: true
+#                    -> context view0 = target segment 의 첫 카메라(frame s) 자체. 나머지 5장은
+#                       s 를 이미 뽑아 놓은 것으로 치고(subtract_first) 커버리지를 채운다.
+#                       geo_worldtraj.yaml 과 같은 세팅.
+#   nos             둘 다 false -> target segment 카메라가 context 에 하나도 안 들어간다.
+#                    geo_worldtraj_camembed.yaml 과 같은 세팅.
+# camembed arm 은 잃어버린 프레임 정합을 geo_cam_embed='relfirst' 로 보상했지만, 여기서는
+# **geo_cam_embed: null** 이다 (사용자 결정 2026-08-07 "context 선택만"). custom 인코더는
+# 카메라를 view 당 11-d cam_token 이 아니라 **픽셀당 Plücker ray** 로 이미 받고 있어서
+# (custom_geo_encoder.py 설계) relfirst 를 얹으면 같은 정보가 두 경로로 들어간다.
+#
+# 인코더 구조 (custom_geo_encoder.py)
+#   rgb (3ch)                       -> DINOv2 ViT-L/14 (frozen)      -> patch 당 1024
+#   plucker(6) + logd(1) + valid(1) -> GeoTokenizer (trainable conv) -> patch 당 256
+#   두 갈래를 patch 단위 concat -> LayerNorm -> Linear(1280 -> 768) -> (B, V*P, 768)
+#   격자 252x448 / patch 14 = 18x32 = 576 tok/view, V=6 -> M = 3456 (lagernvs 의 4662 보다 작다)
+#
+# dataset 이 새로 내보내는 것 (dataset_dl3dv._geo_pixel_plucker / _geo_depth_maps)
+#   geo_plucker_map (V,6,252,448)  target segment 첫 카메라 프레임, translation / norm_scale
+#   geo_logd        (V,1,252,448)  log(depth / norm_scale)  <- **같은 분모**여야 ray x depth 가
+#                                  target 궤적과 같은 좌표계의 3D 점이 된다
+#   geo_valid       (V,1,252,448)  전부 1 (사용자 결정 2026-08-07). da3 depth 는 depth<=0 이
+#                                  0.0% 이고 conf 는 확률이 아니라 상한 없는 값이라
+#                                  (scene 별 p50 1.86~14.41) 코퍼스 공통 임계값을 못 잡는다.
+#
+# pose_source: da3 가 강제다 — depth 가 <scene>/da3/depth.npz 에만 있고, 그 depth 는 da3
+# pose/intrinsics 와 같은 스케일 공간이다. transforms pose 와 섞으면 ray x depth 가 무의미해진다.
+# dataset_dl3dv 가 이 조합을 확인하고 아니면 죽는다.
+#
+# 기준선: da3_1k_da3pose.yaml (text-only, 같은 pose_source/seg 리스트/blacklist/VAE 설정).
+# vae_latent_scale 은 config 기본값 0.96032625 그대로 — 그 arm 들과 타깃 스케일을 맞추기 위해서다
+# (geo_worldtraj 계열의 0.47637 은 transforms 코퍼스 값이라 여기 쓰면 비교가 깨진다).
+exp_name: da3_1k_customgeo_withs
+pose_source: da3
+batch_size: 8
+epochs: 150
+
+geo_encoder: custom
+geo_cam_embed: null           # 카메라는 픽셀 Plücker 로만 들어간다
+geo_latent_cache_dir: null    # GeoTokenizer/proj 가 학습되므로 출력을 얼릴 수 없다
+geo_posed: false              # custom backend 는 lagernvs cam_token 을 만들지 않는다
+custom_geo_input_hw: [252, 448]   # 14 의 배수 (256 -> 252). dataset/encoder 가 어긋나지 않게 명시
+custom_geo_freeze_dino: true
+
+geo_view_sampling: frustum_cover
+geo_cover_out_of_seg: true
+geo_cover_centered_at_s: true
+geo_first_view_target_s: true     # <- arm A 의 정의. nos arm 은 false
+geo_cover_subtract_first: true    # <- arm A 의 정의. nos arm 은 false
+
+scale_mode: avg_scale
+intr_norm: rel                # vae_20260302_300 = frame-0-relative-intrinsics ckpt
+cam_dim: 64                   # = 그 ckpt 의 latent_dim
+meta_csv: meta_da3_1k.csv
+train_seg_list: /data1/cympyc1785/data/DL3DV/scenes/latentcam_da3_1k_train_seg_list.txt
+test_seg_list: /data1/cympyc1785/data/DL3DV/scenes/latentcam_da3_1k_test_seg_list.txt
+# da3_1k_{textonly,da3pose} 와 **같은** teleport 세그먼트 blacklist (합집합).
+coverage_blacklist_path: /data1/cympyc1785/LatentCamVid/camera_generation/latentcam/data/seg_blacklist_jump_da3_1k.csv

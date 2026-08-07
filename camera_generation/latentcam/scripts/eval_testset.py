@@ -189,6 +189,22 @@ def main():
     model.load_state_dict(sd, strict=True)              # strict: a shape/name drift must not pass silently
     model = model.to(device).eval()
 
+    # [new 2026-08-07] geo_encoder='custom' 은 학습되는 인코더라 가중치를 같이 복원해야 한다.
+    # train_latent_cam_dm 이 <ckpt>.pth 옆에 <last|best>_geo.pth 로 남긴다 (frozen DINO 는 뺀
+    # 상태라 missing 키가 나오는 게 정상 -> strict=False). 파일이 없으면 랜덤 초기값으로 평가하는
+    # 셈이라 조용히 넘어가면 안 되고 여기서 죽인다.
+    if getattr(geo_encoder, 'trainable', False):
+        geo_ckpt = ckpt_path.replace('.pth', '_geo.pth')
+        if not osp.isfile(geo_ckpt):
+            raise SystemExit(f"geo_encoder='{cfg.geo_encoder}' 는 학습된 인코더인데 "
+                             f"{geo_ckpt} 가 없다 — 랜덤 가중치로 평가할 수 없다")
+        _gm, _gu = geo_encoder.load_state_dict(
+            torch.load(geo_ckpt, map_location='cpu'), strict=False)
+        if _gu:
+            raise SystemExit(f"{geo_ckpt}: unexpected keys {_gu[:5]}")
+        print(f"(geo) loaded {geo_ckpt} (missing={len(_gm)} = frozen DINO)")
+        geo_encoder = geo_encoder.to(device).eval()
+
     camera_vae = None
     if cfg.use_vae:
         camera_vae = CameraVAE(latent_dim=cfg.cam_dim).to(device)

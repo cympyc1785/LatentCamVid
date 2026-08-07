@@ -322,6 +322,46 @@ class CamDataset(torch.utils.data.Dataset):
                              f"got {self.geo_cam_embed!r}")
         # [new] test-time probe: force K of the V context views to be TARGET-SEGMENT cameras.
         # null/0 = OFF (unchanged). See _mix_inseg_context and conf/config.yaml.
+        # [new 2026-08-07] geo_encoder='custom' (models/custom_geo_encoder.py) 전용 RGBD 경로.
+        # lagernvs 경로는 아래 어디도 건드리지 않는다 -- 이 플래그가 False 면 __getitem__ 의
+        # 동작은 이전과 bit-identical.
+        #
+        # custom 인코더는 카메라를 view 당 11-d cam_token 이 아니라 **픽셀당 Plücker ray** 로 받는다.
+        # 그래서 dataset 이 내보내야 할 것이 세 개 더 있다 (custom_geo_encoder.py 의 입력 계약):
+        #   geo_plucker_map (V,6,Hc,Wc)  target segment 첫 카메라 프레임, trans / norm_scale
+        #   geo_logd        (V,1,Hc,Wc)  log(depth / norm_scale)  -- Plücker 와 같은 단위여야
+        #                                ray x depth 가 3D 점이 된다
+        #   geo_valid       (V,1,Hc,Wc)  depth 유효 마스크
+        # 해상도 Hc,Wc 는 DINOv2 patch(14) 의 배수여야 하고, GeoTokenizer 가 stride 14 로
+        # patchify 한 토큰 수가 DINO patch 토큰 수와 정확히 같아야 한다 (custom_geo_encoder.py:156
+        # 이 불일치를 raise). 그래서 self.geo_hw 자체를 custom_geo_input_hw 로 바꿔서
+        # _load_images 도 처음부터 그 격자로 주게 한다 -- 인코더 안의 bilinear 재보간을 피하면
+        # Plücker 방향 단위벡터가 정확히 보존된다 (custom_geo_encoder.py:117-135 주석).
+        self.geo_custom = self.geo_enabled and str(cfg.geo_encoder) == 'custom'
+        self.geo_depth_cache_dir = None
+        self._plucker_grid = {}      # (H0,W0) -> (xx, yy) 픽셀 중심 격자 (상수라 재사용)
+        if self.geo_custom:
+            _p = int(getattr(cfg, 'custom_geo_patch', 14))
+            _ihw = getattr(cfg, 'custom_geo_input_hw', None)
+            self.geo_hw = (tuple(int(v) for v in _ihw) if _ihw else
+                           ((self.geo_hw[0] // _p) * _p, (self.geo_hw[1] // _p) * _p))
+            if any(v % _p for v in self.geo_hw):
+                raise ValueError(f"custom_geo_input_hw={self.geo_hw} must be a multiple of "
+                                 f"patch {_p}")
+            if self.pose_source != 'da3':
+                # depth 는 <scene>/da3/depth.npz 에만 있고, 그 depth 는 da3 pose/intrinsics 와
+                # 같은 스케일 공간이다. transforms pose 와 섞으면 ray x depth 가 무의미해진다.
+                raise ValueError("geo_encoder='custom' requires pose_source='da3' "
+                                 f"(depth comes from <scene>/da3/depth.npz), got "
+                                 f"{self.pose_source!r}")
+            if self.geo_latent_cache_dir is not None:
+                # GeoTokenizer/proj 가 **학습되는** 파라미터라 그 출력을 파일로 얼리면 안 된다.
+                print("[geo cache] DISABLED: geo_encoder='custom' -> the geo encoder is trainable")
+                self.geo_latent_cache_dir = None
+            self.geo_depth_cache_dir = getattr(cfg, 'custom_geo_depth_cache_dir', None)
+            print(f"[geo custom] input_hw={self.geo_hw} grid="
+                  f"{self.geo_hw[0] // _p}x{self.geo_hw[1] // _p} "
+                  f"depth_cache={self.geo_depth_cache_dir or 'OFF (npz fallback, ~0.6s/item)'}")
         self.geo_test_inseg_k = getattr(cfg, 'geo_test_inseg_k', None) or 0
         if self.geo_test_inseg_k and self.geo_latent_cache_dir is not None:
             # 캐시 키는 data_name 뿐이라 context view 가 바뀐 걸 구분 못 한다 -> 반드시 끈다.
@@ -1094,6 +1134,96 @@ class CamDataset(torch.utils.data.Dataset):
         m = torch.cross(o[:, None, :].expand_as(d), d, dim=-1)            # (V,P,3) moment
         return torch.cat([d, m], dim=-1).float()                          # (V,P,6)
 
+    def _geo_pixel_plucker(self, scene_idx, geo_idxs, w2c_s, norm_scale, hw_orig):
+        """[new 2026-08-07] geo_encoder='custom': (V, 6, Hc, Wc) Plücker ray per **PIXEL** of the
+        encoder's input grid (self.geo_hw), in the SAME frame and units as the trajectory being
+        generated — target segment's first camera s, translations / norm_scale.
+
+        수식은 _geo_cam_plucker (patch 격자용) 와 글자 그대로 같다:
+          rel_v = w2c_v @ inv(w2c_s);  R,t = rel[:3,:3], rel[:3,3]/norm_scale
+          o = -R^T t;  d = normalize(R^T K^-1 [x,y,1]);  out = [d(3), o x d(3)]
+        다른 것은 격자뿐이다 -- patch (Gh,Gw) 대신 픽셀 (Hc,Wc). custom 인코더의 GeoTokenizer 가
+        stride=patch conv 로 직접 patchify 하므로 여기서 미리 내리면 안 된다.
+
+        픽셀 중심은 NORMALIZED 좌표 ((j+.5)/Wc, (i+.5)/Hc) 로 잡아 원본 픽셀 격자로 되돌린 뒤
+        원본 K 를 적용한다. 원본 -> geo_hw 리사이즈는 full-frame scaling 이라 정규화 좌표가
+        정확히 보존된다 (da3 의 504x280 도 원본 3840x2160 의 full-frame 리사이즈임을 확인:
+        cx,cy 가 정확히 252,140 = 중심).
+
+        Row-major (i over rows, j over cols) — GeoTokenizer 의 conv 출력을 flatten(2) 한 순서와
+        DINO 의 patch 토큰 순서가 둘 다 row-major 라 그대로 맞는다.
+
+        전 구간을 **channel-first (V,3,P)** 로 계산한다. _geo_cam_plucker 처럼 (V,P,3) 으로 두면
+        마지막 축이 길이 3 이라 norm/cross 의 벡터화가 나빠서 실측 0.26 s/item 이 나왔다
+        (P=112896 이라 patch 격자보다 168 배 크다). channel-first + 마지막 permute 제거로 ~4배."""
+        Hc, Wc = self.geo_hw
+        H0, W0 = float(hw_orig[0]), float(hw_orig[1])
+        w2c_v = self.extrinsics_list[scene_idx][list(geo_idxs)].float()   # (V,4,4)
+        K = self.intrinsics_list[scene_idx][list(geo_idxs)].float()       # (V,3,3) original px
+        rel = w2c_v @ torch.linalg.inv(w2c_s.float()).unsqueeze(0)        # (V,4,4)
+        R = rel[:, :3, :3]
+        t = rel[:, :3, 3] / norm_scale
+        Rt = R.transpose(1, 2)                                            # c2w rotation
+        o = -torch.einsum('vij,vj->vi', Rt, t)                            # (V,3) camera center
+
+        # 픽셀 중심 격자는 (Hc,Wc,H0,W0) 에만 의존하는 상수 -> scene 마다 다시 만들지 않는다.
+        g = self._plucker_grid.get((H0, W0))
+        if g is None:
+            ys = (torch.arange(Hc, dtype=torch.float32) + 0.5) / Hc * H0  # (Hc,)
+            xs = (torch.arange(Wc, dtype=torch.float32) + 0.5) / Wc * W0  # (Wc,)
+            yy, xx = torch.meshgrid(ys, xs, indexing='ij')                # row-major
+            g = (xx.reshape(1, -1), yy.reshape(1, -1))                    # (1,P)
+            self._plucker_grid[(H0, W0)] = g
+        xx, yy = g
+        V, P = K.shape[0], Hc * Wc
+        fx, fy = K[:, 0, 0:1], K[:, 1, 1:2]
+        cx, cy = K[:, 0, 2:3], K[:, 1, 2:3]
+        d_cam = torch.stack([(xx - cx) / fx, (yy - cy) / fy,
+                             torch.ones(V, 1).expand(V, P)], dim=1)       # (V,3,P)
+        d = Rt @ d_cam                                                    # (V,3,P) frame s
+        d = d * d.pow(2).sum(1, keepdim=True).clamp(min=1e-16).rsqrt()
+        oc = o.unsqueeze(-1)                                              # (V,3,1)
+        m = torch.stack([oc[:, 1] * d[:, 2] - oc[:, 2] * d[:, 1],         # o x d, 성분별로 직접
+                         oc[:, 2] * d[:, 0] - oc[:, 0] * d[:, 2],         # (torch.cross 는 길이 3
+                         oc[:, 0] * d[:, 1] - oc[:, 1] * d[:, 0]], dim=1)  # 축을 요구해 느리다)
+        return torch.cat([d, m], dim=1).view(V, 6, Hc, Wc).float()
+
+    def _da3_depth(self, scene_idx, geo_idxs):
+        """<scene>/da3/depth.npz 의 지정 프레임 -> (V, H0, W0) float32 (da3 native 280x504).
+
+        depth.npz 는 deflate 압축이라 6 장만 필요해도 scene 전체를 풀어야 한다 (실측 0.62 s).
+        cfg.custom_geo_depth_cache_dir 가 있으면 scripts/data/cache_da3_depth.py 가 풀어 둔
+        비압축 .npy 를 mmap 으로 열어 해당 프레임만 읽는다 (0.02 s). 캐시가 없으면 npz 로
+        폴백하므로 부분 캐시도 안전하다."""
+        sd = self.scene_dir_list[scene_idx]
+        gi = list(geo_idxs)
+        if self.geo_depth_cache_dir:
+            p = osp.join(self.geo_depth_cache_dir, osp.relpath(sd, self.root) + '.npy')
+            if osp.isfile(p):
+                a = np.load(p, mmap_mode='r')
+                return torch.from_numpy(np.asarray(a[gi], dtype=np.float32))
+        z = np.load(osp.join(sd, 'da3', 'depth.npz'))['depth']
+        return torch.from_numpy(np.asarray(z[gi], dtype=np.float32))
+
+    def _geo_depth_maps(self, scene_idx, geo_idxs, norm_scale):
+        """[new 2026-08-07] geo_encoder='custom': (logd (V,1,Hc,Wc), valid (V,1,Hc,Wc)).
+
+          logd  = log(depth / norm_scale)   -- Plücker translation 과 **같은 분모**를 써야
+                  o + exp(logd)*d 가 target 궤적과 같은 좌표계의 3D 점이 된다.
+          valid = 전부 1 (사용자 결정 2026-08-07). da3 depth 는 depth<=0 이 0.0%, conf 는 확률이
+                  아니라 상한 없는 값(scene 별 p50 1.86~14.41)이라 코퍼스 공통 임계값을 못 잡는다.
+                  채널은 남겨 두므로(GeoTokenizer 의 8ch 계약) 나중에 마스크를 넣을 때 shape 변경
+                  없이 여기만 고치면 된다.
+
+        da3 격자(280x504) -> geo_hw 는 nearest 로 내린다. depth 는 물체 경계에서 불연속이라
+        bilinear 로 섞으면 존재하지 않는 중간 깊이가 생긴다."""
+        dep = self._da3_depth(scene_idx, geo_idxs).unsqueeze(1)           # (V,1,H0,W0)
+        if dep.shape[-2:] != self.geo_hw:
+            dep = torch.nn.functional.interpolate(dep, size=self.geo_hw, mode='nearest')
+        dep = torch.nan_to_num(dep, nan=0.0, posinf=0.0, neginf=0.0)
+        logd = torch.log((dep / norm_scale).clamp(min=1e-6))
+        return logd.float(), torch.ones_like(logd)
+
     def _swap_donor(self, idx, scene_idx):
         """geo_swap_mode='inscene': (s, e) of ANOTHER segment of the same scene, or None when the
         scene holds only this one segment (the caller then leaves the context unswapped and flags
@@ -1309,6 +1439,14 @@ class CamDataset(torch.utils.data.Dataset):
             if self.geo_cam_embed is not None:
                 out['geo_cam_param'] = self._geo_cam_cond(
                     scene_idx, geo_idxs, extrinsics[0], norm_scale, (h, w))
+
+            # [new 2026-08-07] geo_encoder='custom' 의 RGBD 입력. lagernvs 경로에서는
+            # self.geo_custom 이 False 라 이 블록 자체가 없는 것과 같다.
+            if self.geo_custom:
+                out['geo_plucker_map'] = self._geo_pixel_plucker(
+                    scene_idx, geo_idxs, extrinsics[0], norm_scale, (h, w))
+                out['geo_logd'], out['geo_valid'] = self._geo_depth_maps(
+                    scene_idx, geo_idxs, norm_scale)
 
             # posed geo: raw geo-view camera geometry (geo_encoder builds the lagernvs
             # cam_token from these). c2w OpenCV, intrinsics (fx,fy,cx,cy) px, image hw.

@@ -5,6 +5,43 @@ All notable changes to the latentcam sub-project. Follows [Keep a Changelog](htt
 ## [Unreleased]
 
 ### Added
+- **`main/conf/experiment/da3_1k_customgeo_{withs,nos}.yaml`** — 새 custom geo encoder
+  (`models/custom_geo_encoder.py`)를 쓰는 arm 2종. **둘의 차이는 context view 선택 두 줄뿐**이다:
+  `withs` 는 `geo_first_view_target_s: true` + `geo_cover_subtract_first: true`
+  (= `geo_worldtraj.yaml` 형, context view0 이 target segment 의 첫 카메라 frame s 자체),
+  `nos` 는 둘 다 `false` (= `geo_worldtraj_camembed.yaml` 형, target segment 카메라가 context 에
+  하나도 안 들어감). 원본 camembed arm 과 달리 **`geo_cam_embed: null`** 이다 — custom 인코더는
+  카메라를 view 당 11-d cam_token 이 아니라 픽셀당 Plücker ray 로 이미 받으므로 `relfirst` 는
+  같은 정보의 중복이다. 공통: `pose_source: da3`, `geo_encoder: custom`,
+  `custom_geo_input_hw: [252, 448]`, `custom_geo_freeze_dino: true`, `geo_posed: false`,
+  `geo_latent_cache_dir: null`(인코더가 학습되므로 출력을 얼릴 수 없음), `batch_size: 8`,
+  `epochs: 150`, `vae_latent_scale` 은 config 기본값 `0.96032625` 유지
+  (`da3_1k_{textonly,da3pose}` 와 타깃 스케일을 맞춰 비교 가능하게).
+- **`scripts/data/cache_da3_depth.py`** — `<scene>/da3/depth.npz`(deflate 압축)를 비압축
+  `.npy` 로 풀어 `mmap_mode='r'` 로 필요한 6프레임만 읽게 하는 캐시 빌더. npz 는 프레임 하나를
+  읽어도 scene 전체를 압축 해제해야 해서 **0.62 s/item**, `num_thread: 8` 기준 150 epoch 이면
+  순수 압축 해제에만 ~17.7 시간이 든다. 캐시 경유는 **0.0197 s (31×)**.
+  env `META`(기본 `meta_da3_1k.csv`) / `OUT`(기본 `<ROOT>/da3_depth_raw`) / `ROOT` / `JOBS` /
+  `LIMIT`. 원자적 교체(`os.replace`)라 중단해도 반쪽 파일이 안 남고, 재실행 시 프레임 수가
+  맞으면 skip. **실측: 957/957 ok, 0 error, 85 GB, 77 s.** `np.array_equal(cache, npz)` 검증 통과.
+- **`cfg.custom_geo_patch`**(기본 14) / **`cfg.custom_geo_depth_cache_dir`**
+  (`main/conf/config.yaml`) — 전자는 dataset 이 `custom_geo_input_hw` 의 격자 정합성을 검사할 때
+  쓰는 patch 크기(DINOv2 ViT-L/14), 후자는 위 캐시 디렉토리. 캐시가 없으면 npz 로 자동 폴백한다.
+- **`dataset_dl3dv`: `geo_plucker_map` / `geo_logd` / `geo_valid` 방출** (`geo_encoder: 'custom'`
+  일 때만; 기존 backend 경로는 손대지 않았다).
+  - `geo_plucker_map (V,6,252,448)` — `_geo_pixel_plucker`. **target segment 첫 카메라(frame s)
+    기준** 상대 pose 로 만든 픽셀당 Plücker `[d(3), o×d(3)]`. translation 은
+    `_geo_cam_plucker` 와 **같은 규약**으로 `/ norm_scale`. 격자는 encoder 입력 해상도
+    (252×448)의 픽셀 중심을 원본 해상도로 되매핑해 만들고 `(H0,W0)` 별로 캐시한다.
+    채널 우선 `(V,3,P)` 레이아웃으로 계산한다 — `(V,P,3)` + `norm(dim=-1)` + `torch.cross` 는
+    P=112,896 에서 2~3× 느리다(0.0118→0.0043 s, 0.0091→0.0050 s).
+  - `geo_logd (V,1,252,448)` — `log(depth / norm_scale)`. **Plücker translation 과 같은 분모**를
+    써야 `o + exp(logd)·d` 가 target 궤적과 같은 좌표계의 3D 점이 된다. NaN/Inf 는 0 으로.
+  - `geo_valid (V,1,252,448)` — 전부 1 (사용자 결정 2026-08-07). da3 depth 는 `depth<=0` 이
+    0.0% 이고 `conf` 는 확률이 아니라 상한 없는 값이라(scene 별 p50 1.86~14.41) 코퍼스 공통
+    임계값을 못 잡는다.
+  - 기하 검증: `‖d‖` 편차 1.79e-07, `d·m` absmax 4.47e-08, `withs` arm 의 view0 moment
+    2.51e-08(= frame s 카메라가 원점).
 - **`scripts/vae/vae_pose_source_recon.py`** — frozen 카메라 VAE 가 `pose_source` 별 `cam_param`
   분포를 아직 감당하는지 재는 스크립트. arm 마다 `in_trans_std` / `in_c_norm` / `divisor_mean` /
   `lat_std_raw` / `lat_std_scaled`(= diffusion 타깃 std) / `vae_scale_for_1` / recon L1
@@ -305,6 +342,25 @@ All notable changes to the latentcam sub-project. Follows [Keep a Changelog](htt
     셋 다 `render_avgscale.py`의 `lagernvs` / `one_st` / `one_sv`와 소수점 3자리까지 일치.
 
 ### Changed
+- **`main/train_latent_cam_dm.py`: 학습되는 geo encoder 배선** (`getattr(geo_encoder,
+  'trainable', False)` 로 분기 — 기존 frozen backend 는 전부 그대로 `no_grad` 경로).
+  - `geo_encode()` 상단에 `wants_batch` 분기 추가: custom backend 는 view latent 가 아니라
+    배치 전체(`images`, `geo_plucker_map`, `geo_logd`, `geo_valid`)를 받아 `forward_batch` 로 간다.
+    키가 빠지면 어떤 키인지 찍고 `KeyError`.
+  - 옵티마이저가 `model.parameters() + [p for p in geo_encoder.parameters() if p.requires_grad]`
+    를 함께 잡는다 (**258 model + 22 geo tensor / 2.44 M param**, 실측 exp_avg 전부 non-zero).
+    `geo_encoder.train()` 은 **부르지 않는다** — `SceneEncoder.__init__` 이 frozen DINO 를
+    `eval()` 로 내려놓는데 부모에서 `train()` 을 부르면 재귀적으로 되돌아간다(GeoTokenizer 는
+    GroupNorm/LayerNorm 뿐이라 train/eval 이 no-op).
+  - train/val 양쪽 호출부를 `with accelerator.autocast():` 로 감쌌다. geo encoder 는
+    `accelerator.prepare` 에 넘기지 않으므로(우리는 `forward` 가 아니라 `forward_batch` 를 부르고,
+    DDP 래핑이 그 메서드를 가린다) 이렇게 하지 않으면 `mixed_precision="bf16"` 이 적용되지 않는다.
+  - 체크포인트: `last_geo.pth` / `best_geo.pth` + `resume.pth['geo']`. **frozen 키를 제외**하고
+    저장한다 — 전체를 저장하면 DINOv2 ViT-L 때문에 epoch 당 ~1.2 GB 다. 실측 **9.76 MB**,
+    `dino` 키 없음 확인.
+- **`scripts/eval_testset.py`: 학습된 geo encoder 가중치 복원.** `trainable` backend 면
+  `<ckpt>_geo.pth` 를 `strict=False` 로 로드하고(missing = frozen DINO), 파일이 없거나
+  unexpected key 가 있으면 랜덤 가중치로 평가하는 대신 죽는다.
 - **`main/conf/experiment/da3_1k_{textonly,da3pose}.yaml`: `epochs: 150` 을 yaml 에 명시.**
   기존 DM run 들은 default `epochs: 2000` 으로 띄운 뒤 `scripts/stop_at_epoch.sh 150` watchdog
   으로 멈췄다. 두 arm 은 watchdog 없이 config 만으로 같은 지점에서 끝나게 한다.

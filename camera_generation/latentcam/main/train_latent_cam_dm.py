@@ -65,7 +65,18 @@ def geo_emb_from_cache(data, device):
 
 def geo_encode(geo_encoder, data, device):
     """Run the geo encoder on a batch. When cfg.geo_posed and the batch carries geo-view
-    geometry, feed the posed lagernvs cam_token; otherwise unposed (cam_token=None)."""
+    geometry, feed the posed lagernvs cam_token; otherwise unposed (cam_token=None).
+
+    [new 2026-08-07] geo_encoder='custom' 은 images 말고도 픽셀 Plücker/log-depth/valid 가
+    필요해서 backend 가 batch dict 을 통째로 받는다 (models/geo_encoder.py:_CustomBackend).
+    wants_batch 로 분기하며, lagernvs 는 이 플래그가 False 라 아래 기존 경로 그대로다."""
+    if getattr(geo_encoder, 'wants_batch', False):
+        need = ('images', 'geo_plucker_map', 'geo_logd', 'geo_valid')
+        miss = [k for k in need if k not in data]
+        if miss:
+            raise KeyError(f"geo_encoder='custom' needs {miss} in the batch — dataset_dl3dv 의 "
+                           f"geo_custom 분기가 꺼져 있다 (geo_encoder/pose_source 확인)")
+        return geo_encoder.forward_batch({k: data[k].to(device) for k in need})
     images = data['images'].to(device)
     cam_token = None
     if getattr(cfg, 'geo_posed', False) and 'geo_c2w' in data:
@@ -324,7 +335,30 @@ def train():
               f"(missing={len(_mm)}, unexpected={len(_uu)})")
 
     model.train()
-    opt = torch.optim.AdamW(model.parameters(), lr=cfg.lr)
+    # [new 2026-08-07] geo_encoder='custom' 은 frozen 이 아니다 (안쪽 DINOv2 만 frozen). 그
+    # 파라미터를 optimizer 에 넣지 않으면 GeoTokenizer/ln/proj 가 랜덤 초기값에 영원히 머문다.
+    # lagernvs/scenetok 은 trainable=False 라 여기서 아무 것도 달라지지 않는다.
+    _geo_trainable = bool(geo_encoder is not None and getattr(geo_encoder, 'trainable', False))
+    _geo_frozen_keys = set()
+    if _geo_trainable:
+        # .train() 을 부르지 않는다 — SceneEncoder.__init__ 이 frozen DINO 를 eval() 로 내려
+        # 놨는데 부모에서 train() 을 부르면 재귀적으로 되돌아간다. GeoTokenizer 는 GroupNorm/
+        # LayerNorm 뿐이라 train/eval 차이가 없어서 생성 직후 상태 그대로가 맞다.
+        _geo_params = [p for p in geo_encoder.parameters() if p.requires_grad]
+        # frozen 파라미터(=DINOv2 ViT-L, ~300 M)는 ckpt 에서 뺀다. 안 빼면 매 epoch 1.2 GB 를
+        # 쓰는데, 그 값은 checkpoints/dinov2-large 에 이미 있고 절대 바뀌지 않는다.
+        _geo_frozen_keys = {n for n, p in geo_encoder.named_parameters() if not p.requires_grad}
+        _n = sum(p.numel() for p in _geo_params)
+        print(f"(geo) trainable backend '{cfg.geo_encoder}': {len(_geo_params)} tensors / "
+              f"{_n / 1e6:.2f} M params -> AdamW "
+              f"(frozen {len(_geo_frozen_keys)} tensors excluded from ckpt)")
+        opt = torch.optim.AdamW(list(model.parameters()) + _geo_params, lr=cfg.lr)
+        if _resume is not None and _resume.get('geo') is not None:
+            _gm, _gu = geo_encoder.load_state_dict(_resume['geo'], strict=False)
+            print(f"(resume) geo encoder from {cfg.load_ckpt_path} "
+                  f"(missing={len(_gm)} [frozen DINO 포함], unexpected={len(_gu)})")
+    else:
+        opt = torch.optim.AdamW(model.parameters(), lr=cfg.lr)
 
     if cfg.use_vae:
         if getattr(cfg, 'causal_vae', False):
@@ -410,7 +444,13 @@ def train():
                 if 'geo_emb' in data:
                     pc_embeds, pc_masks = geo_emb_from_cache(data, device)
                 elif geo_encoder is not None and 'images' in data:
-                    pc_embeds, pc_masks = geo_encode(geo_encoder, data, device)
+                    # train loop 과 같은 autocast 를 걸어 val 쪽 geo 토큰 수치가 어긋나지 않게 한다
+                    # (frozen backend 는 원래도 여기서 fp32 였으므로 그대로 둔다).
+                    if _geo_trainable:
+                        with accelerator.autocast():
+                            pc_embeds, pc_masks = geo_encode(geo_encoder, data, device)
+                    else:
+                        pc_embeds, pc_masks = geo_encode(geo_encoder, data, device)
                 if pc_embeds is not None:
                     pc_embeds = attach_geo_cam(pc_embeds, data, device)
                 if cfg.text_encoder == 'T5':
@@ -566,13 +606,24 @@ def train():
         if accelerator.is_main_process:
             unwrapped_model = accelerator.unwrap_model(model)
             torch.save(unwrapped_model.state_dict(), os.path.join(ckpt_dir, "last.pth"))
+            # [new 2026-08-07] geo_encoder='custom' 의 학습된 가중치. last.pth/best.pth 는
+            # "CameraDiffusionModel state_dict 하나"라는 계약을 그대로 두고 (eval_testset 등
+            # 기존 소비자가 그대로 동작해야 한다) 옆에 별도 파일로 남긴다. frozen backend 에서는
+            # 아무 파일도 생기지 않아 기존 run 디렉토리 구조와 동일하다.
+            if _geo_trainable:
+                _geo_sd = {k: v for k, v in geo_encoder.state_dict().items()
+                           if k not in _geo_frozen_keys}
+                torch.save(_geo_sd, os.path.join(ckpt_dir, "last_geo.pth"))
             if val_loss_traj_mean < best_val:
                 best_val = val_loss_traj_mean
                 torch.save(unwrapped_model.state_dict(), os.path.join(ckpt_dir, "best.pth"))
+                if _geo_trainable:
+                    torch.save(_geo_sd, os.path.join(ckpt_dir, "best_geo.pth"))
                 print(f"(ckpt) new best val/loss_traj={best_val:.6f} @ epoch {epoch} -> best.pth")
             # full checkpoint for seamless resume (model+opt+step+epoch+best_val+ids)
             torch.save({
                 'model': unwrapped_model.state_dict(),
+                'geo': _geo_sd if _geo_trainable else None,
                 'opt': opt.state_dict(),
                 'global_step': global_step,
                 'epoch': epoch,
@@ -660,11 +711,20 @@ def train():
             # point-cloud path: feeds the latent model's geo_emb/geo_mask (5th/6th args).
             # 'geo_emb' present = the dataset served a precomputed cache hit (cfg.
             # geo_latent_cache_dir); otherwise fall back to the original LagerNVS forward.
+            # [new 2026-08-07] geo_encoder='custom' 은 GeoTokenizer/proj 가 학습 대상이라
+            # no_grad 로 감싸면 gradient 가 끊긴다. lagernvs 는 frozen 이므로 기존대로 no_grad.
             if 'geo_emb' in data:
                 pc_embeds, pc_masks = geo_emb_from_cache(data, device)
             elif geo_encoder is not None and 'images' in data:
-                with torch.no_grad():
-                    pc_embeds, pc_masks = geo_encode(geo_encoder, data, device)
+                if _geo_trainable:
+                    # accelerator.prepare 를 태우지 않았으므로(우리는 forward 가 아니라
+                    # forward_batch 로 부른다) autocast 를 여기서 직접 건다. 안 걸면 DINOv2
+                    # ViT-L forward 만 fp32 로 돌아 mixed_precision='bf16' 설정이 무의미해진다.
+                    with accelerator.autocast():
+                        pc_embeds, pc_masks = geo_encode(geo_encoder, data, device)
+                else:
+                    with torch.no_grad():
+                        pc_embeds, pc_masks = geo_encode(geo_encoder, data, device)
             if pc_embeds is not None:
                 pc_embeds = attach_geo_cam(pc_embeds, data, device)
 

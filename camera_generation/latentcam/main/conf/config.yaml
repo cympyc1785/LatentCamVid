@@ -275,6 +275,11 @@ custom_geo_freeze_dino: true  # false 로 열면 DINO 파라미터도 optimizer 
 custom_geo_input_hw: null     # null -> geo_image_hw 를 patch(14) 배수로 내림 ((256,448) -> (252,448) = 18x32 = 576 tok/view)
 custom_geo_ray_dim: 64        # GeoTokenizer 의 Plücker linear-patchify 채널
 custom_geo_geo_dim: 256       # GeoTokenizer 전체 출력 채널 (ray + stem)
+custom_geo_patch: 14          # dataset 이 격자 정합성을 검사할 때 쓰는 patch (DINOv2 ViT-L/14)
+# <scene>/da3/depth.npz 를 비압축 .npy 로 풀어 둔 캐시 (scripts/data/cache_da3_depth.py).
+# npz 는 deflate 라 6 장만 필요해도 scene 전체를 풀어야 해서 0.62 s/item; 캐시 mmap 은 0.02 s.
+# null 로 두면 npz 폴백이라 결과는 같고 느리기만 하다.
+custom_geo_depth_cache_dir: /data1/cympyc1785/data/DL3DV/scenes/da3_depth_raw
 clip_version: ViT-B/32
 clip_max_length: 77
 # config_large.py's CLaTr ckpt. It is an architecture-identical drop-in to the

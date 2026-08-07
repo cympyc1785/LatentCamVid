@@ -1,6 +1,7 @@
 import torch
 import torch.nn.functional as F
 import numpy as np
+import math
 import os
 import sys
 import wandb
@@ -119,6 +120,126 @@ def attach_geo_cam(emb, data, device):
     else:                         # relfirst: per-view, broadcast over the view's patches
         cam = cam.unsqueeze(2).expand(B, V, P, cam.shape[-1]).reshape(B, M, cam.shape[-1])
     return torch.cat([emb, cam], dim=-1)
+
+
+@torch.no_grad()
+def geo_attn_probe(raw_model, scheduler, z, text_emb, text_mask, geo_emb, geo_mask, images=None,
+                   timestep=500, n_views=None, grid_hw=None, make_figure=True):
+    """[new 2026-08-07] geo cross-attention 을 학습 중에 추적한다. cfg.log_geo_attn 으로만 켜지고
+    꺼져 있으면 호출되지 않으므로 기존 run 의 동작/속도는 그대로다.
+
+    왜 attention weight 만으로는 부족한가: CrossAttention 은 norm(x + a) 이고 attention 은
+    softmax 라 **행 합이 항상 1** 이다. 즉 "geo 를 얼마나 쓰는가"는 attention map 에 안 나온다.
+    같이 재야 하는 게 resid_ratio = ||a|| / ||x|| — geo 가 hidden state 를 실제로 밀어내는 양이다.
+
+    반환 dict
+      resid_ratio_l{i}     layer i 의 ||a||/||x||  (+ 평균)
+      attn_entropy         geo 토큰 M 개에 대한 attention 엔트로피(nats). ln(M) 이면 완전 균일
+                           = 아무 patch 도 고르지 않는 상태.
+      attn_entropy_norm    위를 ln(M) 으로 나눈 값 (1.0 = 균일). run 간 비교는 이걸로.
+      view_mass_v{i}       M = V x P 로 접었을 때 view 별 attention 질량 (균일이면 1/V)
+      view_max_over_uniform 가장 많이 보는 view 의 질량 / (1/V). 1.0 이면 view 구분을 안 한다.
+      dpred_shuffle        geo 를 배치 축으로 roll(1) 했을 때 ||pred-pred_real||/||pred_real||.
+                           **geo 를 실제로 쓰는지의 직접 지표**다 (토큰 통계는 그대로 두고 scene
+                           짝만 깨므로, 0 이면 모델이 geo 내용을 안 본다).
+      figure               (make_figure) V 개 context view 의 attention heatmap (+ 있으면 RGB)
+    """
+    import numpy as np
+    probe = {}
+
+    def _mk_hook(li):
+        def hook(mod, inputs, output):
+            x, (a, w) = inputs[0], (output[0], output[1])
+            d = probe.setdefault(li, {})
+            d['resid'] = (a.float().norm(dim=-1) / x.float().norm(dim=-1).clamp(min=1e-12)).mean().item()
+            if w is not None:
+                d['attn'] = w.detach().float()                     # (B,T,M) head 평균
+        return hook
+
+    handles = [raw_model.layers[li][5].attn.register_forward_hook(_mk_hook(li))
+               for li in range(len(raw_model.layers))]
+    try:
+        B = z.shape[0]
+        ts = torch.full((B,), int(timestep), device=z.device, dtype=torch.long)
+        # 고정 seed noise — epoch 마다 같은 x_t 를 써야 지표가 epoch 간 비교 가능해진다
+        g = torch.Generator(device='cpu').manual_seed(1234)
+        noise = torch.randn(z.shape, generator=g).to(z.device)
+        x_t = scheduler.add_noise(z, noise, ts)
+        pred_real = raw_model(x_t, ts.float(), text_emb, text_mask, geo_emb, geo_mask)
+        stats, resid = {}, []
+        attn0 = None
+        for li in sorted(probe):
+            r = probe[li]['resid']
+            stats[f'resid_ratio_l{li}'] = r
+            resid.append(r)
+            if attn0 is None:
+                attn0 = probe[li].get('attn')
+        stats['resid_ratio_mean'] = float(np.mean(resid)) if resid else float('nan')
+
+        probe.clear()
+        pred_sh = raw_model(x_t, ts.float(), text_emb, text_mask,
+                            torch.roll(geo_emb, 1, 0), torch.roll(geo_mask, 1, 0))
+        stats['dpred_shuffle'] = ((pred_sh - pred_real).norm() /
+                                  pred_real.norm().clamp(min=1e-12)).item()
+
+        fig = None
+        if attn0 is not None:
+            p = attn0.mean(dim=1)                                  # (B,M) target token 평균
+            p = p / p.sum(-1, keepdim=True).clamp(min=1e-12)
+            M = p.shape[-1]
+            stats['attn_entropy'] = (-(p * p.clamp(min=1e-12).log()).sum(-1)).mean().item()
+            stats['attn_entropy_norm'] = stats['attn_entropy'] / math.log(M)
+            V = int(n_views) if n_views else 6
+            if M % V == 0:
+                P = M // V
+                vm = p.view(-1, V, P).sum(-1).mean(0)              # (V,)
+                for i in range(V):
+                    stats[f'view_mass_v{i}'] = vm[i].item()
+                stats['view_max_over_uniform'] = (vm.max().item() * V)
+                if make_figure and grid_hw is not None:
+                    fig = _geo_attn_figure(p[0].view(V, P), grid_hw, images, stats)
+        return stats, fig
+    finally:
+        for h in handles:
+            h.remove()
+
+
+def _geo_attn_figure(attn_v, grid_hw, images, stats):
+    """attn_v (V,P) -> V 열짜리 figure. images (B,V,3,H,W) 가 있으면 위에 RGB 를 같이 깐다."""
+    import matplotlib
+    matplotlib.use('Agg')
+    import matplotlib.pyplot as plt
+    import numpy as np
+    gh, gw = int(grid_hw[0]), int(grid_hw[1])
+    V = attn_v.shape[0]
+    a = attn_v.detach().float().cpu().numpy().reshape(V, gh, gw)
+    has_rgb = images is not None
+    rows = 2 if has_rgb else 1
+    fig, axes = plt.subplots(rows, V, figsize=(2.4 * V, 2.6 * rows), squeeze=False)
+    # vmin/vmax 를 **6개 view 전체**에서 잡는다. imshow 기본값은 패널마다 따로 정규화해서
+    # view 간 밝기 비교가 무의미해진다 (view mass 차이가 그림에서 지워진다).
+    vmin, vmax = float(a.min()), float(a.max())
+    im_h = None
+    for v in range(V):
+        if has_rgb:
+            im = images[0, v].detach().float().cpu().numpy().transpose(1, 2, 0)
+            im = (im - im.min()) / max(im.max() - im.min(), 1e-8)
+            axes[0][v].imshow(im)
+            axes[0][v].set_title(f"view {v}" + (" (=target s)" if v == 0 else ""), fontsize=8)
+            axes[0][v].axis('off')
+        ax = axes[rows - 1][v]
+        im_h = ax.imshow(a[v], cmap='inferno', vmin=vmin, vmax=vmax)
+        ax.set_title(f"mass {a[v].sum():.4f}", fontsize=8)
+        ax.axis('off')
+    if im_h is not None:
+        fig.colorbar(im_h, ax=axes[rows - 1, :].tolist(), fraction=0.02)
+    # 그림 안 텍스트는 영문만 쓴다 — matplotlib 기본 폰트(DejaVu Sans)에 한글 glyph 가 없어
+    # 한글을 넣으면 전부 두부(□)로 나온다.
+    fig.suptitle(f"geo cross-attn (uniform = {1.0 / a.size:.2e}) | "
+                 f"resid ||a||/||x|| {stats.get('resid_ratio_mean', float('nan')):.3f} | "
+                 f"entropy_norm {stats.get('attn_entropy_norm', float('nan')):.4f} | "
+                 f"dpred_shuffle {stats.get('dpred_shuffle', float('nan')):.4f}", fontsize=9)
+    return fig
 
 
 @torch.no_grad()
@@ -339,6 +460,15 @@ def train():
     # 파라미터를 optimizer 에 넣지 않으면 GeoTokenizer/ln/proj 가 랜덤 초기값에 영원히 머문다.
     # lagernvs/scenetok 은 trainable=False 라 여기서 아무 것도 달라지지 않는다.
     _geo_trainable = bool(geo_encoder is not None and getattr(geo_encoder, 'trainable', False))
+    # [new 2026-08-07] geo attention map 을 view 별 patch 격자로 되접을 때 쓰는 (gh, gw).
+    # custom backend 만 격자가 확정적이다 (custom_geo_input_hw / patch). 다른 backend 는
+    # None -> geo_attn_probe 가 스칼라 지표만 내고 figure 는 안 만든다.
+    _geo_grid_hw = None
+    if str(getattr(cfg, 'geo_encoder', None)) == 'custom':
+        _p = int(getattr(cfg, 'custom_geo_patch', 14))
+        _ihw = getattr(cfg, 'custom_geo_input_hw', None)
+        if _ihw:
+            _geo_grid_hw = (int(_ihw[0]) // _p, int(_ihw[1]) // _p)
     _geo_frozen_keys = set()
     if _geo_trainable:
         # .train() 을 부르지 않는다 — SceneEncoder.__init__ 이 frozen DINO 를 eval() 로 내려
@@ -463,6 +593,29 @@ def train():
                     traj_latents = camera_vae.encode(traj) / cfg.vae_latent_scale
                 else:
                     traj_latents = traj
+
+                # [new 2026-08-07] geo cross-attention tracking. cfg.log_geo_attn 이 꺼져 있으면
+                # (기본값) 아예 안 돈다 -> 기존 run 의 동작·속도 그대로. 첫 배치 하나에서만 재고
+                # forward 2회 추가라 비용은 무시할 수준이다.
+                if (step == 0 and getattr(cfg, 'log_geo_attn', False) and pc_embeds is not None
+                        and not _pt and not getattr(cfg, 'is_ar', False)):
+                    _every = int(getattr(cfg, 'log_geo_attn_every', 5))
+                    _fig_ok = (epoch % _every == 0)
+                    try:
+                        _gs, _gfig = geo_attn_probe(
+                            accelerator.unwrap_model(model), noise_scheduler, traj_latents,
+                            text_embeds, text_masks, pc_embeds, pc_masks,
+                            images=data.get('images'),
+                            timestep=int(getattr(cfg, 'log_geo_attn_timestep', 500)),
+                            n_views=int(data['images'].shape[1]) if 'images' in data else None,
+                            grid_hw=_geo_grid_hw, make_figure=_fig_ok)
+                        accelerator.log({f"val/geo/{k}": v for k, v in _gs.items()}, step=global_step)
+                        if _gfig is not None:
+                            accelerator.log({"val/geo/attn_map": wandb.Image(_gfig)}, step=global_step)
+                            import matplotlib.pyplot as _plt
+                            _plt.close(_gfig)
+                    except Exception as _e:      # 계측 실패가 학습을 죽이면 안 된다
+                        print(f"[geo attn] probe 실패 (무시하고 계속): {type(_e).__name__}: {_e}")
 
                 if _pt:   # per-token flow: masked val loss + tau-bin/pattern monitoring
                     vloss, tau, labels, per_tok = per_token_flow_loss(

@@ -5,6 +5,19 @@ All notable changes to the latentcam sub-project. Follows [Keep a Changelog](htt
 ## [Unreleased]
 
 ### Added
+- **`scripts/eval/geo_ablation.py`** — 학습된 모델이 geo condition 을 **실제로 읽는지**를 재는
+  paired ablation. 같은 batch / 같은 noise / 같은 timestep 에 geo 토큰만 바꿔
+  `real` / `shuffle`(= `torch.roll(geo_emb, 1, 0)`, 토큰 통계는 유지하고 scene 짝만 깨뜨림) /
+  `zero` / `none`(조건 자체 제거) 4조건의 epsilon MSE 와 `d_pred_vs_real` 을 비교한다.
+  `shuffle` 이 핵심이다 — `zero` 는 `geo_proj` 에 bias 가 있어 "조건 없음"이 아니라 "상수 토큰"이
+  되므로 내용 의존성을 분리하지 못한다. 부수적으로 layer 별 `resid_ratio = ‖a‖/‖x‖`,
+  `attn_entropy_nats`, `view_mass` 를 뽑는다. `eval_testset.build_cfg` 재사용,
+  출력 `eval_my/geo_ablation/<run>__<ckpt>/geo_ablation.json`.
+- **`cfg.log_geo_attn` / `cfg.log_geo_attn_every` / `cfg.log_geo_attn_timestep`**
+  (`main/conf/config.yaml`, 기본 `false` / `5` / `500`) — 학습 중 validation 때 geo cross-attn 을
+  계측해 wandb 에 올린다. 기본이 `false` 라 기존 run 은 동작이 바뀌지 않는다.
+  스칼라는 매 validation, attention map 이미지는 `log_geo_attn_every` epoch 마다.
+  고정 timestep + 고정 seed noise 라 **epoch 간 비교가 성립**한다.
 - **`main/conf/experiment/da3_1k_customgeo_{withs,nos}.yaml`** — 새 custom geo encoder
   (`models/custom_geo_encoder.py`)를 쓰는 arm 2종. **둘의 차이는 context view 선택 두 줄뿐**이다:
   `withs` 는 `geo_first_view_target_s: true` + `geo_cover_subtract_first: true`
@@ -342,6 +355,22 @@ All notable changes to the latentcam sub-project. Follows [Keep a Changelog](htt
     셋 다 `render_avgscale.py`의 `lagernvs` / `one_st` / `one_sv`와 소수점 3자리까지 일치.
 
 ### Changed
+- **`main/train_latent_cam_dm.py`: 학습 중 geo cross-attn 계측** (`geo_attn_probe` /
+  `_geo_attn_figure` 신규, `run_validation` 안에서 `cfg.log_geo_attn` 이 켜졌을 때만 호출).
+  `cfg.log_geo_attn` 기본이 `false` 이고 probe 실패는 `try/except` 로 삼키므로
+  **기존 경로는 그대로**다 (계측이 학습을 죽이면 안 된다).
+  - `layers[li][5].attn` (geo cross-attn) 에 forward hook 을 걸어 layer 별
+    **`resid_ratio = ‖a‖/‖x‖`** 를 잰다. attention weight 만으로는 부족하다 —
+    `CrossAttention.forward` 는 `norm(x + a)` 이고 attention 은 softmax 라 **행 합이 항상 1**
+    이어서, 모델이 geo 를 무시해도 attention map 은 멀쩡해 보인다. 실제로 얼마나 섞이는지는
+    residual 크기로만 보인다.
+  - 같이 올리는 스칼라: `attn_entropy_nats` / `attn_entropy_norm`(uniform 대비),
+    `view_mass_v{i}`(view 별 attention 질량, uniform = 1/V), `view_max_over_uniform`,
+    `dpred_shuffle`(= geo 를 roll 했을 때 예측이 얼마나 바뀌는지, 상대 norm).
+  - attention map figure 는 **6개 view 전체에서 잡은 공통 `vmin`/`vmax`** + `inferno` +
+    공유 colorbar (사용자 결정 2026-08-07). panel 마다 autoscale 하면 view 간 밝기 비교가
+    지워지고, uniform 대비 상대값(diverging)은 outlier min 0.48 / max 3.64 에 씻겨나간다.
+    그림 안 텍스트는 **영문만** — DejaVu Sans 에 한글 glyph 가 없어 두부(□)로 나온다.
 - **`main/train_latent_cam_dm.py`: 학습되는 geo encoder 배선** (`getattr(geo_encoder,
   'trainable', False)` 로 분기 — 기존 frozen backend 는 전부 그대로 `no_grad` 경로).
   - `geo_encode()` 상단에 `wants_batch` 분기 추가: custom backend 는 view latent 가 아니라

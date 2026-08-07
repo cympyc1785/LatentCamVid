@@ -280,6 +280,19 @@ custom_geo_patch: 14          # dataset 이 격자 정합성을 검사할 때 �
 # npz 는 deflate 라 6 장만 필요해도 scene 전체를 풀어야 해서 0.62 s/item; 캐시 mmap 은 0.02 s.
 # null 로 두면 npz 폴백이라 결과는 같고 느리기만 하다.
 custom_geo_depth_cache_dir: /data1/cympyc1785/data/DL3DV/scenes/da3_depth_raw
+
+# --- geo cross-attention tracking (val 때만, 첫 배치 하나) ------------------------
+# 켜면 wandb 에 val/geo/* 스칼라와 val/geo/attn_map 이미지가 올라간다. 기본 off 라
+# 기존 run 은 코드 경로가 바뀌지 않는다. forward 2회 추가라 비용은 무시할 수준.
+#   resid_ratio_l{i}  geo cross-attn 의 ||a||/||x||. attention 은 softmax 라 행 합이 항상
+#                     1 이므로 "geo 를 얼마나 쓰는가"는 attention map 이 아니라 이걸로 본다.
+#   attn_entropy_norm 1.0 = geo 토큰에 완전 균일(= patch 를 고르지 않음), 낮을수록 집중.
+#   dpred_shuffle     geo 를 배치 축으로 roll(1) 했을 때 출력 변화율. geo 를 실제로 쓰는지의
+#                     직접 지표 (토큰 통계는 그대로 두고 scene 짝만 깬다). 0 이면 안 쓰는 것.
+#   view_mass_v{i}    view 별 attention 질량 (균일 = 1/V)
+log_geo_attn: false
+log_geo_attn_every: 5         # 이 주기(epoch)마다 attn_map 이미지도 같이 올린다 (스칼라는 매 val)
+log_geo_attn_timestep: 500    # 고정 timestep + 고정 seed noise -> epoch 간 비교 가능
 clip_version: ViT-B/32
 clip_max_length: 77
 # config_large.py's CLaTr ckpt. It is an architecture-identical drop-in to the

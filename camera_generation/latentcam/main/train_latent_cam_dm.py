@@ -773,6 +773,16 @@ def train():
                 if _geo_trainable:
                     torch.save(_geo_sd, os.path.join(ckpt_dir, "best_geo.pth"))
                 print(f"(ckpt) new best val/loss_traj={best_val:.6f} @ epoch {epoch} -> best.pth")
+            # [new 2026-08-08] cfg.ckpt_at_epochs 에 든 epoch 은 별도로 박아 둔다. best/last 는
+            # 계속 덮어써지므로 "학습 중간 지점의 모델"을 나중에 볼 방법이 없다. 기본값이 빈
+            # 리스트라 켜지 않으면 기존 run 디렉토리 구조와 동일하다.
+            for _e in (getattr(cfg, 'ckpt_at_epochs', None) or []):
+                if epoch == int(_e):
+                    torch.save(unwrapped_model.state_dict(),
+                               os.path.join(ckpt_dir, f"epoch{int(_e)}.pth"))
+                    if _geo_trainable:
+                        torch.save(_geo_sd, os.path.join(ckpt_dir, f"epoch{int(_e)}_geo.pth"))
+                    print(f"(ckpt) epoch {epoch} 고정 저장 -> epoch{int(_e)}.pth")
             # full checkpoint for seamless resume (model+opt+step+epoch+best_val+ids)
             torch.save({
                 'model': unwrapped_model.state_dict(),

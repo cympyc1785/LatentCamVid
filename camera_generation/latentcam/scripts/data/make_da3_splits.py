@@ -28,6 +28,8 @@ da3 = 각 scene 의 `<scene>/da3/` 아래에 새로 추출해 둔 depth / pose /
   같은 규칙으로 셔플한다.
 
 Run: python scripts/data/make_da3_splits.py [--batch 1K] [--train-frac 0.9] [--seed 42]
+     # 여러 batch 를 한 코퍼스로 (scene-disjoint 분할은 batch 경계를 무시하고 전체에서 한 번 한다)
+     python scripts/data/make_da3_splits.py --batches 1K 2K 3K 4K 5K 6K 7K --tag da3_7k
 """
 import argparse
 import csv
@@ -66,6 +68,17 @@ def scan_scene(sdir):
     except Exception as e:
         return [], f"unreadable({type(e).__name__})"
 
+    # [new 2026-08-08] 이미지 수 == da3 pose 수. blacklist.csv 의 filter_len_mismatch(13건)는
+    # 최상위 transforms.json 기준이라 da3 pose 에 대해서는 보장이 없다. 어긋나면 프레임 인덱스가
+    # 조용히 밀려서 잘못된 (이미지, 카메라) 짝으로 학습된다. 실측 1K~7K 는 7000/7000 통과라
+    # 지금은 아무것도 안 걸러내지만, 이후 batch 를 추가할 때를 위한 방어다.
+    img_dir = next((osp.join(sdir, f) for f in ("images_8", "images_4", "images")
+                    if osp.isdir(osp.join(sdir, f))), None)
+    if img_dir is None:
+        return [], "no_image_dir"
+    if len(os.listdir(img_dir)) != nframes:
+        return [], "img_pose_count_mismatch"
+
     segs, bad = [], Counter()
     for k in sorted(prompts, key=lambda x: int(x) if str(x).isdigit() else x):
         v = prompts[k]
@@ -102,33 +115,43 @@ def scan_scene(sdir):
 def main():
     ap = argparse.ArgumentParser()
     ap.add_argument("--root", default=ROOT)
-    ap.add_argument("--batch", default="1K", help="DL3DV batch dir to scan")
+    ap.add_argument("--batch", default="1K", help="DL3DV batch dir to scan (단일)")
+    ap.add_argument("--batches", nargs="+", default=None,
+                    help="여러 batch 를 한 코퍼스로 묶는다 (예: --batches 1K 2K ... 7K). "
+                         "주면 --batch 는 무시되고 --tag 가 필수다.")
     ap.add_argument("--train-frac", type=float, default=0.9)
     ap.add_argument("--seed", type=int, default=42)
     ap.add_argument("--tag", default=None, help="output name tag (default: da3_<batch 소문자>)")
     args = ap.parse_args()
-    tag = args.tag or f"da3_{args.batch.lower()}"
+    # --batches 를 안 주면 기존 단일-batch 동작 그대로다.
+    batches = args.batches or [args.batch]
+    if args.batches and not args.tag:
+        ap.error("--batches 를 쓸 때는 --tag 를 명시해야 한다 (예: --tag da3_7k)")
+    tag = args.tag or f"da3_{batches[0].lower()}"
 
-    bdir = osp.join(args.root, args.batch)
     blocked = read_blacklist(args.root)
-    hashes = sorted(h for h in os.listdir(bdir) if osp.isdir(osp.join(bdir, h)))
-    print(f"{args.batch}: {len(hashes)} scene dirs | blacklist {len(blocked)} scenes (전 batch 합)")
+    print(f"batches {batches} | blacklist {len(blocked)} scenes (전 batch 합)")
 
     scene_segs, drop = {}, Counter()
-    for h in hashes:
-        if h in blocked:
-            drop["blacklisted"] += 1
-            continue
-        segs, bad = scan_scene(osp.join(bdir, h))
-        if isinstance(bad, str):
-            drop[bad] += 1
-            continue
-        for k, v in bad.items():
-            drop[k] += v
-        if not segs:
-            drop["no_valid_segment"] += 1
-            continue
-        scene_segs[f"{args.batch}/{h}"] = segs
+    for b in batches:
+        bdir = osp.join(args.root, b)
+        hashes = sorted(h for h in os.listdir(bdir) if osp.isdir(osp.join(bdir, h)))
+        n0 = len(scene_segs)
+        for h in hashes:
+            if h in blocked:
+                drop["blacklisted"] += 1
+                continue
+            segs, bad = scan_scene(osp.join(bdir, h))
+            if isinstance(bad, str):
+                drop[bad] += 1
+                continue
+            for k, v in bad.items():
+                drop[k] += v
+            if not segs:
+                drop["no_valid_segment"] += 1
+                continue
+            scene_segs[f"{b}/{h}"] = segs
+        print(f"  {b}: {len(hashes)} scene dirs -> 유효 {len(scene_segs) - n0}")
 
     n_seg = sum(len(v) for v in scene_segs.values())
     print(f"유효: {len(scene_segs)} scene / {n_seg} segment")

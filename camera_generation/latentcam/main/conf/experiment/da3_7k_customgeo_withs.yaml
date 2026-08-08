@@ -1,0 +1,35 @@
+# @package _global_
+# da3_1k_customgeo_withs.yaml 의 **7K 코퍼스판** — geo_worldtraj 형 context 선택
+# (geo_first_view_target_s: true + geo_cover_subtract_first: true, 즉 context view0 이
+# target segment 의 첫 카메라 frame s 자체). nos arm 과는 그 **두 줄만** 다르다.
+#
+# 인코더/조건 설정은 1K 판에서 한 줄도 안 바꿨다. 바뀐 것은 데이터 범위(1K -> 1K~7K),
+# epochs(150 -> 100), ckpt_at_epochs 뿐이다. 코퍼스 구성/필터/epoch 근거는
+# da3_7k_da3pose.yaml 의 주석 참고. 인코더 구조와 dataset 이 내보내는 텐서
+# (geo_plucker_map / geo_logd / geo_valid) 설명은 da3_1k_customgeo_withs.yaml 참고.
+exp_name: da3_7k_customgeo_withs
+pose_source: da3
+batch_size: 8
+epochs: 100
+ckpt_at_epochs: [50]
+
+geo_encoder: custom
+geo_cam_embed: null           # 카메라는 픽셀 Plücker 로만 들어간다
+geo_latent_cache_dir: null    # GeoTokenizer/proj 가 학습되므로 출력을 얼릴 수 없다
+geo_posed: false              # custom backend 는 lagernvs cam_token 을 만들지 않는다
+custom_geo_input_hw: [252, 448]   # 14 의 배수 (256 -> 252). dataset/encoder 가 어긋나지 않게 명시
+custom_geo_freeze_dino: true
+
+geo_view_sampling: frustum_cover
+geo_cover_out_of_seg: true
+geo_cover_centered_at_s: true
+geo_first_view_target_s: true     # <- arm A 의 정의. nos arm 은 false
+geo_cover_subtract_first: true    # <- arm A 의 정의. nos arm 은 false
+
+scale_mode: avg_scale
+intr_norm: rel                # vae_20260302_300 = frame-0-relative-intrinsics ckpt
+cam_dim: 64                   # = 그 ckpt 의 latent_dim
+meta_csv: meta_da3_7k.csv
+train_seg_list: /data1/cympyc1785/data/DL3DV/scenes/latentcam_da3_7k_train_seg_list.txt
+test_seg_list: /data1/cympyc1785/data/DL3DV/scenes/latentcam_da3_7k_test_seg_list.txt
+coverage_blacklist_path: /data1/cympyc1785/LatentCamVid/camera_generation/latentcam/data/seg_blacklist_jump_da3_7k.csv

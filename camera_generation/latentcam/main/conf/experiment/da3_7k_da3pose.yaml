@@ -1,0 +1,35 @@
+# @package _global_
+# da3_1k_da3pose.yaml 의 **7K 코퍼스판**. 모델/조건 설정은 한 줄도 안 바꿨고 바뀐 것은
+# (a) 데이터 범위 1K -> 1K~7K, (b) epochs 150 -> 100, (c) ckpt_at_epochs 뿐이다.
+#
+# 코퍼스 (2026-08-08 재생성, scripts/data/make_da3_splits.py --batches 1K..7K --tag da3_7k)
+#   scene-disjoint 0.9/0.1 (seed 42). batch 경계를 무시하고 전체에서 한 번 나눈다.
+#   필터 순서:
+#     1) scenes/blacklist.csv  scene 단위. filter_dl3dv.py 산출물로 non_consecutive_frames 259 /
+#        filter_teleport 21+1 / filter_len_mismatch 13 / duplicate_camera_centers 2 등.
+#     2) make_da3_splits.scan_scene  da3/{prompts,pose,depth,conf}.npz + avg_scale 존재,
+#        segment frame_idx 가 pose 프레임 수 안, avg_scale 유한 양수, prompt_camera 비지 않음,
+#        그리고 **이미지 수 == da3 pose 수** (1K~7K 실측 7000/7000 통과, 방어용).
+#     3) coverage_blacklist_path  segment 단위 teleport (아래).
+#
+# epochs: 100 (사용자 결정 2026-08-08). 데이터가 7배라 1K 의 150 epoch 과 같은 step 수는
+#   ~21 epoch 이고, 100 epoch 은 그 5배 가까운 gradient step 이다.
+# ckpt_at_epochs: [50] — best/last 는 계속 덮어써지므로 중간 지점 모델을 남기려면 이게 유일한 방법.
+#
+# vae_latent_scale 은 config 기본값 0.96032625 유지 (사용자 결정 2026-08-08). 1K 세 arm 과 같은
+#   상수라 loss_traj 를 같은 축에서 비교할 수 있다. 7K corpus 로 재계산하지 않았다.
+exp_name: da3_7k_da3pose
+pose_source: da3
+batch_size: 8
+epochs: 100
+ckpt_at_epochs: [50]
+geo_encoder: null
+scale_mode: avg_scale
+intr_norm: rel              # vae_20260302_300 = frame-0-relative-intrinsics ckpt
+cam_dim: 64                 # = 그 ckpt 의 latent_dim
+meta_csv: meta_da3_7k.csv
+train_seg_list: /data1/cympyc1785/data/DL3DV/scenes/latentcam_da3_7k_train_seg_list.txt
+test_seg_list: /data1/cympyc1785/data/DL3DV/scenes/latentcam_da3_7k_test_seg_list.txt
+# 세 arm 이 **같은** 파일을 가리킨다 — 세그먼트 집합이 어긋나면 arm 간 비교가 깨진다.
+# 1K 와 동일한 임계값 jr>6 | msf>0.2 | rmax>30, --source both (transforms ∪ da3).
+coverage_blacklist_path: /data1/cympyc1785/LatentCamVid/camera_generation/latentcam/data/seg_blacklist_jump_da3_7k.csv

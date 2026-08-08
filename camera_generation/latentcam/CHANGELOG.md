@@ -5,6 +5,20 @@ All notable changes to the latentcam sub-project. Follows [Keep a Changelog](htt
 ## [Unreleased]
 
 ### Added
+- **`cfg.ckpt_at_epochs`** (`main/conf/config.yaml`, 기본 `[]`) — 여기 든 epoch 에서
+  `ckpts/epoch<N>.pth` (custom geo arm 이면 `epoch<N>_geo.pth` 도) 를 따로 박아 둔다.
+  `best.pth` / `last.pth` 는 계속 덮어써지므로 **학습 중간 지점의 모델을 남길 유일한 방법**이다.
+  기본이 빈 리스트라 켜지 않으면 기존 run 디렉토리 구조와 동일하다.
+- **`main/conf/experiment/da3_7k_{da3pose,customgeo_withs,customgeo_nos}.yaml`** —
+  같은 3 arm 의 **7K 코퍼스판** (DL3DV 1K -> 1K~7K). 모델/조건 설정은 1K 판에서 한 줄도
+  안 바꿨고, 바뀐 것은 (a) 데이터 범위, (b) `epochs` 150 -> 100, (c) `ckpt_at_epochs: [50]`,
+  (d) `meta_csv` / `train_seg_list` / `test_seg_list` / `coverage_blacklist_path` 뿐이다.
+  세 arm 이 **같은** seg 리스트·blacklist 파일을 가리킨다 — 세그먼트 집합이 어긋나면 arm 간
+  비교가 깨진다. `vae_latent_scale` 은 config 기본값 `0.96032625` 유지 (7K 로 재계산하지
+  않음) 라 1K 세 arm 과 `loss_traj` 를 같은 축에서 비교할 수 있다.
+  코퍼스 실측: 유효 6704 scene / 43989 segment -> meta 검증 후 6095 scene,
+  scene-disjoint 0.9/0.1 (seed 42) = train 5485 scene / 35832 segment,
+  test 610 scene / 3985 segment. segment teleport blacklist 1208/39817 (3.03%).
 - **`scripts/eval/geo_ablation.py`** — 학습된 모델이 geo condition 을 **실제로 읽는지**를 재는
   paired ablation. 같은 batch / 같은 noise / 같은 timestep 에 geo 토큰만 바꿔
   `real` / `shuffle`(= `torch.roll(geo_emb, 1, 0)`, 토큰 통계는 유지하고 scene 짝만 깨뜨림) /
@@ -355,6 +369,19 @@ All notable changes to the latentcam sub-project. Follows [Keep a Changelog](htt
     셋 다 `render_avgscale.py`의 `lagernvs` / `one_st` / `one_sv`와 소수점 3자리까지 일치.
 
 ### Changed
+- **`scripts/data/make_da3_splits.py`: 다중 batch + 이미지/포즈 개수 검사**
+  - **`--batches 1K 2K ... 7K`** (+ 필수 `--tag`) — 여러 DL3DV batch 를 **한 코퍼스**로 묶는다.
+    scene-disjoint 분할은 batch 경계를 무시하고 전체에서 **한 번** 한다 (batch 별로 나눈 뒤
+    합치면 분할 비율이 batch 크기에 끌려간다). `--batches` 를 안 주면 기존 `--batch` 단일
+    동작 그대로다.
+  - **`img_pose_count_mismatch` 필터** — `scan_scene` 이 이미지 수 == da3 pose 프레임 수를
+    확인한다. `blacklist.csv` 의 `filter_len_mismatch`(13건)는 **최상위 `transforms.json`
+    기준**이라 da3 pose 에 대해서는 아무것도 보장하지 않는다. 어긋나면 프레임 인덱스가 조용히
+    밀려 **잘못된 (이미지, 카메라) 짝**으로 학습된다. 실측 1K~7K 는 7000/7000 통과라 지금은
+    아무것도 안 걸러내지만, 이후 batch 를 추가할 때를 위한 방어다.
+- **`main/train_latent_cam_dm.py`: `cfg.ckpt_at_epochs` 저장** — `best.pth` 블록 직후,
+  `resume.pth` 앞에서 해당 epoch 이면 `epoch<N>.pth` (+ geo 가 학습 대상이면 `epoch<N>_geo.pth`)
+  를 저장한다. 기본값이 빈 리스트라 **기존 run 은 저장 파일 구성이 바뀌지 않는다.**
 - **`main/train_latent_cam_dm.py`: 학습 중 geo cross-attn 계측** (`geo_attn_probe` /
   `_geo_attn_figure` 신규, `run_validation` 안에서 `cfg.log_geo_attn` 이 켜졌을 때만 호출).
   `cfg.log_geo_attn` 기본이 `false` 이고 probe 실패는 `try/except` 로 삼키므로

@@ -5,6 +5,20 @@ All notable changes to the latentcam sub-project. Follows [Keep a Changelog](htt
 ## [Unreleased]
 
 ### Added
+- **`scripts/data/sd_clip_divisor_spread.py`** — Scene-Decoupled cross-clip 의 divisor 후보를
+  `norm_divisor_compare.py` 와 같은 기준(`m = max_t||c_t-c_0|| / D` 의 `sd(log10 m)`)으로 비교한다.
+  own(target 자기 `avg_scale_align`, leaky 상한) / ctx(context clip 의 것, 현재 계획) /
+  ctxd(context clip 의 median depth × s, meters).
+  10 scene / 49 clip / 192 pair 실측: `sd(log10 m)` own **0.3749** · ctx **0.3370** · ctxd **0.3175**
+  — 셋이 사실상 동률이라 **divisor 선택은 병목이 아니다**. 분해하면 `sd(log10 reach)=0.3470` 이
+  지배하고 divisor 의 context 의존분(scene 내 산포)은 align 0.1115 / depth 0.0717 dex 뿐이며,
+  `corr(log reach, log align)=0.31` 로 divisor 가 target 움직임과 거의 상관이 없다.
+  부수 확인: `avg_scale` 은 `mean(||scene point - first camera||)`(dataset_dl3dv.py:921) 이라
+  **카메라 움직임이 아니라 장면 깊이**다 — ctx 와 ctxd 의 `corr(log)=0.93` 이 그 결과다.
+  또 mean 이라 원거리 point 에 취약하다: `scene927_...Creepwood` 는 scene 안에서 align 이
+  8.276 -> 56.083 (**6.78x**) 흔들리는데 median depth 는 11.196 -> 22.793 (2.04x) 이고
+  umeyama `resid` 는 0.009~0.030 로 전부 정상이라 **resid 필터로는 안 걸린다.**
+  out -> `results/scene_decoupled/clip_divisor_spread/{summary.md,per_clip.csv,per_pair.csv}`.
 - **`cfg.ckpt_every_epochs`** (`main/conf/config.yaml`, 기본 `null`) — 기존 `ckpt_at_epochs` 가
   "이 epoch 들에서 `ckpts/epoch<N>.pth` 를 남겨라" 였다면 이건 **주기**로 같은 일을 한다
   (`50` -> epoch 50, 100, 150...). 파일명 규약(`epoch<N>.pth`, N = 0-based 루프 변수)이 동일해서

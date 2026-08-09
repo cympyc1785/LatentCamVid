@@ -61,14 +61,23 @@ def load_clip(scene, clip):
     reach = float(np.max(np.linalg.norm(c - c[0:1], axis=-1)) * s)   # meters
 
     # 장면 깊이: da3 depth * s 의 median (meters). frame/pixel 서브샘플.
-    z = np.load(os.path.join(d, "depth.npz"))["depth"]
-    z = np.asarray(z[::FRAME_STRIDE, ::PIX_STRIDE, ::PIX_STRIDE], dtype=np.float32)
+    zz = np.load(os.path.join(d, "depth.npz"))["depth"]
+    z = np.asarray(zz[::FRAME_STRIDE, ::PIX_STRIDE, ::PIX_STRIDE], dtype=np.float32)
     z = z[np.isfinite(z) & (z > 0)]
     depth_m = float(np.median(z) * s)
+
+    # [new] frame 0 만. 같은 scene 의 clip 들은 frame-0 pose 가 완전히 동일하므로(중심 산포
+    # 0.0000 m, 회전 산포 max 0.084 deg) frame-0 depth 는 **context 선택과 무관**해야 한다.
+    # 그렇다면 이건 clip 을 누구로 뽑든 같은 값이 나오는 유일한 divisor 후보다.
+    z0 = np.asarray(zz[0], dtype=np.float32)
+    z0 = z0[np.isfinite(z0) & (z0 > 0)]
+    depth0_med_m = float(np.median(z0) * s)
+    depth0_mean_m = float(np.mean(z0) * s)      # avg_scale 과 같은 mean 통계 (꼬리 취약성 비교용)
 
     return dict(scene=scene, clip=clip, s=s, reach_m=reach,
                 align=float(json.load(open(ap))),
                 depth_m=depth_m,
+                depth0_med_m=depth0_med_m, depth0_mean_m=depth0_mean_m,
                 resid=float(u.get("resid_rmse_over_rad", float("nan"))))
 
 
@@ -106,10 +115,11 @@ def main():
 
     os.makedirs(OUT, exist_ok=True)
     with open(os.path.join(OUT, "per_clip.csv"), "w") as f:
-        f.write("scene,clip,s,reach_m,align,depth_m,resid\n")
+        f.write("scene,clip,s,reach_m,align,depth_m,depth0_med_m,depth0_mean_m,resid\n")
         for c in per_clip:
             f.write(f"{c['scene']},{c['clip']},{c['s']:.6f},{c['reach_m']:.6f},"
-                    f"{c['align']:.6f},{c['depth_m']:.6f},{c['resid']:.6f}\n")
+                    f"{c['align']:.6f},{c['depth_m']:.6f},{c['depth0_med_m']:.6f},"
+                    f"{c['depth0_mean_m']:.6f},{c['resid']:.6f}\n")
 
     # ---- (1) scene 내 clip 간 산포: divisor 가 "어느 clip 을 뽑든 같은 값" 인가 ----
     by_scene = {}
@@ -121,15 +131,21 @@ def main():
              "## (1) scene 안에서 clip 을 바꿨을 때 divisor 가 얼마나 흔들리나",
              "   align = avg_scale_align (context clip 의 움직임)   depth_m = 장면 깊이(meters)",
              "   ratio = scene 안 max/min. 1.0 에 가까울수록 'context 를 누구로 뽑든 같은 값'.", ""]
-    lines.append(f"{'scene':<46}{'nclip':>6}{'align_ratio':>13}{'depth_ratio':>13}")
-    ar, dr = [], []
+    COLS = [("align", "align"), ("depth_m", "depth_all"),
+            ("depth0_med_m", "d0_med"), ("depth0_mean_m", "d0_mean")]
+    lines.append(f"{'scene':<46}{'nclip':>6}" + "".join(f"{n:>11}" for _, n in COLS))
+    acc = {k: [] for k, _ in COLS}
     for sc, cs in sorted(by_scene.items()):
-        a, _ = spread([c["align"] for c in cs])
-        d, _ = spread([c["depth_m"] for c in cs])
-        ar.append(a); dr.append(d)
-        lines.append(f"{sc:<46}{len(cs):>6}{a:>13.4f}{d:>13.4f}")
-    lines += ["", f"  align_ratio  median {np.median(ar):.4f}   max {max(ar):.4f}",
-              f"  depth_ratio  median {np.median(dr):.4f}   max {max(dr):.4f}", ""]
+        row = ""
+        for k, _ in COLS:
+            r, _sd = spread([c[k] for c in cs])
+            acc[k].append(r); row += f"{r:>11.4f}"
+        lines.append(f"{sc:<46}{len(cs):>6}{row}")
+    lines.append("")
+    for k, n in COLS:
+        lines.append(f"  {n:>9}  median {np.median(acc[k]):.4f}   p90 "
+                     f"{np.percentile(acc[k],90):.4f}   max {max(acc[k]):.4f}")
+    lines.append("")
 
     # ---- (2) 모델이 실제로 회귀할 크기 m = reach/D 의 산포 ----
     pairs = []
@@ -138,17 +154,19 @@ def main():
             pairs.append(dict(scene=sc, tgt=tgt["clip"], ctx=ctx["clip"],
                               m_own=tgt["reach_m"] / tgt["align"],
                               m_ctx=tgt["reach_m"] / ctx["align"],
-                              m_ctxd=tgt["reach_m"] / ctx["depth_m"]))
+                              m_ctxd=tgt["reach_m"] / ctx["depth_m"],
+                              m_ctxd0=tgt["reach_m"] / ctx["depth0_med_m"]))
     with open(os.path.join(OUT, "per_pair.csv"), "w") as f:
-        f.write("scene,target,context,m_own,m_ctx,m_ctxd\n")
+        f.write("scene,target,context,m_own,m_ctx,m_ctxd,m_ctxd0\n")
         for p in pairs:
             f.write(f"{p['scene']},{p['tgt']},{p['ctx']},"
-                    f"{p['m_own']:.6f},{p['m_ctx']:.6f},{p['m_ctxd']:.6f}\n")
+                    f"{p['m_own']:.6f},{p['m_ctx']:.6f},{p['m_ctxd']:.6f},"
+                    f"{p['m_ctxd0']:.6f}\n")
 
     lines += ["## (2) normalized reach  m = reach / D   (pair 단위, n=%d)" % len(pairs),
               "   sd(log10 m) 이 낮을수록 좋다. 레벨은 VAE 가 흡수하므로 무관.",
               "   own = target 자기 align [LEAKY 상한] / ctx = 현재 계획 / ctxd = 제안", ""]
-    for k, nm in (("m_own", "own"), ("m_ctx", "ctx"), ("m_ctxd", "ctxd")):
+    for k, nm in (("m_own", "own"), ("m_ctx", "ctx"), ("m_ctxd", "ctxd"), ("m_ctxd0", "ctxd0")):
         lines.append("   " + q([p[k] for p in pairs], nm))
 
     txt = "\n".join(lines) + "\n"

@@ -18,6 +18,24 @@ All notable changes to the latentcam sub-project. Follows [Keep a Changelog](htt
   또 mean 이라 원거리 point 에 취약하다: `scene927_...Creepwood` 는 scene 안에서 align 이
   8.276 -> 56.083 (**6.78x**) 흔들리는데 median depth 는 11.196 -> 22.793 (2.04x) 이고
   umeyama `resid` 는 0.009~0.030 로 전부 정상이라 **resid 필터로는 안 걸린다.**
+  **[갱신] frame-0 depth 후보 `ctxd0` 추가** — 같은 scene 의 clip 들은 frame-0 pose 가 완전히
+  동일하므로 frame-0 depth 는 context 선택과 무관해야 한다는 가설. 실측이 그대로 확인해준다.
+  scene 안에서 clip 을 바꿨을 때 divisor 가 흔들리는 배수(max/min):
+
+  | divisor | median | p90 | max |
+  |---|---|---|---|
+  | `align` (현재) | 1.2516 | 2.0751 | **6.7762** |
+  | `depth_all` (전 프레임 median) | 1.4682 | 2.0572 | 2.2503 |
+  | **`d0_med` (frame-0 median)** | **1.1172** | **1.1883** | **1.2813** |
+  | `d0_mean` (frame-0 mean) | 1.1418 | 1.3160 | 1.4455 |
+
+  `align` 이 6.78x 튀던 `scene927_...Creepwood` 가 `d0_med` 로는 **1.1265** 로 내려온다
+  (`d0_mean` 은 1.4455 — mean 통계가 원거리 point 에 취약하다는 게 여기서도 재현).
+  scene 내 `sd(log10)`: reach 0.2359 / align 0.1115 / depth_all 0.0717 / **d0_med 0.0198**(=1.047x).
+  이 잔여 0.0198 은 da3 raw 스케일(0.0337)과 sim3 `s`(0.0356)가 **서로 상쇄된 나머지**라
+  sim3 정렬이 제대로 됐다는 방증이기도 하다. `corr(log reach, log d0_med)=0.50` 으로 `align` 의
+  0.31 보다 target 움직임과 더 상관돼 `sd(log10 m)` 도 최저(**0.3107**)다.
+  다만 개선폭은 ctx 0.3370 -> ctxd0 0.3107 (8%) 로, `reach` 자체 산포가 지배한다는 결론은 그대로.
   out -> `results/scene_decoupled/clip_divisor_spread/{summary.md,per_clip.csv,per_pair.csv}`.
 - **`cfg.ckpt_every_epochs`** (`main/conf/config.yaml`, 기본 `null`) — 기존 `ckpt_at_epochs` 가
   "이 epoch 들에서 `ckpts/epoch<N>.pth` 를 남겨라" 였다면 이건 **주기**로 같은 일을 한다

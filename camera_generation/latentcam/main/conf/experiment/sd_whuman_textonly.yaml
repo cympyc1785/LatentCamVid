@@ -1,0 +1,27 @@
+# @package _global_
+# Scene-Decoupled whuman, text-only ablation (geo 조건 없음).
+#
+# sd_whuman_customgeo 의 대조군. **같은 train/test 리스트**를 쓰므로 두 arm 이 본 (target, context)
+# 쌍이 정확히 같다 -- 차이는 geo 조건의 유무 하나뿐이다. context clip 은 이 arm 에서 분모
+# (avg_scale_align) 를 정하는 데만 쓰이고 모델에는 들어가지 않는다.
+#
+# batch_size / epochs 는 **customgeo arm 에 맞춰서** 4 / 50 이다 (text-only 자체는 bs 8 도 여유롭게
+# 돌지만, optimizer step 수와 step 당 표본 수가 다르면 두 곡선을 나란히 못 놓는다).
+# customgeo 가 bs 4 인 이유는 그쪽 yaml 의 [실측] 블록 참고 -- 49 view DINO forward 가 62 GB 다.
+exp_name: sd_whuman_textonly
+dataset_name: scene_decoupled
+sd_split: whuman
+pose_source: da3
+batch_size: 4
+epochs: 50
+ckpt_every_epochs: 5
+
+geo_encoder: null             # text-only
+geo_cam_embed: null
+geo_latent_cache_dir: null
+
+intr_norm: rel
+cam_dim: 64
+train_seg_list: /data1/cympyc1785/data/Scene-Decoupled-Video-dataset/latentcam_lists/sd_whuman_train.txt
+test_seg_list: /data1/cympyc1785/data/Scene-Decoupled-Video-dataset/latentcam_lists/sd_whuman_test.txt
+coverage_blacklist_path: null

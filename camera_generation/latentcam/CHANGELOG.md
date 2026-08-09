@@ -5,6 +5,38 @@ All notable changes to the latentcam sub-project. Follows [Keep a Changelog](htt
 ## [Unreleased]
 
 ### Added
+- **Scene-Decoupled 코퍼스로 학습할 수 있게 되었다** (`dataset_name: scene_decoupled`).
+  context 가 같은 scene 의 **다른 clip** 이라는 점만 빼면 DL3DV 경로와 규약이 같다.
+  - **`main/dataset_scene_decoupled.py`** (신규) — `SDCamDataset(CamDataset)`.
+    `scene_dir_list` 의 단위를 scene 이 아니라 **clip** 으로 두어서, 부모의
+    `_geo_pixel_plucker` / `_geo_depth_maps` / `_geo_cam_cond` 에 context clip 인덱스를
+    `scene_idx` 자리로 넘기기만 하면 그대로 돈다 (`rel = w2c_ctx_v @ inv(w2c_tgt_0)` 이
+    cross-clip 에서도 유효한 이유는 sim3 가 두 clip 을 같은 world frame 에 올려놨기 때문).
+    **분모 규약**: clip 별 `umeyama_gt.json` sim3 (`convention: gtrot`) 로 pose 와 depth 를
+    GT meters 로 올린 뒤, **context clip 의 `avg_scale_align` 하나로** target pose /
+    context Plücker translation / context depth 를 전부 나눈다. 추론 때 알 수 있는 건
+    context clip 뿐이라 target 의 `avg_scale` 을 쓰면 leakage 다.
+    static clip (`moving: false`) 은 `s`/`t` 가 없으므로 `_load_scene` 에서 즉시 raise 한다.
+  - **`main/base.py`** — `build_dataset(cfg)` 추가. `dataset_name` 기본값 `'dl3dv'` 는
+    기존 동작 그대로. seg-list 분할의 id 변환도 `type(dataset).seg_key` 로 위임했다
+    (DL3DV = `<batch>_<hash>_<seg>` -> 슬래시 경로, SD = 항등).
+  - **`main/conf/config.yaml`** — `dataset_name` / `sd_root` / `sd_split` / `sd_geo_views` 신규 키.
+  - **`scripts/data/sd_build_seg_lists.py`** (신규) — 학습 전에 (target, context) 쌍 리스트를
+    **뽑아 고정**한다. whuman 실측:
+    ```
+    clip 총 23408 (umeyama_gt.json 읽기 실패 0)
+      static (moving=false) 제외   7682
+      align 컷 (resid_rmse_over_rad > 코퍼스 p99 = 0.3273) 제외   158
+      남은 clip 15568 / clip 2장 이상 남은 scene 3340 of 3344
+      scene 단위 90/10 (seed 42) -> train scene 3006 = 52286 쌍 / test scene 334 = 5758 쌍
+    ```
+    컷 기준은 moving clip 15726 개 위에서 잰 백분위:
+    `resid_rmse_over_rad` p50 0.0292 / p90 0.0928 / **p99 0.3273** / max 1.0000.
+    `rot_spread_deg` p99 컷은 `--rot-p99` 로 쓸 수 있으나 **적용하지 않았다** — resid 컷 후
+    잔여 분포는 p50 0.4081 / p90 1.2026 / p99 5.3515 / max 62.2741, 10 deg 초과가 88 개다.
+    out -> `<sd_root>/latentcam_lists/sd_whuman_{train,test}.txt` + `_clip_stats.csv` + `_lists_summary.md`.
+  - **`main/conf/experiment/sd_whuman_customgeo.yaml`**, **`sd_whuman_textonly.yaml`** (신규) —
+    같은 리스트를 쓰는 paired arm. 차이는 geo 조건의 유무 하나뿐.
 - **`scripts/render/sd_pair_scene_swap_render.py`** — 같은 scene 의 두 clip 을 각자 sim3 로 GT 에
   보낸 뒤 **scene 만 바꿔서** 렌더한다 (target clip 의 pose 로, source clip 의 depth+RGB 를
   unproject -> reproject). dynamic subject 때문에 출력 frame t 는 source 의 **같은 t 프레임 하나만**
@@ -502,6 +534,12 @@ All notable changes to the latentcam sub-project. Follows [Keep a Changelog](htt
     셋 다 `render_avgscale.py`의 `lagernvs` / `one_st` / `one_sv`와 소수점 3자리까지 일치.
 
 ### Changed
+- **`main/dataset_dl3dv.py`: `CamDataset.__getitem__` 에서 target 쪽 블록을 `_target_out()` 으로
+  분리** — `SDCamDataset` 이 **분모만 다르고** cam_param 규약(`intr_norm` / `trans_repr` /
+  `normalize_camera_extrinsics_and_points`)은 완전히 같아서, 복사본을 두면 한쪽만 고치는 사고가
+  난다. 분리 전후 DL3DV item 0/137/5000 의 전 키를 비교해 **bit-identical** 확인
+  (`experiment=da3_7k_customgeo_nos` 기준). `seg_key()` staticmethod 도 같이 추가 —
+  seg-list id <-> `data_name` 변환을 dataset 클래스가 갖게 해서 `base.py` 가 코퍼스를 몰라도 된다.
 - **`scripts/data/cache_da3_depth.py`: `LAYOUT` 분기 (`dl3dv` 기본 | `clipdir`)** —
   Scene-Decoupled-Video-dataset 은 da3 를 **clip 단위**로 돌려서 scene 아래 trajectory 7개가
   각각 자기 `depth.npz` 를 갖는다 (DL3DV 는 scene 당 하나). `clipdir` 은 meta csv 없이 ROOT 를

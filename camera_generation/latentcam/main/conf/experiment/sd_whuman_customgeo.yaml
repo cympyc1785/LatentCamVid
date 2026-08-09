@@ -1,0 +1,47 @@
+# @package _global_
+# Scene-Decoupled whuman + custom geo encoder (frozen DINOv2 + trainable GeoTokenizer).
+#
+# da3_7k_customgeo_nos 를 SD 코퍼스로 옮긴 것. 달라지는 것만:
+#   dataset_name        dl3dv -> scene_decoupled   (context = 같은 scene 의 **다른 clip**)
+#   geo_view_sampling   frustum_cover -> 무의미     (SD 로더는 context clip segment 를 통째로 쓴다;
+#                                                    geo_cover_* / geo_first_view_target_s 도 미사용)
+#   sd_geo_views        null = 49 프레임 전부       (dynamic subject 라 시간축이 다 필요)
+#   train/test_seg_list  scripts/data/sd_build_seg_lists.py 산출물 (static 제외 + resid p99 컷,
+#                        scene 단위 90/10 -> train 52286 쌍 / test 5758 쌍)
+#   batch_size          8 -> 4                      (view 6장 -> 49장이라 DINO forward 가 8배)
+#   epochs              100 -> 50                   (아래 [실측] 참고)
+#
+# [실측 2026-08-10, H100 80GB 단일 GPU, 이 리스트 그대로]
+#   bs 2 / num_thread  8 : 1.92 it/s = 3.84 sample/s , 42.8 GB
+#   bs 4 / num_thread  8 : 1.04 it/s = 4.16 sample/s , 62.2 GB
+#   bs 4 / num_thread 24 : 1.13 it/s = 4.52 sample/s , 62.2 GB
+#   -> dataloader 가 아니라 **frozen DINOv2 forward 가 병목**이다 (worker 3배 늘려서 +9%).
+#      bs 8 은 메모리상 불가 (62GB 에서 선형이면 ~120GB).
+#      4.5 sample/s x 52286 = 약 3.2 h/epoch -> epochs 100 이면 13 일. 50 epoch(약 6.7 일)로 자르고
+#      ckpt_every_epochs 5 로 중간 ckpt 를 남긴다. 더 돌리려면 ckpts/resume.pth 로 이어붙이면 된다.
+#
+# 분모 규약: clip 별 umeyama sim3 (convention gtrot) 로 pose+depth 를 GT meters 로 올린 뒤
+# **context clip 의** avg_scale_align 하나로 target pose / context Plücker / context depth 를
+# 전부 나눈다. scale_mode 는 이 경로에서 쓰이지 않는다 (SDCamDataset 이 분모를 직접 준다).
+exp_name: sd_whuman_customgeo
+dataset_name: scene_decoupled
+sd_split: whuman
+sd_geo_views: null
+pose_source: da3
+batch_size: 4
+num_thread: 16                # 8 -> 16 (24 는 +9% 뿐이라 CPU/RAM 값 못 함)
+epochs: 50
+ckpt_every_epochs: 5
+
+geo_encoder: custom
+geo_cam_embed: null           # 카메라는 픽셀 Plücker 로만 들어간다
+geo_latent_cache_dir: null    # GeoTokenizer/proj 가 학습되므로 출력을 얼릴 수 없다
+geo_posed: false              # custom backend 는 lagernvs cam_token 을 만들지 않는다
+custom_geo_input_hw: [252, 448]   # 14 의 배수 (256 -> 252)
+custom_geo_freeze_dino: true
+
+intr_norm: rel                # vae_20260302_300 = frame-0-relative-intrinsics ckpt
+cam_dim: 64                   # = 그 ckpt 의 latent_dim
+train_seg_list: /data1/cympyc1785/data/Scene-Decoupled-Video-dataset/latentcam_lists/sd_whuman_train.txt
+test_seg_list: /data1/cympyc1785/data/Scene-Decoupled-Video-dataset/latentcam_lists/sd_whuman_test.txt
+coverage_blacklist_path: null

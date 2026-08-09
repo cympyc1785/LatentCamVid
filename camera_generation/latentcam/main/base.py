@@ -20,6 +20,20 @@ from dataset_dl3dv import CamDataset
 from torch.nn.utils.rnn import pad_sequence
 
 
+def build_dataset(cfg):
+    """[new 2026-08-10] cfg.dataset_name 으로 코퍼스를 고른다. 기본 'dl3dv' 는 기존 동작 그대로.
+      'dl3dv'           dataset_dl3dv.CamDataset            (scene 안의 다른 프레임 구간 = context)
+      'scene_decoupled' dataset_scene_decoupled.SDCamDataset (같은 scene 의 다른 clip = context)
+    """
+    name = getattr(cfg, 'dataset_name', None) or 'dl3dv'
+    if name == 'dl3dv':
+        return CamDataset(cfg=cfg)
+    if name == 'scene_decoupled':
+        from dataset_scene_decoupled import SDCamDataset      # 지연 import (기존 경로 영향 X)
+        return SDCamDataset(cfg=cfg)
+    raise ValueError(f"dataset_name must be 'dl3dv' | 'scene_decoupled', got {name!r}")
+
+
 class Base(object):
     __metaclass__ = abc.ABCMeta
 
@@ -52,17 +66,16 @@ class Trainer(Base):
     def _make_batch_generator(self, include_train=True, include_val=True):
         generator = torch.Generator().manual_seed(self.cfg.random_seed)
 
-        dataset = CamDataset(cfg=self.cfg)
+        dataset = build_dataset(self.cfg)
         tr_list = getattr(self.cfg, 'train_seg_list', None)
         te_list = getattr(self.cfg, 'test_seg_list', None)
         if tr_list and te_list:
             # Explicit segment-list split (deterministic): train/val come from the given
             # <batch>/<hash>/<seg_key> lists instead of a random 90/10. val order follows the
             # test-list file order (shuffle=False) so validation = its first N segments.
-            def _seg_key(sample_id):                     # "<batch>_<hash>_<seg>" -> "<batch>/<hash>/<seg>"
-                bh, seg = sample_id.rsplit('_', 1)
-                batch, h = bh.split('_', 1)
-                return f"{batch}/{h}/{seg}"
+            # 리스트 id <-> data_name 변환은 dataset.seg_key 가 안다 (DL3DV = 슬래시 경로 복원,
+            # Scene-Decoupled = 항등).
+            _seg_key = type(dataset).seg_key
             id2idx = {}
             for i, s in enumerate(dataset.samples):
                 id2idx.setdefault(_seg_key(s[4]), i)

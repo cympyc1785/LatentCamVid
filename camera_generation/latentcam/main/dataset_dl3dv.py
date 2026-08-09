@@ -1253,47 +1253,31 @@ class CamDataset(torch.utils.data.Dataset):
             return self._geo_cam_plucker(scene_idx, geo_idxs, w2c_s, norm_scale, hw_orig)
         return self._geo_cam_param(scene_idx, geo_idxs, w2c_s, norm_scale)
 
+    @staticmethod
+    def seg_key(data_name):
+        """data_name '<batch>_<hash>_<seg>' -> seg-list 파일의 '<batch>/<hash>/<seg>'.
+        base.py 의 명시적 train/test 분할이 쓴다. Scene-Decoupled 로더
+        (dataset_scene_decoupled) 는 리스트에 data_name 을 그대로 적으므로 항등으로 덮어쓴다."""
+        bh, seg = data_name.rsplit('_', 1)
+        batch, h = bh.split('_', 1)
+        return f"{batch}/{h}/{seg}"
+
     def __len__(self):
         return len(self.samples)
 
-    def __getitem__(self, idx):
-        scene_idx, s, e, caption, data_name = self.samples[idx]
-        extrinsics = self.extrinsics_list[scene_idx][s:e]     # (T,4,4) w2c
-        intrinsics = self.intrinsics_list[scene_idx][s:e]     # (T,3,3)
-        h, w = self.hw_list[scene_idx]
-        frame_files = self.frame_files_list[scene_idx]
+    def _target_out(self, extrinsics, intrinsics, norm_scale, h, w, caption, data_name,
+                    scale_mode=None):
+        """[refactor 2026-08-10] target segment 의 (w2c, K, divisor) -> 모델이 먹는 dict.
 
-        # if the segment has more than num_frames, sample evenly to num_frames
-        if extrinsics.shape[0] > self.num_frames:
-            sel = self._even_indices(extrinsics.shape[0], self.num_frames)
-            extrinsics = extrinsics[sel]
-            intrinsics = intrinsics[sel]
+        __getitem__ 에서 그대로 떼어낸 것이라 DL3DV 경로의 결과는 bit-identical 하다 (분할 전후
+        3개 item 의 전 키 동일 확인). 떼어낸 이유는 Scene-Decoupled 로더
+        (dataset_scene_decoupled.SDCamDataset) 가 **분모만 다르고** cam_param 규약
+        (intr_norm / trans_repr / normalize_camera_extrinsics_and_points) 은 완전히 같아서다 --
+        복사본을 두면 한쪽만 고치는 사고가 난다.
 
-        _scale_mode = resolve_scale_mode(self.cfg)
-        if _scale_mode == 'avg_scale':
-            # SCVideo original: normalize by the STORED point-cloud avg_scale
-            # (scene_dir/avg_scale/<seg_key>.json). Falls back to cam_dist_mean if missing.
-            gs = self._avg_scale(scene_idx, data_name.split('_')[-1])
-            norm_scale = gs if gs is not None else self._cam_dist_mean_scale(extrinsics)
-        elif _scale_mode == 'geo_lagernvs':
-            # FULL alignment: scale = 1.35*max(||geo-context center - frame s||) = the exact
-            # scale LagerNVS's build_cam_token uses -> target & geo latent share frame+scale.
-            gs = self._geo_lagernvs_scale(scene_idx, s, e)
-            norm_scale = gs if gs is not None else self._cam_dist_mean_scale(extrinsics)
-        elif _scale_mode == 'context_longer':
-            cs = self._cam_dist_mean_context(scene_idx, s, e)
-            norm_scale = cs if cs is not None else self._cam_dist_mean_scale(extrinsics)
-        elif _scale_mode == 'ctx_longer_135max':
-            # LagerNVS's denominator form (1.35*max) measured on the CONTEXT RANGE's
-            # num_frames windows -> same units as LagerNVS's own context normalization,
-            # and leakage-free (no target view enters the divisor).
-            cs = self._first_farthest_context(scene_idx, s, e)
-            norm_scale = cs if cs is not None else self._first_farthest_scale(extrinsics)
-        elif _scale_mode == 'first_farthest_135':
-            # LagerNVS-style: 1.35 * max ||center - first camera|| over the segment
-            norm_scale = self._first_farthest_scale(extrinsics)
-        else:
-            norm_scale = self._cam_dist_mean_scale(extrinsics)
+        scale_mode 는 intr_norm='auto' 의 legacy 커플링에만 쓰인다 (None -> cfg 에서 다시 해석).
+        """
+        _scale_mode = scale_mode or resolve_scale_mode(self.cfg)
         normalized_extrinsics, _, norm_scale, _ = normalize_camera_extrinsics_and_points(
             extrinsics, avg_scale=norm_scale, max_trans_norm=self.cfg.max_trans_norm)
 
@@ -1353,6 +1337,48 @@ class CamDataset(torch.utils.data.Dataset):
             'height': torch.full((cam_param.shape[0],), float(h)),
             'width': torch.full((cam_param.shape[0],), float(w)),
         }
+        return out
+
+    def __getitem__(self, idx):
+        scene_idx, s, e, caption, data_name = self.samples[idx]
+        extrinsics = self.extrinsics_list[scene_idx][s:e]     # (T,4,4) w2c
+        intrinsics = self.intrinsics_list[scene_idx][s:e]     # (T,3,3)
+        h, w = self.hw_list[scene_idx]
+        frame_files = self.frame_files_list[scene_idx]
+
+        # if the segment has more than num_frames, sample evenly to num_frames
+        if extrinsics.shape[0] > self.num_frames:
+            sel = self._even_indices(extrinsics.shape[0], self.num_frames)
+            extrinsics = extrinsics[sel]
+            intrinsics = intrinsics[sel]
+
+        _scale_mode = resolve_scale_mode(self.cfg)
+        if _scale_mode == 'avg_scale':
+            # SCVideo original: normalize by the STORED point-cloud avg_scale
+            # (scene_dir/avg_scale/<seg_key>.json). Falls back to cam_dist_mean if missing.
+            gs = self._avg_scale(scene_idx, data_name.split('_')[-1])
+            norm_scale = gs if gs is not None else self._cam_dist_mean_scale(extrinsics)
+        elif _scale_mode == 'geo_lagernvs':
+            # FULL alignment: scale = 1.35*max(||geo-context center - frame s||) = the exact
+            # scale LagerNVS's build_cam_token uses -> target & geo latent share frame+scale.
+            gs = self._geo_lagernvs_scale(scene_idx, s, e)
+            norm_scale = gs if gs is not None else self._cam_dist_mean_scale(extrinsics)
+        elif _scale_mode == 'context_longer':
+            cs = self._cam_dist_mean_context(scene_idx, s, e)
+            norm_scale = cs if cs is not None else self._cam_dist_mean_scale(extrinsics)
+        elif _scale_mode == 'ctx_longer_135max':
+            # LagerNVS's denominator form (1.35*max) measured on the CONTEXT RANGE's
+            # num_frames windows -> same units as LagerNVS's own context normalization,
+            # and leakage-free (no target view enters the divisor).
+            cs = self._first_farthest_context(scene_idx, s, e)
+            norm_scale = cs if cs is not None else self._first_farthest_scale(extrinsics)
+        elif _scale_mode == 'first_farthest_135':
+            # LagerNVS-style: 1.35 * max ||center - first camera|| over the segment
+            norm_scale = self._first_farthest_scale(extrinsics)
+        else:
+            norm_scale = self._cam_dist_mean_scale(extrinsics)
+        out = self._target_out(extrinsics, intrinsics, norm_scale, h, w, caption, data_name)
+        norm_scale = out['norm_scale']
 
         # geo encoder input (multi-view images) — only for the geo path; text-only skips it.
         # [new] cache hit short-circuits the whole block: the frozen geo_emb is read straight off

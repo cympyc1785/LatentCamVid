@@ -140,6 +140,19 @@ t5_tokenizer_path: google/umt5-xxl
 point_encoder: concerto
 # ===== DL3DV data + geo (scene-image) conditioning (latentcam additions beyond the
 # original SCVideo text->camera config; [new] = added after config.py) =====
+# [new 2026-08-10] 어느 코퍼스로 학습할지. 'dl3dv' (기본) = 기존 동작 그대로.
+#   'scene_decoupled'  main/dataset_scene_decoupled.py — 같은 scene 의 **다른 clip** 이 context.
+#     sample = (target clip, context clip) 쌍이고 train/test_seg_list 로 **고정**된다
+#     (scripts/data/sd_build_seg_lists.py: static clip 제외 + align resid p99 컷 + scene 단위 90/10).
+#     스케일 규약: clip 별 umeyama sim3 로 pose/depth 를 GT meters 로 올린 뒤 **context clip 의**
+#     avg_scale_align 하나로 전부 나눈다 (추론 때 아는 건 context 뿐이라 target 분모는 누수).
+#     dl3dv_root / meta_csv / coverage_blacklist_path 는 이 모드에서 쓰이지 않는다.
+dataset_name: dl3dv
+sd_root: /data1/cympyc1785/data/Scene-Decoupled-Video-dataset
+sd_split: whuman              # 'whuman' | 'wohuman'
+sd_geo_views: null            # context view 수. null = context clip segment 의 49 프레임 전부
+                              #   (dynamic scene 이라 시간축이 다 필요하다는 결정, 2026-08-10).
+                              #   int 면 균등 subsample — OOM 시 줄이는 손잡이.
 dl3dv_root: /data1/cympyc1785/data/DL3DV/scenes   # DL3DV scene root (images_8 = 480x270; see dataset_dl3dv.py)
 meta_csv: meta.csv            # [new] scene-list CSV under dl3dv_root (e.g. meta_worldtraj.csv = 1K-7K − blacklist)
 max_scenes: null              # cap #scenes loaded (null = all; small int for smoke tests)

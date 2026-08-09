@@ -5,6 +5,21 @@ All notable changes to the latentcam sub-project. Follows [Keep a Changelog](htt
 ## [Unreleased]
 
 ### Added
+- **`cfg.ckpt_every_epochs`** (`main/conf/config.yaml`, 기본 `null`) — 기존 `ckpt_at_epochs` 가
+  "이 epoch 들에서 `ckpts/epoch<N>.pth` 를 남겨라" 였다면 이건 **주기**로 같은 일을 한다
+  (`50` -> epoch 50, 100, 150...). 파일명 규약(`epoch<N>.pth`, N = 0-based 루프 변수)이 동일해서
+  두 설정이 같은 epoch 을 가리키면 파일 하나로 합쳐진다. epoch 0 은 건너뛴다. `null` 이면 기존
+  동작 그대로라 `ckpt_at_epochs` 만 쓰던 실험은 영향 없음. `main/train_latent_cam_dm.py` 의
+  고정 ckpt 저장 루프가 두 소스를 합쳐 중복 제거 후 저장한다.
+- **`main/conf/experiment/da3_7k_textonly.yaml`** — `da3_7k_da3pose.yaml` 에서 `pose_source: da3`
+  **한 줄만 뺀** COLMAP arm (= config 기본값 `transforms`). 기존 COLMAP text-only run
+  `20260730_223514_dl3dv_textonly_savedscale_bs8` 은 da3pose arm 과 pose_source 외에 교란이 넷
+  (segment 단위 random_split 의 scene leakage / blacklist 미적용 / `meta_worldtraj.csv` 6098 scene
+  vs `meta_da3_7k.csv` 6095 / 150 epoch vs 100 epoch) 더 있어 paired 비교가 안 됐다. 이 arm 은
+  meta_csv·seg list·blacklist 를 da3pose arm 과 **같은 파일**로 두고 `epochs: 150` 으로 맞춰
+  넷을 전부 제거한다. `vae_latent_scale` 도 같은 상수(0.96032625) 유지.
+  주의: 두 arm 은 GT 궤적도 translation 분모도 달라 `val/loss_traj` 를 직접 비교할 수 없다 —
+  1K 실측 기준 "차이 없음" 기준선이 `(0.74367/0.46512)^2 = 2.557`. 크기 무관 지표는 CLaTr/caption.
 - **`scripts/vae/vae_sd_scale_swap_recon.py`** — Scene-Decoupled cross-clip 계획(context clip 의
   `avg_scale_align` 을 target 의 분모로 사용)이 **frozen CameraVAE** 에서 버티는지 측정한다.
   선행 실측(300 scene / 5328 pair): `avg_scale_align == s * avg_scale` 가 **정확히** 성립하므로

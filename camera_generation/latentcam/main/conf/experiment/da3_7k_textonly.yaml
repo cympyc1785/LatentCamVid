@@ -1,0 +1,49 @@
+# @package _global_
+# da3_7k_da3pose.yaml 에서 **`pose_source: da3` 한 줄만 뺀** arm (= default `transforms`,
+# 즉 COLMAP). 1K 에서 돌렸던 da3_1k_{textonly,da3pose} 쌍의 7K 판이다.
+#
+# 왜 이 arm 이 필요한가
+# ---------------------
+# 기존 COLMAP text-only run 20260730_223514_dl3dv_textonly_savedscale_bs8 (wandb k6byk2m1) 과
+# 20260808_140209_da3_7k_da3pose (vfz7dw9m) 를 비교하려 했지만, 저장된 config.yaml diff 결과
+# pose_source 말고도 **비교를 깨는 교란이 넷** 더 있었다:
+#   (a) split 방식   k6byk2m1 은 train/test_seg_list 가 null -> base.py:86 random_split(0.9/0.1)
+#                    = segment 단위 랜덤이라 같은 scene 이 train 과 val 에 동시에 들어간다
+#                    (scene leakage). da3_7k 는 scene-disjoint seg list.
+#   (b) blacklist    k6byk2m1 은 coverage_blacklist_path=null -> teleport segment 미필터.
+#   (c) 코퍼스       meta_worldtraj.csv (6098 scene) vs meta_da3_7k.csv (6095 scene, da3 산출물
+#                    존재 + scan_scene 유효성 통과분만). train segment 35840 vs 34752.
+#   (d) step 수      k6byk2m1 은 150 epoch = global_step 671956, vfz7dw9m 은 100 epoch = 434400.
+# 이 arm 은 meta_csv / seg list / blacklist 를 da3_7k_da3pose 와 **같은 파일**로 쓰므로 (a)~(c)
+# 가 사라지고, epochs 150 으로 (d) 도 맞춘다. 남는 차이는 pose_source 한 줄뿐이다.
+#
+# pose_source 가 바꾸는 것 (dataset_dl3dv.py:454-473 의 4개 경로가 전부):
+#   _prompts_path    <scene>/prompts.json           (da3 는 <scene>/da3/prompts.json)
+#   _avg_scale_dir   <scene>/avg_scale              (da3 는 <scene>/da3/avg_scale)
+#   _scene_probe     transforms.json 의 n,h,w
+#   pose/intr 파싱   transforms.json (GL c2w -> CV w2c flip+inv)
+# 세그먼트 경계와 키('0','1',...)는 두 prompts.json 이 동일하므로 같은 seg list 가 그대로
+# 통한다 (1K 에서 두 arm 모두 6095 -> 5972 sample / 957 scene 로 일치 확인).
+#
+# !! 해석 주의 — 이 arm 과 da3pose arm 은 **정답 궤적도 분모도 다르다**:
+#    val/loss_traj 는 각자 자기 pose_source 의 GT 를 맞춘 점수고, cam_param 의 translation 분모
+#    (scale_mode=avg_scale 의 norm_scale) 도 다르다. 1K 실측 divisor_mean 16.20145(transforms)
+#    vs 6.31709(da3), diffusion 타깃 std 0.46512 vs 0.74367. MSE 는 타깃 크기의 제곱에 비례하므로
+#    "차이 없음" 기준선이 (0.74367/0.46512)^2 = 2.557 이다. 크기 무관 지표는 CLaTr/caption 쪽.
+#
+# vae_latent_scale 은 config 기본값 0.96032625 유지 — da3pose arm 과 **같은 상수**여야 paired
+#    비교가 성립한다 (1K 쌍에서 내린 결정과 동일).
+exp_name: da3_7k_textonly
+# pose_source 는 일부러 쓰지 않는다 -> config.yaml:81 의 default 'transforms' (COLMAP).
+batch_size: 8
+epochs: 150
+ckpt_every_epochs: 50            # epoch 50 / 100 에서 ckpts/epoch<N>.pth (150 은 last.pth)
+geo_encoder: null
+scale_mode: avg_scale
+intr_norm: rel              # vae_20260302_300 = frame-0-relative-intrinsics ckpt
+cam_dim: 64                 # = 그 ckpt 의 latent_dim
+meta_csv: meta_da3_7k.csv
+train_seg_list: /data1/cympyc1785/data/DL3DV/scenes/latentcam_da3_7k_train_seg_list.txt
+test_seg_list: /data1/cympyc1785/data/DL3DV/scenes/latentcam_da3_7k_test_seg_list.txt
+# da3pose arm 과 **같은** 파일을 가리킨다 — 세그먼트 집합이 어긋나면 paired 비교가 깨진다.
+coverage_blacklist_path: /data1/cympyc1785/LatentCamVid/camera_generation/latentcam/data/seg_blacklist_jump_da3_7k.csv

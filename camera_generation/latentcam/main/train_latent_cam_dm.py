@@ -794,13 +794,20 @@ def train():
             # [new 2026-08-08] cfg.ckpt_at_epochs 에 든 epoch 은 별도로 박아 둔다. best/last 는
             # 계속 덮어써지므로 "학습 중간 지점의 모델"을 나중에 볼 방법이 없다. 기본값이 빈
             # 리스트라 켜지 않으면 기존 run 디렉토리 구조와 동일하다.
-            for _e in (getattr(cfg, 'ckpt_at_epochs', None) or []):
-                if epoch == int(_e):
+            # [new 2026-08-09] cfg.ckpt_every_epochs 는 그 주기마다 자동으로 같은 일을 한다.
+            # 파일명 규약(epoch<idx>.pth, idx = 0-based 루프 변수)은 ckpt_at_epochs 와 동일하게
+            # 두어서 두 경로가 같은 epoch 에 대해 같은 파일을 가리킨다. epoch 0 은 건너뛴다.
+            _marks = list(getattr(cfg, 'ckpt_at_epochs', None) or [])
+            _every = getattr(cfg, 'ckpt_every_epochs', None)
+            if _every and epoch > 0 and epoch % int(_every) == 0:
+                _marks.append(epoch)
+            for _e in dict.fromkeys(int(x) for x in _marks):      # 중복 제거, 순서 유지
+                if epoch == _e:
                     torch.save(unwrapped_model.state_dict(),
-                               os.path.join(ckpt_dir, f"epoch{int(_e)}.pth"))
+                               os.path.join(ckpt_dir, f"epoch{_e}.pth"))
                     if _geo_trainable:
-                        torch.save(_geo_sd, os.path.join(ckpt_dir, f"epoch{int(_e)}_geo.pth"))
-                    print(f"(ckpt) epoch {epoch} 고정 저장 -> epoch{int(_e)}.pth")
+                        torch.save(_geo_sd, os.path.join(ckpt_dir, f"epoch{_e}_geo.pth"))
+                    print(f"(ckpt) epoch {epoch} 고정 저장 -> epoch{_e}.pth")
             # full checkpoint for seamless resume (model+opt+step+epoch+best_val+ids)
             torch.save({
                 'model': unwrapped_model.state_dict(),

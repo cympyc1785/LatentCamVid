@@ -243,10 +243,17 @@ def _geo_attn_figure(attn_v, grid_hw, images, stats):
 
 
 @torch.no_grad()
-def sample(model, scheduler, traj_len, text_emb, text_masks, point_emb, point_mask):
+def sample(model, scheduler, traj_len, text_emb, text_masks, point_emb, point_mask, generator=None):
+    """generator: x_T 추첨용 **CPU** torch.Generator. None 이면 전역 RNG (기존 동작).
+
+    이걸 넘기면 sampling 이 완전히 결정적이 된다 — cfg.sampling_type='ddim' 의 DDIMScheduler
+    는 eta=0 이라 step() 이 노이즈를 안 뽑으므로 확률적 요소가 x_T 하나뿐이기 때문이다.
+    ('ddpm' 으로 바꾸면 step() 이 전역 RNG 에서 다시 뽑으므로 이 보장이 깨진다.)
+    CPU generator 로 뽑아서 .to(device) 하는 이유는 GPU RNG 가 device/커널에 따라 다른 수열을
+    내서, 같은 시드라도 GPU 를 바꾸면 다른 표본이 나오기 때문이다."""
     B = text_emb.size(0)
     device = text_emb.device
-    x_t = torch.randn(B, traj_len, cfg.cam_dim).to(device)
+    x_t = torch.randn(B, traj_len, cfg.cam_dim, generator=generator).to(device)
 
     scheduler.set_timesteps(num_inference_steps=cfg.diffusion_inference_step, device=device)
     for t in scheduler.timesteps:
@@ -637,7 +644,18 @@ def train():
                     out = ar_sample(accelerator.unwrap_model(model), noise_scheduler, traj_len,
                                     text_embeds, text_masks, pc_embeds, pc_masks, cfg.ar_chunk_size, cfg.cam_dim)
                 else:
-                    out = sample(model, noise_scheduler, traj_len, text_embeds, text_masks, pc_embeds, pc_masks)
+                    # [new 2026-08-09] cfg.val_sample_seed 가 있으면 배치마다 (seed + step) 으로
+                    # 시드한 전용 generator 로 x_T 를 뽑는다. epoch 간/arm 간 **같은 노이즈**를
+                    # 쓰는 짝지은 비교가 되어, 가중치 변화만 val 곡선에 남는다. 실측 노이즈 폭은
+                    # 160-segment val 에서 sd 0.0046 (plateau 평균의 7%) 이라 arm 격차를 삼킨다.
+                    # 배치 index 를 더하는 이유: 전역 RNG 를 안 쓰므로 앞 배치의 소비량이나
+                    # 다른 arm 의 RNG 사용 패턴에 흔들리지 않는다. batch_size 를 바꾸면 segment
+                    # 와 노이즈의 짝이 달라지므로 비교하려는 run 끼리는 batch_size 를 맞춰야 한다.
+                    # None (기본값 아님, 명시적 null) 이면 기존처럼 전역 RNG 를 쓴다.
+                    _vs = getattr(cfg, 'val_sample_seed', None)
+                    _g = torch.Generator().manual_seed(int(_vs) + step) if _vs is not None else None
+                    out = sample(model, noise_scheduler, traj_len, text_embeds, text_masks,
+                                 pc_embeds, pc_masks, generator=_g)
 
                 val_loss_latent = F.mse_loss(out, traj_latents, reduction='mean')
                 total_loss_latent += val_loss_latent * B

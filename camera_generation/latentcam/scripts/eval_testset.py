@@ -94,6 +94,21 @@ def main():
     # Value is parsed as YAML so null / true / 3 / 0.5 keep their types.
     ap.add_argument('--set', dest='sets', action='append', default=[], metavar='KEY=VALUE',
                     help='override any config key (repeatable), e.g. --set test_seg_list=/path/x.txt')
+    # [new 2026-08-09] sample() 의 x_T ~ N(0,I) 를 **배치마다 (seed + step)** 으로 시드한
+    # 전용 CPU generator 에서 뽑는다. 기본값 cfg.random_seed(=42) 라 아무것도 안 주면 그냥
+    # 고정 시드로 돌아간다.
+    # 왜: loss_traj 는 segment 당 표본 **1개**와 GT 의 MSE 라 가중치가 같아도 노이즈 추첨만
+    # 바뀌면 값이 흔들린다. 실측(da3_7k_da3pose last.pth, 3857 seg, seed 42 vs 7):
+    #   loss_traj 0.09225494 vs 0.09239452 -> 폭 0.00014
+    # 1K testset 의 withs vs nos 격차는 0.00018 (n=601, 노이즈는 sqrt(3857/601)=2.5 배라
+    # ~0.00035) 이었으니 그 비교는 노이즈 아래였다. 시드를 고정하면 arm 끼리 segment 별로
+    # **같은 노이즈**를 쓰는 짝지은 비교(common random numbers)가 되어 이 하한이 더 내려간다.
+    # 전역 manual_seed 만으로는 부족하다 — arm 마다 RNG 소비 패턴이 달라 수열이 어긋난다.
+    # -1 을 주면 배치별 generator 를 끄고 예전처럼 전역 RNG 를 쓴다 (과거 결과 재현용).
+    # held-out 집합은 base.Trainer 가 별도 torch.Generator(cfg.random_seed) 또는
+    # test_seg_list 파일 순서(shuffle=False)로 만들므로 이 값과 무관하게 그대로다.
+    ap.add_argument('--sample-seed', type=int, default=None,
+                    help='per-batch seed for sample()의 x_T (default: cfg.random_seed, -1=legacy 전역 RNG)')
     args = ap.parse_args()
 
     if args.gpu is not None:
@@ -140,9 +155,21 @@ def main():
     from utils.eval_utils import run_command_in_dir
     from diffusers import DDPMScheduler, DDIMScheduler
 
-    torch.manual_seed(cfg.random_seed)
+    # -1 = legacy (전역 RNG). 그 외에는 배치별 generator 를 쓴다. 전역 manual_seed 는 dropout
+    # 등 나머지 경로를 위해 어느 쪽이든 그대로 건다.
+    _seed = None if args.sample_seed == -1 else (
+        cfg.random_seed if args.sample_seed is None else int(args.sample_seed))
+    torch.manual_seed(cfg.random_seed if _seed is None else _seed)
+    print(f"[seed] sample() x_T: " +
+          ("legacy 전역 RNG (--sample-seed -1)" if _seed is None
+           else f"배치별 generator seed={_seed}+step (split 은 영향 없음)"))
 
+    # 시드를 tag 에 박는다 — 시드 스윕이 서로를 덮어쓰는 것도 막고, 배치별 generator 로 바꾸기
+    # 전(legacy 전역 RNG)에 만들어 둔 eval_my/<run>__<ckpt>/ 를 덮어써서 과거 수치와 조용히
+    # 섞이는 것도 막는다.
     tag = f"{osp.basename(run_dir)}__{args.ckpt[:-4]}"
+    if _seed is not None:
+        tag += f"__seed{_seed}"
     out_dir = args.out or osp.join(REPO, EVAL_ROOT, tag)
     # 상대경로 --out 은 REPO 기준. os.chdir(MAIN) 이 이미 돌았기 때문에 그냥 abspath 하면
     # main/ 밑으로 떨어진다 (기본값은 REPO 를 붙여서 만드니 영향 없고, --out 을 준 경우만 문제).
@@ -274,8 +301,13 @@ def main():
                 out = T.ar_sample(model, noise_scheduler, traj_len, text_embeds, text_masks,
                                   pc_embeds, pc_masks, cfg.ar_chunk_size, cfg.cam_dim)
             else:
+                # 배치마다 (sample_seed + step) 으로 시드한 CPU generator -> x_T 가 완전히
+                # 결정적이고, 서로 다른 ckpt/arm 을 돌려도 segment 별 노이즈가 동일하다
+                # (common random numbers). 전역 시드만 맞추는 것과 달리 앞 배치의 RNG 소비량이나
+                # arm 별 RNG 사용 패턴에 흔들리지 않는다.
+                _g = (torch.Generator().manual_seed(_seed + step) if _seed is not None else None)
                 out = T.sample(model, noise_scheduler, traj_len, text_embeds, text_masks,
-                               pc_embeds, pc_masks)
+                               pc_embeds, pc_masks, generator=_g)
 
             tot_lat += F.mse_loss(out, traj_latents, reduction='mean').item() * B
             traj_pred = camera_vae.decode(out * cfg.vae_latent_scale) if cfg.use_vae else out

@@ -13,6 +13,17 @@ epochs: 2000
 save_epoch: 10
 val_step: 5000
 val_max_batches: 20
+
+# [new 2026-08-09] run_validation 의 sample() 이 뽑는 x_T 를 고정한다 (배치마다 seed+step).
+# 왜: val/loss_traj 는 segment 당 표본 1개와 GT 의 MSE 라, 가중치가 그대로여도 노이즈 추첨만
+# 바뀌면 값이 흔들린다. 7K 3 arm 실측 plateau sd = 0.0046 (평균 0.0646 의 7%) 인데 비교하려는
+# withs vs nos 격차는 0.0005 (0.11 sd) 라 곡선으로는 아무것도 못 읽었다. 시드를 고정하면
+# epoch 간/arm 간이 같은 노이즈를 쓰는 짝지은 비교가 되어 가중치 변화만 남는다.
+# null 로 두면 기존과 동일하게 전역 RNG 를 쓴다. 비교할 run 끼리는 batch_size 가 같아야 한다.
+# 주의: 이 값이 켜진 run 의 val 곡선은 꺼진 run(예 20260808_140209_da3_7k_*)과 절대 수치가
+# 서로 다른 노이즈 위에서 잰 것이라 곧바로 겹쳐 읽으면 안 된다.
+val_sample_seed: 42
+
 sample_data: null
 load_points: false
 load_saved_pc_embeds: false

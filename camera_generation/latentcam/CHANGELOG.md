@@ -5,6 +5,22 @@ All notable changes to the latentcam sub-project. Follows [Keep a Changelog](htt
 ## [Unreleased]
 
 ### Added
+- **`cfg.val_sample_seed`** (`main/conf/config.yaml`, 기본 `42`) + `scripts/eval_testset.py --sample-seed` —
+  `sample()` 의 `x_T ~ N(0,I)` 를 **배치마다 `(seed + step)` 으로 시드한 CPU generator** 에서 뽑아
+  샘플링을 결정적으로 만든다. `cfg.sampling_type: ddim` 의 DDIMScheduler 는 eta=0 이라
+  `step()` 이 노이즈를 안 뽑으므로, 이걸 고정하면 sampling 의 확률적 요소가 전부 사라진다.
+  **왜:** `val/loss_traj` 는 segment 당 표본 1개와 GT 의 MSE 라 가중치가 같아도 노이즈 추첨만
+  바뀌면 값이 움직인다. 7K 3 arm 실측 plateau sd = **0.0046** (평균 0.0646 의 7%) 인데
+  비교 대상인 withs vs nos 격차는 **0.0005 (0.11 sd)** 라 wandb val 곡선으로는 arm 을 가릴 수
+  없었다. 전역 `manual_seed` 만으로는 부족하다 — arm 마다 RNG 소비 패턴이 달라 수열이 어긋난다.
+  배치별 generator 는 arm 이 달라도 segment 별로 **같은 노이즈**를 쓰는 짝지은 비교
+  (common random numbers) 를 만든다.
+  검증: 같은 `last.pth` 를 GPU 0 과 GPU 3 에서 각각 돌려 `loss_traj 0.071126245893538`
+  비트 단위 동일 (CPU generator 라 GPU 를 바꿔도 같은 수열).
+  `cfg.val_sample_seed: null` / `--sample-seed -1` 로 두면 예전처럼 전역 RNG 를 쓴다.
+  `eval_testset` 출력 디렉토리는 `eval_my/<run>__<ckpt>__seed<N>/` 로 바뀐다 — legacy 전역 RNG
+  로 만들어 둔 기존 `eval_my/<run>__<ckpt>/` 를 덮어써서 다른 노이즈 위의 수치와 조용히
+  섞이는 것을 막는다.
 - **`cfg.ckpt_at_epochs`** (`main/conf/config.yaml`, 기본 `[]`) — 여기 든 epoch 에서
   `ckpts/epoch<N>.pth` (custom geo arm 이면 `epoch<N>_geo.pth` 도) 를 따로 박아 둔다.
   `best.pth` / `last.pth` 는 계속 덮어써지므로 **학습 중간 지점의 모델을 남길 유일한 방법**이다.

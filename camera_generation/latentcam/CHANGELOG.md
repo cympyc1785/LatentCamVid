@@ -369,6 +369,12 @@ All notable changes to the latentcam sub-project. Follows [Keep a Changelog](htt
     셋 다 `render_avgscale.py`의 `lagernvs` / `one_st` / `one_sv`와 소수점 3자리까지 일치.
 
 ### Changed
+- **`scripts/data/cache_da3_depth.py`: `LAYOUT` 분기 (`dl3dv` 기본 | `clipdir`)** —
+  Scene-Decoupled-Video-dataset 은 da3 를 **clip 단위**로 돌려서 scene 아래 trajectory 7개가
+  각각 자기 `depth.npz` 를 갖는다 (DL3DV 는 scene 당 하나). `clipdir` 은 meta csv 없이 ROOT 를
+  두 단계 스캔해 `<scene>/<clip>/depth.npz -> <OUT>/<scene>/<clip>.npy` 로 푼다.
+  `LAYOUT` 기본값이 `dl3dv` 라 **기존 호출은 동작이 그대로**다 (meta_da3_7k.csv 로 재실행 시
+  `{'ok': 0, 'skip': 2}` 확인). 캐시 내용은 `np.array_equal(npy, npz['depth'])` 검증 통과.
 - **`scripts/data/make_da3_splits.py`: 다중 batch + 이미지/포즈 개수 검사**
   - **`--batches 1K 2K ... 7K`** (+ 필수 `--tag`) — 여러 DL3DV batch 를 **한 코퍼스**로 묶는다.
     scene-disjoint 분할은 batch 경계를 무시하고 전체에서 **한 번** 한다 (batch 별로 나눈 뒤

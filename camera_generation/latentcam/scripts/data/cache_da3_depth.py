@@ -18,12 +18,22 @@ depth 압축 해제**에만 들어간다. 비압축 .npy 로 풀어 두면 datas
 
 이미 있고 프레임 수가 맞으면 건너뛴다 (중단 후 재실행 안전).
 
+레이아웃 (env LAYOUT)
+--------------------
+`dl3dv` (기본, 기존 동작 그대로): <ROOT>/<chunk>/da3/depth.npz -> <OUT>/<chunk>.npy.
+  대상 목록은 META csv 의 chunk 열에서 온다.
+`clipdir` (Scene-Decoupled-Video-dataset): <ROOT>/<scene>/<clip>/depth.npz ->
+  <OUT>/<scene>/<clip>.npy. 이 데이터셋은 da3 를 **clip 단위**로 돌려서 scene 아래에
+  trajectory 7개가 각각 자기 depth.npz 를 갖는다 (DL3DV 는 scene 당 하나). meta csv 가
+  없으므로 대상은 ROOT 를 두 단계 스캔해 직접 찾는다.
+
 env:
-  META      meta csv 이름 (기본 meta_da3_1k.csv). dl3dv_root 아래에서 찾는다.
-  OUT       출력 루트 (기본 <dl3dv_root>/da3_depth_raw)
-  ROOT      dl3dv_root (기본 /data1/cympyc1785/data/DL3DV/scenes)
+  LAYOUT    dl3dv (기본) | clipdir
+  META      meta csv 이름 (기본 meta_da3_1k.csv). dl3dv 레이아웃에서만 쓴다.
+  OUT       출력 루트 (기본 <ROOT>/da3_depth_raw)
+  ROOT      루트 (기본 /data1/cympyc1785/data/DL3DV/scenes)
   JOBS      병렬 프로세스 수 (기본 8)
-  LIMIT     앞에서 N scene 만 (기본 0 = 전부)
+  LIMIT     앞에서 N개만 (기본 0 = 전부)
 """
 import os
 import os.path as osp
@@ -39,6 +49,7 @@ META = os.environ.get("META", "meta_da3_1k.csv")
 OUT = os.environ.get("OUT", osp.join(ROOT, "da3_depth_raw"))
 JOBS = int(os.environ.get("JOBS", "8"))
 LIMIT = int(os.environ.get("LIMIT", "0"))
+LAYOUT = os.environ.get("LAYOUT", "dl3dv")
 
 
 def _read_meta_chunks(root, meta_name):
@@ -50,9 +61,28 @@ def _read_meta_chunks(root, meta_name):
     return [r[key] for r in rows]
 
 
+def _scan_clipdirs(root):
+    """clipdir 레이아웃: <root>/<scene>/<clip>/depth.npz 를 찾아 '<scene>/<clip>' 목록을 낸다."""
+    out = []
+    for scene in sorted(os.listdir(root)):
+        sd = osp.join(root, scene)
+        if not osp.isdir(sd):
+            continue
+        for clip in sorted(os.listdir(sd)):
+            if osp.isfile(osp.join(sd, clip, "depth.npz")):
+                out.append(f"{scene}/{clip}")
+    return out
+
+
+def _src_path(item):
+    # dl3dv 는 scene 아래 da3/ 가 한 겹 더 있고, clipdir 은 clip 디렉토리가 곧 da3 출력 디렉토리다.
+    return (osp.join(ROOT, item, "da3", "depth.npz") if LAYOUT == "dl3dv"
+            else osp.join(ROOT, item, "depth.npz"))
+
+
 def convert(chunk):
     """-> (chunk, 'ok' | 'skip' | 'miss' | 'err: ...')."""
-    src = osp.join(ROOT, chunk, "da3", "depth.npz")
+    src = _src_path(chunk)
     dst = osp.join(OUT, chunk + ".npy")
     if not osp.isfile(src):
         return chunk, "miss"
@@ -75,10 +105,17 @@ def convert(chunk):
 
 
 def main():
-    chunks = _read_meta_chunks(ROOT, META)
+    if LAYOUT == "clipdir":
+        chunks = _scan_clipdirs(ROOT)
+        shape = "<scene>/<clip>"
+    elif LAYOUT == "dl3dv":
+        chunks = _read_meta_chunks(ROOT, META)
+        shape = "<chunk>/da3"
+    else:
+        raise SystemExit(f"unknown LAYOUT={LAYOUT!r} (dl3dv | clipdir)")
     if LIMIT:
         chunks = chunks[:LIMIT]
-    print(f"{len(chunks)} scene  {ROOT}/<chunk>/da3/depth.npz -> {OUT}/<chunk>.npy  (jobs={JOBS})")
+    print(f"{len(chunks)} item  {ROOT}/{shape}/depth.npz -> {OUT}/<item>.npy  (jobs={JOBS})")
     os.makedirs(OUT, exist_ok=True)
     cnt = {"ok": 0, "skip": 0, "miss": 0, "err": 0}
     errs = []

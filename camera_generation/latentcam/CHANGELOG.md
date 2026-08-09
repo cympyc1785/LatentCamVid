@@ -5,6 +5,40 @@ All notable changes to the latentcam sub-project. Follows [Keep a Changelog](htt
 ## [Unreleased]
 
 ### Added
+- **`scripts/render/sd_pair_scene_swap_render.py`** — 같은 scene 의 두 clip 을 각자 sim3 로 GT 에
+  보낸 뒤 **scene 만 바꿔서** 렌더한다 (target clip 의 pose 로, source clip 의 depth+RGB 를
+  unproject -> reproject). dynamic subject 때문에 출력 frame t 는 source 의 **같은 t 프레임 하나만**
+  쓴다. 출력은 `GT | render[file] | render[gtrot]` × 두 방향의 2×3 mp4.
+
+  이걸로 **`umeyama_gt.json` 의 `R` 이 cross-clip 에 쓸 수 없다**는 걸 확인했다. GT 카메라
+  (`camera/<split>/<scene>/<scene>_cam.json`, Unreal LH, cm) 와 대조한 실측:
+  - da3 의 상대 회전/이동은 GT 와 거의 완벽 (rel-rot 오차 0.2~1.5 deg, rel-trans 0.5% 이내).
+  - 파일의 `s`,`t` 도 맞다 — 카메라 중심이 GT 와 1~2 cm 안에서 일치.
+  - 그런데 `R` 은 **RH 변환 없이 Unreal 의 LH 좌표에 직접 맞춰져** 있고, 게다가 이 데이터셋
+    궤적은 대부분 **완전 직선**(중심 좌표 특이값 `sv2/sv1 = 0.0000`)이라 Umeyama 의 회전이
+    그 축 둘레로 1 자유도 미결정이다. 결과: 같은 scene 의 clip 두 개를 각자 `R` 로 보내면
+    서로 최대 **174 deg** 어긋나는데 `resid_rmse_over_rad` 는 정상값이다.
+  - 실측 (200 scene / 1788 moving-moving pair 중 resid 최고·최악 pair):
+    `render[file]` 의 coverage median **0.0%** (best-resid pair 조차 23~35%, MAE 76),
+    `render[gtrot]` 는 frame 0 coverage **99.9%** / MAE 13~19 로 정상.
+  - **`gtrot` 로 고친다**: `R` 을 위치가 아니라 GT 카메라 **방향**에서 푼다
+    (`R_sim = R_gt_rh^T A0^T R_ext`, SVD 로 프레임 평균; `p_rh = diag(1,-1,1) p_ue`,
+    `A0 = [[0,-1,0],[0,0,-1],[1,0,0]]`). 잔차 `gtrot R spread` 0.08~2.50 deg.
+    회전만 있으면 풀리므로 **static clip 도 `R`,`t` 는 나온다** (`s` 만 미결정).
+  out -> `results/scene_decoupled/pair_scene_swap/{*.mp4,selection.md,per_frame.csv}`.
+- **`scripts/data/sd_static_scale_transfer.py`** — static clip(`moving:false`, 23408 중 7682 =
+  32.8%) 을 살릴 수 있는지 잰다. 같은 scene 의 clip 들은 frame-0 pose 가 같으므로 이미 정렬된
+  moving clip M 의 frame-0 depth 로 static clip S 의 스케일을 역산한다
+  (`s_S = median(d0_M·s_M / d0_S)` -> `avg_scale_align_S = avg_scale_S · s_S`).
+  10 scene / static 21 / (static,moving) pair 102 실측:
+
+  | 지표 | p50 | p90 | p99 | max | moving-moving 참고선 |
+  |---|---|---|---|---|---|
+  | `shape_sd` 깊이맵 모양 불일치 | 0.0397 | 0.0950 | 0.1285 | 0.1332 | p50 0.0321 / max 0.1205 |
+  | `s_spread` 기준 clip 을 바꿨을 때 s 의 max/min | 1.0685 | 1.1967 | 1.3201 | 1.3274 | `scale_off` p50 1.0352 / max 1.2939 |
+
+  둘 다 moving-moving 잡음 바닥과 거의 같은 자리 -> **static clip 은 역산으로 살릴 수 있다.**
+  out -> `results/scene_decoupled/static_scale_transfer/{summary.md,per_static.csv,per_pair.csv}`.
 - **`scripts/data/sd_frame0_depth_agreement.py`** — `avg_scale_align` 이 scene 안에서 clip 마다
   흔들리는 원인이 (a) clip 마다 보이는 부분이 달라서인지 (b) 똑같이 보는 부분조차 스케일이
   어긋나서인지를 가른다. 가를 수 있는 이유: 같은 scene 의 clip 들은 frame-0 pose 가 동일해

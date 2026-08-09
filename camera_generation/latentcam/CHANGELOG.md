@@ -5,6 +5,25 @@ All notable changes to the latentcam sub-project. Follows [Keep a Changelog](htt
 ## [Unreleased]
 
 ### Added
+- **`scripts/data/sd_frame0_depth_agreement.py`** — `avg_scale_align` 이 scene 안에서 clip 마다
+  흔들리는 원인이 (a) clip 마다 보이는 부분이 달라서인지 (b) 똑같이 보는 부분조차 스케일이
+  어긋나서인지를 가른다. 가를 수 있는 이유: 같은 scene 의 clip 들은 frame-0 pose 가 동일해
+  frame 0 이 곧 '공유되는 부분'이다 (frame-0 RGB 평균 절대차 **1.45/255** = mp4 압축 노이즈
+  수준으로 실측 확인). 10 scene / 96 pair:
+
+  | 지표 | p50 | p90 | p99 | max |
+  |---|---|---|---|---|
+  | `scale_off` 같은 걸 보는 데서의 스케일 어긋남 | **1.0352** | 1.1273 | 1.2351 | 1.2939 |
+  | `shape_sd` 전역 스케일 뺀 깊이맵 모양 불일치 | 0.0321 | 0.0782 | 0.1129 | 0.1205 |
+  | `align_ratio` 실제 divisor 가 흔들리는 폭 | 1.1173 | 1.5464 | 5.2608 | **6.7762** |
+  | `s_ratio` umeyama sim3 스케일 비 | 1.0719 | 1.2167 | 1.5360 | 1.6035 |
+
+  결론: **꼬리는 전부 (a)** 다. `align_ratio` 6.7762 인 최악 pair 의 `scale_off` 가 **1.0199**
+  이고, `corr(log align_ratio, log scale_off)=+0.25` 로 둘이 거의 무관하다. sim3 정렬은 제대로
+  되고 있고 (같은 걸 보는 데서 3.5% 오차), 흔들림은 "clip 마다 다른 point cloud 의 mean 거리"
+  라는 양 자체의 성질이다. 이 3.5% 가 frame-0 depth divisor 의 오차 바닥이며
+  `reach` 자체 산포(0.2359 dex)에 비하면 무시할 수준.
+  out -> `results/scene_decoupled/frame0_agreement/{summary.md,per_pair.csv}`.
 - **`scripts/data/sd_clip_divisor_spread.py`** — Scene-Decoupled cross-clip 의 divisor 후보를
   `norm_divisor_compare.py` 와 같은 기준(`m = max_t||c_t-c_0|| / D` 의 `sd(log10 m)`)으로 비교한다.
   own(target 자기 `avg_scale_align`, leaky 상한) / ctx(context clip 의 것, 현재 계획) /

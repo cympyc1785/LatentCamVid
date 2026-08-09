@@ -5,6 +5,23 @@ All notable changes to the latentcam sub-project. Follows [Keep a Changelog](htt
 ## [Unreleased]
 
 ### Added
+- **`scripts/vae/vae_sd_scale_swap_recon.py`** — Scene-Decoupled cross-clip 계획(context clip 의
+  `avg_scale_align` 을 target 의 분모로 사용)이 **frozen CameraVAE** 에서 버티는지 측정한다.
+  선행 실측(300 scene / 5328 pair): `avg_scale_align == s * avg_scale` 가 **정확히** 성립하므로
+  (상대오차 max 0.0) 자기 clip 의 align 으로 나누면 sim3 이전과 비트 단위로 같은 `cam_param` 이
+  나온다 — sim3 가 실제로 무언가를 바꾸는 유일한 지점이 cross-clip 분모다. own/ctx 비는
+  p1 0.228 / p50 1.000 / p99 4.389 / max 16.921.
+  결과 (400 scene, 800 pair, T=49, `vae_20260302_300.pth`): 정규화 단위 `rec_trans` 가
+  own **0.001743** vs swap **0.001756**, 비 4배 이상 버킷에서도 0.002416, 회전은 0.003200 vs
+  0.003203 — **swap 은 VAE 의 블로커가 아니다.** 대신 `lat_std_scaled = 0.2633` 이 나와
+  이 코퍼스의 `vae_latent_scale` 은 0.96032625 가 아니라 **0.2528** 근처여야 한다는 것이 드러났다
+  (`in_c_norm 0.1075` 로 DL3DV transforms ~0.18 / da3 ~0.46 보다 궤적이 작다).
+  out -> `results/scene_decoupled/vae_scale_swap.json`.
+- **`scripts/render/sd_clip_pair_video.py`** — Scene-Decoupled 같은 scene 의 두 clip 을 가로로
+  이어붙여 mp4 로 낸다. 프레임 위에 clip 이름 / `avg_scale` / `avg_scale_align` / `moving` /
+  umeyama `resid` 를 찍는다. clip 은 scene 안에서 **첫 프레임 카메라 pose 가 완전히 동일**
+  (중심 산포 0.0000 m, 회전 산포 max 0.084 deg, 200 scene 실측)하므로 화면 차이는 전부 이후
+  궤적 차이다. out -> `results/scene_decoupled/clip_pair/<scene>__<A>_vs_<B>.mp4`.
 - **`cfg.val_sample_seed`** (`main/conf/config.yaml`, 기본 `42`) + `scripts/eval_testset.py --sample-seed` —
   `sample()` 의 `x_T ~ N(0,I)` 를 **배치마다 `(seed + step)` 으로 시드한 CPU generator** 에서 뽑아
   샘플링을 결정적으로 만든다. `cfg.sampling_type: ddim` 의 DDIMScheduler 는 eta=0 이라

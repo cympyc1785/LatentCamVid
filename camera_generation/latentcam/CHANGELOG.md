@@ -63,6 +63,24 @@ All notable changes to the latentcam sub-project. Follows [Keep a Changelog](htt
   rot6d+intr 포함) 공간이고 이 표는 denormalize 된 world 위치 공간이라 **같은 양이 아니다.**
 
 ### Added
+- **`scripts/eval/viz_clatr_latent_pca.py`** — PRDC 가 사는 공간(CLaTr trajectory latent, 256-D)의
+  GT/pred 분포를 코퍼스별로 그린다. 코퍼스당 3 열: (1) GT+pred 합쳐 적합한 2-D PCA 산점도,
+  (2) 같은 PCA 위 GT 만 카메라 프리셋별 색, (3) **PRDC 가 실제로 임계 비교하는 두 거리**의
+  히스토그램 (GT 의 k=3 NN 반경 = 합격선 vs 각 pred 의 최근접 GT 거리).
+
+  2-D PCA 는 SD 36.4%, DL3DV 29.1% 만 설명하므로 산점도의 근접성은 PRDC 판정과 다를 수 있다 —
+  판정 근거는 3 열이다. 그래서 두 그림을 같이 낸다.
+
+  | run | N | 2-D PCA 설명분산 | GT끼리 거리 med | k-NN 반경 med | radius/dist | pred→최근접GT med | ratio | 보고 precision / density |
+  |---|---|---|---|---|---|---|---|---|
+  | SD_textonly | 80 | 36.4% | 34.871 | 15.967 | 0.458 | 21.537 | **1.349** | 0.15 / 0.1792 |
+  | DL3DV_nos | 160 | 29.1% | 41.410 | 25.258 | 0.610 | 23.250 | **0.921** | 0.95 / 1.1188 |
+
+  그림에서 보이는 것: SD 는 GT 가 카메라 프리셋 5 종으로 **뚜렷하게 뭉쳐** 있어 k-NN 반경이
+  좁고(15.97), pred 는 그 사이 빈 공간에 퍼진다 → 3 열에서 빨강 분포가 파랑보다 오른쪽.
+  DL3DV 는 GT 가 넓게 퍼져 반경이 크고(25.26) pred 분포와 크게 겹친다.
+  `frac(pred dist < median radius)`: SD 0.0375, DL3DV 0.70.
+
 - **`scripts/eval/prdc_per_sample.py`** — set-level 로만 보고되던 `clatr/precision`, `clatr/density`
   를 **per-sample 로 분해**한다. `prdc.py` 의 정의가 fake 축 평균이라 분해가 성립한다:
   `precision = (d(real_j,fake_i) < radius_j).any(axis=0).mean()`,

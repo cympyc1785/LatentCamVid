@@ -121,6 +121,16 @@ All notable changes to the latentcam sub-project. Follows [Keep a Changelog](htt
   거의 그대로다** — chunk 크기 실험으로 이미 기각한 표본수 artifact 가설과 일치한다.
 
 ### Added
+- **`scripts/data/sd_preset_taxonomy.py`** — SD 의 clip 인덱스 `01`~`07` 이 실제로 몇 종류의
+  카메라 움직임인지 `camera/<split>/<scene>/*_cam.json` 에서 직접 센다. 프레임 0 카메라
+  좌표계로 옮기고 경로 길이로 정규화한 뒤, 같은 인덱스의 scene 간 RMSD / 인덱스 간 RMSD /
+  clip 별 straightness / net 방향 일치도 / frame-0 대비 최대 회전각을 낸다.
+  whuman 400 scene 실측: `01`,`02` 는 arc(직진성 0.931, 방향 일치도 0.98, 회전 75.7deg,
+  z축 부호만 반대인 좌우 대칭쌍), `03`,`04` 는 **이동 0 + 제자리 74.53deg 회전**(p05=p95,
+  좌우 한 쌍), `05`,`06`,`07` 은 **완전 직선 이동**(straightness 정확히 1.0)에 방향이
+  scene 마다 무작위(일치도 0.29~0.33)이고 회전 median 약 19deg 인 서로 통계적으로
+  구분되지 않는 3 개 표본. 즉 결정적 템플릿 4 개 + 무작위 직선 3 개다.
+
 - **`avg_scale_ref` 옵션** (`main/conf/config.yaml`, `main/dataset_dl3dv.py`) — `scale_mode: avg_scale`
   + `pose_source: da3` 에서 저장된 avg_scale 을 **어느 기준점에서 잰 파일**로 읽을지 고른다.
   점 집합(context range unproject: target 제외 [0,s)/[e,N) 중 긴 쪽, da3 depth conf >= 전역 P40,

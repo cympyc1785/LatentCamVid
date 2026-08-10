@@ -5,6 +5,30 @@ All notable changes to the latentcam sub-project. Follows [Keep a Changelog](htt
 ## [Unreleased]
 
 ### Added
+- **`scripts/eval/corpus_traj_manifold.py`** — "SD 는 caption 정확도가 너무 높고 density/coverage
+  가 너무 낮은데 카메라 분포가 단순해서인가?" 를 가른다. 학습이 이미 남긴 `preds.npy` /
+  `preds_pcf.csv` 만 읽으므로 재추론이 없다. 핵심은 **천장(ceiling)** 대조군 — real 임베딩을
+  반으로 갈라 한쪽을 fake 인 척 넣고 PRDC 를 돌려서, 참분포 표본이 받는 점수를 잰다.
+  SD whuman textonly(ep21) vs DL3DV da3_7k textonly(ep54), n=80 맞춤, k=3, 200 split:
+
+  | | SD whuman | DL3DV da3_7k |
+  |---|---|---|
+  | GT-vs-GT density (천장) | 1.0016 +- 0.1240 | 1.0127 +- 0.1361 |
+  | GT-vs-GT coverage (천장) | 0.8877 +- 0.0843 | 0.8881 +- 0.0601 |
+  | GT 태그 엔트로피 (max 7.5622) | 2.8538 | 4.2036 |
+  | 서로 다른 GT 태그 수 | 11 | 42 |
+  | 48 스텝 내내 태그가 안 바뀌는 궤적 | 0.7500 | 0.1938 |
+  | 최빈 태그 시퀀스 하나가 차지하는 비중 | 0.3000 | 0.0500 |
+  | straightness p50 | 0.9542 | 0.8804 |
+  | sv2/sv1 < 0.01 (사실상 직선) 비율 | 0.2000 | 0.0063 |
+  | real 3-NN 반경 r (median) | 15.7094 | 26.2507 |
+  | real -> 최근접 fake (median) | 17.4911 | 22.8956 |
+  | 위 둘의 비 (>1 이면 coverage 탈락) | **1.1209** | **0.8854** |
+
+  결론: **천장은 두 코퍼스가 같다** -> 분포가 좁다고 density/coverage 가 기계적으로 눌리는 게
+  아니다. 대신 눌리는 건 허용 반경으로, r 이 0.60 배가 되는 동안 모델 오차는 0.76 배밖에 안
+  줄어서 비율이 1 을 넘어간다. coverage 는 지시함수라 이 27% 차이가 0.225 vs 0.9125 로 증폭된다.
+  caption 쪽은 분포 단순함으로 **그대로 설명된다** (GT 궤적의 75% 가 48 스텝 내내 단일 태그).
 - **Scene-Decoupled 코퍼스로 학습할 수 있게 되었다** (`dataset_name: scene_decoupled`).
   context 가 같은 scene 의 **다른 clip** 이라는 점만 빼면 DL3DV 경로와 규약이 같다.
   - **`main/dataset_scene_decoupled.py`** (신규) — `SDCamDataset(CamDataset)`.

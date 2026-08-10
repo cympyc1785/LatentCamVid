@@ -71,28 +71,40 @@ All notable changes to the latentcam sub-project. Follows [Keep a Changelog](htt
   구름이 구분 안 된다 (반경 28.9934 vs 29.1505, 3-NN r 25.5805 vs 26.0459, participation
   ratio 14.2113 vs 14.6033), (c) GT-vs-GT 천장도 같다 (density 1.0002+-0.0970 vs
   0.9999+-0.0954, coverage 0.8740+-0.0488 vs 0.8770+-0.0494).
-  **가장 큰 원인은 prompt 였다 (2026-08-10 추가).** `pose_source` 는 pose 만 바꾸는 게 아니라
+  **prompt 도 통째로 바뀐다 (2026-08-10 추가).** `pose_source` 는 pose 만 바꾸는 게 아니라
   caption 파일을 `<scene>/prompts.json` -> `<scene>/da3/prompts.json` 으로 **조용히 갈아끼운다.**
-  7K test 1500 segment 중 **1435 개(95.7%) 의 prompt 가 다르다** (길이 122.5 vs 98.6 자).
-  같은 LLM(Qwen3-30B-A3B-Instruct-2507)인데 생성 시점이 달라서(2026-02-07 vs 2026-08-08)
-  **카메라 동사 어휘가 붕괴했다**:
+  학습이 쓰는 필드는 `prompt_camera_with_scene_video.concise` 다 (`dataset_dl3dv.py:590`).
+  7K test 3985 segment 전량에서 **3985 개(100%) 가 다르다** (평균 126.6 vs 110.0 자).
+  같은 VL 모델(Qwen/Qwen3-VL-30B-A3B-Instruct)인데 생성 시점이 다르다 (2026-02-07 vs 2026-08-06).
 
-  | 토큰 | COLMAP prompts.json | da3/prompts.json |
+  | | COLMAP `prompts.json` | `da3/prompts.json` |
   |---|---|---|
-  | truck/trucks | 715 | **0** |
-  | dolly/dollies | 407 | **0** |
-  | pedestal/pedestals | 78 | **0** |
-  | tilt/tilts/tilting | 294 | **0** |
-  | pan/pans/panning | 1976 | **3** |
-  | 서로 다른 어휘 수 | 130 | 84 |
-  | caption 당 모션 토큰 수 | 11.07 | 8.28 |
-  | 서로 다른 모션 시그니처 | 1187 | 792 |
-  | 모션 시그니처 엔트로피 (bits) | 9.5480 | 7.9891 |
-  | 최빈 시그니처 비중 | 0.0287 | 0.1313 |
+  | trucks / trucking | 518 / 74 | **0 / 0** |
+  | dolly / dollies / dollying | 226 / 267 / 132 | **0 / 0 / 0** |
+  | pan 계열 (pan+pans+panning) | 5334 | 3797 |
+  | tilt 계열 | 1001 | 504 |
+  | yaw 계열 (yaw+yaws+yawing) | 1009 | 1787 |
+  | pitch 계열 | 141 | 231 |
+  | 서로 다른 어휘 수 | 1714 | 1672 |
+  | caption 당 모션 토큰 수 | 7.39 | 5.86 |
+  | 서로 다른 모션 시그니처 | 1593 | 1019 |
+  | 모션 시그니처 엔트로피 (bits) | 8.9234 | 7.8678 |
+  | 최빈 시그니처 비중 | 0.0753 | 0.0665 |
 
-  text-only 모델에서 이건 성능 상한을 직접 깎는다. 게다가 사라진 단어(truck/dolly/pedestal)가
-  바로 `val/captions/*` 가 채점하는 27 translation x 7 rotation 태그의 translation 축이다.
+  즉 **translation 을 가리키던 촬영 용어(truck/dolly/pedestal)가 사라지고** 평범한
+  "moves right/forward" 로 대체됐고, 회전은 pan/tilt 에서 yaw/pitch 로 이동했다. 모션 표현의
+  다양성도 줄었다 (시그니처 1593 -> 1019, 엔트로피 -1.06 bit). `val/captions/*` 가 채점하는
+  27 translation x 7 rotation 태그 중 translation 축의 어휘 신호가 특히 약해진다.
+
+  > **정정 (같은 날).** 처음 이 표를 `prompt_camera` 필드로 재고 "어휘 붕괴 (pan 1976->3,
+  > 엔트로피 9.5480->7.9891, 최빈 0.0287->0.1313)" 라고 적었는데, `prompt_camera` 는 **학습에
+  > 안 쓰인다** (dataset 은 `concise` 만 읽는다). `prompt_camera` 쪽 붕괴가 더 극단적인 건
+  > 맞다 (truck/dolly/pedestal/pan/tilt 전부 0~3, 어휘 156->94) — 그건 그 필드가
+  > `da3/tags/camera_tags.json` 의 `description`("move right + yaw left")을 LLM 이 그대로
+  > 풀어 쓴 것이라 원문에 촬영 용어가 아예 없기 때문이다. 위 표가 학습에 해당하는 수치다.
+
   -> pose 효과와 prompt 효과를 가르려면 `pose_source: da3` + COLMAP prompt arm 이 필요하다 (미실행).
+  (프롬프트 생성 스크립트는 이 저장소에 없어서 system prompt 가 어떻게 바뀌었는지는 확인 못 했다.)
 - **`scripts/eval/corpus_traj_manifold.py`** — "SD 는 caption 정확도가 너무 높고 density/coverage
   가 너무 낮은데 카메라 분포가 단순해서인가?" 를 가른다. 학습이 이미 남긴 `preds.npy` /
   `preds_pcf.csv` 만 읽으므로 재추론이 없다. 핵심은 **천장(ceiling)** 대조군 — real 임베딩을

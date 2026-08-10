@@ -1,0 +1,36 @@
+# @package _global_
+# da3_7k_customgeo_nos 의 **depth 제거** ablation.
+#
+# da3_7k_customgeo_nos.yaml 과 **한 줄만** 다르다: custom_geo_channels: no_depth.
+# GeoTokenizer 는 그대로 남고 stem 의 첫 conv in_ch 만 8 -> 6 이다 (log-depth + valid 채널 제거).
+# ray 갈래(Plücker linear-patchify)와 c_ray/c_geo/폭은 전부 동일하므로, 파라미터 차이는
+# 첫 conv 의 2 채널 * 64 * 3 * 3 = 1152 개뿐이다 -- 용량이 아니라 depth 입력의 유무를 잰다.
+#
+# dataset 쪽도 geo_logd/geo_valid 를 만들지 않는다 (da3 depth mmap I/O 가 빠진다).
+exp_name: da3_7k_customgeo_nos_nodepth
+pose_source: da3
+batch_size: 8
+epochs: 100
+ckpt_at_epochs: [50]
+
+geo_encoder: custom
+custom_geo_channels: no_depth     # <- 이 arm 의 정의 (base 는 full)
+geo_cam_embed: null           # 카메라는 픽셀 Plücker 로만 들어간다
+geo_latent_cache_dir: null    # GeoTokenizer/proj 가 학습되므로 출력을 얼릴 수 없다
+geo_posed: false              # custom backend 는 lagernvs cam_token 을 만들지 않는다
+custom_geo_input_hw: [252, 448]   # 14 의 배수 (256 -> 252)
+custom_geo_freeze_dino: true
+
+geo_view_sampling: frustum_cover
+geo_cover_out_of_seg: true
+geo_cover_centered_at_s: true
+geo_first_view_target_s: false
+geo_cover_subtract_first: false
+
+scale_mode: avg_scale
+intr_norm: rel
+cam_dim: 64
+meta_csv: meta_da3_7k.csv
+train_seg_list: /data1/cympyc1785/data/DL3DV/scenes/latentcam_da3_7k_train_seg_list.txt
+test_seg_list: /data1/cympyc1785/data/DL3DV/scenes/latentcam_da3_7k_test_seg_list.txt
+coverage_blacklist_path: /data1/cympyc1785/LatentCamVid/camera_generation/latentcam/data/seg_blacklist_jump_da3_7k.csv

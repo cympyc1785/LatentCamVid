@@ -304,6 +304,12 @@ custom_geo_patch: 14          # dataset 이 격자 정합성을 검사할 때 �
 # npz 는 deflate 라 6 장만 필요해도 scene 전체를 풀어야 해서 0.62 s/item; 캐시 mmap 은 0.02 s.
 # null 로 두면 npz 폴백이라 결과는 같고 느리기만 하다.
 custom_geo_depth_cache_dir: /data1/cympyc1785/data/DL3DV/scenes/da3_depth_raw
+# [ablation 2026-08-10] GeoTokenizer 에 무엇을 넣을지. full 이 기존 동작 그대로다.
+#   full     Plücker(6) + log-depth(1) + valid(1)  <- 기본. 기존 run 과 완전히 동일한 경로
+#   no_depth Plücker(6) 만. stem 의 첫 conv in_ch 만 8->6 이고 폭/구조는 그대로
+#   rgb_only GeoTokenizer 자체를 제거 -> frozen DINOv2 특징만 proj(1024->geo_latent_dim)
+# rgb_only/no_depth 는 dataset 에서 안 쓰는 텐서를 아예 만들지 않는다 (depth I/O 절약).
+custom_geo_channels: full
 
 # --- geo cross-attention tracking (val 때만, 첫 배치 하나) ------------------------
 # 켜면 wandb 에 val/geo/* 스칼라와 val/geo/attn_map 이미지가 올라간다. 기본 off 라

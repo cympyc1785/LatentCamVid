@@ -162,14 +162,21 @@ class _CustomBackend(nn.Module):
             input_hw=getattr(cfg, 'custom_geo_input_hw', None),
             c_ray=int(getattr(cfg, 'custom_geo_ray_dim', 64)),
             c_geo=int(getattr(cfg, 'custom_geo_geo_dim', 256)),
+            channels=getattr(cfg, 'custom_geo_channels', 'full'),
         )
         self.out_dim = self.net.out_dim
         self.camera_encoding_dim = 0     # 카메라는 cam_token 이 아니라 픽셀 Plücker 로 들어간다
+        # [ablation] 배치에서 실제로 필요한 키. train 쪽이 이걸 보고 .to(device) 할 것만 옮긴다.
+        self.needs_keys = {
+            'full': ('images', 'geo_plucker_map', 'geo_logd', 'geo_valid'),
+            'no_depth': ('images', 'geo_plucker_map'),
+            'rgb_only': ('images',),
+        }[self.net.channels]
 
     def forward(self, batch):
         """batch: 'images'/'geo_plucker_map'/'geo_logd'/'geo_valid' -> (B, M, C), (B, M) bool"""
-        tokens = self.net(batch['images'], batch['geo_plucker_map'],
-                          batch['geo_logd'], batch['geo_valid'])
+        tokens = self.net(batch['images'], batch.get('geo_plucker_map'),
+                          batch.get('geo_logd'), batch.get('geo_valid'))
         # mask 는 일단 전부 유효로 둔다 (depth 없는 view 를 context 에 섞지 않는다는 전제).
         # 섞게 되면 valid 비율이 낮은 patch 를 여기서 False 로 내려야 한다.
         mask = torch.ones(tokens.shape[:2], dtype=torch.bool, device=tokens.device)
@@ -209,6 +216,8 @@ class GeoEncoder(nn.Module):
         # lagernvs/scenetok 은 frozen + images 인자, custom 은 trainable + batch dict 인자
         self.trainable = bool(getattr(self.backend, "trainable", False))
         self.wants_batch = bool(getattr(self.backend, "wants_batch", False))
+        self.needs_keys = tuple(getattr(self.backend, "needs_keys",
+                                        ('images', 'geo_plucker_map', 'geo_logd', 'geo_valid')))
 
         native = self.backend.out_dim
         # align to geo_latent_dim; Identity when they already match (lagernvs -> 768)

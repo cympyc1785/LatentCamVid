@@ -38,37 +38,55 @@ class GeoTokenizer(nn.Module):
            전제로 stride 2 -> stride patch//2 로 쪼갠다 (patch=14 -> 2*7, 16 -> 2*8).
     """
 
-    def __init__(self, patch=14, c_ray=64, c_tot=256):
+    def __init__(self, patch=14, c_ray=64, c_tot=256, use_depth=True):
         super().__init__()
         if patch % 2:
             raise ValueError(f"GeoTokenizer: patch 는 짝수여야 한다 (got {patch})")
         if c_tot <= c_ray:
             raise ValueError(f"GeoTokenizer: c_tot({c_tot}) > c_ray({c_ray}) 여야 한다")
         self.patch = patch
+        # [ablation] use_depth=False 면 stem 이 Plücker(6)만 받는다. 채널 수 말고는
+        # 나머지 구조/폭이 전부 같아서 depth 유무만 바뀐다.
+        self.use_depth = bool(use_depth)
+        c_in = 8 if self.use_depth else 6
         self.ray = nn.Conv2d(6, c_ray, patch, patch)
         c_s = c_tot - c_ray
         self.stem = nn.Sequential(
-            nn.Conv2d(8, 64, 3, 1, 1), nn.GroupNorm(8, 64), nn.GELU(),
+            nn.Conv2d(c_in, 64, 3, 1, 1), nn.GroupNorm(8, 64), nn.GELU(),
             nn.Conv2d(64, 96, 3, 2, 1), nn.GroupNorm(8, 96), nn.GELU(),      # /2
             nn.Conv2d(96, 128, 3, 1, 1), nn.GroupNorm(8, 128), nn.GELU(),
             nn.Conv2d(128, c_s, patch // 2, patch // 2),                     # /patch 누적
         )
         self.out_dim = c_tot
 
-    def forward(self, plucker, logd, valid):
+    def forward(self, plucker, logd=None, valid=None):
         """plucker (N,6,H,W), logd (N,1,H,W), valid (N,1,H,W) -> (N, C_tot, H/patch, W/patch)"""
-        logd = logd * valid
-        x = torch.cat([plucker, logd, valid], 1)
+        if self.use_depth:
+            logd = logd * valid
+            x = torch.cat([plucker, logd, valid], 1)
+        else:
+            x = plucker
         return torch.cat([self.ray(plucker), self.stem(x)], 1)
 
 
 class SceneEncoder(nn.Module):
     """frozen DINOv2 + trainable GeoTokenizer -> geo 토큰 (B, V*P, out_dim)."""
 
+    CHANNELS = ('full', 'no_depth', 'rgb_only')
+
     def __init__(self, out_dim=768, dino_path=None, freeze_dino=True,
-                 input_hw=None, c_ray=64, c_geo=256):
+                 input_hw=None, c_ray=64, c_geo=256, channels='full'):
         super().__init__()
         from transformers import Dinov2Model               # 지연 import (text-only 경로 영향 X)
+
+        # [ablation 2026-08-10] channels
+        #   full     : 기존 그대로 (Plücker + log-depth + valid)
+        #   no_depth : GeoTokenizer 는 남기되 depth/valid 채널만 뺀다 (Plücker 만)
+        #   rgb_only : GeoTokenizer 자체를 제거 -> frozen DINOv2 특징만 proj
+        channels = str(channels or 'full')
+        if channels not in self.CHANNELS:
+            raise ValueError(f"custom_geo_channels: {self.CHANNELS} 중 하나여야 한다 (got {channels})")
+        self.channels = channels
 
         if not dino_path or not os.path.isdir(dino_path):
             raise FileNotFoundError(f"custom_geo_dino_path not found: {dino_path}")
@@ -93,10 +111,16 @@ class SceneEncoder(nn.Module):
         self.register_buffer('_std', torch.tensor(std).view(1, 3, 1, 1), persistent=False)
 
         self.input_hw = tuple(input_hw) if input_hw else None   # None -> 첫 forward 에서 확정
-        self.geo = GeoTokenizer(self.patch, c_ray, c_geo)
         self.ln_d = nn.LayerNorm(d_dim)
-        self.ln_g = nn.LayerNorm(c_geo)
-        self.proj = nn.Linear(d_dim + c_geo, out_dim)           # zero-init 하지 않음
+        if channels == 'rgb_only':
+            self.geo = None
+            self.ln_g = None
+            self.proj = nn.Linear(d_dim, out_dim)
+        else:
+            self.geo = GeoTokenizer(self.patch, c_ray, c_geo,
+                                    use_depth=(channels == 'full'))
+            self.ln_g = nn.LayerNorm(c_geo)
+            self.proj = nn.Linear(d_dim + c_geo, out_dim)       # zero-init 하지 않음
         self.out_dim = out_dim
         self._warned_resize = False
 
@@ -129,18 +153,23 @@ class SceneEncoder(nn.Module):
                   f"(patch {self.patch} 배수). dataset 이 이 해상도로 직접 주는 편이 정확하다.")
             self._warned_resize = True
         rgb = F.interpolate(rgb, (th, tw), mode='bicubic', align_corners=False, antialias=True)
-        plucker = F.interpolate(plucker, (th, tw), mode='bilinear', align_corners=False)
-        logd = F.interpolate(logd, (th, tw), mode='bilinear', align_corners=False)
-        valid = F.interpolate(valid, (th, tw), mode='nearest')
+        # ablation arm 에서는 안 쓰는 입력이 None 으로 들어온다 -> 건드리지 않는다
+        if plucker is not None:
+            plucker = F.interpolate(plucker, (th, tw), mode='bilinear', align_corners=False)
+        if logd is not None:
+            logd = F.interpolate(logd, (th, tw), mode='bilinear', align_corners=False)
+        if valid is not None:
+            valid = F.interpolate(valid, (th, tw), mode='nearest')
         return rgb.clamp(0, 1), plucker, logd, valid
 
-    def forward(self, rgb, plucker, logd, valid):
+    def forward(self, rgb, plucker=None, logd=None, valid=None):
         """rgb (B,V,3,H,W) in [0,1], plucker (B,V,6,H,W), logd/valid (B,V,1,H,W)
-        -> tokens (B, V*P, out_dim)"""
+        -> tokens (B, V*P, out_dim). ablation arm 은 안 쓰는 인자가 None 이다."""
         b, v = rgb.shape[:2]
-        flat = lambda x: x.flatten(0, 1)
+        flat = lambda x: x.flatten(0, 1) if x is not None else None
         rgb, plucker, logd, valid = self._to_input_hw(
-            flat(rgb), flat(plucker), flat(logd), flat(valid.float()))
+            flat(rgb), flat(plucker), flat(logd),
+            flat(valid.float()) if valid is not None else None)
 
         x = (rgb - self._mean) / self._std
         if self.freeze_dino:
@@ -149,6 +178,10 @@ class SceneEncoder(nn.Module):
         else:
             d = self.dino(pixel_values=x, interpolate_pos_encoding=True).last_hidden_state
         d = d[:, 1:]                                   # CLS 제거 (dinov2-large 는 register 토큰 없음)
+
+        if self.geo is None:                           # rgb_only: DINO 특징만
+            s = self.proj(self.ln_d(d))                # (N, P, out_dim)
+            return s.view(b, v * s.shape[1], self.out_dim)
 
         g = self.geo(plucker, logd, valid)             # (N, C_geo, Gh, Gw)
         gh, gw = g.shape[-2:]

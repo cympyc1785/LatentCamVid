@@ -5,6 +5,45 @@ All notable changes to the latentcam sub-project. Follows [Keep a Changelog](htt
 ## [Unreleased]
 
 ### Added
+- **`custom_geo_channels` (기본 `full`)** — `geo_encoder: custom` 의 GeoTokenizer 에 무엇을
+  넣을지 고르는 ablation 스위치. `full` 은 기존 경로와 완전히 동일하다 (기존 run 영향 없음).
+
+  | 값 | GeoTokenizer 입력 | proj 입력 | dataset 이 만드는 텐서 |
+  |---|---|---|---|
+  | `full` (기본) | Plücker(6) + log-depth(1) + valid(1) | 1024 + 256 | plucker, logd, valid |
+  | `no_depth` | Plücker(6) 만 (stem 첫 conv in_ch 8->6) | 1024 + 256 | plucker |
+  | `rgb_only` | GeoTokenizer 제거 | 1024 | 없음 |
+
+  `no_depth` 는 폭/구조가 base 와 같고 첫 conv 의 2 채널(1152 param)만 줄어서 **용량이 아니라
+  depth 입력의 유무**를 잰다. `rgb_only` 는 frozen DINOv2 특징만 남으므로 context 가 외관만
+  주고 카메라 기하는 전혀 주지 않는다. geo view 선택(`frustum_cover`)은 그대로라 세 arm 이
+  **같은 context view 집합**을 본다.
+  - `models/custom_geo_encoder.py`: `GeoTokenizer(use_depth=)`, `SceneEncoder(channels=)`.
+    `_to_input_hw`/`forward` 가 안 쓰는 입력을 `None` 으로 받는다.
+  - `models/geo_encoder.py`: `_CustomBackend` 가 `needs_keys` 를 노출하고 `batch.get()` 으로 읽는다.
+  - `main/train_latent_cam_dm.py:geo_encode`: 하드코딩된 4-key 검사 대신 `geo_encoder.needs_keys`.
+  - `main/dataset_dl3dv.py` / `main/dataset_scene_decoupled.py`: 안 쓰는 텐서를 아예 안 만든다
+    (`no_depth` 는 da3 depth mmap I/O 가, `rgb_only` 는 픽셀 Plücker 생성까지 빠진다).
+  - 실험 yaml 2 개 (`da3_7k_customgeo_nos` 와 각각 **한 줄만** 다르다):
+    `main/conf/experiment/da3_7k_customgeo_nos_nodepth.yaml`,
+    `main/conf/experiment/da3_7k_customgeo_nos_rgbonly.yaml`.
+- **`scripts/eval/target_scale_stats.py`** — "avg_scale 이 원인이냐"를 **실제 diffusion 타깃**
+  으로 답한다. 궤적 요약량(reach)이 아니라 `data['cam_param']` 과
+  `vae.encode(traj)/vae_latent_scale` 을 직접 잰다. 두 arm 이 같은 seg list 라 paired 다.
+
+  | | DA3 | COLMAP(transforms) |
+  |---|---|---|
+  | `avg_scale` mean (test 800 seg) | 4.50488 | 16.11375 |
+  | `cam_param` trans std | 0.44565 | 0.14929 |
+  | `cam_param` rot6d std | 0.49553 | 0.49554 |
+  | VAE latent std (**FULL corpus** 39817 sample / 6095 scene) | **0.73158** | **0.47637** |
+  | `/vae_latent_scale` 0.96032625 후 = diffusion 입력 std | 0.7618 | 0.4960 |
+
+  즉 같은 노이즈 스케줄에 **1.536 배 다른 신호 크기**가 들어간다. 회전 성분은 두 arm 이
+  완전히 같고 (0.49553 vs 0.49554) 차이는 전부 translation 분모에서 온다.
+  단 손해의 방향은 이걸로 정해지지 않는다 — 명목 1.0 에는 da3(0.7618) 쪽이 오히려 가깝다.
+  FULL corpus 값은 `scripts/vae/vae_scale_matrix.py` 를 `MAX_SCENES=none` 으로 돌려 얻었다
+  (기본값 200 은 저속 scene 편중이라 4~7% 낮게 나온다).
 - **`scripts/eval/pose_source_agreement.py`** — "da3pose 가 textonly(COLMAP)보다 못 나오는 게
   CLaTr 탓인가?" 를 가른다. 두 arm 의 `preds.npy` 가 **같은 160 segment 를 같은 순서로** 담고
   있어서 paired 비교가 된다 (filename 완전 일치 확인). 재추론 없음.
@@ -20,17 +59,40 @@ All notable changes to the latentcam sub-project. Follows [Keep a Changelog](htt
   즉 **두 pose_source 의 GT 궤적은 sim3 를 빼면 사실상 같은 궤적이다** (경로길이의 0.16%).
   DA3 pose 가 틀려서 지는 게 아니다. 갈리는 건 **분모**다 — 7K test 3985 segment 전량:
   `avg_scale` mean 15.52805(transforms) vs 4.69791(da3), 비율 p5 0.06490 / p50 0.23851 /
-  p95 1.05628 (16 배 산포). 그 결과 정규화된 타깃의 산포가 DA3 쪽이 크다:
-  std(log reach) 0.7381 vs 0.5670, CV(reach) 0.6590 vs 0.4863, reach p95/p5 9.905 vs 5.687.
-  이 여분의 산포는 caption(방향/회전 패턴)으로 예측할 수 없는 성분이라 그대로 학습 노이즈가 된다.
+  p95 1.05628 (16 배 산포).
+
+  > **정정 (2026-08-10).** 이 항목은 처음에 `preds.npy['ref_matrices']` 에서 잰
+  > std(log reach) 0.7381 vs 0.5670 / CV(reach) 0.6590 vs 0.4863 을 "정규화된 타깃의 산포"
+  > 라고 적었다. **틀렸다** — `out_to_trajectory` (`utils/data_utils.py:81`) 가 translation 에
+  > `scale` 을 **다시 곱해서** 돌려주므로 그 행렬은 world 단위다. 아래를 대신 볼 것.
 
   CLaTr 탓이 아니라는 근거 셋 (전부 `corpus_traj_manifold.py` 산출): (a) CLaTr 를 안 거치는
   caption fscore 도 같은 방향으로 진다 (ep50-59 평균 0.2069 vs 0.2369), (b) 두 GT 의 CLaTr
   구름이 구분 안 된다 (반경 28.9934 vs 29.1505, 3-NN r 25.5805 vs 26.0459, participation
   ratio 14.2113 vs 14.6033), (c) GT-vs-GT 천장도 같다 (density 1.0002+-0.0970 vs
   0.9999+-0.0954, coverage 0.8740+-0.0488 vs 0.8770+-0.0494).
-  남은 교란: 두 arm 은 prompt 도 다르다 (`<scene>/prompts.json` vs `<scene>/da3/prompts.json`
-  -> `token` maxabsdiff 10.0898). 이건 아직 안 갈랐다.
+  **가장 큰 원인은 prompt 였다 (2026-08-10 추가).** `pose_source` 는 pose 만 바꾸는 게 아니라
+  caption 파일을 `<scene>/prompts.json` -> `<scene>/da3/prompts.json` 으로 **조용히 갈아끼운다.**
+  7K test 1500 segment 중 **1435 개(95.7%) 의 prompt 가 다르다** (길이 122.5 vs 98.6 자).
+  같은 LLM(Qwen3-30B-A3B-Instruct-2507)인데 생성 시점이 달라서(2026-02-07 vs 2026-08-08)
+  **카메라 동사 어휘가 붕괴했다**:
+
+  | 토큰 | COLMAP prompts.json | da3/prompts.json |
+  |---|---|---|
+  | truck/trucks | 715 | **0** |
+  | dolly/dollies | 407 | **0** |
+  | pedestal/pedestals | 78 | **0** |
+  | tilt/tilts/tilting | 294 | **0** |
+  | pan/pans/panning | 1976 | **3** |
+  | 서로 다른 어휘 수 | 130 | 84 |
+  | caption 당 모션 토큰 수 | 11.07 | 8.28 |
+  | 서로 다른 모션 시그니처 | 1187 | 792 |
+  | 모션 시그니처 엔트로피 (bits) | 9.5480 | 7.9891 |
+  | 최빈 시그니처 비중 | 0.0287 | 0.1313 |
+
+  text-only 모델에서 이건 성능 상한을 직접 깎는다. 게다가 사라진 단어(truck/dolly/pedestal)가
+  바로 `val/captions/*` 가 채점하는 27 translation x 7 rotation 태그의 translation 축이다.
+  -> pose 효과와 prompt 효과를 가르려면 `pose_source: da3` + COLMAP prompt arm 이 필요하다 (미실행).
 - **`scripts/eval/corpus_traj_manifold.py`** — "SD 는 caption 정확도가 너무 높고 density/coverage
   가 너무 낮은데 카메라 분포가 단순해서인가?" 를 가른다. 학습이 이미 남긴 `preds.npy` /
   `preds_pcf.csv` 만 읽으므로 재추론이 없다. 핵심은 **천장(ceiling)** 대조군 — real 임베딩을

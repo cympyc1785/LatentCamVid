@@ -1,0 +1,37 @@
+# @package _global_
+# da3_7k_customgeo_nos 의 **depth + Plücker 모두 제거** ablation.
+#
+# da3_7k_customgeo_nos.yaml 과 **한 줄만** 다르다: custom_geo_channels: rgb_only.
+# GeoTokenizer 자체가 사라지고 frozen DINOv2 특징만 proj(1024 -> geo_latent_dim) 로 간다.
+# 즉 context 는 "이 장면이 어떻게 생겼나"만 주고 "카메라가 어디 있었나"는 전혀 주지 않는다.
+# nodepth arm 과 함께 보면 (RGB) / (RGB+Plücker) / (RGB+Plücker+depth) 3 점이 된다.
+#
+# dataset 쪽도 geo_plucker_map / geo_logd / geo_valid 를 만들지 않는다.
+# geo view 선택(frustum_cover)은 그대로라 세 arm 이 **같은 context view 집합**을 본다.
+exp_name: da3_7k_customgeo_nos_rgbonly
+pose_source: da3
+batch_size: 8
+epochs: 100
+ckpt_at_epochs: [50]
+
+geo_encoder: custom
+custom_geo_channels: rgb_only     # <- 이 arm 의 정의 (base 는 full)
+geo_cam_embed: null           # 카메라 정보는 어떤 경로로도 들어가지 않는다
+geo_latent_cache_dir: null    # proj 가 학습되므로 출력을 얼릴 수 없다
+geo_posed: false
+custom_geo_input_hw: [252, 448]   # 14 의 배수 (256 -> 252)
+custom_geo_freeze_dino: true
+
+geo_view_sampling: frustum_cover
+geo_cover_out_of_seg: true
+geo_cover_centered_at_s: true
+geo_first_view_target_s: false
+geo_cover_subtract_first: false
+
+scale_mode: avg_scale
+intr_norm: rel
+cam_dim: 64
+meta_csv: meta_da3_7k.csv
+train_seg_list: /data1/cympyc1785/data/DL3DV/scenes/latentcam_da3_7k_train_seg_list.txt
+test_seg_list: /data1/cympyc1785/data/DL3DV/scenes/latentcam_da3_7k_test_seg_list.txt
+coverage_blacklist_path: /data1/cympyc1785/LatentCamVid/camera_generation/latentcam/data/seg_blacklist_jump_da3_7k.csv

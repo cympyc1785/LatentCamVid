@@ -338,6 +338,9 @@ class CamDataset(torch.utils.data.Dataset):
         # _load_images 도 처음부터 그 격자로 주게 한다 -- 인코더 안의 bilinear 재보간을 피하면
         # Plücker 방향 단위벡터가 정확히 보존된다 (custom_geo_encoder.py:117-135 주석).
         self.geo_custom = self.geo_enabled and str(cfg.geo_encoder) == 'custom'
+        # [ablation 2026-08-10] custom_geo_channels: full | no_depth | rgb_only.
+        # 안 쓰는 입력은 아예 만들지 않는다 (depth 는 mmap 이라도 view 당 I/O 가 있다).
+        self.geo_custom_channels = str(getattr(cfg, 'custom_geo_channels', 'full') or 'full')
         self.geo_depth_cache_dir = None
         self._plucker_grid = {}      # (H0,W0) -> (xx, yy) 픽셀 중심 격자 (상수라 재사용)
         if self.geo_custom:
@@ -1469,10 +1472,12 @@ class CamDataset(torch.utils.data.Dataset):
             # [new 2026-08-07] geo_encoder='custom' 의 RGBD 입력. lagernvs 경로에서는
             # self.geo_custom 이 False 라 이 블록 자체가 없는 것과 같다.
             if self.geo_custom:
-                out['geo_plucker_map'] = self._geo_pixel_plucker(
-                    scene_idx, geo_idxs, extrinsics[0], norm_scale, (h, w))
-                out['geo_logd'], out['geo_valid'] = self._geo_depth_maps(
-                    scene_idx, geo_idxs, norm_scale)
+                if self.geo_custom_channels != 'rgb_only':
+                    out['geo_plucker_map'] = self._geo_pixel_plucker(
+                        scene_idx, geo_idxs, extrinsics[0], norm_scale, (h, w))
+                if self.geo_custom_channels == 'full':
+                    out['geo_logd'], out['geo_valid'] = self._geo_depth_maps(
+                        scene_idx, geo_idxs, norm_scale)
 
             # posed geo: raw geo-view camera geometry (geo_encoder builds the lagernvs
             # cam_token from these). c2w OpenCV, intrinsics (fx,fy,cx,cy) px, image hw.

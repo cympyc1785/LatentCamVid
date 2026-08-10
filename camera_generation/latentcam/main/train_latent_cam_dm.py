@@ -72,7 +72,10 @@ def geo_encode(geo_encoder, data, device):
     필요해서 backend 가 batch dict 을 통째로 받는다 (models/geo_encoder.py:_CustomBackend).
     wants_batch 로 분기하며, lagernvs 는 이 플래그가 False 라 아래 기존 경로 그대로다."""
     if getattr(geo_encoder, 'wants_batch', False):
-        need = ('images', 'geo_plucker_map', 'geo_logd', 'geo_valid')
+        # [ablation 2026-08-10] custom_geo_channels 에 따라 필요한 키가 줄어든다
+        # (no_depth -> logd/valid 없음, rgb_only -> Plücker 도 없음).
+        need = tuple(getattr(geo_encoder, 'needs_keys',
+                             ('images', 'geo_plucker_map', 'geo_logd', 'geo_valid')))
         miss = [k for k in need if k not in data]
         if miss:
             raise KeyError(f"geo_encoder='custom' needs {miss} in the batch — dataset_dl3dv 의 "

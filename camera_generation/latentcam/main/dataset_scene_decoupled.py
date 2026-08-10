@@ -268,9 +268,11 @@ class SDCamDataset(CamDataset):
             out['geo_cam_param'] = self._geo_cam_cond(
                 ctx, geo_idxs, extrinsics[0], norm_scale, (ch, cw))
         if self.geo_custom:
-            out['geo_plucker_map'] = self._geo_pixel_plucker(
-                ctx, geo_idxs, extrinsics[0], norm_scale, (ch, cw))
-            out['geo_logd'], out['geo_valid'] = self._geo_depth_maps(ctx, geo_idxs, norm_scale)
+            if self.geo_custom_channels != 'rgb_only':
+                out['geo_plucker_map'] = self._geo_pixel_plucker(
+                    ctx, geo_idxs, extrinsics[0], norm_scale, (ch, cw))
+            if self.geo_custom_channels == 'full':
+                out['geo_logd'], out['geo_valid'] = self._geo_depth_maps(ctx, geo_idxs, norm_scale)
         if self.geo_posed:
             gw2c = self.extrinsics_list[ctx][geo_idxs].float()
             gK = self.intrinsics_list[ctx][geo_idxs].float()

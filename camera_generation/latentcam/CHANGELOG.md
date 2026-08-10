@@ -31,6 +31,37 @@ All notable changes to the latentcam sub-project. Follows [Keep a Changelog](htt
     context clip 의 `avg_scale_align/0.json`). 즉 leakage-free 인 쪽은 `da3` + SD 이고,
     `transforms` arm 만 target 기준이다.
 
+### Changed
+- **`scripts/render/compare_textonly.py` 에 run 인자와 SD 용 그림 두 종류 추가** (인자 없이 돌리면
+  기존 `20260719_210144_dl3dv_textonly` 동작 그대로).
+  - `--run` / `--out`: 하드코딩돼 있던 run 경로를 인자로. `--no-per-target` 으로 target 별 PNG 생략.
+  - `--grid`: 전 target 을 contact sheet 한 장으로. 프리셋 → pos_rmse 순 정렬.
+  - `--preset-overlay`: SD 카메라 프리셋(`01_24mm` 등)별 GT/pred 중첩 + 프리셋 평균 궤적.
+  - `_vs_geo.png` (point/dist 분포 비교)는 기본 run 이 아니면 건너뛴다 — 다른 코퍼스에 대고
+    그리면 의미 없는 비교가 나온다.
+  - 그림 제목은 ASCII 로 (matplotlib DejaVu Sans 에 한글 글리프가 없어 tofu 로 깨졌다).
+
+  **결과 (`results/compare/sd_whuman_textonly/`, `sd_whuman_textonly` testset 80 target,
+  world 단위 = umeyama 로 GT 미터에 맞춘 SD 좌표계):**
+
+  n=80 pos_rmse mean 1.1627 / median 0.7932, rot_mean 11.48 deg, CLaTr 48.72
+
+  | preset | n | GT reach | pred reach | GT spread | pred spread | pos_rmse | rmse/reach |
+  |---|---|---|---|---|---|---|---|
+  | 01_24mm | 19 | 3.651 | 3.725 | 1.035 | 1.854 | 1.351 | 0.370 |
+  | 02_24mm | 19 | 3.728 | 2.287 | 1.042 | 1.795 | 1.915 | 0.514 |
+  | 05_24mm | 15 | 1.956 | 1.504 | 1.049 | 1.097 | 0.909 | 0.465 |
+  | 06_24mm | 12 | 1.543 | 1.749 | 0.437 | 0.883 | 0.588 | 0.381 |
+  | 07_24mm | 15 | 1.454 | 1.051 | 0.811 | 0.848 | 0.685 | 0.471 |
+
+  reach = `mean_n max_t ||T(t)-T(0)||`, spread = 프리셋 내 평균 궤적으로부터의 RMS 편차.
+  **pred spread 가 5/5 프리셋 전부에서 GT spread 보다 크다** (01 1.79x, 02 1.72x, 06 2.02x).
+  즉 world 공간에서 이 run 은 프리셋 평균으로 붕괴한 게 아니라 **과하게 퍼져 있다**.
+  `metrics.json` 의 clatr precision 0.15 / density 0.1792 / coverage 0.175 / fcd 319.9549 와
+  방향이 일치한다 (recall 0.8375 만 높다).
+  주의: `mean_traj_baseline.py` 의 "평균 예측 수준" 판정은 `cam_param`(분모 D 로 정규화,
+  rot6d+intr 포함) 공간이고 이 표는 denormalize 된 world 위치 공간이라 **같은 양이 아니다.**
+
 ### Added
 - **`scripts/eval/mean_traj_baseline.py`** — `val/loss_traj` / `val/loss_latent` 의 **"코퍼스 평균
   궤적만 내놓는 모델"** 기준선을 코퍼스별로 잰다. `mean_n (x - mean_n x)^2` (per-(t,c) 평균 궤적)

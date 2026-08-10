@@ -5,6 +5,14 @@ All notable changes to the latentcam sub-project. Follows [Keep a Changelog](htt
 ## [Unreleased]
 
 ### Fixed
+- **`dataset_scene_decoupled.py::_load_images` 가 일시적 mp4 디코딩 실패 한 번에 학습 전체를
+  죽였다** — 이제 재시도한다 (`_DECODE_RETRIES=3`, `_DECODE_RETRY_SLEEP=0.5s`, attempt 마다
+  ×(attempt+1)). 3 회 후에도 0 프레임이면 기존과 동일하게 `RuntimeError`.
+  `sd_whuman_customgeo` (wandb `fkfqww00`) 가 epoch 5, 19:37 에 이걸로 죽었다
+  (`scene3292_5x5_loc115_scene_Yakohama_02_24mm.mp4`). **파일 손상이 아니다** — 같은 mp4 를
+  직후 cv2 로 3/3 회 재디코딩해 매번 81 프레임 정상. `/data1` 이 Lustre 라 동시 I/O 가 몰리면
+  `VideoCapture` open 이 일시적으로 실패한다. 자세한 경위는 `FIX.log`.
+
 - **`dataset_dl3dv.py` 의 `avg_scale` 설명이 틀려 있었다 (주석만 수정, 동작 변화 없음).**
   모듈 상단 `scale_mode` 표와 `_avg_scale` docstring 은 저장된 avg_scale 을
   `mean(||scene point - first camera||)` 하나로 적어 뒀지만, **`pose_source` 마다 생성기가

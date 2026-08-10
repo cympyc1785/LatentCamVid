@@ -38,6 +38,11 @@ from dataset_dl3dv import CamDataset
 
 SD_ROOT_DEFAULT = "/data1/cympyc1785/data/Scene-Decoupled-Video-dataset"
 
+# mp4 디코딩이 0 프레임을 낼 때 재시도 횟수/간격. /data1 은 Lustre 라 동시 I/O 가 몰리면
+# VideoCapture open 이 일시적으로 실패한다 — 그 한 번에 학습을 죽이지 않기 위한 값.
+_DECODE_RETRIES = 3
+_DECODE_RETRY_SLEEP = 0.5      # 초. attempt 마다 x(attempt+1) 로 늘어난다
+
 
 class SDCamDataset(CamDataset):
     """scene_dir_list 의 원소 = clip 디렉토리, samples 의 원소 = (target clip, context clip) 쌍."""
@@ -188,22 +193,36 @@ class SDCamDataset(CamDataset):
         비등방으로 리사이즈했다). 둘 다 **full-frame** 리사이즈라 정규화 좌표는 보존되고,
         `_geo_pixel_plucker` 가 (j+.5)/Wc·W0 로 원본 격자에 되돌린 뒤 K 를 걸므로
         여기서 곧장 geo_hw 로 줄여도 Plücker 와 픽셀이 정확히 대응한다.
+
+        [fix 2026-08-10] 0 프레임 디코딩을 즉시 예외로 올리면 **일시적 I/O 실패 한 번에
+        학습 전체가 죽는다.** 실제로 sd_whuman_customgeo (wandb fkfqww00) 가 epoch 5 에서
+        이렇게 죽었는데, 그 mp4 는 직후 3/3 회 81 프레임 정상 디코딩됐다 (/data1 은 Lustre,
+        동시 I/O 가 몰리면 open 이 실패할 수 있다). 그래서 재시도 후에도 실패할 때만 던진다.
         """
         import cv2
+        import time
         H, W = self.geo_hw
         want = {int(i) for i in idxs}
-        cap = cv2.VideoCapture(mp4)
-        got, k = {}, 0
-        while len(got) < len(want):
-            ok, f = cap.read()
-            if not ok:
+        got = {}
+        for attempt in range(_DECODE_RETRIES):
+            cap = cv2.VideoCapture(mp4)
+            got, k = {}, 0
+            while len(got) < len(want):
+                ok, f = cap.read()
+                if not ok:
+                    break
+                if k in want:
+                    got[k] = cv2.resize(f, (W, H), interpolation=cv2.INTER_AREA)[:, :, ::-1]
+                k += 1
+            cap.release()
+            if got:
+                if attempt:
+                    print(f"[sd _load_images] {attempt + 1} 번째 시도에서 디코딩 성공: {mp4}")
                 break
-            if k in want:
-                got[k] = cv2.resize(f, (W, H), interpolation=cv2.INTER_AREA)[:, :, ::-1]
-            k += 1
-        cap.release()
+            if attempt < _DECODE_RETRIES - 1:
+                time.sleep(_DECODE_RETRY_SLEEP * (attempt + 1))
         if not got:
-            raise RuntimeError(f"no frames decoded from {mp4}")
+            raise RuntimeError(f"no frames decoded from {mp4} ({_DECODE_RETRIES} 회 재시도 후)")
         last = got[max(got)]
         imgs = [torch.from_numpy(np.ascontiguousarray(got.get(int(i), last)))
                 .permute(2, 0, 1).float() / 255.0 for i in idxs]

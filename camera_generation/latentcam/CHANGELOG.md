@@ -63,6 +63,54 @@ All notable changes to the latentcam sub-project. Follows [Keep a Changelog](htt
   rot6d+intr 포함) 공간이고 이 표는 denormalize 된 world 위치 공간이라 **같은 양이 아니다.**
 
 ### Added
+- **`scripts/eval/prdc_per_sample.py`** — set-level 로만 보고되던 `clatr/precision`, `clatr/density`
+  를 **per-sample 로 분해**한다. `prdc.py` 의 정의가 fake 축 평균이라 분해가 성립한다:
+  `precision = (d(real_j,fake_i) < radius_j).any(axis=0).mean()`,
+  `density = (1/k)*(...).sum(axis=0).mean()` — axis=0 이 real 축이므로 fake 샘플별 값이 남는다.
+  `manifold_k=3`, `num_splits=5` 의 chunk 경계까지 그대로 재현한다 (radius 가 chunk 안에서만
+  정해지므로). recall/coverage 는 real 축이 남아 per-sample 값이 없어 내지 않는다.
+
+  **재현 검증 (`sd_whuman_textonly`): precision 0.1500 = 보고 0.15, density 0.1792 = 보고 0.1792.**
+
+  출력: `_prdc_per_sample.csv`, `_fscore_vs_prdc.png`, `_mismatch_topdown.png`
+  (caption fscore >= 0.999 인데 manifold 밖인 target 을 density 순으로 top-down).
+
+  **`sd_whuman_textonly` 결과 (n=80):** manifold 안 12/80, density>0 12/80.
+  caption fscore >= 0.999 인 28 개 중 manifold 안은 **4 개뿐**.
+
+  | 그룹 | n | pos_rmse | reach GT/pred | pathlen p/g | jitter GT/pred | CLaTr | cos(pred,GT) |
+  |---|---|---|---|---|---|---|---|
+  | 전체 | 80 | 1.163 | 2.62 / 2.17 | 0.96 | 0.510 / 0.363 | 48.6 | 59.0 |
+  | precision=1 | 12 | 0.944 | 1.81 / 1.35 | 0.90 | 0.617 / 0.345 | 52.2 | 65.5 |
+  | precision=0 | 68 | 1.201 | 2.77 / 2.31 | 0.97 | 0.491 / 0.366 | 48.0 | 57.9 |
+  | fscore>=.999 & 안 | 4 | 0.607 | 1.51 / 0.85 | 0.65 | 0.480 / 0.361 | 50.2 | 75.7 |
+  | fscore>=.999 & 밖 | 24 | 1.024 | 2.68 / 2.53 | 0.93 | 0.426 / 0.322 | 51.3 | 71.5 |
+
+  jitter = `mean||2차차분|| / mean||1차차분||`. **manifold 밖 그룹이 특별히 떨리거나 짧지 않다** —
+  오히려 `fscore>=.999 & 밖` 24 개는 cos(pred,GT) 71.5 로 전체 평균 59.0 보다 GT 에 가깝다.
+
+  **PRDC 격차는 표본수 artifact 가 아니다 (가설 기각).** chunk 크기를 맞춰 재계산:
+
+  | run | N | chunk=8 | chunk=16 | chunk=32 | chunk=N |
+  |---|---|---|---|---|---|
+  | SD_textonly | 80 | P 0.1750 D 0.1875 | P 0.1500 D 0.1792 | — | P 0.1625 D 0.0958 |
+  | SD_customgeo | 80 | P 0.0875 D 0.1083 | P 0.1125 D 0.1250 | — | P 0.0625 D 0.0667 |
+  | DL3DV_nos | 160 | — | P 0.9688 D 1.0688 | P 0.9500 D 1.1187 | P 0.9500 D 1.0688 |
+
+  chunk=16 으로 맞춰도 0.15 vs 0.9688 이라 SD 테스트셋이 작아서 생긴 차이가 아니다.
+
+  **실제 원인은 manifold 반경 대비 예측 거리다:**
+
+  | run | real-real 거리 med | kNN radius(k=3) med | radius/dist | real-fake min 거리 med | min/radius |
+  |---|---|---|---|---|---|
+  | SD_textonly | 34.871 | 15.967 | 0.458 | 21.537 | **1.349 (> 1 → 밖)** |
+  | DL3DV_nos | 41.410 | 25.258 | 0.610 | 23.250 | **0.920 (< 1 → 안)** |
+
+  SD 는 real 궤적이 5 개 프리셋으로 뭉쳐 있어 kNN 반경이 좁고(radius/dist 0.458), 예측이 그
+  좁은 공에 못 들어간다. 두 코퍼스 모두 **경계 바로 양옆**에 있어서 (21.5 vs 16.0, 23.3 vs 25.3)
+  precision 0.15 대 0.95 라는 격차는 밑바탕 거리 차이(21.5 vs 23.3)를 크게 증폭한 값이다.
+  **PRDC 절대값을 코퍼스 간에 비교하지 말 것.**
+
 - **`scripts/eval/mean_traj_baseline.py`** — `val/loss_traj` / `val/loss_latent` 의 **"코퍼스 평균
   궤적만 내놓는 모델"** 기준선을 코퍼스별로 잰다. `mean_n (x - mean_n x)^2` (per-(t,c) 평균 궤적)
   을 `cam_param` 공간과 VAE-latent(`/vae_latent_scale`) 공간 양쪽에서 계산한다. `cfg.geo_encoder`

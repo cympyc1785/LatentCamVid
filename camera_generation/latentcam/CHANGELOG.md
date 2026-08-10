@@ -5,6 +5,60 @@ All notable changes to the latentcam sub-project. Follows [Keep a Changelog](htt
 ## [Unreleased]
 
 ### Added
+- **`scripts/eval/mean_traj_baseline.py`** — `val/loss_traj` / `val/loss_latent` 의 **"코퍼스 평균
+  궤적만 내놓는 모델"** 기준선을 코퍼스별로 잰다. `mean_n (x - mean_n x)^2` (per-(t,c) 평균 궤적)
+  을 `cam_param` 공간과 VAE-latent(`/vae_latent_scale`) 공간 양쪽에서 계산한다. `cfg.geo_encoder`
+  를 `None` 으로 눌러 이미지/depth I/O 를 건너뛴다.
+
+  **동기가 된 질문: "Scene-Decoupled(SD) 로 학습한 게 왜 DL3DV 보다 성능이 훨씬 높게 나오나?
+  context 에 target segment 가 들어간 건 아닌가?"**
+
+  (1) **누수는 없다.** `sd_whuman_train.txt` 52286 줄 / 3006 scene, `sd_whuman_test.txt` 5758 줄 /
+  334 scene 에서 `awk -F'__' '$2==$3'` = **0 쌍** (target clip == context clip 인 샘플 없음),
+  train/test scene 교집합 `comm -12` = **0**. 게다가 `sd_whuman_textonly` arm 은 context 자체가
+  없는데도 가장 낮은 loss 를 낸다 — context 경로로는 설명이 안 된다.
+
+  (2) **점수 차이는 타깃 분산 차이다.** val 집합 600 segment (`--n 600`) 기준선:
+
+  | 코퍼스 | `cam_param` mse_vs_mean_traj | VAE-target mse_vs_mean_traj | VAE-target std |
+  |---|---|---|---|
+  | SD whuman | 0.012418 | 0.062269 | 0.255507 |
+  | DL3DV DA3 | 0.091427 | 0.538472 | 0.752311 |
+  | DL3DV COLMAP | 0.049417 | 0.234451 | 0.497127 |
+
+  run 의 wandb summary 를 자기 코퍼스 기준선으로 나누면 (수치는 wandb 원본):
+
+  | run (id) | `val/loss_traj` | / baseline | `val/loss_latent` | / baseline |
+  |---|---|---|---|---|
+  | `sd_whuman_textonly` (rzu5qedy, ep25 killed) | 0.01226280815899372 | 0.988 | 0.07175761461257935 | 1.152 |
+  | `sd_whuman_customgeo` (fkfqww00, ep4 running) | 0.016203269362449646 | 1.305 | 0.15333011746406555 | 2.462 |
+  | `da3_7k_customgeo_nos` (68iuifk0, ep97 running) | 0.05391194298863411 | 0.590 | 0.3500967025756836 | 0.650 |
+  | `da3_7k_textonly` COLMAP (6chmxgrq, ep60 killed) | 0.0486505962908268 | 0.985 | 0.2414451539516449 | 1.030 |
+
+  즉 SD 의 `val/loss_traj` 0.0123 은 **자기 코퍼스의 평균-예측 기준선 0.012418 과 사실상 같다
+  (0.988)**. 낮은 loss 는 학습이 잘 된 게 아니라 SD 타깃 분산이 DL3DV 의 1/4~1/7 이라서다.
+  같은 잣대로 DL3DV DA3 customgeo 만 0.590 / 0.650 으로 기준선을 유의미하게 깬다.
+
+  (3) **원인: SD 코퍼스에 카메라 프리셋이 5 종뿐이다.** clip 이름 접미사 기준 train
+  `_01_24mm` 10979 / `_02_24mm` 10922 / `_05_24mm` 10154 / `_06_24mm` 10121 / `_07_24mm` 10110,
+  test 1204/1205/1109/1103/1137. 환경(Rome, Gothic_Mansion, IslandMap, Dragon_Rise …)만 바뀌고
+  카메라 무브는 그대로다. test 600 샘플의 `cam_param` RMSD: 프리셋 평균궤적 기준 0.0492 / 0.0477
+  / 0.0580 / 0.0500 / 0.0481, 전체 pooled 0.1114 → **궤적 분산의 약 80% 를 프리셋 라벨 5 개가
+  설명**한다. 프리셋 평균궤적끼리의 거리는 05-07 0.0045, 05-06 0.0175, 06-07 0.0181 로
+  within-preset 산포보다 한 자릿수 작아 05/06/07 은 사실상 같은 무브다 (01-02 는 0.2947).
+  scene 은 disjoint 여도 **궤적 라벨 공간은 train/test 가 동일**하다.
+
+  (4) **"성능이 높다"는 것도 지표 한정이다.** wandb summary 원본:
+  `val/captions/fscore` SD textonly 0.5626 vs DL3DV COLMAP 0.2673, 그러나
+  `val/clatr/precision` 0.1500 vs 0.9813, `density` 0.1792 vs 1.1271, `coverage` 0.1750 vs 0.9313,
+  `fcd` 319.9549 vs 172.5301 로 분포 지표는 전부 크게 나쁘다. 이전 `corpus_traj_manifold.py`
+  결과(SD GT tag 엔트로피 2.8538 vs DL3DV 4.2036 bit, 48 step 내내 tag 1 개 유지 비율 0.7500 vs
+  0.1938)와 같은 방향이다 — SD 모델은 저진폭·저다양성 궤적을 내놓고, 그게 진폭/태그 기반
+  지표에서만 유리하게 잡힌다.
+
+  주의: `val/loss_traj` 는 코퍼스 간 직접 비교 불가다. 위 비율은 각 run 이 실제로 쓴
+  `vae_latent_scale` (SD run 도 DL3DV 상수 0.96032625 사용, SD 자체 값은 ≈0.2528 로 추정)을
+  기준선 계산에도 똑같이 적용해 맞춘 것이다.
 - **`custom_geo_channels` (기본 `full`)** — `geo_encoder: custom` 의 GeoTokenizer 에 무엇을
   넣을지 고르는 ablation 스위치. `full` 은 기존 경로와 완전히 동일하다 (기존 run 영향 없음).
 

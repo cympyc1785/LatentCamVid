@@ -88,12 +88,52 @@ def baseline(x):
             'rmsd_vs_mean_traj': float(np.sqrt(per_elem))}
 
 
+def sd_preset(name):
+    """SD data_name '<scene>__<target clip>__<context clip>' 의 target clip 프리셋 접미사.
+
+    clip 이름이 '..._01_24mm' 꼴이라 뒤 두 토큰이 프리셋 id 다. 매칭 실패하면 None.
+    """
+    tgt = name.split('__')[1] if '__' in name else name
+    parts = tgt.split('_')
+    return '_'.join(parts[-2:]) if len(parts) >= 2 else None
+
+
+def oracle(x, groups):
+    """그룹 라벨을 **정확히 안다고 가정**했을 때의 MSE (= 그룹 내 분산).
+
+    SD 처럼 카메라 프리셋이 몇 종뿐인 코퍼스에서 "프리셋만 맞히면 도달하는 하한"이다.
+    run 의 loss 가 이 값보다 훨씬 크면, taxonomy 가 작아서 쉬운 문제인데도 못 풀고 있다는 뜻.
+    """
+    x = np.asarray(x, dtype=np.float64)
+    labs = sorted(set(groups))
+    tot, n, per = 0.0, 0, {}
+    means = {}
+    for g in labs:
+        m = np.array([i for i, v in enumerate(groups) if v == g])
+        xs = x[m]
+        mu = xs.mean(0, keepdims=True)
+        means[g] = mu[0]
+        se = float(((xs - mu) ** 2).mean())
+        per[g] = {'n': int(len(m)), 'mse': se, 'rmsd': float(np.sqrt(se))}
+        tot += se * xs.size
+        n += xs.size
+    inter = {}
+    for i, a in enumerate(labs):
+        for b in labs[i + 1:]:
+            inter[f'{a} vs {b}'] = float(np.sqrt(((means[a] - means[b]) ** 2).mean()))
+    return {'n_groups': len(labs), 'mse_within_group': tot / n,
+            'rmsd_within_group': float(np.sqrt(tot / n)),
+            'per_group': per, 'group_mean_rmsd_between': inter}
+
+
 def main():
     ap = argparse.ArgumentParser()
     ap.add_argument('--cfg', action='append', required=True,
                     help='LABEL=path/to/config.yaml (반복 가능)')
     ap.add_argument('--n', type=int, default=600)
     ap.add_argument('--no-vae', action='store_true')
+    ap.add_argument('--group', default='none', choices=['none', 'sd_preset'],
+                    help="sd_preset: SD 카메라 프리셋(_01_24mm 등)을 안다고 가정한 oracle 하한도 잰다")
     ap.add_argument('--out', default='results/compare/mean_traj_baseline')
     a = ap.parse_args()
 
@@ -117,6 +157,12 @@ def main():
         if not a.no_vae:
             z = vae_latents(cfg, traj).numpy() / float(cfg.vae_latent_scale)
             rec['vae_target'] = {**baseline(z), 'std_all': float(z.std())}
+        if a.group == 'sd_preset':
+            gs = [sd_preset(x) for x in names]
+            if all(gs):
+                rec['cam_param_oracle_preset'] = oracle(traj.numpy(), gs)
+                if not a.no_vae:
+                    rec['vae_target_oracle_preset'] = oracle(z, gs)
         out[lab] = rec
         print(f'[{lab}] {len(names)}/{n_val} segments  '
               f'cam_param baseline={rec["cam_param"]["mse_vs_mean_traj"]:.6f}', flush=True)

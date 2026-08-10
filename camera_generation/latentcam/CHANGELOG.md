@@ -59,6 +59,60 @@ All notable changes to the latentcam sub-project. Follows [Keep a Changelog](htt
   주의: `val/loss_traj` 는 코퍼스 간 직접 비교 불가다. 위 비율은 각 run 이 실제로 쓴
   `vae_latent_scale` (SD run 도 DL3DV 상수 0.96032625 사용, SD 자체 값은 ≈0.2528 로 추정)을
   기준선 계산에도 똑같이 적용해 맞춘 것이다.
+
+  (5) **`--group sd_preset` — 프리셋 oracle 하한** (val 1200 seg). "taxonomy 가 줄었으면 오히려
+  더 잘 맞춰야 하는 것 아니냐"는 지적에 답하기 위해, **프리셋 라벨을 정확히 안다고 가정**했을
+  때의 MSE(=프리셋 내 분산)를 쟀다:
+
+  | 공간 | pooled 평균-예측 | 프리셋 oracle | oracle/pooled |
+  |---|---|---|---|
+  | `cam_param` | 0.012204214888561328 | 0.0026682241351742033 | 0.219 |
+  | VAE-target | 0.061723771252337176 | 0.021127361593618044 | 0.342 |
+
+  프리셋 내 RMSD 0.0491(01) / 0.0492(02) / 0.0547(05) / 0.0555(06) / 0.0498(07),
+  프리셋 평균궤적 간 RMSD 01-02 0.2939, 01-05/06/07 0.1515~0.1551, **05-06 0.0043 / 05-07 0.0049
+  / 06-07 0.0036** (실효 궤적 3 종).
+
+  즉 라벨만 맞히면 `cam_param` MSE 0.00267 까지 내려가야 한다. 그런데 실제 run 은
+
+  | run | val/loss_traj | / pooled | **/ oracle** |
+  |---|---|---|---|
+  | `sd_whuman_textonly` (rzu5qedy, ep25) | 0.01226280815899372 | 1.005 | **4.60** |
+  | `sd_whuman_customgeo` (fkfqww00, ep4) | 0.016203269362449646 | 1.328 | **6.07** |
+
+  이고, rzu5qedy 의 마지막 6 epoch val/loss_traj 는 0.011152 / 0.0123 / 0.01286 / 0.010486 /
+  0.011928 / 0.012263 로 **이미 평탄**하다(최저 0.010486 도 oracle 대비 3.93). 즉 SD 는 문제가
+  쉬워져서 loss 가 낮은 게 아니라, **쉬워진 문제조차 못 풀고 pooled 평균 근처에 머무는 중**이다.
+  비교로 `da3_7k_customgeo_nos` (68iuifk0) 는 마지막 6 epoch 0.056614 / 0.053448 / 0.060576 /
+  0.054481 / 0.05384 / 0.053912 로 pooled 기준선의 0.59 다.
+- **`scripts/eval/prompt_motion_stats.py`** — 학습이 실제로 읽는 캡션 필드
+  (`prompt_camera_with_scene_video.concise`) 에서 **축(axis)/방향(direction) 정보가 남아 있는지**
+  를 pose_source 별로 센다. "DA3 캡션은 truck/dolly 가 사라지고 move/yaw 만 남아서 정보가 줄었다"
+  는 앞선 추정을 검증하기 위한 것 — 어휘 수가 아니라 축 표기 유무를 봐야 한다.
+
+  test seg list 3985 caption, COLMAP(`<scene>/prompts.json`) vs DA3(`<scene>/da3/prompts.json`):
+
+  | 지표 | COLMAP | DA3 |
+  |---|---|---|
+  | 축 정보가 있는 caption 비율 | 0.9997490589711417 | 0.9997490589711417 |
+  | lateral | 0.9761606022584692 | 0.9851944792973651 |
+  | yaw (yaw+pan) | 0.9681304893350062 | 0.9513174404015057 |
+  | depth | 0.6637390213299874 | 0.6052697616060226 |
+  | vertical | 0.3565872020075282 | 0.3214554579673777 |
+  | pitch (pitch+tilt) | 0.2582183186951066 | 0.1922208281053952 |
+  | roll | 0.0602258469259724 | 0.0484316185696361 |
+  | move 계열 토큰 수 | 4262 | 3464 |
+  | 그중 뒤 3 토큰 안에 방향어가 있는 비율 | 0.9899108399812294 | 0.9760392609699770 |
+  | 방향어 없는 bare move | 43 | 83 |
+  | caption 평균 토큰 수 | 21.028858218318696 | 18.504391468005018 |
+  | 용어 카운트 | pan 5334, yaw 1009, tilt 1001, truck 640, dolly 625, roll 269, pitch 210, pedestal 25, crane 7 | pan 3797, yaw 1787, tilt 504, pitch 340, roll 205, truck 10, zoom 6, crane 6, pedestal 4, arc 1, orbit 1 |
+
+  **결론: 촬영용어만 평범한 말로 바뀌었고 축·방향 정보는 그대로다.** "move right" 는 truck right
+  와 같은 축을 지정하고, 방향어 동반율이 0.9899 -> 0.9760 로 거의 안 떨어진다. 축 표기율 차이는
+  depth −5.8pp / vertical −3.5pp / pitch −6.6pp 수준이고 caption 이 2.5 토큰 짧아진 정도다.
+  따라서 **DA3 arm 의 지표 차이를 캡션 어휘 변화로 설명하기 어렵다** — 앞선
+  `pose_source_agreement.py` 항목의 "어휘가 줄어 텍스트 조건이 약해졌다"는 뉘앙스를 여기서
+  정정한다. 남는 후보는 GT 궤적 쪽(DA3 pose 의 지터/스케일)이다.
 - **`custom_geo_channels` (기본 `full`)** — `geo_encoder: custom` 의 GeoTokenizer 에 무엇을
   넣을지 고르는 ablation 스위치. `full` 은 기존 경로와 완전히 동일하다 (기존 run 영향 없음).
 

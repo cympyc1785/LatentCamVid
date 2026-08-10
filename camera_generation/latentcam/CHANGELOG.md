@@ -100,6 +100,37 @@ All notable changes to the latentcam sub-project. Follows [Keep a Changelog](htt
   거의 그대로다** — chunk 크기 실험으로 이미 기각한 표본수 artifact 가설과 일치한다.
 
 ### Added
+- **`avg_scale_ref` 옵션** (`main/conf/config.yaml`, `main/dataset_dl3dv.py`) — `scale_mode: avg_scale`
+  + `pose_source: da3` 에서 저장된 avg_scale 을 **어느 기준점에서 잰 파일**로 읽을지 고른다.
+  점 집합(context range unproject: target 제외 [0,s)/[e,N) 중 긴 쪽, da3 depth conf >= 전역 P40,
+  pixel_stride 2)은 둘이 같고 기준점만 다르다. 둘 다 target 프레임을 안 써서 leakage-free.
+
+  | 값 | 디렉토리 | 기준점 |
+  |---|---|---|
+  | `centroid` (기본, **기존 동작 그대로**) | `<scene>/da3/avg_scale/` | context 카메라 중심들의 centroid |
+  | `context_first_cam` | `<scene>/da3/avg_scale_context_first_cam/` | context range 의 첫 카메라 |
+
+  - `pose_source != 'da3'` 과 같이 쓰면 `ValueError` (해당 디렉토리가 `da3/` 아래에만 있다).
+    알 수 없는 값도 `ValueError`.
+  - `centroid` 이 아닐 때는 avg_scale json 결측/파싱 실패 시 `cam_dist_mean` 으로 **조용히
+    fallback 하지 않고 예외를 던진다** — 분모가 말없이 바뀌는 사고를 막기 위해서다.
+    기본값 `centroid` 의 fallback 동작은 그대로 유지.
+  - 인덱스 캐시 키에는 안 들어간다 (avg_scale 은 `__getitem__` 에서 읽고 샘플 인덱스와 무관).
+    실제로 두 설정이 같은 캐시(38609 samples / 6092 scenes)를 재사용하는 것을 확인.
+
+  데이터 검증 (da3_7k train+test 39817 세그먼트): 결측 0, 비유한·비양수 0.
+  first_cam mean 6.64851 / med 4.30108 / min 0.25072 / max 171.81422,
+  first_cam/centroid 비 med 1.41159 (p05 1.00945, p95 2.23834, min 0.62235, max 6.09669,
+  1 미만 3.87%). dataset 단위 검증: `cam_param` 의 rot6d/intrinsics/caption 은 완전 동일하고
+  translation 만 정확히 그 비율만큼 스케일 (예 `1K_001dccbc…_0` centroid 9.496656 /
+  first_cam 9.946007, trans 비 min=max=1.047317).
+
+- **`main/conf/experiment/da3_7k_da3pose_asfirstcam.yaml`** — `da3_7k_da3pose.yaml` 에서
+  `avg_scale_ref: context_first_cam` 한 줄만 추가한 arm. 나머지(모델/코퍼스/seg 리스트/blacklist/
+  VAE/epochs/ckpt_at_epochs)는 전부 동일해 **차이가 분모의 기준점 하나뿐**이다.
+  `vae_latent_scale` 은 0.96032625 유지 — 분모가 바뀌면 VAE latent std 도 바뀌므로 이 arm 에
+  맞춰 측정한 값이 아니지만, `da3_7k_da3pose` 와 loss 를 같은 축에서 보기 위해 그대로 뒀다.
+
 - **`scripts/eval/viz_clatr_latent_pca.py`** — PRDC 가 사는 공간(CLaTr trajectory latent, 256-D)의
   GT/pred 분포를 코퍼스별로 그린다. 코퍼스당 3 열: (1) GT+pred 합쳐 적합한 2-D PCA 산점도,
   (2) 같은 PCA 위 GT 만 카메라 프리셋별 색, (3) **PRDC 가 실제로 임계 비교하는 두 거리**의

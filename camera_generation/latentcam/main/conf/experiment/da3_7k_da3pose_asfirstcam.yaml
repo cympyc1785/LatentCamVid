@@ -1,0 +1,35 @@
+# @package _global_
+# da3_7k_da3pose.yaml 에서 **`avg_scale_ref: context_first_cam` 한 줄만 추가한** arm.
+# 다른 값(모델/코퍼스/seg 리스트/blacklist/VAE/epochs/ckpt_at_epochs)은 전부 그대로라
+# 둘의 차이는 **분모 avg_scale 의 기준점 하나뿐**이다.
+#
+# 무엇이 바뀌나 (dataset_dl3dv 의 avg_scale_ref 주석 참고)
+#   점 집합은 동일: context range(= target 제외 [0,s)/[e,N) 중 프레임이 많은 쪽 하나)의
+#   da3 depth(conf >= 전역 P40, pixel_stride 2) unproject. 기준점만
+#     centroid            = context 카메라 중심들의 평균   -> <scene>/da3/avg_scale/
+#     context_first_cam   = context range 의 첫 카메라      -> <scene>/da3/avg_scale_context_first_cam/
+#   둘 다 target 프레임을 안 쓰므로 leakage-free 인 것은 동일하다.
+#
+# 실측 (da3_7k train+test 39817 세그먼트, 결측 0 / 비유한 0):
+#   first_cam mean 6.64851 / med 4.30108 / min 0.25072 / max 171.81422
+#   first_cam/centroid 비: med 1.41159, p05 1.00945, p95 2.23834, <1 인 것 3.87%
+#   -> 분모가 대체로 1.4배 커져 정규화된 translation 이 그만큼 작아진다.
+#
+# !! vae_latent_scale 은 da3_7k_da3pose 와 같은 0.96032625 를 그대로 둔다. 분모가 바뀌면 VAE
+#    latent 의 실제 std 도 바뀌므로 이 상수는 이 arm 에 맞춰 측정한 값이 아니다. 그래도 유지하는
+#    이유는 da3_7k_da3pose 와 loss_traj / loss_latent 를 같은 축에서 비교하기 위해서다.
+#    (7K 코퍼스로 재계산한 적이 없다는 점은 da3_7k_da3pose 와 동일한 조건.)
+exp_name: da3_7k_da3pose_asfirstcam
+pose_source: da3
+avg_scale_ref: context_first_cam
+batch_size: 8
+epochs: 100
+ckpt_at_epochs: [50]
+geo_encoder: null
+scale_mode: avg_scale
+intr_norm: rel              # vae_20260302_300 = frame-0-relative-intrinsics ckpt
+cam_dim: 64                 # = 그 ckpt 의 latent_dim
+meta_csv: meta_da3_7k.csv
+train_seg_list: /data1/cympyc1785/data/DL3DV/scenes/latentcam_da3_7k_train_seg_list.txt
+test_seg_list: /data1/cympyc1785/data/DL3DV/scenes/latentcam_da3_7k_test_seg_list.txt
+coverage_blacklist_path: /data1/cympyc1785/LatentCamVid/camera_generation/latentcam/data/seg_blacklist_jump_da3_7k.csv

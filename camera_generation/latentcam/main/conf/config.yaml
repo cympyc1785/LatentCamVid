@@ -79,6 +79,14 @@ trans_repr: w2c
 # 에서 cam_param[9:11] 이 정확히 [1,1] 이 아니라 1.000 +- 0.003 이 된다.
 # 인덱스 캐시 키에는 'transforms' 가 아닐 때만 __ps<source> 가 붙는다(기존 캐시 재사용 보존).
 pose_source: transforms
+# [new 2026-08-10] scale_mode='avg_scale' + pose_source='da3' 에서 저장된 avg_scale 을 **어느
+# 기준점에서 잰 파일**로 읽을지. 점 집합(context range unproject)은 같고 기준점만 다르다.
+#   'centroid'          (기본, 기존 동작) <scene>/da3/avg_scale/          context 카메라 centroid 기준
+#   'context_first_cam'                   <scene>/da3/avg_scale_context_first_cam/  context 첫 카메라 기준
+# pose_source != 'da3' 과 같이 쓰면 에러 (해당 디렉토리가 da3 아래에만 있다).
+# 실측 (da3_7k 39817 세그먼트): first_cam/centroid 비 med 1.41159 -> 분모가 커져 정규화된
+# translation 이 작아진다. vae_latent_scale 을 그대로 두면 diffusion 입력 std 가 arm 마다 달라진다.
+avg_scale_ref: centroid
 lazy_dataset: true         # [new] __init__ builds only the sample index (cached); scene poses parsed lazily in __getitem__
 use_vae: true
 num_cam: 13

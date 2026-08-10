@@ -33,6 +33,7 @@ scale_mode (what the camera translations are divided by):
                            점 = da3 depth(conf >= 전역 P40, pixel_stride 2) unproject.
                            target 프레임을 전혀 안 써서 **leakage-free** 다.
                            (pipeline/workspace/make_avg_scale_da3.py, 6/6 세그먼트 재현 확인)
+                         기준점은 `avg_scale_ref` 로 바꿀 수 있다 (아래).
                        -> 즉 pose_source 를 바꾸면 분모의 **정의 자체**가 바뀐다. 두 arm 의
                           avg_scale 크기 차이(mean 15.52805 vs 4.69791)는 단위 차가 아니다.
   'cam_dist_mean'      mean(||camera center_i - center_0||) over the target segment  (~1-2)
@@ -47,6 +48,18 @@ pose_source (pose/caption/avg_scale 를 어느 코퍼스에서 읽을지) — �
 _POSE_SOURCES 주석 참고. 'transforms'(기본)는 기존 동작 그대로.
   'transforms'  <scene>/{transforms.json, prompts.json, avg_scale/}
   'da3'         <scene>/da3/{pose.npz, prompts.json, avg_scale/}   (Depth Anything 3 예측 pose)
+
+avg_scale_ref (pose_source='da3' + scale_mode='avg_scale' 에서만 의미가 있다) — 저장된 avg_scale
+을 **어느 기준점에서 잰 파일**로 읽을지. 점 집합(context range unproject)은 둘이 같고 기준점만
+다르다. 다른 pose_source 와 같이 쓰면 에러 (디렉토리가 da3 아래에만 있다).
+  'centroid'          (기본, 기존 동작) <scene>/da3/avg_scale/<seg>.json
+                      = mean(|| context 점 - context 카메라 중심들의 centroid ||)
+  'context_first_cam' <scene>/da3/avg_scale_context_first_cam/<seg>.json
+                      = mean(|| context 점 - context range 첫 카메라 ||)
+실측 (da3_7k train+test 39817 세그먼트, 결측/비유한 0): first_cam mean 6.64851 / med 4.30108,
+first_cam/centroid 비 med 1.41159 (p05 1.00945, p95 2.23834, <1 인 것 3.87%). 즉 first_cam 쪽
+분모가 대체로 1.4배 커서 정규화된 translation 이 그만큼 작아진다 — vae_latent_scale 을 그대로
+두면 diffusion 입력 std 가 arm 마다 달라진다는 점에 주의.
 
 intr_norm (how cam_param's last 2 channels encode the intrinsics) — INDEPENDENT of scale_mode,
 because it is a property of the VAE CHECKPOINT (whichever convention that ckpt was trained on):
@@ -301,6 +314,16 @@ class CamDataset(torch.utils.data.Dataset):
         # pose / caption / avg_scale 를 어느 코퍼스에서 읽을지 (모듈 상단 _POSE_SOURCES 주석 참고).
         # 'transforms' = 기존 동작.
         self.pose_source = resolve_pose_source(cfg)
+        # [new 2026-08-10] da3 의 저장된 avg_scale 을 어느 기준점에서 잰 파일로 읽을지.
+        # 'centroid'(기본) = 기존 동작, 'context_first_cam' = <scene>/da3/avg_scale_context_first_cam.
+        self.avg_scale_ref = str(getattr(cfg, 'avg_scale_ref', 'centroid') or 'centroid')
+        if self.avg_scale_ref not in ('centroid', 'context_first_cam'):
+            raise ValueError(f"avg_scale_ref must be 'centroid' or 'context_first_cam', "
+                             f"got {self.avg_scale_ref!r}")
+        if self.avg_scale_ref != 'centroid' and self.pose_source != 'da3':
+            raise ValueError(f"avg_scale_ref={self.avg_scale_ref!r} 는 pose_source='da3' 에서만 "
+                             f"쓸 수 있다 (해당 디렉토리가 da3 아래에만 있다). "
+                             f"현재 pose_source={self.pose_source!r}")
         self.root = cfg.dl3dv_root
         self.num_frames = cfg.num_frames
         self.geo_num_views = getattr(cfg, 'geo_num_views', 4)
@@ -475,8 +498,13 @@ class CamDataset(torch.utils.data.Dataset):
             else osp.join(scene_dir, 'prompts.json')
 
     def _avg_scale_dir(self, scene_dir):
-        return osp.join(scene_dir, 'da3', 'avg_scale') if self.pose_source == 'da3' \
-            else osp.join(scene_dir, 'avg_scale')
+        # avg_scale_ref (pose_source='da3' 에서만 의미가 있다): 저장된 avg_scale 을 어느 기준점
+        # 에서 잰 것으로 쓸지. 'centroid' = 기존 동작(<scene>/da3/avg_scale).
+        if self.pose_source == 'da3':
+            sub = 'avg_scale_context_first_cam' if self.avg_scale_ref == 'context_first_cam' \
+                else 'avg_scale'
+            return osp.join(scene_dir, 'da3', sub)
+        return osp.join(scene_dir, 'avg_scale')
 
     def _scene_probe(self, scene_dir):
         """인덱스 빌드용 경량 프로브 -> (n_frames, h, w). 포즈 전체를 파싱하지 않는다."""
@@ -940,14 +968,23 @@ class CamDataset(torch.utils.data.Dataset):
 
           transforms: mean(|| scene.ply 점 - target segment 첫 카메라 ||)   [target 기준]
           da3:        mean(|| context 점 - context 카메라 centroid ||)      [leakage-free]
+                      avg_scale_ref='context_first_cam' 이면 같은 점 집합을 **context range
+                      첫 카메라** 기준으로 잰 값 (<scene>/da3/avg_scale_context_first_cam).
 
-        Mirrors dataset_large.py. Returns None if the json is missing (caller falls back)."""
+        Mirrors dataset_large.py. Returns None if the json is missing (caller falls back to
+        cam_dist_mean). 단 avg_scale_ref != 'centroid' 일 때는 fallback 이 조용히 분모를
+        바꿔 버리므로 그냥 터뜨린다 — 7K 코퍼스는 39817/39817 세그먼트 전부 존재를 확인했다."""
         p = osp.join(self._avg_scale_dir(self.scene_dir_list[scene_idx]), f'{seg_key}.json')
+        _strict = self.avg_scale_ref != 'centroid'
         if not osp.isfile(p):
+            if _strict:
+                raise FileNotFoundError(f"avg_scale_ref={self.avg_scale_ref!r} 인데 파일이 없다: {p}")
             return None
         try:
             return torch.tensor([float(json.load(open(p)))]).clamp(min=1e-5)
         except Exception:
+            if _strict:
+                raise
             return None
 
     def _first_farthest_scale(self, extrinsics):

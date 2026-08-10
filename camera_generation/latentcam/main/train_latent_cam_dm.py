@@ -493,12 +493,15 @@ def train():
               f"{_n / 1e6:.2f} M params -> AdamW "
               f"(frozen {len(_geo_frozen_keys)} tensors excluded from ckpt)")
         opt = torch.optim.AdamW(list(model.parameters()) + _geo_params, lr=cfg.lr)
+        _opt_param_names = ([n for n, _ in model.named_parameters()]
+                            + [n for n, p in geo_encoder.named_parameters() if p.requires_grad])
         if _resume is not None and _resume.get('geo') is not None:
             _gm, _gu = geo_encoder.load_state_dict(_resume['geo'], strict=False)
             print(f"(resume) geo encoder from {cfg.load_ckpt_path} "
                   f"(missing={len(_gm)} [frozen DINO 포함], unexpected={len(_gu)})")
     else:
         opt = torch.optim.AdamW(model.parameters(), lr=cfg.lr)
+        _opt_param_names = [n for n, _ in model.named_parameters()]
 
     if cfg.use_vae:
         if getattr(cfg, 'causal_vae', False):
@@ -525,7 +528,49 @@ def train():
 
     best_val = float('inf')   # best val/loss_traj so far (for best.pth)
     if _full_resume:          # restore optimizer + counters for seamless continuation
-        opt.load_state_dict(_resume['opt'])
+        # [fix 2026-08-10] AdamW state_dict 는 param 을 **인덱스**로만 참조한다. 그래서 저장 이후
+        # nn.Module 의 **등록 순서**가 바뀌면 (파라미터 개수가 같아도) 모멘트가 엉뚱한 param 에
+        # 실린다. 실제로 sd_whuman_customgeo (fkfqww00) 재개가 이렇게 죽었다: 커밋 916bc7a 가
+        # SceneEncoder.__init__ 에서 self.ln_d 를 self.geo 앞으로 옮기면서 geo 22개 중
+        # GeoTokenizer 16개가 2칸 밀렸고, opt.step() 에서
+        #   RuntimeError: The size of tensor a (14) must match the size of tensor b (1024)
+        # 가 났다 (ray.weight 의 exp_avg 가 ln_d.weight 의 grad 와 짝지어짐).
+        # -> 이제 이름 목록을 같이 저장하고, 재개 시 이름 기준으로 인덱스를 다시 맞춘다.
+        _opt_sd = _resume['opt']
+        _saved_names = _resume.get('opt_param_names')
+        if _saved_names is None and _resume.get('model') is not None:
+            # 구 ckpt 호환: 저장 당시 순서 = model state_dict 키 순서 + geo state_dict 키 순서.
+            # (opt 은 list(model.parameters()) + geo trainable params 로 만들어지고, 두 sd 모두
+            #  등록 순서를 그대로 따른다. 개수가 안 맞으면 buffer 가 섞인 것이니 포기한다.)
+            _cand = list(_resume['model'].keys()) + list((_resume.get('geo') or {}).keys())
+            if len(_cand) == len(_opt_param_names):
+                _saved_names = _cand
+        if _saved_names is not None and list(_saved_names) != list(_opt_param_names):
+            if sorted(_saved_names) != sorted(_opt_param_names):
+                raise RuntimeError(
+                    "resume: optimizer param 이름 집합이 ckpt 와 다르다 — 모델 구조가 바뀐 "
+                    f"체크포인트다. ckpt {len(_saved_names)}개 / 현재 {len(_opt_param_names)}개, "
+                    f"ckpt 에만 있는 것 {sorted(set(_saved_names) - set(_opt_param_names))[:5]}, "
+                    f"현재에만 있는 것 {sorted(set(_opt_param_names) - set(_saved_names))[:5]}")
+            _new_of = {n: i for i, n in enumerate(_opt_param_names)}
+            _remap = {i: _new_of[n] for i, n in enumerate(_saved_names)}
+            _opt_sd = {
+                'state': {_remap[int(i)]: s for i, s in _opt_sd['state'].items()},
+                'param_groups': [dict(g, params=sorted(_remap[int(i)] for i in g['params']))
+                                 for g in _opt_sd['param_groups']],
+            }
+            _moved = sum(1 for i, j in _remap.items() if i != j)
+            print(f"(resume) optimizer param 순서가 ckpt 와 달라 이름 기준으로 재매핑했다 "
+                  f"({_moved}/{len(_remap)} 개 이동).")
+        opt.load_state_dict(_opt_sd)
+        # 재매핑이 맞았는지 shape 로 확인 (틀리면 opt.step() 에서야 터진다).
+        _flat = [p for g in getattr(opt, 'optimizer', opt).param_groups for p in g['params']]
+        for _i, _p in enumerate(_flat):
+            _s = getattr(opt, 'optimizer', opt).state.get(_p, {})
+            if 'exp_avg' in _s and tuple(_s['exp_avg'].shape) != tuple(_p.shape):
+                raise RuntimeError(f"resume: optimizer state shape 불일치 (param {_i} "
+                                   f"{_opt_param_names[_i]}: param {tuple(_p.shape)} vs "
+                                   f"exp_avg {tuple(_s['exp_avg'].shape)})")
         _real_opt = getattr(opt, 'optimizer', opt)
         for _st in _real_opt.state.values():              # move AdamW moments to device
             for _k, _v in _st.items():
@@ -816,6 +861,9 @@ def train():
                 'model': unwrapped_model.state_dict(),
                 'geo': _geo_sd if _geo_trainable else None,
                 'opt': opt.state_dict(),
+                # opt.state_dict() 는 param 을 인덱스로만 참조한다 -> 등록 순서가 바뀐 코드에서
+                # 재개해도 맞출 수 있게 이름 순서를 같이 남긴다 (위 resume 블록 참고).
+                'opt_param_names': _opt_param_names,
                 'global_step': global_step,
                 'epoch': epoch,
                 'best_val': best_val,

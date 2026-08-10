@@ -5,6 +5,19 @@ All notable changes to the latentcam sub-project. Follows [Keep a Changelog](htt
 ## [Unreleased]
 
 ### Fixed
+- **`train_latent_cam_dm.py` 의 full-resume 이 optimizer 모멘트를 엉뚱한 param 에 실었다** —
+  `opt.state_dict()` 는 param 을 **인덱스**로만 참조하는데, 저장 이후 `nn.Module` 등록 순서가
+  바뀌면 개수가 같아도 인덱스가 어긋난다. 이제 `resume.pth` 에 `opt_param_names` (optimizer
+  param 순서의 이름 목록)를 같이 저장하고, 재개 시 이름 기준으로 인덱스를 재매핑한다.
+  이름 목록이 없는 구 ckpt 는 `model`/`geo` state_dict 키 순서로 복원하고(개수가 맞을 때만),
+  로드 직후 param 과 `exp_avg` 의 shape 를 대조해 틀리면 즉시 `RuntimeError` 로 세운다.
+  이름 집합 자체가 다르면 구조가 바뀐 ckpt 이므로 명시적으로 거부한다.
+  실제 사고: `sd_whuman_customgeo` (wandb `fkfqww00`) 재개가
+  `RuntimeError: The size of tensor a (14) must match the size of tensor b (1024)` 로 죽었다.
+  커밋 `916bc7a` (custom_geo_channels ablation) 가 `SceneEncoder.__init__` 에서 `self.ln_d` 를
+  `self.geo` 앞으로 옮기면서 GeoTokenizer 16개가 2칸 밀려, `geo.ray.weight` 의 `exp_avg` 가
+  `ln_d.weight` 의 grad 와 짝지어진 것. 재매핑 후 280개 중 18개 이동으로 정상 재개.
+
 - **`dataset_scene_decoupled.py::_load_images` 가 일시적 mp4 디코딩 실패 한 번에 학습 전체를
   죽였다** — 이제 재시도한다 (`_DECODE_RETRIES=3`, `_DECODE_RETRY_SLEEP=0.5s`, attempt 마다
   ×(attempt+1)). 3 회 후에도 0 프레임이면 기존과 동일하게 `RuntimeError`.

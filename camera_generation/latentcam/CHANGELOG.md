@@ -62,6 +62,43 @@ All notable changes to the latentcam sub-project. Follows [Keep a Changelog](htt
   주의: `mean_traj_baseline.py` 의 "평균 예측 수준" 판정은 `cam_param`(분모 D 로 정규화,
   rot6d+intr 포함) 공간이고 이 표는 denormalize 된 world 위치 공간이라 **같은 양이 아니다.**
 
+- **위 SD textonly 평가를 n=160 으로 재실행** (`results/compare/sd_whuman_textonly_n160/`).
+  기존 80 은 `batch_size 4 x val_max_batches 20` 의 산물이라 DL3DV_nos(160)와 표본수가 달랐다.
+  `scripts/eval_testset.py --ckpt last.pth --max-batches 40` 으로 맞췄다 (`eval_testset.py` 는
+  `val_max_batches` 를 무시하고 `--max-batches` 를 쓴다). **재샘플링이므로 앞의 80 과 겹치는
+  target 도 값이 그대로 재현되지는 않는다.**
+
+  `metrics.json` (n=160): captions precision 0.5993 / recall 0.5014 / fscore 0.5381,
+  clatr_score 46.9889, clatr precision 0.1625 / recall 0.8188 / density 0.1521 /
+  coverage 0.175 / fcd 222.2015, loss_latent 0.05423911759862676,
+  loss_traj 0.008784372146328679, sampling_sec 27.8.
+  (n=80 값: 0.5928 / 0.5443 / 0.5626, 48.6265, 0.15 / 0.8375 / 0.1792 / 0.175 / 319.9549.)
+
+  top-down (n=160): pos_rmse mean 1.2561 / median 0.9093, rot_mean 9.81 deg.
+
+  | preset | n | GT reach | pred reach | GT spread | pred spread | pos_rmse | rmse/reach |
+  |---|---|---|---|---|---|---|---|
+  | 01_24mm | 34 | 5.151 | 4.252 | 1.727 | 1.979 | 1.756 | 0.341 |
+  | 02_24mm | 34 | 4.578 | 3.163 | 1.241 | 1.842 | 1.851 | 0.404 |
+  | 05_24mm | 33 | 2.232 | 1.780 | 1.247 | 1.212 | 0.960 | 0.430 |
+  | 06_24mm | 28 | 2.319 | 2.195 | 0.944 | 1.045 | 0.850 | 0.367 |
+  | 07_24mm | 31 | 1.516 | 1.385 | 0.897 | 0.915 | 0.737 | 0.486 |
+
+  **over-spread 결론은 부호만 유지되고 크기는 크게 줄었다.** pred spread > GT spread 는
+  n=160 에서도 5/5 프리셋이지만 배율이 01 1.79x→1.15x, 02 1.72x→1.48x, 06 2.02x→1.11x,
+  05 는 1.05x→0.97x 로 사실상 동률이다. n=80 의 GT spread 가 프리셋당 12~19 개뿐이라
+  과소추정된 것으로 보인다. pred reach 는 n=160 에서 5/5 전부 GT reach 보다 작다 (과소 이동).
+
+  per-sample PRDC (`prdc_per_sample.py`, 재현 검증 precision 0.1625 / density 0.1521 =
+  보고값과 일치): manifold 안 26/160, density>0 26/160, caption fscore mean 0.5048,
+  fscore>=0.999 인 47 개의 precision 0.2340 / density 0.2553.
+
+  CLaTr latent (`viz_clatr_latent_pca.py` → `results/compare/clatr_latent_pca_n160/`):
+  SD_textonly n=160 → 2-D PCA 설명분산 34.8%, k-NN 반경 med 15.618,
+  pred→최근접GT med 19.799, ratio **1.268** (n=80 의 1.349 에서 소폭 하락).
+  DL3DV_nos 는 그대로 25.258 / 23.250 / 0.921. **표본수를 160 으로 맞춰도 PRDC 격차는
+  거의 그대로다** — chunk 크기 실험으로 이미 기각한 표본수 artifact 가설과 일치한다.
+
 ### Added
 - **`scripts/eval/viz_clatr_latent_pca.py`** — PRDC 가 사는 공간(CLaTr trajectory latent, 256-D)의
   GT/pred 분포를 코퍼스별로 그린다. 코퍼스당 3 열: (1) GT+pred 합쳐 적합한 2-D PCA 산점도,

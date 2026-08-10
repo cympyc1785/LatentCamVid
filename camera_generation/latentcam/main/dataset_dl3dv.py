@@ -21,8 +21,20 @@ Per sample:
   height/width : int
 
 scale_mode (what the camera translations are divided by):
-  'avg_scale'          stored point-cloud avg_scale, <scene>/avg_scale/<seg>.json =
-                       mean(||scene point - first camera||)  (SCVideo original; ~10-44)
+  'avg_scale'          stored point-cloud avg_scale. 파일은 target segment key 로 고르지만
+                       **내용의 정의는 pose_source 마다 다르다** (생성기가 서로 다른 스크립트다).
+                       transforms: <scene>/avg_scale/<seg>.json
+                         = mean(|| scene.ply 점 - target segment 첫 카메라 ||)  (~10-44)
+                           (pipeline/workspace/make_avg_scale.py -> normalize_camera_
+                            extrinsics_and_points, extrinsics[s:e] 의 [0] 이 기준 카메라)
+                       da3:        <scene>/da3/avg_scale/<seg>.json
+                         = mean(|| context 점 - context 카메라 중심들의 centroid ||)
+                           context range = [0,s) 와 [e,N) 중 프레임이 많은 쪽 **하나**,
+                           점 = da3 depth(conf >= 전역 P40, pixel_stride 2) unproject.
+                           target 프레임을 전혀 안 써서 **leakage-free** 다.
+                           (pipeline/workspace/make_avg_scale_da3.py, 6/6 세그먼트 재현 확인)
+                       -> 즉 pose_source 를 바꾸면 분모의 **정의 자체**가 바뀐다. 두 arm 의
+                          avg_scale 크기 차이(mean 15.52805 vs 4.69791)는 단위 차가 아니다.
   'cam_dist_mean'      mean(||camera center_i - center_0||) over the target segment  (~1-2)
   'context_longer'     'cam_dist_mean' computed on out-of-segment context windows instead
   'ctx_longer_135max'  1.35 * max(||center - window's first center||) averaged over the CONTEXT
@@ -922,11 +934,14 @@ class CamDataset(torch.utils.data.Dataset):
         return centers.norm(dim=-1).mean().clamp(min=1e-5).unsqueeze(0)
 
     def _avg_scale(self, scene_idx, seg_key):
-        """scale_mode='avg_scale' (SCVideo original): the STORED point-cloud avg_scale,
-        scene_dir/avg_scale/<seg_key>.json = mean(||scene point - first camera||).
-        Mirrors dataset_large.py. Returns None if the json is missing (caller falls back).
-        pose_source='da3' 이면 <scene>/da3/avg_scale/<seg>.json 을 읽는다 (da3 예측 depth 로
-        만든 값이라 da3 pose 와 같은 스케일 공간에 있다)."""
+        """scale_mode='avg_scale': the STORED point-cloud avg_scale. seg_key 는 **target
+        segment** 의 키지만, 파일 안의 값이 무엇을 기준으로 잰 것인지는 pose_source 마다
+        다르다 — 모듈 상단 scale_mode 주석의 표를 볼 것.
+
+          transforms: mean(|| scene.ply 점 - target segment 첫 카메라 ||)   [target 기준]
+          da3:        mean(|| context 점 - context 카메라 centroid ||)      [leakage-free]
+
+        Mirrors dataset_large.py. Returns None if the json is missing (caller falls back)."""
         p = osp.join(self._avg_scale_dir(self.scene_dir_list[scene_idx]), f'{seg_key}.json')
         if not osp.isfile(p):
             return None

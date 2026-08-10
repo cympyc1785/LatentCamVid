@@ -4,6 +4,33 @@ All notable changes to the latentcam sub-project. Follows [Keep a Changelog](htt
 
 ## [Unreleased]
 
+### Fixed
+- **`dataset_dl3dv.py` 의 `avg_scale` 설명이 틀려 있었다 (주석만 수정, 동작 변화 없음).**
+  모듈 상단 `scale_mode` 표와 `_avg_scale` docstring 은 저장된 avg_scale 을
+  `mean(||scene point - first camera||)` 하나로 적어 뒀지만, **`pose_source` 마다 생성기가
+  다르고 정의도 다르다.** 생성 스크립트를 찾아 6/6 세그먼트 전부 소수점 6 자리까지 재현해 확인:
+
+  | pose_source | 파일 | 점 | 기준점 | target 사용 |
+  |---|---|---|---|---|
+  | `transforms` | `<scene>/avg_scale/<seg>.json` | `scene.ply` 전체 | **target segment 첫 카메라** | 쓴다 |
+  | `da3` | `<scene>/da3/avg_scale/<seg>.json` | context 프레임 da3 depth (conf >= 전역 P40, pixel_stride 2) unproject | **context 카메라 중심들의 centroid** | 안 쓴다 (**leakage-free**) |
+
+  - `transforms` 생성기: `pipeline/workspace/make_avg_scale.py` → `normalize_camera_extrinsics_and_points(extrinsics[s:e], scene.ply)`, `extrinsics[0]` 이 기준.
+  - `da3` 생성기: `pipeline/workspace/make_avg_scale_da3.py`. context range = `[0,s)` 와 `[e,N)`
+    중 **프레임이 많은 쪽 하나**, `centroid = cam_c[ctx].mean(0)`,
+    `avg_scale = mean(||P_ctx - centroid||)`.
+  - 재현 (scene `1K/9c2ede…`, `da3/avg_scale/{0..5}.json`): json 9.203050 / 9.052784 / 8.823183
+    / 10.359932 / 10.083172 / 9.143390 = centroid 기준 계산값과 **완전 일치**. 같은 점 집합을
+    "context 첫 카메라" 기준으로 재면 9.929137 / 9.090941 / 10.793398 / 13.941890 / 15.083957 /
+    14.697644 로 어긋난다 → 기준점은 첫 카메라가 아니라 centroid 다.
+  - **함의:** `pose_source` 를 바꾸면 pose·caption 뿐 아니라 **분모의 정의 자체**가
+    target 기준 → context 기준으로 바뀐다. 즉 `da3_7k_da3pose` vs `da3_7k_textonly` 는
+    "pose 만 다른 paired 비교"가 아니다. 앞선 항목의 `avg_scale` mean 15.52805(transforms) vs
+    4.69791(da3), 비율 p50 0.23851 은 단위 차가 아니라 **다른 양을 잰 것**이다.
+  - Scene-Decoupled 는 원래부터 context 기준이다 (`dataset_scene_decoupled.py:227-230`,
+    context clip 의 `avg_scale_align/0.json`). 즉 leakage-free 인 쪽은 `da3` + SD 이고,
+    `transforms` arm 만 target 기준이다.
+
 ### Added
 - **`scripts/eval/mean_traj_baseline.py`** — `val/loss_traj` / `val/loss_latent` 의 **"코퍼스 평균
   궤적만 내놓는 모델"** 기준선을 코퍼스별로 잰다. `mean_n (x - mean_n x)^2` (per-(t,c) 평균 궤적)

@@ -5,6 +5,32 @@ All notable changes to the latentcam sub-project. Follows [Keep a Changelog](htt
 ## [Unreleased]
 
 ### Added
+- **`scripts/eval/pose_source_agreement.py`** — "da3pose 가 textonly(COLMAP)보다 못 나오는 게
+  CLaTr 탓인가?" 를 가른다. 두 arm 의 `preds.npy` 가 **같은 160 segment 를 같은 순서로** 담고
+  있어서 paired 비교가 된다 (filename 완전 일치 확인). 재추론 없음.
+
+  | | DA3 | COLMAP |
+  |---|---|---|
+  | GT 지터 pos (국소 2차 적합 잔차 / 스텝길이) p50 | 0.0632 | 0.0538 |
+  | GT 지터 rot (회전 2차 차분, deg) p50 | 0.5235 | 0.4922 |
+  | DA3->COLMAP sim3 정렬 RMSE / 경로길이 p50 | 0.0016 (p95 0.0053) | — |
+  | 정렬 후 회전 불일치 (deg) p50 | 0.4624 (p95 3.2316) | — |
+  | 정렬 후 reach 비 p50 | 0.9999 | — |
+
+  즉 **두 pose_source 의 GT 궤적은 sim3 를 빼면 사실상 같은 궤적이다** (경로길이의 0.16%).
+  DA3 pose 가 틀려서 지는 게 아니다. 갈리는 건 **분모**다 — 7K test 3985 segment 전량:
+  `avg_scale` mean 15.52805(transforms) vs 4.69791(da3), 비율 p5 0.06490 / p50 0.23851 /
+  p95 1.05628 (16 배 산포). 그 결과 정규화된 타깃의 산포가 DA3 쪽이 크다:
+  std(log reach) 0.7381 vs 0.5670, CV(reach) 0.6590 vs 0.4863, reach p95/p5 9.905 vs 5.687.
+  이 여분의 산포는 caption(방향/회전 패턴)으로 예측할 수 없는 성분이라 그대로 학습 노이즈가 된다.
+
+  CLaTr 탓이 아니라는 근거 셋 (전부 `corpus_traj_manifold.py` 산출): (a) CLaTr 를 안 거치는
+  caption fscore 도 같은 방향으로 진다 (ep50-59 평균 0.2069 vs 0.2369), (b) 두 GT 의 CLaTr
+  구름이 구분 안 된다 (반경 28.9934 vs 29.1505, 3-NN r 25.5805 vs 26.0459, participation
+  ratio 14.2113 vs 14.6033), (c) GT-vs-GT 천장도 같다 (density 1.0002+-0.0970 vs
+  0.9999+-0.0954, coverage 0.8740+-0.0488 vs 0.8770+-0.0494).
+  남은 교란: 두 arm 은 prompt 도 다르다 (`<scene>/prompts.json` vs `<scene>/da3/prompts.json`
+  -> `token` maxabsdiff 10.0898). 이건 아직 안 갈랐다.
 - **`scripts/eval/corpus_traj_manifold.py`** — "SD 는 caption 정확도가 너무 높고 density/coverage
   가 너무 낮은데 카메라 분포가 단순해서인가?" 를 가른다. 학습이 이미 남긴 `preds.npy` /
   `preds_pcf.csv` 만 읽으므로 재추론이 없다. 핵심은 **천장(ceiling)** 대조군 — real 임베딩을

@@ -189,6 +189,15 @@ All notable changes to the latentcam sub-project. Follows [Keep a Changelog](htt
   맞으므로 영향받지 않는다.
 
 ### Added
+- **`conf/experiment/sd_whuman_customgeo_v6.yaml`** — SD customgeo 의 context view 수만
+  49 -> 6 으로 줄인 arm (`sd_geo_views: 6`). **코드 변경 없음** — `SDCamDataset._ctx_view_idxs`
+  가 이미 `_even_indices` 로 균등 추출한다 (`np.linspace(0,48,6).round()` =
+  `[0, 10, 19, 29, 38, 48]`, 양 끝점 포함 결정적 인덱스).
+  원본 대비 실질 차이는 `sd_geo_views` 하나뿐이고 (hydra resolve 후 122 key 전수 비교로 확인)
+  batch_size 4 / epochs 50 / num_thread 16 / seg_list 는 paired 비교를 위해 그대로 뒀다.
+  smoke 실측: **4.23 it/s / 25799 MiB** (원본 V=49 는 1.04~1.13 it/s / 62223 MiB) → 3.7~4.1x
+  빠르고 메모리 2.4x 적다. 약 52 min/epoch (원본 3.3 h/epoch). 병목이 frozen DINOv2 forward
+  에서 dataloader 로 넘어갔다 (GPU util 26%).
 - **`scripts/test/golden_dataset.py`** — 데이터셋 회귀 하네스. 22 개 arm(실제 run config 10 개 +
   플래그 합성 12 개)에 대해 `ds[i]` 를 4 샘플씩 뽑아 전 key 의 dtype/shape/sha1/min·max·mean 을
   json 으로 얼려 두고(`scripts/test/golden/dataset_golden.json`), 리팩토링 후

@@ -1,0 +1,43 @@
+# @package _global_
+# sd_whuman_customgeo 의 context view 수만 49 -> 6 으로 줄인 arm.
+#
+# 왜: 원본은 context clip segment 의 **49 프레임 전부**를 DINOv2 에 태운다. 실측에서
+# bottleneck 이 dataloader 가 아니라 frozen DINO forward 였고 (worker 8->24 로 +9% 뿐),
+# 그게 4.5 sample/s = 3.2 h/epoch 의 원인이다. dynamic subject 라 시간축이 필요하다는 게
+# 원래 근거였지만, 49 프레임을 다 넣는 것과 고르게 6 프레임을 넣는 것의 차이가 그 8배
+# 연산을 정당화하는지는 **측정된 적이 없다**. 이 arm 이 그걸 잰다.
+#
+# 유일한 차이: sd_geo_views null -> 6.  batch_size 4 / epochs 50 / lr / 리스트 전부 원본과
+# 동일하게 뒀다 — 20260810_010755_sd_whuman_customgeo 와 **paired 비교**가 되어야 하므로.
+#   (V=6 이면 메모리가 62GB -> 20GB 대로 내려가 bs 8 도 들어가지만, 그러면 paired 가 아니다.)
+#
+# 뽑는 방식: SDCamDataset._ctx_view_idxs -> CamDataset._even_indices =
+#   np.linspace(0, 48, 6).round() = [0, 10, 19, 29, 38, 48]
+# 즉 **양 끝점 포함 uniform**. 매 step 동일한 결정적 인덱스라 랜덤 augmentation 이 아니다.
+# 이 인덱스 6 개는 DL3DV customgeo arm 의 geo_cover_k: 6 과 view 수가 같아서, 두 코퍼스의
+# 토큰 예산도 V*P = 6*576 = 3456 으로 맞는다.
+#
+# 나머지 규약은 sd_whuman_customgeo.yaml 주석 참고 (분모 = context clip 의 avg_scale_align,
+# scale_mode 는 이 경로에서 안 쓰인다).
+exp_name: sd_whuman_customgeo_v6
+dataset_name: scene_decoupled
+sd_split: whuman
+sd_geo_views: 6               # <-- 원본 대비 유일한 변경 (null = 49 프레임 전부)
+pose_source: da3
+batch_size: 4
+num_thread: 16
+epochs: 50
+ckpt_every_epochs: 5
+
+geo_encoder: custom
+geo_cam_embed: null           # 카메라는 픽셀 Plücker 로만 들어간다
+geo_latent_cache_dir: null    # GeoTokenizer/proj 가 학습되므로 출력을 얼릴 수 없다
+geo_posed: false              # custom backend 는 lagernvs cam_token 을 만들지 않는다
+custom_geo_input_hw: [252, 448]   # 14 의 배수 (256 -> 252)
+custom_geo_freeze_dino: true
+
+intr_norm: rel                # vae_20260302_300 = frame-0-relative-intrinsics ckpt
+cam_dim: 64                   # = 그 ckpt 의 latent_dim
+train_seg_list: /data1/cympyc1785/data/Scene-Decoupled-Video-dataset/latentcam_lists/sd_whuman_train.txt
+test_seg_list: /data1/cympyc1785/data/Scene-Decoupled-Video-dataset/latentcam_lists/sd_whuman_test.txt
+coverage_blacklist_path: null

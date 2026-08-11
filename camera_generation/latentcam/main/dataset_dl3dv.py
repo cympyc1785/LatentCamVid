@@ -44,8 +44,8 @@ scale_mode (what the camera translations are divided by):
   'geo_lagernvs'       1.35 * max(||geo-context center - frame s||) (full LagerNVS alignment)
 Legacy aliases accepted: 'saved_avg_scale' -> 'avg_scale', 'target_cam' -> 'cam_dist_mean'.
 
-pose_source (pose/caption/avg_scale 를 어느 코퍼스에서 읽을지) — 자세한 근거는 아래
-_POSE_SOURCES 주석 참고. 'transforms'(기본)는 기존 동작 그대로.
+pose_source (pose/caption/avg_scale 를 어느 코퍼스에서 읽을지) — 자세한 근거는
+dataset_cfg.py 의 _POSE_SOURCES 주석 참고. 'transforms'(기본)는 기존 동작 그대로.
   'transforms'  <scene>/{transforms.json, prompts.json, avg_scale/}
   'da3'         <scene>/da3/{pose.npz, prompts.json, avg_scale/}   (Depth Anything 3 예측 pose)
 
@@ -94,43 +94,14 @@ from utils.data_utils import normalize_camera_extrinsics_and_points
 # OpenGL(c2w) -> OpenCV(c2w): flip Y and Z camera axes
 _GL2CV = torch.diag(torch.tensor([1.0, -1.0, -1.0, 1.0]))
 
-# old scale_mode spellings -> current name. 'avg_scale' now means ONLY the stored point-cloud
-# value; the camera-distance one is 'cam_dist_mean'. Old configs/wandb runs keep working.
-_SCALE_MODE_ALIASES = {'saved_avg_scale': 'avg_scale', 'target_cam': 'cam_dist_mean'}
-
-
-def resolve_scale_mode(cfg):
-    m = getattr(cfg, 'scale_mode', 'cam_dist_mean')
-    return _SCALE_MODE_ALIASES.get(m, m)
-
-
-# [new 2026-08-06] pose_source -- scene 의 pose / intrinsics / caption / avg_scale 를 어느
-# 코퍼스에서 읽을지. 'transforms' 가 기본이고 기존 동작과 bit-identical 하다.
-#   'transforms'  <scene>/transforms.json (nerfstudio OpenGL c2w) + <scene>/prompts.json
-#                 + <scene>/avg_scale/<seg>.json                     [기존]
-#   'da3'         <scene>/da3/pose.npz    (Depth Anything 3 가 예측한 pose)
-#                 + <scene>/da3/prompts.json + <scene>/da3/avg_scale/<seg>.json
-#
-# da3/pose.npz 의 규약 (실측으로 확정, 2026-08-06):
-#   extrinsics (N,3,4) = **w2c, OpenCV** — transforms.json 과 달리 GL->CV flip 이 필요 없고
-#     역행렬도 필요 없다. w2c 로 읽고 GT(transforms.json 을 OpenCV w2c 로 변환한 것)와
-#     Umeyama 정렬하면 12개 표본 scene 중 11개가 ATE/extent <= 0.004, 회전 평균 <= 0.32deg 다
-#     (나머지 1개 8a1b61638a 는 0.194 / 3.49deg). c2w 로 잘못 읽으면 회전 오차가 137~178deg 로
-#     튄다.  !! <scene>/pose_eval_vs_gt.json 과 da3_camcond_report.json("convention":"c2w",
-#     da3 ATE_norm 0.4764 / Rot_mean 172deg)은 바로 이 잘못된 c2w 해석으로 만들어진 수치라
-#     신뢰하면 안 된다 (5개 방법 전부 172~176deg 로 나오는 게 그 증거).
-#   intrinsics (N,3,3) = 504x280 픽셀 공간. cx*2=504, cy*2=280 로 전 프레임 상수라
-#     cam_param 의 fx/(2cx), fy/(2cy) 는 해상도와 무관하게 그대로 성립한다. 다만 fx 는
-#     **프레임마다 조금씩 다르다** (scene 내 std/mean 7e-4 ~ 3e-3). transforms.json 은 scene 당
-#     상수였으므로 intr_norm='rel' 에서 [1,1] 정확히가 아니라 1.000 +- 0.003 이 된다.
-_POSE_SOURCES = ('transforms', 'da3')
-
-
-def resolve_pose_source(cfg):
-    ps = getattr(cfg, 'pose_source', 'transforms') or 'transforms'
-    if ps not in _POSE_SOURCES:
-        raise ValueError(f"pose_source must be one of {_POSE_SOURCES}, got {ps!r}")
-    return ps
+# config 해석은 전부 dataset_cfg.py 로 옮겼다 (거기 모듈 docstring 이 "왜"를 설명한다).
+# 여기서 re-export 하는 이유는 `from dataset_dl3dv import CamDataset, resolve_scale_mode`
+# 같은 기존 import 를 깨지 않기 위해서다 (scripts/data/viz_scene_chunk_scale.py:108).
+# _POSE_SOURCES / da3 pose.npz 규약 주석도 dataset_cfg.py 에 있다.
+from dataset_cfg import (  # noqa: F401  (re-export)
+    _POSE_SOURCES, _SCALE_MODE_ALIASES, DatasetSpec,
+    resolve_dataset_cfg, resolve_pose_source, resolve_scale_mode,
+)
 
 
 # per-scene image dir, in preference order: 'images_4' = DL3DV-960 (960x540),
@@ -311,164 +282,13 @@ class CamDataset(torch.utils.data.Dataset):
         # prompts.json are read -- no full-corpus scan, no index cache. See from_segments().
         self.only_segments = only_segments
         self._geo_idx_memo = {}      # (scene_idx, s, e) -> frustum_cover context views
-        # pose / caption / avg_scale 를 어느 코퍼스에서 읽을지 (모듈 상단 _POSE_SOURCES 주석 참고).
-        # 'transforms' = 기존 동작.
-        self.pose_source = resolve_pose_source(cfg)
-        # [new 2026-08-10] da3 의 저장된 avg_scale 을 어느 기준점에서 잰 파일로 읽을지.
-        # 'centroid'(기본) = 기존 동작, 'context_first_cam' = <scene>/da3/avg_scale_context_first_cam.
-        self.avg_scale_ref = str(getattr(cfg, 'avg_scale_ref', 'centroid') or 'centroid')
-        if self.avg_scale_ref not in ('centroid', 'context_first_cam'):
-            raise ValueError(f"avg_scale_ref must be 'centroid' or 'context_first_cam', "
-                             f"got {self.avg_scale_ref!r}")
-        if self.avg_scale_ref != 'centroid' and self.pose_source != 'da3':
-            raise ValueError(f"avg_scale_ref={self.avg_scale_ref!r} 는 pose_source='da3' 에서만 "
-                             f"쓸 수 있다 (해당 디렉토리가 da3 아래에만 있다). "
-                             f"현재 pose_source={self.pose_source!r}")
-        self.root = cfg.dl3dv_root
-        self.num_frames = cfg.num_frames
-        self.geo_num_views = getattr(cfg, 'geo_num_views', 4)
-        self.geo_hw = tuple(getattr(cfg, 'geo_image_hw', (256, 448)))
-        self.geo_enabled = bool(getattr(cfg, 'geo_encoder', None))  # skip image loading for text-only
-        # [new] precomputed frozen geo-latent cache (cache_geo_embeddings.py). None = OFF, i.e.
-        # load images + run LagerNVS every step exactly as before. Only safe when the encoder's
-        # proj is Identity (lagernvs native 768 == geo_latent_dim); otherwise proj is trainable
-        # and its output must not be frozen into a file.
-        self.geo_latent_cache_dir = None
-        _cdir = getattr(cfg, 'geo_latent_cache_dir', None)
-        if _cdir and self.geo_enabled:
-            if int(getattr(cfg, 'geo_latent_dim', 768)) != 768:
-                print(f"[geo cache] DISABLED: geo_latent_dim="
-                      f"{getattr(cfg, 'geo_latent_dim')} != 768 -> GeoEncoder.proj is a trainable "
-                      f"Linear, its output must not be cached")
-            else:
-                sub = ('first_cam_included' if getattr(cfg, 'geo_first_view_target_s', False)
-                       else 'first_cam_not_included')
-                self.geo_latent_cache_dir = osp.join(_cdir, sub)
-                print(f"[geo cache] reading {self.geo_latent_cache_dir}/<iK>/<data_name>.pt "
-                      f"(miss -> on-the-fly LagerNVS)")
-        # [new] per-context-view camera embedding concatenated onto the geo tokens.
-        # None = OFF (unchanged geo condition). 'relfirst' = 11-d pose relative to the target's
-        # first camera (per-VIEW, broadcast over that view's patches); 'plucker' = 6-d Plücker ray
-        # per PATCH token in the same frame. See conf/config.yaml and _geo_cam_param /
-        # _geo_cam_plucker below.
-        self.geo_cam_embed = getattr(cfg, 'geo_cam_embed', None)
-        if self.geo_cam_embed not in (None, 'relfirst', 'plucker'):
-            raise ValueError(f"geo_cam_embed must be null | 'relfirst' | 'plucker', "
-                             f"got {self.geo_cam_embed!r}")
-        # [new] test-time probe: force K of the V context views to be TARGET-SEGMENT cameras.
-        # null/0 = OFF (unchanged). See _mix_inseg_context and conf/config.yaml.
-        # [new 2026-08-07] geo_encoder='custom' (models/custom_geo_encoder.py) 전용 RGBD 경로.
-        # lagernvs 경로는 아래 어디도 건드리지 않는다 -- 이 플래그가 False 면 __getitem__ 의
-        # 동작은 이전과 bit-identical.
-        #
-        # custom 인코더는 카메라를 view 당 11-d cam_token 이 아니라 **픽셀당 Plücker ray** 로 받는다.
-        # 그래서 dataset 이 내보내야 할 것이 세 개 더 있다 (custom_geo_encoder.py 의 입력 계약):
-        #   geo_plucker_map (V,6,Hc,Wc)  target segment 첫 카메라 프레임, trans / norm_scale
-        #   geo_logd        (V,1,Hc,Wc)  log(depth / norm_scale)  -- Plücker 와 같은 단위여야
-        #                                ray x depth 가 3D 점이 된다
-        #   geo_valid       (V,1,Hc,Wc)  depth 유효 마스크
-        # 해상도 Hc,Wc 는 DINOv2 patch(14) 의 배수여야 하고, GeoTokenizer 가 stride 14 로
-        # patchify 한 토큰 수가 DINO patch 토큰 수와 정확히 같아야 한다 (custom_geo_encoder.py:156
-        # 이 불일치를 raise). 그래서 self.geo_hw 자체를 custom_geo_input_hw 로 바꿔서
-        # _load_images 도 처음부터 그 격자로 주게 한다 -- 인코더 안의 bilinear 재보간을 피하면
-        # Plücker 방향 단위벡터가 정확히 보존된다 (custom_geo_encoder.py:117-135 주석).
-        self.geo_custom = self.geo_enabled and str(cfg.geo_encoder) == 'custom'
-        # [ablation 2026-08-10] custom_geo_channels: full | no_depth | rgb_only.
-        # 안 쓰는 입력은 아예 만들지 않는다 (depth 는 mmap 이라도 view 당 I/O 가 있다).
-        self.geo_custom_channels = str(getattr(cfg, 'custom_geo_channels', 'full') or 'full')
-        self.geo_depth_cache_dir = None
         self._plucker_grid = {}      # (H0,W0) -> (xx, yy) 픽셀 중심 격자 (상수라 재사용)
-        if self.geo_custom:
-            _p = int(getattr(cfg, 'custom_geo_patch', 14))
-            _ihw = getattr(cfg, 'custom_geo_input_hw', None)
-            self.geo_hw = (tuple(int(v) for v in _ihw) if _ihw else
-                           ((self.geo_hw[0] // _p) * _p, (self.geo_hw[1] // _p) * _p))
-            if any(v % _p for v in self.geo_hw):
-                raise ValueError(f"custom_geo_input_hw={self.geo_hw} must be a multiple of "
-                                 f"patch {_p}")
-            if self.pose_source != 'da3':
-                # depth 는 <scene>/da3/depth.npz 에만 있고, 그 depth 는 da3 pose/intrinsics 와
-                # 같은 스케일 공간이다. transforms pose 와 섞으면 ray x depth 가 무의미해진다.
-                raise ValueError("geo_encoder='custom' requires pose_source='da3' "
-                                 f"(depth comes from <scene>/da3/depth.npz), got "
-                                 f"{self.pose_source!r}")
-            if self.geo_latent_cache_dir is not None:
-                # GeoTokenizer/proj 가 **학습되는** 파라미터라 그 출력을 파일로 얼리면 안 된다.
-                print("[geo cache] DISABLED: geo_encoder='custom' -> the geo encoder is trainable")
-                self.geo_latent_cache_dir = None
-            self.geo_depth_cache_dir = getattr(cfg, 'custom_geo_depth_cache_dir', None)
-            print(f"[geo custom] input_hw={self.geo_hw} grid="
-                  f"{self.geo_hw[0] // _p}x{self.geo_hw[1] // _p} "
-                  f"depth_cache={self.geo_depth_cache_dir or 'OFF (npz fallback, ~0.6s/item)'}")
-        self.geo_test_inseg_k = getattr(cfg, 'geo_test_inseg_k', None) or 0
-        if self.geo_test_inseg_k and self.geo_latent_cache_dir is not None:
-            # 캐시 키는 data_name 뿐이라 context view 가 바뀐 걸 구분 못 한다 -> 반드시 끈다.
-            print(f"[geo cache] DISABLED: geo_test_inseg_k={self.geo_test_inseg_k} changes the "
-                  f"context views, but the cache is keyed by segment only")
-            self.geo_latent_cache_dir = None
-        # geo context-view sampling (leakage ablation): 'even' (in-segment) | 'hybrid'
-        self.geo_view_sampling = getattr(cfg, 'geo_view_sampling', 'even')
-        self.geo_num_inseg = getattr(cfg, 'geo_num_inseg', 3)
-        self.geo_num_covis = getattr(cfg, 'geo_num_covis', 3)
-        self.geo_inseg_span = getattr(cfg, 'geo_inseg_span', None)
-        self.covis_radius = getattr(cfg, 'geo_covis_radius', 1.0)
-        self.covis_theta0 = getattr(cfg, 'geo_covis_theta0', 10.0)
-        self.covis_max_axis_deg = getattr(cfg, 'geo_covis_max_axis_deg', 60.0)
-        self.covis_topM = getattr(cfg, 'geo_covis_topM', 32)
-        # frustum_cover mode
-        self.geo_cover_k = getattr(cfg, 'geo_cover_k', 6)
-        self.geo_cover_radius = getattr(cfg, 'geo_cover_radius', 2.0)
-        self.geo_cover_ndepth = getattr(cfg, 'geo_cover_ndepth', 3)
-        self.geo_cover_out_of_seg = getattr(cfg, 'geo_cover_out_of_seg', False)
-        # restrict out-of-segment context to frames BEFORE the target segment (index < s)
-        # only, instead of the longer side. Requires the target segment to have frames
-        # before it -> the target segment can be the 2nd segment onward.
-        self.geo_cover_before_only = getattr(cfg, 'geo_cover_before_only', False)
-        self.geo_posed = getattr(cfg, 'geo_posed', False)
-        self.geo_shuffle_order = getattr(cfg, 'geo_shuffle_order', False)
-        # honest selection: anchor at the target's FIRST frame only (known at inference);
-        # radius scaled by CONTEXT (not the unseen rest of the target segment).
-        # [renamed 2026-07-31] geo_anchor_first_frame -> geo_cover_centered_at_s. The old name read
-        # as "the first frame goes in as an anchor VIEW", which is what geo_first_view_target_s
-        # does; this flag only centers the frustum_cover search ball on frame s and never adds a
-        # view. Old key still honored (deprecated) so pre-rename configs / CLI overrides work.
-        _legacy = getattr(cfg, 'geo_anchor_first_frame', None)
-        _cur = getattr(cfg, 'geo_cover_centered_at_s', None)
-        if _cur is None and _legacy is not None:
-            print("[cfg] geo_anchor_first_frame is deprecated -> using it as geo_cover_centered_at_s"
-                  f"={_legacy}")
-        self.geo_cover_centered_at_s = bool(_cur if _cur is not None
-                                            else (_legacy if _legacy is not None else False))
-        # geo context view0 = target segment's FIRST camera s (rest = out-of-seg retrieved)
-        # -> LagerNVS anchors to s, aligning the geo latent frame with the target frame.
-        self.geo_first_view_target_s = getattr(cfg, 'geo_first_view_target_s', False)
-        # [new] test-time probe: swap the geo context to ANOTHER SEGMENT OF THE SAME SCENE.
-        # 'inscene' = donor is the (position+geo_swap_shift)-th other segment of this scene, so the
-        # context views stay real images of the same scene in the same world frame (nothing goes
-        # out of distribution) and the ONLY thing that changes is WHICH REGION they cover.
-        # geo_swap_keep_first puts view0 back to the target's frame s, so the anchor -- and with it
-        # the frame/scale link to the generated trajectory -- is untouched. Reading:
-        #   predicted trajectory follows the DONOR region -> the model is context-driven
-        #   predicted trajectory does not move                -> it is text-driven
-        # geo_test_inseg_k measures the same worry along the leakage axis; this is the orthogonal
-        # (context-content) axis. Test-time only -- the model never saw this during training.
-        self.geo_swap_mode = getattr(cfg, 'geo_swap_mode', None)
-        if self.geo_swap_mode not in (None, 'inscene'):
-            raise ValueError(f"geo_swap_mode must be null | 'inscene', got {self.geo_swap_mode!r}")
-        self.geo_swap_shift = int(getattr(cfg, 'geo_swap_shift', 1) or 1)
-        self.geo_swap_keep_first = bool(getattr(cfg, 'geo_swap_keep_first', True))
-        self._scene2samples = None      # lazily built: scene_idx -> [sample idx, ...]
-        if self.geo_swap_mode and self.geo_latent_cache_dir is not None:
-            # geo_test_inseg_k (:289) 와 같은 이유 -- 캐시 키가 data_name 뿐이라 context view 가
-            # 바뀐 것을 구분하지 못한다. 끄지 않으면 swap 이 조용히 무효가 된다.
-            print(f"[geo cache] DISABLED: geo_swap_mode={self.geo_swap_mode} changes the "
-                  f"context views, but the cache is keyed by segment only")
-            self.geo_latent_cache_dir = None
-        # [new] attach the chosen context view indices (+ their c2w) to every item so an offline
-        # script can measure how close the generated trajectory sits to the context cameras.
-        # Off by default: on a cache HIT it costs the frustum_cover search the cache exists to skip.
-        self.geo_return_idxs = bool(getattr(cfg, 'geo_return_idxs', False))
-        self.max_scenes = getattr(cfg, 'max_scenes', None)   # limit #scenes (e.g. smoke test)
+        self._scene2samples = None   # lazily built: scene_idx -> [sample idx, ...]
+        # config 읽기/검증/폴백은 전부 dataset_cfg.resolve_dataset_cfg 가 한다. spec 의 필드
+        # 이름 = 속성 이름이라 self.geo_cover_k 등 기존 접근은 그대로다. 캐스케이드(한 번 켜진
+        # geo_latent_cache_dir 이 네 조건에서 차례로 꺼지는 것)와 print 문구도 거기 있다.
+        spec = resolve_dataset_cfg(cfg)
+        spec.apply_to(self)
 
         # scene-level (indexed by scene) and sample-level (per prompt segment)
         self.extrinsics_list = []   # [(N,4,4)]   (eager) or _LazyScenes (lazy)
@@ -480,7 +300,7 @@ class CamDataset(torch.utils.data.Dataset):
         self._scene_cache = {}      # lazy: scene_idx -> {w2c,intr,frame_files,hw}
         # lazy_dataset (default True): __init__ only builds the sample/scene index (from a persisted
         # cache when available); scene poses/paths are parsed on demand in __getitem__ + cached.
-        self.lazy = getattr(cfg, 'lazy_dataset', True) or only_segments is not None
+        self.lazy = spec.lazy_dataset or only_segments is not None
         if self.lazy:
             self._load_index()
             self.extrinsics_list = _LazyScenes(self, 'w2c')
@@ -519,7 +339,7 @@ class CamDataset(torch.utils.data.Dataset):
         """<scene>/da3/pose.npz -> (w2c (N,4,4), intr (N,3,3), frame_files, (h,w)).
 
         extrinsics 는 이미 **OpenCV w2c** 라 _parse_transforms 의 GL->CV flip + inv 가 둘 다
-        필요 없다 (모듈 상단 _POSE_SOURCES 주석의 실측 근거 참고). (N,3,4) 를 (N,4,4) 로 채운다.
+        필요 없다 (dataset_cfg.py 의 _POSE_SOURCES 주석에 실측 근거). (N,3,4) 를 (N,4,4) 로 채운다.
         frame_files 는 이미지 디렉토리를 정렬해 쓴다 — da3 는 파일명을 따로 저장하지 않고
         (predictions.npz 는 1000 scene 중 3개에만 있다), 정렬 순서가 transforms.json 의
         file_path 정렬 순서와 일치하는 것은 실측 확인했다."""

@@ -53,6 +53,23 @@ All notable changes to the latentcam sub-project. Follows [Keep a Changelog](htt
     `transforms` arm 만 target 기준이다.
 
 ### Changed
+- **`CamDataset.__init__` 의 config 해석을 `main/dataset_cfg.py` 로 분리 (동작 변화 없음).**
+  `__init__` 190 줄 중 ~155 줄이 `getattr` + 검증 + print 였고 실제 초기화(리스트/인덱스)는
+  20 줄 남짓이라, "이 arm 에서 결국 어떤 값이 서는가"를 알려면 190 줄을 순서대로 읽어야 했다.
+  이제 `spec = resolve_dataset_cfg(cfg); spec.apply_to(self)` 두 줄이고 `__init__` 은 35 줄이다
+  (`dataset_dl3dv.py` 1546 → 1366 줄).
+  - `DatasetSpec` dataclass 의 **필드 이름 = 데이터셋 속성 이름**이라 `ds.geo_cover_k` 같은
+    외부 접근은 전부 그대로다. `resolve_scale_mode` / `resolve_pose_source` / `_POSE_SOURCES` /
+    `_SCALE_MODE_ALIASES` 도 `dataset_cfg.py` 로 옮겼지만 `dataset_dl3dv` 가 re-export 하므로
+    `from dataset_dl3dv import CamDataset, resolve_scale_mode`
+    (`scripts/data/viz_scene_chunk_scale.py:108`) 는 안 깨진다.
+  - **`__getitem__` 과 모델 코드는 안 건드렸다.** 특히 모델은 `nn.Module` 등록 순서가 바뀌면
+    `resume.pth` 가 죽으므로 (위 Fixed 의 `916bc7a` 사고) 이번 범위에서 제외했다.
+  - `self.covis_topM` 제거 — `config.py:219` 가 이미 "unused" 라고 적어 뒀고 참조하는 코드가
+    없다 (`scripts/context_select/*.py` 는 자기 지역 기본값 32 를 쓴다).
+  - `geo_latent_cache_dir` 은 **평평한 매핑이 아니라 순서 있는 상태 기계**다 — 한 번 켜졌다가
+    `geo_latent_dim != 768` / `geo_encoder='custom'` / `geo_test_inseg_k` / `geo_swap_mode`
+    네 곳에서 차례로 꺼진다. 순서와 print 문구를 그대로 보존했다.
 - **`scripts/viewer/viser_val_cameras.py` 에 `--dataset sd` 분기 추가** (기본값 `dl3dv` 라
   기존 동작은 그대로).  SD 는 `data_name` 이 `{scene}__{TARGET}__{CONTEXT}` 이므로 **context clip**
   의 da3 depth/conf/pose 를 읽어 배경을 만든다.
@@ -172,6 +189,24 @@ All notable changes to the latentcam sub-project. Follows [Keep a Changelog](htt
   맞으므로 영향받지 않는다.
 
 ### Added
+- **`scripts/test/golden_dataset.py`** — 데이터셋 회귀 하네스. 22 개 arm(실제 run config 10 개 +
+  플래그 합성 12 개)에 대해 `ds[i]` 를 4 샘플씩 뽑아 전 key 의 dtype/shape/sha1/min·max·mean 을
+  json 으로 얼려 두고(`scripts/test/golden/dataset_golden.json`), 리팩토링 후
+  `--mode check` 로 bit-identical 인지 본다. arm 은 `custom_{full,nodepth,rgbonly}`,
+  `lagernvs_*` 4 종(geo latent cache HIT 경로 포함), `textonly_*`, `sd_whuman_custom`(SD 데이터셋),
+  그리고 `geo_view_sampling` / `scale_mode` / `intr_norm` / `trans_repr` / `geo_shuffle_order` /
+  `geo_swap_mode` / `geo_test_inseg_k` / `geo_posed` / `geo_return_idxs` 합성 arm.
+  샘플은 앞 n 개가 아니라 인덱스 전체에 고르게 편다. arm 이 예외를 던지면 그 예외까지 golden 에
+  기록해 "전에도 똑같이 실패했는가"를 본다.
+  **감도 검증(negative control):** golden 의 `custom_full` 자리에 `syn_trans_c2w` payload 를
+  넣었더니 `FAIL custom_full — 불일치 2 건` 이 뜨고 어긋난 key 로 `cam_param` 만 지목했다
+  (exit 1). 하네스가 실제 변경을 잡는다는 것과, `trans_repr` 이 translation 채널에만 영향을
+  준다는 코드 주석이 동시에 확인됐다.
+- **`scripts/test/test_dataset_cfg.py`** — `resolve_dataset_cfg` 의 캐스케이드/검증 단위 테스트.
+  golden 이 못 메우는 구멍을 메운다: golden 은 캐시가 **켜진** 경로만 (`geo_emb` 유무로) 보고,
+  **꺼지는 네 조건**은 어느 arm 도 그 조합이 아니라 검증되지 않는다. 이게 조용히 깨지면 캐시가
+  켜진 채 남아 context view 변경이 무시되고 증상은 "swap probe 결과가 안 변한다" 뿐이다(무에러).
+  `resolve_dataset_cfg` 는 순수 함수(디스크 접근 없음)라 1 초 안에 돈다.
 - **`scripts/viewer/README.md`** — viser 뷰어 두 개(`viser_val_cameras.py`, `viser_arms_gs.py`)의
   사용법. screen/포트 실행·종료 규약, DL3DV/SD 배경 처리, SD 의 umeyama sim3 → GT meters 식,
   `--pc-clips` 로 두 clip point cloud 를 겹쳐 aligned world 를 검증하는 법, 색 규약,

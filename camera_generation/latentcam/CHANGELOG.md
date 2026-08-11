@@ -53,6 +53,36 @@ All notable changes to the latentcam sub-project. Follows [Keep a Changelog](htt
     `transforms` arm 만 target 기준이다.
 
 ### Changed
+- **`scripts/viewer/viser_val_cameras.py` 에 `--dataset sd` 분기 추가** (기본값 `dl3dv` 라
+  기존 동작은 그대로).  SD 는 `data_name` 이 `{scene}__{TARGET}__{CONTEXT}` 이므로 **context clip**
+  의 da3 depth/conf/pose 를 읽어 배경을 만든다.
+  - point cloud: `da3/<split>/<scene>/<CONTEXT>/{depth,conf}.npz` 를 `umeyama_gt.json` 의 sim3 로
+    GT meters 에 올려 unproject (`dataset_scene_decoupled.py::_load_scene` 과 같은 식:
+    `R'=R_e·Rᵀ`, `t'=s·t_e−R'·t`, `d'=s·d`). 색은 context mp4 프레임을 depth 격자(504×294)로
+    리사이즈해서 사용. `--pc-frames/--pc-stride/--pc-conf-pct/--pc-max-points/--pc-size` 로 조절.
+  - context clip 카메라를 초록 frustum 으로 같이 그린다 (target/ref 파랑, pred 빨강은 기존과 동일).
+  - SD world 는 z-up (Unreal) 이라 up direction 을 `+z` 로 (`--up` 으로 override).
+  - static clip (`umeyama_gt.json` 의 `moving: false`) 은 sim3 의 s/t 가 없어 배경을 건너뛴다.
+- **`scripts/viewer/viser_val_cameras.py`: sequence load 시 터미널에 지표 출력** (dl3dv/sd 공통).
+  - 궤적 오차는 ref/pred 로 그 자리에서 계산 (`traj_metrics`) — `pos_rmse/mean/max/end`,
+    `rot mean/max` (deg), ref·pred path length. 정의는 `scripts/render/compare_textonly.py` 와
+    동일. 단위는 world 단위 그대로 찍고 (sd `m`, dl3dv 정규화 `u`) 코퍼스 간 비교는 안 된다.
+  - 평가 지표는 `<root>/../preds_scores.csv` 의 해당 행. **PRDC/FCD 열은 set 단위로 한 번
+    계산된 값이 전 행에 복사돼 있어** per-sequence 로 오독하기 쉬우므로, 전 행이 동일한 열은
+    corpus-level 로 분리해 시작할 때 한 번만 찍는다.
+  - **sample 별 PRDC 재계산** (`load_prdc_per_sample`, `--no-prdc` 로 끔). PRDC 는 `.mean()`
+    직전까지 sample 별 값이 있어서 `preds.npy` 의 CLaTr latent 로 다시 계산해 찍는다 —
+    `precision`(pred 가 GT 초구 안? T/F), `density`(pred 를 감싼 GT 초구 수/k), `recall`·
+    `coverage`(GT 쪽 T/F) + 그 sample 이 속한 split. prdc.py 와 같은 조건(k=3, euclidean,
+    5 splits, 저장 순서대로 chunk)으로 맞췄고, 시작할 때 재계산 집계를 찍어 `metrics.json`
+    과 일치하는지 눈으로 확인할 수 있게 했다 (SD/DL3DV 양쪽 자리수까지 일치 확인).
+  - **`--only` 로 PRDC 실패 sequence 만 골라 보기** (`prec-fail` / `dens-low` / `recall-fail`
+    / `cov-fail` / `fail`, 기본 `all` 은 기존 동작). 거른 목록을 density 오름차순 표로 찍고
+    slider/Next 도 그 목록만 돈다. `--dens-max` 로 density 기준, `--list-out` 으로 csv 저장.
+    거르기는 **PRDC 계산이 끝난 뒤에** 한다 — seqs 를 먼저 줄이면 5 splits chunk 구성이
+    달라져 값 자체가 바뀐다.
+  - `--cam-stride` (target/pred frustum, 기본 1 = 기존과 동일), `--context-stride`
+    (sd context frustum, 기본 = `--grey-downsample` 이라 기존과 동일) 추가.
 - **`scripts/render/compare_textonly.py` 에 run 인자와 SD 용 그림 두 종류 추가** (인자 없이 돌리면
   기존 `20260719_210144_dl3dv_textonly` 동작 그대로).
   - `--run` / `--out`: 하드코딩돼 있던 run 경로를 인자로. `--no-per-target` 으로 target 별 PNG 생략.
@@ -120,7 +150,66 @@ All notable changes to the latentcam sub-project. Follows [Keep a Changelog](htt
   DL3DV_nos 는 그대로 25.258 / 23.250 / 0.921. **표본수를 160 으로 맞춰도 PRDC 격차는
   거의 그대로다** — chunk 크기 실험으로 이미 기각한 표본수 artifact 가설과 일치한다.
 
+### Changed
+- **`scripts/viewer/viser_val_cameras.py --dataset sd` 가 target clip point cloud 도 그린다** —
+  `--pc-clips {context,target,both}` (기본 `context` = 기존 동작 그대로). 두 clip 은 **서로 다른**
+  `umeyama_gt.json` sim3 를 타고 같은 GT meters world 로 올라오므로, `both` 로 겹쳐 보는 것이 곧
+  aligned world 검증이다. target 을 그릴 때 그 clip 의 `pose.npz` 카메라와 ref(파랑) 카메라의
+  위치차도 찍는다 — 두 값이 서로 다른 경로(`pose.npz`+sim3 / json 의 `first_extrinsic` 복원)로
+  나오므로 0 이 아니면 world 가 어긋난 것이다. 실측: `scene1002_..._01_24mm` 에서 median/max
+  모두 0.0000m. 부수 옵션 `--pc-tint` (RGB 대신 context=초록/target=파랑 단색으로 구분),
+  `--pc-target-cams` (target clip 카메라도 그림), `--pc-seg-only`. point cloud 노드 이름도 `pc` ->
+  `pc_context`/`pc_target_clip` 으로 갈라 viser scene tree 에서 따로 껐다 켤 수 있다.
+  clip 하나가 실패해도(static clip 은 sim3 의 s/t 가 없다) 나머지는 그대로 그린다.
+
+  **clip 길이 ≠ target segment 길이라 파란 궤적이 둘로 보이던 것을 고쳤다.** SD clip 은
+  81 프레임인데 target segment(`ref`)는 앞 **49** 프레임이다 (`whuman` 160/160 sequence 에서
+  offset 0, 위치오차 `<1e-3 m` 확인). 자르지 않으면 뒤 32 프레임이 segment 옆을 median
+  **0.926m** 로 나란히 지나가 (궤적 extent 4.173m 의 22%) 별개의 두 번째 궤적처럼 읽혔다.
+  이제 `--pc-seg-only` 로 target clip 의 카메라와 point cloud 를 `[0, len(ref))` 로 자르고
+  (`sd_pointcloud(t_range=...)` 추가), target clip 카메라 색을 ref 파랑과 겹치던
+  `(40,90,230)` 에서 **청록 `(0,200,200)`** 으로 분리했다. context 는 clip 전체를 쓰는 게
+  맞으므로 영향받지 않는다.
+
 ### Added
+- **`scripts/viewer/README.md`** — viser 뷰어 두 개(`viser_val_cameras.py`, `viser_arms_gs.py`)의
+  사용법. screen/포트 실행·종료 규약, DL3DV/SD 배경 처리, SD 의 umeyama sim3 → GT meters 식,
+  `--pc-clips` 로 두 clip point cloud 를 겹쳐 aligned world 를 검증하는 법, 색 규약,
+  frustum stride, 지표 4덩어리의 출처와 **CSV 의 PRDC/FCD 열은 sequence 별 값이 아니라
+  set 단위 값의 복사본**이라는 함정, `--only` 거르기가 PRDC 계산 뒤에 와야 하는 이유,
+  OpenGL↔OpenCV / `applied_transform` 좌표계 정리. 하드코딩된 함정 두 개를 명시:
+  `--pc-frames` 는 target segment(49) 가 아니라 **clip 전체(81)** 에 균등 분포한다는 것과,
+  static clip 은 sim3 의 `s`/`t` 가 없어 건너뛴다는 것.
+
+- **`scripts/context_select/verify_geo_leakage.py`** — 끝난 run 의 **저장된 config 그대로**
+  dataset 을 세워, 고른 context view 가 target segment `[s, e)` 안으로 들어갔는지 전수 확인한다.
+  leakage-free 여부는 `geo_cover_out_of_seg` / `geo_first_view_target_s` /
+  `geo_cover_before_only` 조합으로 결정되는데, 코드에 pool 이 비면 anchor(=frame s)로 떨어지는
+  fallback (`dataset_dl3dv.py:173-174`, `:917` 의 pad pool) 이 있어 플래그만 읽고 단정할 수 없다.
+  그래서 dataset 이 실제로 내보내는 `geo_idxs` 와 `[s, e)` 의 교집합을 센다. config 은
+  `scripts/eval_testset.py::build_cfg` 를 재사용하고 (튜플 `(ns, dict)` 반환에 주의),
+  강제로 켜는 건 선택 결과를 바꾸지 않는 `geo_return_idxs` 하나뿐이다.
+  `20260808_140209_da3_7k_customgeo_nos` 결과: 겹침 0/500, `view0 == s` 0/500.
+
+- **`scripts/bench/geo_encoder_speed.py`** — `geo_encoder: custom` vs `lagernvs` 의 **추론
+  forward** 속도/메모리/토큰수/파라미터를 같은 조건(bf16 autocast, `train_latent_cam_dm.py:349`
+  와 동일)에서 잰다. 해상도는 각 backend 가 실제로 받는 값(custom `custom_geo_input_hw`
+  252x448, lagernvs `geo_image_hw` 256x448), view 수는 `--views` 로 준다 (DL3DV
+  `geo_cover_k` 6 / SD `sd_geo_views: null` 49). `--trace` 는 custom 의 단계별 shape 을
+  forward hook 으로 실측해 찍는다. GPU 경합 하에서 재면 median 이 부풀어서 min 을 같이
+  보고한다. custom 은 `trainable=True` 라 학습 step 비용은 이 숫자로 외삽 금지.
+
+- **`scripts/eval/prdc_diversity_diagnosis.py`** — "SD 는 GT 카메라 움직임 종류가 적어서
+  kNN 반경 기반인 `clatr/precision`·`density` 가 낮게 나오는 것 아니냐"를 가르는 진단.
+  PRDC precision 은 거리와 반경이 같이 스케일해서 **"GT 가 좁은 영역에 모여 있다"만으로는
+  안 떨어진다** — 실제로 떨어뜨리는 건 GT 가 뭉쳐 `r_kNN` 이 GT 전체 퍼짐에 비해 작아지는
+  경우다. 그래서 chunk 안의 GT 쌍거리 중앙값(`spread`)으로 전부 나눈 스케일 불변량
+  (`tightness = median(r_kNN)/spread`, `dup_frac`, `err_pair`, `err_min`)과 반사실 precision
+  두 개(`swap` = pred 를 같은 chunk 의 다른 GT 로 치환, `selfgt` = pred=GT)를 같이 낸다.
+  `compute(num_splits=5)` 는 chunk 크기가 n 에 딸려 가므로 (n=160→32, n=640→128) `--chunk`
+  로 고정해 코퍼스를 같은 조건에 놓는다. `--focus <data_name>` 은 sequence 하나의
+  거리/반경/cos 를 뜯어본다.
+
 - **`scripts/data/sd_preset_taxonomy.py`** — SD 의 clip 인덱스 `01`~`07` 이 실제로 몇 종류의
   카메라 움직임인지 `camera/<split>/<scene>/*_cam.json` 에서 직접 센다. 프레임 0 카메라
   좌표계로 옮기고 경로 길이로 정규화한 뒤, 같은 인덱스의 scene 간 RMSD / 인덱스 간 RMSD /

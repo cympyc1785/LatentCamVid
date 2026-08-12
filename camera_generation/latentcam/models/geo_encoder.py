@@ -183,6 +183,53 @@ class _CustomBackend(nn.Module):
         return tokens, mask
 
 
+class _DA3Backend(nn.Module):
+    """da3_geo_encoder.DA3SceneEncoder 래퍼 — Depth-Anything-3 의 cross-view ViT 백본.
+
+    표면은 `_LagerNVSBackend` 와 **동일하게** 맞춰 뒀다 (`wants_batch=False`,
+    `build_cam_token(...)`, `forward(images, cam_token)`). 그래서 `geo_encode` 의 5개 사본
+    (train_latent_cam_dm / infer_validation_sample / infer_swap_ablation / eval_testset /
+    eval/geo_ablation) 을 한 줄도 고치지 않아도 된다.
+
+    다만 `trainable = True` 다. DA3 본체는 frozen 이지만 그 위의 LayerNorm 과
+    GeoEncoder.proj(3072->768) 는 학습돼야 하고, 이 플래그가 꺼지면
+      (1) 두 모듈이 optimizer group 에 안 들어가 랜덤 초기값에 영원히 머물고
+      (2) frozen-key ckpt 필터와 accelerator.autocast() 도 안 걸린다.
+    frozen 파라미터는 `_geo_frozen_keys` 가 ckpt 에서 빼므로 last_geo.pth 는 여전히 작다.
+    """
+
+    trainable = True
+    wants_batch = False
+
+    def __init__(self, cfg):
+        super().__init__()
+        from models.da3_geo_encoder import DA3SceneEncoder
+        self.net = DA3SceneEncoder(
+            repo_path=getattr(cfg, 'da3_geo_repo_path', None),
+            model_name=str(getattr(cfg, 'da3_geo_model', 'da3nested-giant-large')),
+            ckpt_path=getattr(cfg, 'da3_geo_ckpt_path', None),
+            hf_home=getattr(cfg, 'da3_geo_hf_home', None),
+            input_hw=getattr(cfg, 'da3_geo_input_hw', None),
+            layers=getattr(cfg, 'da3_geo_layers', 'last'),
+            layer_fuse=getattr(cfg, 'da3_geo_layer_fuse', 'concat'),
+            norm=getattr(cfg, 'da3_geo_norm', 'ln'),
+            debug=bool(getattr(cfg, 'da3_geo_debug', False)),
+        )
+        self.out_dim = self.net.out_dim
+        self.camera_encoding_dim = self.net.camera_encoding_dim
+
+    def build_cam_token(self, geo_c2w, geo_fxfycxcy, geo_hw, override_scale=None):
+        return self.net.build_cam_token(geo_c2w, geo_fxfycxcy, geo_hw,
+                                        override_scale=override_scale)
+
+    def forward(self, images, cam_token=None):
+        """cam_token=None 이면 DA3 가 자기 learned camera_token 을 쓴다 (unposed).
+        lagernvs 처럼 zeros 를 넣으면 안 된다 — 학습된 토큰 자리를 0 으로 덮게 된다."""
+        tokens = self.net(images, cam_token)                 # (B, V*P, C)
+        mask = torch.ones(tokens.shape[:2], dtype=torch.bool, device=tokens.device)
+        return tokens, mask
+
+
 class _SceneTokBackend(nn.Module):
     """SceneTok scene-token encoder (stub). Wire when needed:
     load the SceneTok encoder, run on multi-view input -> scene tokens (B, M, D),
@@ -210,6 +257,8 @@ class GeoEncoder(nn.Module):
             self.backend = _SceneTokBackend(repo_path=repo_path, ckpt_path=ckpt_path)
         elif backend == "custom":
             self.backend = _CustomBackend(cfg)
+        elif backend == "da3":
+            self.backend = _DA3Backend(cfg)
         else:
             raise ValueError(f"unknown geo_encoder backend: {backend}")
 
@@ -265,5 +314,8 @@ def build_geo_encoder(cfg):
             root = getattr(cfg, "ckpt_root", None)
             if root:
                 cfg.custom_geo_dino_path = os.path.join(root, "dinov2-large")
+        return GeoEncoder(backend, out_dim, cfg=cfg)
+    elif backend == "da3":
+        # da3 도 cfg 통째로 (da3_geo_* 키가 여럿이다). 경로 기본값은 config.py 가 준다.
         return GeoEncoder(backend, out_dim, cfg=cfg)
     raise ValueError(f"unknown geo_encoder backend: {backend}")

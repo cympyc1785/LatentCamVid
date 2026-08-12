@@ -1,0 +1,36 @@
+# @package _global_
+# da3_1k_customgeo_nos.yaml 의 **7K 코퍼스판** — geo_worldtraj_camembed 형 context 선택.
+# da3_7k_customgeo_withs.yaml 과 **두 줄만** 다르다:
+#   geo_first_view_target_s: false    (withs 는 true)
+#   geo_cover_subtract_first: false   (withs 는 true)
+# 즉 target segment 카메라가 context 에 하나도 안 들어간다.
+#
+# 1K 판(150 epoch)에서 이 두 arm 은 최종 성능이 갈리지 않았지만(testset loss_traj
+# 0.064881 vs 0.065060) geo attention 사용 패턴은 명확히 달랐다 — withs 만 view0 로
+# 질량이 몰리고(view_max_over_uniform 1.31 vs 1.02) 그 쏠림이 epoch 과 함께 자랐다.
+# 7배 데이터에서도 같은지 보는 것이 이 arm 쌍의 목적이다.
+#
+# 코퍼스 구성/필터/epoch 근거는 da3_7k_da3pose.yaml 주석 참고.
+exp_name: SMOKE_customgeo_regr
+pose_source: da3
+batch_size: 2
+epochs: 1
+
+geo_encoder: custom
+geo_cam_embed: null           # 카메라는 픽셀 Plücker 로만 들어간다
+geo_latent_cache_dir: null    # GeoTokenizer/proj 가 학습되므로 출력을 얼릴 수 없다
+geo_posed: false              # custom backend 는 lagernvs cam_token 을 만들지 않는다
+custom_geo_input_hw: [252, 448]   # 14 의 배수 (256 -> 252). dataset/encoder 가 어긋나지 않게 명시
+custom_geo_freeze_dino: true
+
+geo_view_sampling: frustum_cover
+geo_cover_out_of_seg: true
+geo_cover_centered_at_s: true
+geo_first_view_target_s: false    # <- arm B 의 정의. withs arm 은 true
+geo_cover_subtract_first: false   # <- arm B 의 정의. withs arm 은 true
+
+scale_mode: avg_scale
+intr_norm: rel                # vae_20260302_300 = frame-0-relative-intrinsics ckpt
+cam_dim: 64                   # = 그 ckpt 의 latent_dim
+meta_csv: meta_da3_7k.csv
+max_scenes: 6

@@ -168,7 +168,10 @@ train_seg_list: null          # [new] explicit train segment-list file (<batch>/
 test_seg_list: null           # [new] explicit val/test segment-list file; val = its first (val_max_batches×batch_size) segments
 geo_encoder: lagernvs         # scene-context encoder: lagernvs (frozen VGGT recon -> 768-d tokens)
                               #   | custom (models/custom_geo_encoder.py: frozen DINOv2 + trainable
-                              #     Plücker/depth tokenizer; RGBD 입력, custom_geo_* 참고) | null (text-only)
+                              #     Plücker/depth tokenizer; RGBD 입력, custom_geo_* 참고)
+                              #   | da3 (models/da3_geo_encoder.py: frozen Depth-Anything-3
+                              #     cross-view ViT; RGB 만, 카메라는 DA3 cam_enc, da3_geo_* 참고)
+                              #   | null (text-only)
 train_frac: 0.9            # [new] random-split train share when train_seg_list/test_seg_list are null.
                           #   1.0 = use the WHOLE index for train and leave val empty; only for jobs that
                           #   never validate (the VAE fits, train_vae_dl3dv.py include_val=False).
@@ -318,6 +321,35 @@ custom_geo_depth_cache_dir: /data1/cympyc1785/data/DL3DV/scenes/da3_depth_raw
 #   rgb_only GeoTokenizer 자체를 제거 -> frozen DINOv2 특징만 proj(1024->geo_latent_dim)
 # rgb_only/no_depth 는 dataset 에서 안 쓰는 텐서를 아예 만들지 않는다 (depth I/O 절약).
 custom_geo_channels: full
+
+# [new 2026-08-12] geo_encoder: da3 — models/da3_geo_encoder.py.
+#   frozen Depth-Anything-3 cross-view ViT + trainable LayerNorm (768 로 내리는 Linear 는
+#   GeoEncoder.proj). custom 과 다른 점:
+#     - 입력이 RGB 뿐이다. Plücker/log-depth/valid 를 안 만들어서 dataset I/O 가 줄어든다.
+#     - 카메라는 픽셀 ray 가 아니라 DA3 자신의 cam_enc 로 넣는다 (geo_posed: true 일 때).
+#       정규화도 DA3 규약(view0 재고정 + camera center 거리 median)이라 norm_scale 과 무관하다.
+#     - view 순서가 의미를 갖는다 (view0 = reference) -> geo_shuffle_order 와 병용 금지.
+#   vendored tools/Depth-Anything-3 는 읽기 전용이다 (수정 0줄). api.py 를 import 하지 않고
+#   registry+safetensors 로 backbone/cam_enc 만 올린다 — 이유는 da3_geo_encoder.py docstring.
+da3_geo_repo_path: /data1/cympyc1785/LatentCamVid/camera_generation/tools/Depth-Anything-3
+da3_geo_model: da3nested-giant-large   # DA3 registry key (configs/*.yaml 의 stem).
+                              #   nested 는 anyview 갈래만 올린다 (metric 갈래는 depth 스케일
+                              #   정렬 전용이라 feature 에 관여하지 않는다). corpus
+                              #   <scene>/da3/*.npz 를 만든 바로 그 모델. vitg embed 1536,
+                              #   cat_token -> native 3072, backbone+cam_enc 1251 M (frozen).
+                              #   더 가벼운 대안: da3-large (vitl, native 2048, 355 M).
+da3_geo_ckpt_path: null       # null -> da3_geo_hf_home 의 HF 캐시 snapshot/model.safetensors
+da3_geo_hf_home: /data1/cympyc1785/cache/huggingface
+da3_geo_input_hw: [252, 448]  # patch(14) 배수. DA3 native 는 280x504 지만 252x448 은 그것의
+                              #   등방(x8/9) 축소라 aspect 왜곡이 없고 custom backend 와 같은
+                              #   격자(18x32 = view 당 576 토큰)다. 해상도 probe 결과:
+                              #   results/20260812_da3_res_probe_giant (448 vs 504 AbsRel
+                              #   0.0176~0.0564, delta<1.25 0.958~0.9995)
+da3_geo_layers: last          # last | all — out_layers 4개 중 마지막만 / 전부 concat(4x3072)
+da3_geo_layer_fuse: concat    # (all 일 때) 현재 concat 만 구현
+da3_geo_norm: ln              # ln | none. cat_token 의 두 반쪽은 앞이 un-normed local_x,
+                              #   뒤가 norm 통과라 분산 스케일이 크게 다르다. 끄면 한쪽이 먹는다.
+da3_geo_debug: false
 
 # --- geo cross-attention tracking (val 때만, 첫 배치 하나) ------------------------
 # 켜면 wandb 에 val/geo/* 스칼라와 val/geo/attn_map 이미지가 올라간다. 기본 off 라

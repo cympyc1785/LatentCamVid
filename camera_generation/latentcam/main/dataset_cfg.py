@@ -15,6 +15,7 @@
 세 곳에서 차례로 꺼진다:
      geo_latent_dim != 768   -> proj 가 학습되는 Linear 라 그 출력을 얼리면 안 된다
      geo_encoder == 'custom' -> 인코더 자체가 학습된다
+     geo_encoder == 'da3'    -> 같은 이유 (LayerNorm/proj 가 학습된다)
      geo_test_inseg_k        -> 캐시 키가 data_name 뿐이라 context view 변경을 구분 못 한다
      geo_swap_mode           -> 같은 이유
 순서와 print 문구를 바꾸면 "캐시가 켜진 줄 알았는데 안 켜졌다"류의 무증상 사고가 난다.
@@ -215,6 +216,52 @@ def resolve_dataset_cfg(cfg, verbose=True):
         say(f"[geo custom] input_hw={geo_hw} grid="
             f"{geo_hw[0] // _p}x{geo_hw[1] // _p} "
             f"depth_cache={geo_depth_cache_dir or 'OFF (npz fallback, ~0.6s/item)'}")
+
+    # [new 2026-08-12] geo_encoder='da3' (models/da3_geo_encoder.py). custom 과 달리 dataset 이
+    # 더 만들어야 할 텐서가 없다 — DA3 는 RGB 만 받고 카메라는 geo_posed 의 geo_c2w /
+    # geo_fxfycxcy / geo_hw (이미 있는 키) 로 들어간다. 여기서 하는 일은 두 가지뿐:
+    #   1) geo_hw 를 da3_geo_input_hw 로 덮어써서 _load_images 가 처음부터 그 격자로 주게 한다
+    #      (인코더 안의 bilinear 재보간을 피한다).
+    #   2) 조용히 틀리는 조합을 raise / disable 한다.
+    geo_da3 = geo_enabled and str(cfg.geo_encoder) == 'da3'
+    if geo_da3:
+        _p = 14                                   # DepthAnything3Net.PATCH_SIZE (고정)
+        _ihw = getattr(cfg, 'da3_geo_input_hw', None)
+        geo_hw = (tuple(int(v) for v in _ihw) if _ihw else
+                  ((geo_hw[0] // _p) * _p, (geo_hw[1] // _p) * _p))
+        if any(v % _p for v in geo_hw):
+            raise ValueError(f"da3_geo_input_hw={geo_hw} must be a multiple of patch {_p}")
+        if getattr(cfg, 'geo_lagernvs_skip_ctx_norm', False):
+            # lagernvs 의 1.35*max(context) 정규화를 target scale 로 덮어쓰는 플래그다.
+            # DA3 는 자기 규약(view0 재고정 + camera center 거리 median)으로 정규화하므로
+            # override_scale 을 받을 자리가 없다 (_DA3Backend.build_cam_token 이 raise).
+            raise ValueError("geo_lagernvs_skip_ctx_norm=True 는 geo_encoder='da3' 와 같이 "
+                             "쓸 수 없다 (lagernvs 전용 정규화)")
+        if getattr(cfg, 'geo_shuffle_order', False):
+            # DA3 backbone 은 view0 를 reference 로 삼는다 (cam_token 을 주면 ref-view 자동
+            # 선택이 꺼지고 입력 순서가 그대로 쓰인다). 순서를 섞으면 기준 프레임이 매번 바뀐다.
+            raise ValueError("geo_shuffle_order=True 는 geo_encoder='da3' 와 같이 쓸 수 없다 "
+                             "(DA3 는 view0 를 reference 로 쓴다)")
+        if getattr(cfg, 'geo_posed', False) and pose_source != 'da3':
+            # cam_enc 에 넣는 pose 의 스케일 공간이 depth/pose 코퍼스와 달라진다.
+            raise ValueError("geo_encoder='da3' + geo_posed=True 는 pose_source='da3' 가 "
+                             f"필요하다 (got {pose_source!r})")
+        if geo_latent_cache_dir is not None:      # [cascade 2b/5]
+            # LayerNorm/proj 가 **학습되는** 파라미터라 그 출력을 파일로 얼리면 안 된다.
+            say("[geo cache] DISABLED: geo_encoder='da3' -> the geo encoder is trainable")
+            geo_latent_cache_dir = None
+        _samp = str(getattr(cfg, 'geo_view_sampling', 'even'))
+        _v = (int(getattr(cfg, 'geo_cover_k', 6)) if _samp == 'frustum_cover' else
+              (int(getattr(cfg, 'geo_num_inseg', 3)) + int(getattr(cfg, 'geo_num_covis', 3))
+               if _samp == 'hybrid' else int(getattr(cfg, 'geo_num_views', 4))))
+        if not getattr(cfg, 'geo_posed', False) and _v < 3:
+            # cam_token 이 없으면 backbone 이 THRESH_FOR_REF_SELECTION(=3) 이상일 때만
+            # reference view 를 고른다. V<3 이면 그 경로가 통째로 빠져 동작이 달라진다.
+            raise ValueError(f"geo_encoder='da3' + geo_posed=False 는 geo_num_views>=3 이어야 "
+                             f"한다 (got {_v}; DA3 의 reference-view 선택 임계값)")
+        say(f"[geo da3] model={getattr(cfg, 'da3_geo_model', 'da3nested-giant-large')} "
+            f"input_hw={geo_hw} grid={geo_hw[0] // _p}x{geo_hw[1] // _p} "
+            f"posed={bool(getattr(cfg, 'geo_posed', False))}")
 
     geo_test_inseg_k = getattr(cfg, 'geo_test_inseg_k', None) or 0
     if geo_test_inseg_k and geo_latent_cache_dir is not None:      # [cascade 3/4]

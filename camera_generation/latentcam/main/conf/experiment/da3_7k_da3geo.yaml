@@ -1,0 +1,46 @@
+# @package _global_
+# da3_7k_customgeo_nos.yaml 의 **geo encoder 교체판**. context 선택 / 코퍼스 / VAE / epoch 은
+# 전부 그대로 두고 **인코더만** custom -> da3 로 바꾼다. 그래야 차이가 인코더 탓임이 분명해진다.
+#
+# custom (frozen DINOv2-L + trainable GeoTokenizer) 과 다른 점:
+#   - DINOv2 는 single-view 라 view 간 대응을 못 만든다. 3D 는 dataset 이 계산한 픽셀
+#     Plücker/log-depth 채널로만 들어간다. DA3 backbone 은 block 13 부터 local/global
+#     attention 을 번갈아 돌리는 cross-view ViT 라 geometry 를 feature 안에서 직접 푼다.
+#   - 그래서 Plücker/depth 텐서를 아예 안 만든다 (dataset I/O 감소). 카메라는 DA3 자신의
+#     cam_enc 로 view 당 1 토큰 (geo_posed: true).
+#   - native 토큰 dim 이 1024 가 아니라 3072 (vitg embed 1536 x cat_token) -> proj 는
+#     Linear(3072->768). 학습 파라미터는 LayerNorm(3072) + 그 Linear = 약 2.36 M.
+#
+# 모델은 da3nested-giant-large 의 anyview 갈래 (= corpus <scene>/da3/*.npz 를 만든 그 모델).
+# 입력 해상도 252x448 은 DA3 native 280x504 의 등방 x8/9 축소이고 custom 과 같은 격자
+# (18x32 = view 당 576 토큰) 다. 근거: results/20260812_da3_res_probe_giant
+#   448 vs 504  AbsRel 0.0176~0.0564 / delta<1.25 0.958~0.9995 (6 scene)
+#   504 vs 저장본  AbsRel 0.0069~0.0164 (같은 모델이라 사실상 재현)
+exp_name: da3_7k_da3geo
+pose_source: da3
+batch_size: 8
+epochs: 100
+ckpt_at_epochs: [50]
+
+geo_encoder: da3
+geo_cam_embed: null           # 카메라는 DA3 cam_enc 토큰으로만 들어간다
+geo_latent_cache_dir: null    # LayerNorm/proj 가 학습되므로 출력을 얼릴 수 없다
+geo_posed: true               # DA3 cam_enc 에 GT pose 주입 (DA3 규약으로 정규화)
+geo_shuffle_order: false      # DA3 는 view0 를 reference 로 쓴다 -> 셔플 금지 (dataset 이 raise)
+da3_geo_model: da3nested-giant-large
+da3_geo_input_hw: [252, 448]  # 14 의 배수. dataset/encoder 가 어긋나지 않게 명시
+da3_geo_layers: last
+
+geo_view_sampling: frustum_cover
+geo_cover_out_of_seg: true
+geo_cover_centered_at_s: true
+geo_first_view_target_s: false
+geo_cover_subtract_first: false
+
+scale_mode: avg_scale
+intr_norm: rel                # vae_20260302_300 = frame-0-relative-intrinsics ckpt
+cam_dim: 64                   # = 그 ckpt 의 latent_dim
+meta_csv: meta_da3_7k.csv
+train_seg_list: /data1/cympyc1785/data/DL3DV/scenes/latentcam_da3_7k_train_seg_list.txt
+test_seg_list: /data1/cympyc1785/data/DL3DV/scenes/latentcam_da3_7k_test_seg_list.txt
+coverage_blacklist_path: /data1/cympyc1785/LatentCamVid/camera_generation/latentcam/data/seg_blacklist_jump_da3_7k.csv

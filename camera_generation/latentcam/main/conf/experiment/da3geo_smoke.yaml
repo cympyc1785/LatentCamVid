@@ -1,0 +1,27 @@
+# @package _global_
+# geo_encoder='da3' smoke — da3_7k_da3geo.yaml 에서 코퍼스/epoch 만 줄인 것
+exp_name: SMOKE_da3geo
+pose_source: da3
+batch_size: 2
+epochs: 1
+max_scenes: 6
+
+geo_encoder: da3
+geo_cam_embed: null
+geo_latent_cache_dir: null
+geo_posed: true
+geo_shuffle_order: false
+da3_geo_model: da3nested-giant-large
+da3_geo_input_hw: [252, 448]
+da3_geo_layers: last
+
+geo_view_sampling: frustum_cover
+geo_cover_out_of_seg: true
+geo_cover_centered_at_s: true
+geo_first_view_target_s: false
+geo_cover_subtract_first: false
+
+scale_mode: avg_scale
+intr_norm: rel
+cam_dim: 64
+meta_csv: meta_da3_7k.csv

@@ -471,12 +471,15 @@ def train():
     # lagernvs/scenetok 은 trainable=False 라 여기서 아무 것도 달라지지 않는다.
     _geo_trainable = bool(geo_encoder is not None and getattr(geo_encoder, 'trainable', False))
     # [new 2026-08-07] geo attention map 을 view 별 patch 격자로 되접을 때 쓰는 (gh, gw).
-    # custom backend 만 격자가 확정적이다 (custom_geo_input_hw / patch). 다른 backend 는
+    # custom / da3 backend 만 격자가 확정적이다 (입력 hw / patch). 다른 backend 는
     # None -> geo_attn_probe 가 스칼라 지표만 내고 figure 는 안 만든다.
     _geo_grid_hw = None
-    if str(getattr(cfg, 'geo_encoder', None)) == 'custom':
-        _p = int(getattr(cfg, 'custom_geo_patch', 14))
-        _ihw = getattr(cfg, 'custom_geo_input_hw', None)
+    _geo_name = str(getattr(cfg, 'geo_encoder', None))
+    if _geo_name in ('custom', 'da3'):
+        # da3 의 patch 는 DepthAnything3Net.PATCH_SIZE = 14 고정이다.
+        _p = 14 if _geo_name == 'da3' else int(getattr(cfg, 'custom_geo_patch', 14))
+        _ihw = getattr(cfg, 'da3_geo_input_hw' if _geo_name == 'da3'
+                       else 'custom_geo_input_hw', None)
         if _ihw:
             _geo_grid_hw = (int(_ihw[0]) // _p, int(_ihw[1]) // _p)
     _geo_frozen_keys = set()

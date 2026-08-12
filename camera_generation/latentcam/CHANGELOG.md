@@ -4,6 +4,52 @@ All notable changes to the latentcam sub-project. Follows [Keep a Changelog](htt
 
 ## [Unreleased]
 
+### Added
+- **`geo_encoder: 'da3'` — Depth-Anything-3 백본을 geo encoder 로 쓰는 네 번째 backend.**
+  기존 `custom` 은 frozen DINOv2-L (single-view) 라 view 간 대응을 못 만들고 3D 는 dataset 이
+  깔아 준 Plücker/log-depth 픽셀 채널로만 들어갔다. DA3 백본은 block 13 부터 local/global
+  attention 을 번갈아 도는 **cross-view ViT** 라 geometry 를 feature 안에서 직접 푼다. 게다가
+  코퍼스의 `<scene>/da3/*.npz` 가 이미 `DA3NESTED-GIANT-LARGE-1.1` 산출물이라 표현 공간이 맞는다.
+  - 신규 `models/da3_geo_encoder.py::DA3SceneEncoder` + `models/geo_encoder.py::_DA3Backend`.
+    `_LagerNVSBackend` / `_CustomBackend` / `custom_geo_encoder.py` 는 **0줄 수정**이고,
+    vendored `tools/Depth-Anything-3` 도 **0줄 수정**이다. `_DA3Backend` 의 표면을
+    `_LagerNVSBackend` 와 동일하게 맞춰서 `geo_encode` 사본 5개도 안 고쳤다.
+  - **`depth_anything_3.api` 는 import 하지 않는다** — ① `api.py` → `utils/export/gs.py` 가
+    `moviepy.editor` 를 끌고 오는데 이 env 에 moviepy 가 없고, ② `DepthAnything3.forward` 에
+    `@torch.inference_mode()` 가 걸려 있어 그대로 쓰면 downstream autograd 가 오염된다.
+    대신 `cfg.load_config` + `registry.MODEL_REGISTRY` + `safetensors` 로 net 을 직접 만들고
+    `head`/`cam_dec`/`gs_head`/`gs_adapter` 를 지운 뒤 `backbone`/`cam_enc` 만
+    `strict=True` 로 로드한다 (739 tensor, 1251.0 M, 전부 frozen).
+  - **pose 주입**은 기존 `geo_posed` 플래그를 재사용하고, 정규화는 파이프라인의 `norm_scale` 이
+    아니라 **DA3 자신의 규약** (view0 기준 재고정 + median camera distance 로 나눔) 을 쓴다.
+    단 `api.py:435-447` 의 median 은 **배치 전역**이라 B>1 에서 샘플이 서로 섞인다 — 우리
+    `build_cam_token` 은 **per-sample median** 으로 고쳤다. B=1 에서는 원본과
+    `max|api-ours| = 1.2e-07 ~ 2.4e-07` (fp32 반올림) 으로 일치, B=4 에서는 의도대로 갈라진다.
+    `cam_enc` 는 원본 `da3.py:127` 과 동일하게 autocast 를 끄고 fp32 로 돌린다.
+  - `cam_token` 을 넘기면 `select_reference_view`/`reorder_by_reference` 가 건너뛰어져
+    **view 순서가 보존**된다 (그 경로는 `V >= 3` **이고** `cam_token is None` 일 때만 발동).
+    그래서 `geo_shuffle_order=True` 는 `da3` 와 함께 쓰면 raise 하고, `geo_posed=False` 인데
+    `V < 3` 이어도 raise 한다 (ref-view 선택 유무로 동작이 조용히 달라지는 자리).
+  - 토큰 dim 은 1024 가 아니라 **3072** (vitg embed 1536 × `cat_token`). `cat_token` 의 두 반쪽은
+    분산이 크게 다르므로 (앞쪽 un-normed local_x, 뒤쪽 `self.norm` 통과) `Linear(3072→768)` 앞에
+    `LayerNorm(3072)` 을 넣는다. 학습 파라미터는 그 둘뿐 — 4 tensor / 2.37 M,
+    `last_geo.pth` = 9,467,303 B 로 DA3 739 tensor 가 ckpt 에서 빠지는 것 확인.
+- **`da3_geo_*` config 9종** (`main/config.py`, `main/conf/config.yaml`):
+  `da3_geo_repo_path` / `da3_geo_model` / `da3_geo_ckpt_path` / `da3_geo_hf_home` /
+  `da3_geo_input_hw` / `da3_geo_layers` / `da3_geo_layer_fuse` / `da3_geo_norm` / `da3_geo_debug`.
+  기본 모델은 `da3nested-giant-large`, 기본 입력은 `[252, 448]` (14 배수, 격자 18×32 = view 당
+  576 토큰 — `custom` 과 동일). `main/dataset_cfg.py` 에 `geo_da3` 분기를 추가해 `geo_hw` 를
+  `da3_geo_input_hw` 로 덮어쓰고, `geo_latent_cache_dir` 은 disable 한다
+  (LN/proj 가 학습되므로 출력을 얼릴 수 없다 — cascade 2b/5 에 항목 추가).
+- **`scripts/data/da3_res_probe.py`** — 252×448 vs 280×504 해상도 probe.
+  DL3DV 3 + DynamicVerse 3 scene 을 두 해상도로 돌려 depth mp4 와 AbsRel/δ 를 뽑고,
+  `--repro-check` 로 저장된 `<scene>/da3/depth.npz` 와 대조해 api 우회 로딩 경로가
+  `api.DepthAnything3` 와 같은 결과를 내는지 증명한다. 결과는 `results/20260812_da3_res_probe_giant`:
+  448 vs 504 는 AbsRel 0.0176~0.0564 / δ<1.25 0.958~0.9995, 504 vs 저장본은 AbsRel 0.0069~0.0164.
+- **실험 arm `main/conf/experiment/da3_7k_da3geo.yaml`** — `da3_7k_customgeo_nos.yaml` 의 인코더만
+  바꾼 판 (코퍼스/seg list/blacklist/VAE/cam_dim/epoch/batch 동일) 이라 차이가 인코더 탓임이 분명하다.
+  smoke config `da3geo_smoke.yaml` / `da3geo_smoke_unposed.yaml` / `customgeo_regr_smoke.yaml` 동봉.
+
 ### Fixed
 - **`train_latent_cam_dm.py` 의 full-resume 이 optimizer 모멘트를 엉뚱한 param 에 실었다** —
   `opt.state_dict()` 는 param 을 **인덱스**로만 참조하는데, 저장 이후 `nn.Module` 등록 순서가

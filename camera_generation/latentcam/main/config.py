@@ -148,7 +148,7 @@ class Config:
     test_seg_list = None       # explicit val/test segment-list file; val = its first N segments (shuffle=False)
 
     # Geo encoder (image-based scene encoder feeding camera_diffusion_model_latent's geo latent)
-    geo_encoder = 'lagernvs'    # ['lagernvs', 'scenetok', 'custom']
+    geo_encoder = 'lagernvs'    # ['lagernvs', 'scenetok', 'custom', 'da3']
     geo_latent_dim = 768        # must match CameraDiffusionModel(geo_latent_dim=...)
     geo_num_views = 4           # (even path only) multi-view images fed per scene
     geo_image_hw = [256, 448]   # (H, W) images are loaded/resized to for the geo encoder
@@ -230,6 +230,24 @@ class Config:
     custom_geo_input_hw = None      # None -> geo_image_hw 를 patch(14) 배수로 내림
     custom_geo_ray_dim = 64
     custom_geo_geo_dim = 256
+    # da3 backend: models/da3_geo_encoder.py (frozen Depth-Anything-3 cross-view ViT +
+    # trainable LayerNorm; 768 로 내리는 Linear 는 GeoEncoder.proj). custom 과 달리 픽셀
+    # Plücker/depth 를 안 쓰고 (dataset 부하 감소) 카메라는 DA3 자신의 cam_enc 로 넣는다
+    # (geo_posed=True). vendored tools/Depth-Anything-3 는 읽기 전용 — 수정 0줄.
+    da3_geo_repo_path = '/data1/cympyc1785/LatentCamVid/camera_generation/tools/Depth-Anything-3'
+    da3_geo_model = 'da3nested-giant-large'   # DA3 registry key. nested 는 anyview 갈래만 올린다
+                                #   (metric 갈래는 depth 스케일 정렬 전용이라 feature 와 무관).
+                                #   corpus <scene>/da3/*.npz 를 만든 바로 그 모델이다.
+    da3_geo_ckpt_path = None    # None -> da3_geo_hf_home 의 HF 캐시 snapshot/model.safetensors
+    da3_geo_hf_home = '/data1/cympyc1785/cache/huggingface'
+    da3_geo_input_hw = [252, 448]   # patch(14) 배수. 280x504(DA3 native) 대비 등방 x8/9 축소이고
+                                #   custom backend 와 같은 격자(18x32 = view 당 576 토큰)다.
+                                #   해상도 probe: results/20260812_da3_res_probe{,_giant}
+    da3_geo_layers = 'last'     # ['last', 'all'] — out_layers 4개 중 마지막만 / 전부 concat
+    da3_geo_layer_fuse = 'concat'
+    da3_geo_norm = 'ln'         # cat_token 두 반쪽(un-normed local | normed global)의 스케일을
+                                #   맞추는 LayerNorm. 'none' 으로 끄면 한쪽이 다른 쪽을 먹는다.
+    da3_geo_debug = False
 
     clip_version = 'ViT-B/32'
     clip_max_length = 77

@@ -88,6 +88,10 @@ All notable changes to the latentcam sub-project. Follows [Keep a Changelog](htt
   **`scripts/data/da3_latent_scale_probe.py`** — σ 분포 측정 (파일을 쓰지 않는다).
   **`scripts/data/make_avg_scale_da3_latent.py`** — `da3latent` 분모(M·σ) 생성기. view 선택/resize/
   `cam_token` 을 재구현하지 않고 학습이 쓰는 `CamDataset` + `DA3SceneEncoder` 를 그대로 돌린다.
+  기본으로 이미 있는 json 은 **이미지 로드 전에** 인덱스에서 빼서 중단 후 이어 돌릴 수 있다
+  (`--overwrite` 로 재계산). `--splits` 기본값은 `train` 하나 — `base.build_dataset` 이
+  `CamDataset(cfg)` 하나만 만들고 train/val 은 그 위 `Subset` 분할이라(`base.py:69-89`)
+  `train` 인덱스가 이미 전 코퍼스다.
 - **실험 arm 5종** — `da3_7k_da3geo_frontanchor.yaml`, `da3_7k_da3geo_frontanchor_samelen.yaml`,
   `da3_7k_da3geo_latentscale.yaml`, 그리고 분모만 같게 맞춘 text-only 비교군
   `da3_7k_da3pose_frontanchor.yaml`, `da3_7k_da3pose_frontanchor_samelen.yaml`.

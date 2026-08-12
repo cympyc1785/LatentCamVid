@@ -111,6 +111,8 @@ def main():
     ap.add_argument('--workers', type=int, default=8)
     ap.add_argument('--limit', type=int, default=0)
     ap.add_argument('--dry-run', action='store_true', help='파일을 쓰지 않고 통계만')
+    ap.add_argument('--overwrite', action='store_true',
+                    help='기본은 이미 있는 json 을 건너뛴다 (중단 후 이어 돌리기). 이 플래그면 다시 계산')
     args, _ = ap.parse_known_args()
 
     cfg, _ = load_cfg('config')
@@ -142,9 +144,19 @@ def main():
     for split in args.splits:
         ds = CamDataset(cfg, split)
         wrapped = _Wrap(ds)
-        n = len(wrapped) if not args.limit else min(args.limit, len(wrapped))
+        # 이미 계산된 세그먼트는 **이미지 로드 전에** 인덱스에서 뺀다 (중단/재개용).
+        # 값이 세그먼트당 상수라 (view 집합 결정적 + cam_dec frozen) 다시 계산해도 같은 값이다.
+        keep = list(range(len(wrapped)))
+        if not args.overwrite and not args.dry_run:
+            keep = [i for i, (sc, _s, _e, _c, dn) in enumerate(ds.samples)
+                    if not osp.isfile(osp.join(ds.scene_dir_list[sc], 'da3', OUT_DIR,
+                                               f"{str(dn).split('_')[-1]}.json"))]
+            print(f"[{split}] {len(ds.samples) - len(keep)} 개는 이미 있어 건너뛴다", flush=True)
+        if args.limit:
+            keep = keep[:args.limit]
+        n = len(keep)
         if n < len(wrapped):
-            wrapped = torch.utils.data.Subset(wrapped, range(n))
+            wrapped = torch.utils.data.Subset(wrapped, keep)
         dl = torch.utils.data.DataLoader(
             wrapped, batch_size=args.batch, shuffle=False, num_workers=args.workers,
             collate_fn=collate2, pin_memory=False)

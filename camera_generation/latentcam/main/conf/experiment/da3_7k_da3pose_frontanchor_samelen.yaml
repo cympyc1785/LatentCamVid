@@ -1,0 +1,30 @@
+# @package _global_
+# da3_7k_da3geo_frontanchor_samelen.yaml 의 **text-only 대조군** (geo_encoder: null).
+#
+# avg_scale_ref: front_first_anchor_same_len
+#   context range = **[s-L, s)**, L = e-s = 49 (target segment 와 같은 길이),
+#   기준점 = **target segment 첫 카메라 s**. 점 집합 규약은 다른 변형과 동일.
+#   [0,s) 를 다 쓰는 front_first_anchor 와 달리 range 길이가 세그먼트마다 균질하다.
+#
+# !! geo arm 쪽 짝(da3_7k_da3geo_frontanchor_samelen)은 geo_view_sampling='front_uniform' 도
+#    같이 바뀌지만, 여기는 geo_encoder 가 null 이라 view 샘플링 자체가 없다. 즉 text-only 대조군
+#    두 개(frontanchor / frontanchor_samelen)의 차이는 **순수하게 분모 range 하나뿐**이다.
+#    (geo arm 두 개의 차이는 분모 + view0 결정성 두 가지라 대칭이 아니다 — 해석 시 주의.)
+#
+# 학습 샘플: 앞쪽 L 프레임을 못 채우는 세그먼트 제외. da3_7k 에서는 s == 0 과 같아진다.
+#
+# !! vae_latent_scale 은 0.96032625 그대로 (이 분모에 맞춰 측정한 값이 아니다).
+exp_name: da3_7k_da3pose_frontanchor_samelen
+pose_source: da3
+avg_scale_ref: front_first_anchor_same_len
+batch_size: 8
+epochs: 100
+ckpt_at_epochs: [50]
+geo_encoder: null
+scale_mode: avg_scale
+intr_norm: rel              # vae_20260302_300 = frame-0-relative-intrinsics ckpt
+cam_dim: 64                 # = 그 ckpt 의 latent_dim
+meta_csv: meta_da3_7k.csv
+train_seg_list: /data1/cympyc1785/data/DL3DV/scenes/latentcam_da3_7k_train_seg_list.txt
+test_seg_list: /data1/cympyc1785/data/DL3DV/scenes/latentcam_da3_7k_test_seg_list.txt
+coverage_blacklist_path: /data1/cympyc1785/LatentCamVid/camera_generation/latentcam/data/seg_blacklist_jump_da3_7k.csv

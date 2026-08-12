@@ -1,0 +1,61 @@
+# @package _global_
+# da3_7k_da3geo_frontanchor_samelen.yaml 과 **분모 하나만** 다른 arm (context view / 샘플 집합 동일).
+#
+# 왜 또 다른 분모인가
+# -------------------
+# 앞의 네 avg_scale_* 는 전부 **점 구름에서 잰 기하학적 거리**다. 그런데 geo latent 이 실제로
+# 표현하는 카메라 스케일은 그것과 다르다: geo_posed=True 로 cam_enc 에 GT pose 를 넣어 줘도
+# DA3 가 latent 에서 뽑는 카메라의 **translation 은 항상 예측값**이다 (cam_dec.py:35 의
+# out_t = self.fc_t(feat) 에는 echo 경로가 없고 rotation/fov 만 echo 되며, da3.py:216 은
+# camera_encoding 없이 부른다).
+#
+#   c_fed  = (GT camera center, view0 기준) / M      M = per-sample median camera distance
+#   c_pred = cam_dec(feats[-1][1]) -> c2w center     (latent 이 실제로 보는 카메라)
+#   sigma  = Umeyama(source=c_pred, target=c_fed).scale
+#   => GT 상대좌표 = M * c_fed = (M*sigma) * c_pred  => **latent 1 단위 = M*sigma GT 미터**
+#   => 분모 = M*sigma  (<scene>/da3/avg_scale_da3latent/, scripts/data/make_avg_scale_da3_latent.py)
+#
+# target translation 을 이 값으로 나누면 target 궤적이 geo latent 과 **같은 스케일 공간**에 놓인다.
+# Umeyama 의 R/t 는 쓰지 않는다 — 앵커는 front 계열과 같이 target 첫 카메라 s 로 둔다
+# (사용자 지시: "scale 구해서"). 실측 residual 이 fed 단위 med 0.00507 로 어긋남이 사실상 순수
+# 스칼라였다.
+#
+# 200 세그먼트 실측 (scripts/data/da3_latent_scale_probe.py):
+#   sigma            med 2.90040 p05 1.25082 p95 11.83133 ; [0.95,1.05] 안에 든 것 1.0%
+#   M*sigma          med 5.07997 p05 1.59861 p95 15.62358
+#   M*sigma/avg_scale med 0.95135 p05 0.25960 p95 1.74867
+# -> no-op 이 아니고(sigma != 1), 크기 자체는 기존 분모와 같은 대역이라 loss 축은 비교 가능하다.
+#
+# 순환 없음: cam_token 은 DA3 자기 규약(view0 재고정 + median camera distance)으로만 만들어지고
+# avg_scale/norm_scale 을 쓰지 않는다. 그래서 이 분모는 어떤 arm 으로 뽑아도 같다.
+#
+# geo_view_sampling 은 front_uniform 이어야 한다 (dataset_cfg 가 아니면 raise) — 분모를 만들 때
+# 쓴 view 집합이 바로 이 sampler 의 결정적 6 view 이기 때문이다.
+#
+# !! vae_latent_scale 은 0.96032625 그대로 (다른 arm 들과 같은 축에서 loss 를 보기 위해 고정).
+exp_name: da3_7k_da3geo_latentscale
+pose_source: da3
+avg_scale_ref: da3latent
+batch_size: 8
+epochs: 100
+ckpt_at_epochs: [50]
+
+geo_encoder: da3
+geo_cam_embed: null           # 카메라는 DA3 cam_enc 토큰으로만 들어간다
+geo_latent_cache_dir: null    # LayerNorm/proj 가 학습되므로 출력을 얼릴 수 없다
+geo_posed: true               # DA3 cam_enc 에 GT pose 주입 (DA3 규약으로 정규화)
+geo_shuffle_order: false      # DA3 는 view0 를 reference 로 쓴다 -> 셔플 금지 (dataset 이 raise)
+da3_geo_model: da3nested-giant-large
+da3_geo_input_hw: [252, 448]  # 14 의 배수. dataset/encoder 가 어긋나지 않게 명시
+da3_geo_layers: last
+
+geo_view_sampling: front_uniform   # [s-L, s) 에서 uniform. 분모를 만든 그 view 집합
+geo_num_views: 6                   # front_uniform 이 읽는 view 수 (geo_cover_k 아님)
+
+scale_mode: avg_scale
+intr_norm: rel                # vae_20260302_300 = frame-0-relative-intrinsics ckpt
+cam_dim: 64                   # = 그 ckpt 의 latent_dim
+meta_csv: meta_da3_7k.csv
+train_seg_list: /data1/cympyc1785/data/DL3DV/scenes/latentcam_da3_7k_train_seg_list.txt
+test_seg_list: /data1/cympyc1785/data/DL3DV/scenes/latentcam_da3_7k_test_seg_list.txt
+coverage_blacklist_path: /data1/cympyc1785/LatentCamVid/camera_generation/latentcam/data/seg_blacklist_jump_da3_7k.csv

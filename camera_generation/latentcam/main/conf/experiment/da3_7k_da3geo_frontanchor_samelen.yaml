@@ -1,0 +1,57 @@
+# @package _global_
+# da3_7k_da3geo_frontanchor.yaml 에서 **context range 의 길이를 target segment 와 같게 맞춘** arm.
+# 이 arm 은 앞 arm 과 달리 **두 가지가 같이 바뀐다** (사용자 지시대로).
+#
+#   (a) 분모: avg_scale_ref = front_first_anchor_same_len
+#       context range 가 [0, s) 전체가 아니라 **[s-L, s)** (L = e-s = 49). 기준점은 그대로
+#       target segment 첫 카메라 s. -> <scene>/da3/avg_scale_front_first_anchor_same_len/
+#       왜: [0,s) 는 s 가 뒤쪽 세그먼트일수록 길어져 분모가 scene 내 위치에 따라 달라진다.
+#       길이를 target 과 같게 고정하면 세그먼트 간 분모 정의가 균질해진다.
+#
+#   (b) geo context view: geo_view_sampling = front_uniform
+#       coverage 기반 retrieval 대신 **같은 [s-L, s) range 에서 geo_num_views 장 uniform**.
+#       -> 분모를 만든 range 와 view 를 뽑은 range 가 일치한다 (앞 arm 은 분모만 앞쪽이었고
+#       view 는 frustum_cover 로 target 양쪽에서 뽑혔다).
+#
+# !! 그래서 이 arm vs frontanchor 의 차이는 **분모 하나가 아니다.** front_uniform 은 view0 가
+#    항상 s-L 로 결정적인데 frustum_cover 는 view0 가 세그먼트마다 다르다. DA3 는 view0 를
+#    reference 로 쓰므로(cam_token 을 주면 select_reference_view 가 건너뛰어져 우리가 준 순서가
+#    그대로 reference) geo latent 의 기준 프레임이 결정적이 되는 효과가 같이 들어간다.
+#    두 요인은 이 두 arm 만으로는 분리되지 않는다.
+#
+# geo_num_views: 6 — front_uniform 은 geo_cover_k 가 아니라 geo_num_views 를 쓴다
+# (geo_cover_k 는 coverage 탐색 전용 노브다). 다른 arm 들과 토큰 예산을 맞추려면 6 이어야 한다
+# (V*P = 6 * 576 = 3456).
+#
+# 학습 샘플: 앞쪽 L 프레임을 못 채우는 세그먼트는 파일이 없어 인덱스에서 빠진다
+# (dataset_cfg.avg_scale_min_front -> 'nf' -> num_frames). da3_7k 는 전 세그먼트 길이 49 /
+# s in {0,49,98,...} 이라 s<49 <=> s==0 -> frontanchor arm 과 **정확히 같은 집합**을 뺀다.
+#
+# !! vae_latent_scale 은 0.96032625 그대로. 분모 정의가 또 바뀌므로 이 arm 에 맞춰 측정한 값이
+#    아니다 (다른 arm 들과 같은 축에서 loss 를 보기 위해 고정).
+exp_name: da3_7k_da3geo_frontanchor_samelen
+pose_source: da3
+avg_scale_ref: front_first_anchor_same_len
+batch_size: 8
+epochs: 100
+ckpt_at_epochs: [50]
+
+geo_encoder: da3
+geo_cam_embed: null           # 카메라는 DA3 cam_enc 토큰으로만 들어간다
+geo_latent_cache_dir: null    # LayerNorm/proj 가 학습되므로 출력을 얼릴 수 없다
+geo_posed: true               # DA3 cam_enc 에 GT pose 주입 (DA3 규약으로 정규화)
+geo_shuffle_order: false      # DA3 는 view0 를 reference 로 쓴다 -> 셔플 금지 (dataset 이 raise)
+da3_geo_model: da3nested-giant-large
+da3_geo_input_hw: [252, 448]  # 14 의 배수. dataset/encoder 가 어긋나지 않게 명시
+da3_geo_layers: last
+
+geo_view_sampling: front_uniform   # [s-L, s) 에서 uniform. retrieval 없음/결정적
+geo_num_views: 6                   # front_uniform 이 읽는 view 수 (geo_cover_k 아님)
+
+scale_mode: avg_scale
+intr_norm: rel                # vae_20260302_300 = frame-0-relative-intrinsics ckpt
+cam_dim: 64                   # = 그 ckpt 의 latent_dim
+meta_csv: meta_da3_7k.csv
+train_seg_list: /data1/cympyc1785/data/DL3DV/scenes/latentcam_da3_7k_train_seg_list.txt
+test_seg_list: /data1/cympyc1785/data/DL3DV/scenes/latentcam_da3_7k_test_seg_list.txt
+coverage_blacklist_path: /data1/cympyc1785/LatentCamVid/camera_generation/latentcam/data/seg_blacklist_jump_da3_7k.csv

@@ -1,0 +1,59 @@
+# @package _global_
+# da3_7k_da3geo.yaml 에서 **`avg_scale_ref: context_first_cam` 한 줄만 추가한** arm.
+# (da3_7k_da3pose -> da3_7k_da3pose_asfirstcam 과 정확히 같은 성격의 변경이다.)
+#
+# 무엇이 바뀌나 — **target cam_param 의 분모 하나뿐이다.**
+#   점 집합은 동일: context range(= target 제외 [0,s)/[e,N) 중 프레임이 많은 쪽 하나)의
+#   da3 depth(conf >= 전역 P40, pixel_stride 2) unproject. 기준점만
+#     centroid           = context 카메라 중심들의 평균  -> <scene>/da3/avg_scale/
+#     context_first_cam  = context range 의 첫 카메라     -> <scene>/da3/avg_scale_context_first_cam/
+#   둘 다 target 프레임을 안 쓰므로 leakage-free 인 것은 동일.
+#
+# geo 쪽은 **전혀 영향을 받지 않는다.** geo_encoder='da3' 는 cam_token 을 DA3 자체 규약
+# (view0 기준 재고정 + per-sample median camera distance) 으로 만들고 norm_scale 을 안 쓰며,
+# geo_cam_embed 도 null 이라 avg_scale 이 들어가는 경로가 없다. Plücker/log-depth 도 안 만든다
+# (그건 custom backend 전용). 즉 이 arm 과 da3_7k_da3geo 의 차이는 순수하게 target 분모다.
+#
+# 실측 (da3_7k train+test 39817 세그먼트, 결측 0 / 비유한 0):
+#   first_cam mean 6.64851 / med 4.30108 / min 0.25072 / max 171.81422
+#   first_cam/centroid 비: med 1.41159, p05 1.00945, p95 2.23834, <1 인 것 3.87%
+#   -> 분모가 대체로 1.4배 커져 정규화된 translation 이 그만큼 작아진다.
+#
+# !! vae_latent_scale 은 0.96032625 를 그대로 둔다. 분모가 바뀌면 VAE latent 의 실제 std 도
+#    바뀌므로 이 상수는 이 arm 에 맞춰 측정한 값이 아니다. 유지하는 이유는 da3_7k_da3pose_asfirstcam
+#    / da3_7k_da3geo 와 loss_traj / loss_latent 를 같은 축에서 비교하기 위해서다.
+#
+# 아래 geo 설정은 da3_7k_da3geo.yaml 과 한 글자도 다르지 않다 (근거 주석은 그쪽 참고).
+#   모델 da3nested-giant-large 의 anyview 갈래, 입력 252x448 (격자 18x32 = view 당 576 토큰),
+#   근거: results/20260812_da3_res_probe_giant
+#     448 vs 504  AbsRel 0.0176~0.0564 / delta<1.25 0.958~0.9995 (6 scene)
+#     504 vs 저장본  AbsRel 0.0069~0.0164 (같은 모델이라 사실상 재현)
+exp_name: da3_7k_da3geo_asfirstcam
+pose_source: da3
+avg_scale_ref: context_first_cam
+batch_size: 8
+epochs: 100
+ckpt_at_epochs: [50]
+
+geo_encoder: da3
+geo_cam_embed: null           # 카메라는 DA3 cam_enc 토큰으로만 들어간다
+geo_latent_cache_dir: null    # LayerNorm/proj 가 학습되므로 출력을 얼릴 수 없다
+geo_posed: true               # DA3 cam_enc 에 GT pose 주입 (DA3 규약으로 정규화)
+geo_shuffle_order: false      # DA3 는 view0 를 reference 로 쓴다 -> 셔플 금지 (dataset 이 raise)
+da3_geo_model: da3nested-giant-large
+da3_geo_input_hw: [252, 448]  # 14 의 배수. dataset/encoder 가 어긋나지 않게 명시
+da3_geo_layers: last
+
+geo_view_sampling: frustum_cover
+geo_cover_out_of_seg: true
+geo_cover_centered_at_s: true
+geo_first_view_target_s: false
+geo_cover_subtract_first: false
+
+scale_mode: avg_scale
+intr_norm: rel                # vae_20260302_300 = frame-0-relative-intrinsics ckpt
+cam_dim: 64                   # = 그 ckpt 의 latent_dim
+meta_csv: meta_da3_7k.csv
+train_seg_list: /data1/cympyc1785/data/DL3DV/scenes/latentcam_da3_7k_train_seg_list.txt
+test_seg_list: /data1/cympyc1785/data/DL3DV/scenes/latentcam_da3_7k_test_seg_list.txt
+coverage_blacklist_path: /data1/cympyc1785/LatentCamVid/camera_generation/latentcam/data/seg_blacklist_jump_da3_7k.csv

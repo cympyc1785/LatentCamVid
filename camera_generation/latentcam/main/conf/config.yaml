@@ -83,6 +83,12 @@ pose_source: transforms
 # 기준점에서 잰 파일**로 읽을지. 점 집합(context range unproject)은 같고 기준점만 다르다.
 #   'centroid'          (기본, 기존 동작) <scene>/da3/avg_scale/          context 카메라 centroid 기준
 #   'context_first_cam'                   <scene>/da3/avg_scale_context_first_cam/  context 첫 카메라 기준
+# [new 2026-08-13] 아래 둘은 context range 를 **target 앞쪽으로 고정**하고 기준점을 **target
+# segment 첫 카메라 s** 로 잡는다 (cam_param 재고정 기준 E @ inv(E_s) 와 분모 기준을 일치시킴).
+#   'front_first_anchor'          <scene>/da3/avg_scale_front_first_anchor/           range [0, s)
+#   'front_first_anchor_same_len' <scene>/da3/avg_scale_front_first_anchor_same_len/  range [s-L, s), L=e-s
+# 앞쪽을 못 채우는 세그먼트는 파일이 없고 dataset 이 인덱스에서 제외한다 (da3_7k 는 전 세그먼트
+# 길이 49 / s in {0,49,...} 이라 두 변형 모두 s==0 만 빠져 서로 paired 비교가 된다).
 # pose_source != 'da3' 과 같이 쓰면 에러 (해당 디렉토리가 da3 아래에만 있다).
 # 실측 (da3_7k 39817 세그먼트): first_cam/centroid 비 med 1.41159 -> 분모가 커져 정규화된
 # translation 이 작아진다. vae_latent_scale 을 그대로 두면 diffusion 입력 std 가 arm 마다 달라진다.

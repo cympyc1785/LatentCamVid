@@ -49,6 +49,48 @@ All notable changes to the latentcam sub-project. Follows [Keep a Changelog](htt
 - **실험 arm `main/conf/experiment/da3_7k_da3geo.yaml`** — `da3_7k_customgeo_nos.yaml` 의 인코더만
   바꾼 판 (코퍼스/seg list/blacklist/VAE/cam_dim/epoch/batch 동일) 이라 차이가 인코더 탓임이 분명하다.
   smoke config `da3geo_smoke.yaml` / `da3geo_smoke_unposed.yaml` / `customgeo_regr_smoke.yaml` 동봉.
+- **`avg_scale_ref` 변형 3종 추가** (`main/dataset_cfg.py::AVG_SCALE_DIRS`, `pose_source='da3'` 전용).
+  target translation 을 나누는 분모를 어느 context range 에서 어느 기준점으로 잴지 고르는 노브다.
+  점 구름 규약(da3 depth unproject, `conf >= 전역 P40`, `pixel_stride 2`, 평균 거리)은 넷 다 동일.
+  | ref | context range | 기준점 | 디렉토리 |
+  |---|---|---|---|
+  | `centroid` (기존 기본) | `[0,s)`/`[e,N)` 중 긴 쪽 | context 카메라 center 들의 centroid | `da3/avg_scale/` |
+  | `context_first_cam` | 위와 같음 | context range 의 첫 카메라 | `da3/avg_scale_context_first_cam/` |
+  | `front_first_anchor` **(신규)** | `[0, s)` — 앞쪽만 | target segment 첫 카메라 s | `da3/avg_scale_front_first_anchor/` |
+  | `front_first_anchor_same_len` **(신규)** | `[s-L, s)`, L=e-s | target segment 첫 카메라 s | `da3/avg_scale_front_first_anchor_same_len/` |
+  | `da3latent` **(신규)** | `[s-L, s)` 의 geo view | **M·σ — 기하 거리가 아니다** (아래) | `da3/avg_scale_da3latent/` |
+  - `front_*` 계열은 앞쪽 context 를 못 채우는 세그먼트를 **인덱스에서 제외**한다
+    (`dataset_cfg.avg_scale_min_front` → `_min_front`, `_load_index`/`_load_index_subset` 필터).
+    da3_7k 는 전 세그먼트 길이 49 / s ∈ {0,49,98,…} 이라 두 변형이 **정확히 같은 집합**(s==0)을
+    빼므로 arm 간 paired 비교가 성립한다. 인덱스 캐시 키에 `__as<ref>` 를 붙여 (거르는 변형일 때만)
+    centroid arm 의 캐시를 물어오지 않게 했다 — 안 그러면 분모 파일이 없어 `_avg_scale` 이 raise.
+  - **`da3latent` 은 기하 거리가 아니라 DA3 latent 이 실제로 쓰는 카메라 스케일**이다.
+    `geo_posed=True` 로 `cam_enc` 에 GT pose 를 넣어도 `cam_dec` 의 **translation 은 항상 예측값**
+    (`cam_dec.py:35` 의 `out_t = self.fc_t(feat)` 에는 echo 경로가 없고 rotation/fov 만 echo 되며
+    `da3.py:216` 은 `camera_encoding` 없이 부른다). `c_fed`=(GT center, view0 기준)/M,
+    `c_pred`=`cam_dec` 출력의 center, `σ`=Umeyama(src=`c_pred`, dst=`c_fed`).scale 이라 하면
+    GT 상대좌표 = M·`c_fed` = (M·σ)·`c_pred` → **latent 1 단위 = M·σ GT 미터**. 그 M·σ 를 분모로
+    저장한다. Umeyama 의 R/t 는 쓰지 않는다 (앵커는 front 계열과 같이 target 첫 카메라 s).
+    `cam_token` 이 `avg_scale`/`norm_scale` 을 안 쓰므로 순환이 없다.
+    `geo_view_sampling != 'front_uniform'` 이면 raise (분모를 만든 view 집합과 달라지므로).
+- **`geo_view_sampling: 'front_uniform'`** (`main/config.py`, `main/dataset_dl3dv.py`) —
+  context view 를 target 바로 앞 `[s-L, s)` (L=e-s) 에서 `geo_num_views` 장 uniform 으로 뽑는다.
+  coverage retrieval 없음 / 결정적 / leakage 없음. `front_first_anchor_same_len` · `da3latent` 과
+  range 가 일치하며, 분모 ref 와 어긋나면 `dataset_cfg` 가 경고한다.
+  주의: `frustum_cover` 와 달리 view0 가 항상 `s-L` 로 고정되므로 (DA3 는 view0 가 reference)
+  두 sampler 를 비교할 때 **분모 변경과 view0 결정성이 함께 바뀐다**.
+- **`DA3SceneEncoder(keep_cam_dec=True)` + `predict_cameras()`** (`models/da3_geo_encoder.py`) —
+  기본값 `False` 는 기존과 동일하게 `cam_dec` 을 삭제하므로 기존 arm 은 비트 단위로 같다.
+  `True` 면 `cam_dec` 가중치까지 로드해 `predict_cameras(images, cam_token)` 로 latent 에서
+  c2w/K 를 뽑을 수 있다 (`da3.py:218` 과 동일하게 autocast 를 끄고 fp32).
+- **`scripts/data/make_avg_scale_da3_front_anchor.py`** — 위 두 front 변형 분모 생성기
+  (전 코퍼스 7000 scene, 각 38989 파일).
+  **`scripts/data/da3_latent_scale_probe.py`** — σ 분포 측정 (파일을 쓰지 않는다).
+  **`scripts/data/make_avg_scale_da3_latent.py`** — `da3latent` 분모(M·σ) 생성기. view 선택/resize/
+  `cam_token` 을 재구현하지 않고 학습이 쓰는 `CamDataset` + `DA3SceneEncoder` 를 그대로 돌린다.
+- **실험 arm 5종** — `da3_7k_da3geo_frontanchor.yaml`, `da3_7k_da3geo_frontanchor_samelen.yaml`,
+  `da3_7k_da3geo_latentscale.yaml`, 그리고 분모만 같게 맞춘 text-only 비교군
+  `da3_7k_da3pose_frontanchor.yaml`, `da3_7k_da3pose_frontanchor_samelen.yaml`.
 
 ### Fixed
 - **`train_latent_cam_dm.py` 의 full-resume 이 optimizer 모멘트를 엉뚱한 param 에 실었다** —

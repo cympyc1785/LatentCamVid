@@ -1,0 +1,30 @@
+# @package _global_
+# da3_7k_da3geo_frontanchor.yaml 의 **text-only 대조군** (geo_encoder: null).
+# 분모/코퍼스/seg 리스트/blacklist/VAE/epochs 를 그 arm 과 정확히 맞췄으므로 둘의 차이는
+# **geo 조건(DA3 scene feature)이 있느냐 없느냐** 하나다.
+#
+# avg_scale_ref: front_first_anchor
+#   context range = **[0, s)** (target 앞쪽만), 기준점 = **target segment 첫 카메라 s**.
+#   점 집합 규약은 다른 변형과 동일 (da3 depth unproject, conf >= 전역 P40, pixel_stride 2, mean).
+#   cam_param 이 `E @ inv(E_s)` 로 frame s 기준 재고정된 뒤 이 분모로 나뉘므로 재고정 기준과
+#   스케일 기준이 일치한다. target 프레임 [s,e) 는 안 쓰므로 leakage-free.
+#
+# 학습 샘플: s == 0 인 세그먼트는 파일이 없어 인덱스에서 빠진다. da3_7k 는 전 세그먼트 길이 49 라
+# da3_7k_da3pose_frontanchor_samelen 과 정확히 같은 집합을 뺀다 -> 네 arm 이 전부 paired.
+#
+# !! vae_latent_scale 은 0.96032625 그대로 (이 분모에 맞춰 측정한 값이 아니다 — 다른 arm 들과
+#    loss_traj / loss_latent 를 같은 축에서 보기 위해 고정).
+exp_name: da3_7k_da3pose_frontanchor
+pose_source: da3
+avg_scale_ref: front_first_anchor
+batch_size: 8
+epochs: 100
+ckpt_at_epochs: [50]
+geo_encoder: null
+scale_mode: avg_scale
+intr_norm: rel              # vae_20260302_300 = frame-0-relative-intrinsics ckpt
+cam_dim: 64                 # = 그 ckpt 의 latent_dim
+meta_csv: meta_da3_7k.csv
+train_seg_list: /data1/cympyc1785/data/DL3DV/scenes/latentcam_da3_7k_train_seg_list.txt
+test_seg_list: /data1/cympyc1785/data/DL3DV/scenes/latentcam_da3_7k_test_seg_list.txt
+coverage_blacklist_path: /data1/cympyc1785/LatentCamVid/camera_generation/latentcam/data/seg_blacklist_jump_da3_7k.csv

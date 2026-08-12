@@ -56,6 +56,19 @@ avg_scale_ref (pose_source='da3' + scale_mode='avg_scale' 에서만 의미가 �
                       = mean(|| context 점 - context 카메라 중심들의 centroid ||)
   'context_first_cam' <scene>/da3/avg_scale_context_first_cam/<seg>.json
                       = mean(|| context 점 - context range 첫 카메라 ||)
+[new 2026-08-13] 아래 둘은 context range 를 target **앞쪽**으로 고정하고 기준점을 **target segment
+첫 카메라 s** 로 잡는다. cam_param 은 E @ inv(E_s) 로 frame s 기준 재고정된 뒤 이 분모로 나뉘므로
+(utils/data_utils.normalize_camera_extrinsics_and_points) 재고정 기준과 스케일 기준이 일치한다.
+s 의 포즈는 추론 시에도 주어지고(first_extrinsic) 점은 target [s,e) 를 안 쓰므로 leakage-free.
+  'front_first_anchor'          <scene>/da3/avg_scale_front_first_anchor/<seg>.json
+                      context range = [0, s)      ; s == 0 인 세그먼트는 파일 없음
+  'front_first_anchor_same_len' <scene>/da3/avg_scale_front_first_anchor_same_len/<seg>.json
+                      context range = [s-L, s), L = e-s ; 앞쪽 L 프레임을 못 채우면 파일 없음
+파일이 없는 세그먼트는 인덱스에서 제외된다 (dataset_cfg.avg_scale_min_front -> self._min_front,
+_load_index/_load_index_subset 의 `s < self._min_front` 필터). da3_7k 는 전 세그먼트 길이 49 /
+s in {0,49,98,...} 이라 두 변형이 똑같이 s==0 만 빼서 paired 비교가 된다.
+'front_first_anchor_same_len' 는 geo_view_sampling='front_uniform' (같은 [s-L,s) range 에서
+geo context view 를 uniform 추출) 과 짝이고, 어긋나면 dataset_cfg 가 경고한다.
 실측 (da3_7k train+test 39817 세그먼트, 결측/비유한 0): first_cam mean 6.64851 / med 4.30108,
 first_cam/centroid 비 med 1.41159 (p05 1.00945, p95 2.23834, <1 인 것 3.87%). 즉 first_cam 쪽
 분모가 대체로 1.4배 커서 정규화된 translation 이 그만큼 작아진다 — vae_latent_scale 을 그대로
@@ -99,8 +112,8 @@ _GL2CV = torch.diag(torch.tensor([1.0, -1.0, -1.0, 1.0]))
 # 같은 기존 import 를 깨지 않기 위해서다 (scripts/data/viz_scene_chunk_scale.py:108).
 # _POSE_SOURCES / da3 pose.npz 규약 주석도 dataset_cfg.py 에 있다.
 from dataset_cfg import (  # noqa: F401  (re-export)
-    _POSE_SOURCES, _SCALE_MODE_ALIASES, DatasetSpec,
-    resolve_dataset_cfg, resolve_pose_source, resolve_scale_mode,
+    _POSE_SOURCES, _SCALE_MODE_ALIASES, AVG_SCALE_DIRS, AVG_SCALE_REFS, DatasetSpec,
+    avg_scale_min_front, resolve_dataset_cfg, resolve_pose_source, resolve_scale_mode,
 )
 
 
@@ -289,6 +302,9 @@ class CamDataset(torch.utils.data.Dataset):
         # geo_latent_cache_dir 이 네 조건에서 차례로 꺼지는 것)와 print 문구도 거기 있다.
         spec = resolve_dataset_cfg(cfg)
         spec.apply_to(self)
+        # front-anchored avg_scale 이 요구하는 최소 앞쪽 context 길이. 0 이면 제약 없음(기존 동작).
+        # 인덱스 필터(_load_index)와 캐시 키 양쪽에서 쓰이므로 인덱스 빌드 전에 정해 둔다.
+        self._min_front = avg_scale_min_front(self.avg_scale_ref, self.num_frames)
 
         # scene-level (indexed by scene) and sample-level (per prompt segment)
         self.extrinsics_list = []   # [(N,4,4)]   (eager) or _LazyScenes (lazy)
@@ -318,12 +334,11 @@ class CamDataset(torch.utils.data.Dataset):
             else osp.join(scene_dir, 'prompts.json')
 
     def _avg_scale_dir(self, scene_dir):
-        # avg_scale_ref (pose_source='da3' 에서만 의미가 있다): 저장된 avg_scale 을 어느 기준점
-        # 에서 잰 것으로 쓸지. 'centroid' = 기존 동작(<scene>/da3/avg_scale).
+        # avg_scale_ref (pose_source='da3' 에서만 의미가 있다): 저장된 avg_scale 을 어느 context
+        # range 에서 어느 기준점으로 잰 것으로 쓸지. 'centroid' = 기존 동작(<scene>/da3/avg_scale).
+        # 매핑은 dataset_cfg.AVG_SCALE_DIRS 한 곳에만 둔다.
         if self.pose_source == 'da3':
-            sub = 'avg_scale_context_first_cam' if self.avg_scale_ref == 'context_first_cam' \
-                else 'avg_scale'
-            return osp.join(scene_dir, 'da3', sub)
+            return osp.join(scene_dir, 'da3', AVG_SCALE_DIRS[self.avg_scale_ref])
         return osp.join(scene_dir, 'avg_scale')
 
     def _scene_probe(self, scene_dir):
@@ -391,6 +406,12 @@ class CamDataset(torch.utils.data.Dataset):
         if self.pose_source != 'transforms':
             # 기본값일 때는 키를 건드리지 않는다 -> 기존 캐시 파일이 그대로 재사용된다.
             key += f"__ps{self.pose_source}"
+        # [new 2026-08-13] front_* avg_scale_ref 는 세그먼트를 **걸러낸다**(앞쪽 context 부족).
+        # 키에 안 넣으면 centroid arm 이 만든 캐시를 그대로 물어와 제외돼야 할 s==0 세그먼트가
+        # 섞여 들어온다 -> 분모 파일이 없어 _avg_scale 이 raise. 거르는 변형일 때만 붙여서
+        # 기존 캐시는 그대로 재사용되게 한다.
+        if self._min_front > 0:
+            key += f"__as{self.avg_scale_ref}"
         cache_dir = osp.join(self.root, '.latentcam_index'); os.makedirs(cache_dir, exist_ok=True)
         cache_path = osp.join(cache_dir, key.replace('/', '_') + '.pt')
         if self.only_segments is not None:
@@ -445,6 +466,10 @@ class CamDataset(torch.utils.data.Dataset):
                 if (chunk, seg_key) in cov_black:
                     continue
                 if self.geo_cover_before_only and s < self.geo_cover_k:
+                    continue
+                # front-anchored avg_scale: 앞쪽 context 를 못 채우는 세그먼트는 분모 파일 자체가
+                # 없다 (scripts/data/make_avg_scale_da3_front_anchor.py 가 안 쓴다) -> 여기서 뺀다.
+                if s < self._min_front:
                     continue
                 pcs = seg.get('prompt_camera_with_scene_video')
                 caption = pcs.get('concise', "") if isinstance(pcs, dict) else (pcs or "")
@@ -545,6 +570,8 @@ class CamDataset(torch.utils.data.Dataset):
                 # before-only geo context: need enough frames before s (excludes the
                 # first segment -> target segment can be the 2nd segment onward).
                 if self.geo_cover_before_only and s < self.geo_cover_k:
+                    continue
+                if s < self._min_front:          # front-anchored avg_scale: 분모 파일이 없다
                     continue
                 pcs = seg.get('prompt_camera_with_scene_video')
                 caption = pcs.get('concise', "") if isinstance(pcs, dict) else (pcs or "")
@@ -653,6 +680,26 @@ class CamDataset(torch.utils.data.Dataset):
         else:                                          # tiny segment fallback
             rest = [random.randrange(s, e) for _ in range(k - 1)]
         return [s] + sorted(rest)
+
+    def _sample_geo_front_uniform(self, s, e):
+        """[new 2026-08-13] geo_view_sampling='front_uniform': context range 를 target 바로 앞
+        **L = e - s 프레임** `[s-L, s)` 으로 고정하고 거기서 geo_num_views 장을 uniform 으로 뽑는다.
+        coverage greedy(frustum_cover) 와 달리 retrieval 이 전혀 없다 — 어느 프레임이 뽑힐지는
+        (s, e) 만으로 정해져 결정적이고, epoch 마다 같다.
+
+        `avg_scale_ref='front_first_anchor_same_len'` 과 **같은 프레임 집합**을 본다는 게 요점이다
+        (분모를 만든 range 와 context view 를 뽑는 range 가 일치). 그래서 이 sampler 는 그 분모와
+        같이 쓰는 것을 전제로 한다 — dataset_cfg 가 어긋난 조합에 경고를 낸다.
+
+        target 프레임 [s,e) 는 절대 안 들어간다 -> leakage-free. 앞쪽이 L 보다 짧으면 있는 만큼만
+        쓰지만, front_first_anchor_same_len 은 그런 세그먼트를 인덱스에서 이미 뺐다.
+        """
+        L = e - s
+        pool = list(range(max(0, s - L), s))
+        k = int(self.geo_num_views)
+        if not pool:                                  # s == 0 (해당 분모에서는 인덱스에서 제외됨)
+            return [s] * k
+        return [pool[i] for i in self._even_indices(len(pool), k)]
 
     @staticmethod
     def _np_context_scale(centers, side, num_frames):
@@ -1308,6 +1355,8 @@ class CamDataset(torch.utils.data.Dataset):
                     swapped = True
             if self.geo_view_sampling == 'frustum_cover':
                 geo_idxs = self._sample_geo_frustum_cover(scene_idx, g_s, g_e)
+            elif self.geo_view_sampling == 'front_uniform':
+                geo_idxs = self._sample_geo_front_uniform(g_s, g_e)
             elif self.geo_view_sampling == 'hybrid':
                 geo_idxs = self._sample_geo_hybrid(scene_idx, g_s, g_e)
             elif self.geo_view_sampling == 'random_inseg':

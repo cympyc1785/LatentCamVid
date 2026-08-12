@@ -58,6 +58,48 @@ def resolve_scale_mode(cfg):
 #     상수였으므로 intr_norm='rel' 에서 [1,1] 정확히가 아니라 1.000 +- 0.003 이 된다.
 _POSE_SOURCES = ('transforms', 'da3')
 
+# avg_scale_ref -> <scene>/da3/<subdir>. 저장된 avg_scale 을 **어느 context range 에서 어느
+# 기준점으로** 잰 파일로 읽을지. 점 집합 규약(conf >= 전역 P40, pixel_stride 2, mean 거리)은
+# 넷 다 같고 range/기준점만 다르다. 생성기:
+#   centroid / context_first_cam        pipeline/workspace/make_avg_scale_da3{,_firstcam}.py
+#   front_first_anchor{,_same_len}      scripts/data/make_avg_scale_da3_front_anchor.py
+#   da3latent                           scripts/data/make_avg_scale_da3_latent.py
+AVG_SCALE_DIRS = {
+    'centroid':                      'avg_scale',
+    'context_first_cam':             'avg_scale_context_first_cam',
+    'front_first_anchor':            'avg_scale_front_first_anchor',
+    'front_first_anchor_same_len':   'avg_scale_front_first_anchor_same_len',
+    # [new 2026-08-13] 위 넷은 점 구름에서 잰 **기하학적 거리**지만 이건 **DA3 latent 이 실제로
+    # 쓰는 카메라 스케일**이다: M x sigma. M = cam_token 을 만들 때 쓴 per-sample median camera
+    # distance, sigma = cam_dec 가 예측한 카메라 center 를 우리가 넣어 준 center 에 맞추는
+    # Umeyama scale. cam_enc 로 pose 를 줘도 cam_dec 의 translation 은 항상 예측값이라
+    # (cam_dec.py:35 에 echo 경로가 없다) 둘이 어긋난다 -- 200 세그먼트 실측 sigma med 2.90040,
+    # ±5% 안이 1.0% 뿐. 이 분모로 나누면 target 궤적이 geo latent 과 같은 스케일 공간에 놓인다.
+    # !! front_uniform view 집합에 의존해서 만든 값이라 geo_view_sampling='front_uniform' +
+    #    geo_num_views 가 생성 때와 같아야 의미가 있다 (아래 resolve 에서 경고한다).
+    'da3latent':                     'avg_scale_da3latent',
+}
+AVG_SCALE_REFS = tuple(AVG_SCALE_DIRS)
+
+# 앞쪽 context 를 요구하는 변형 -> 세그먼트가 s 앞에 최소 몇 프레임을 가져야 하는가.
+# 값이 None 이면 제약 없음. 'nf' 는 num_frames (= target segment 길이) 로 치환된다.
+#   front_first_anchor           s >= 1        ([0,s) 가 비면 분모를 못 만든다)
+#   front_first_anchor_same_len  s >= num_frames  ([s-L,s) 를 꽉 채워야 한다)
+# DL3DV da3 코퍼스는 세그먼트가 전부 길이 49 이고 s 가 0,49,98,... 이라 두 조건이 s==0 제외로
+# 같아진다 -> 두 arm 의 학습 샘플 집합이 동일해서 paired 비교가 성립한다.
+#   da3latent                    s >= num_frames  (front_uniform 짝이라 같은 제약)
+AVG_SCALE_MIN_FRONT = {
+    'front_first_anchor':          1,
+    'front_first_anchor_same_len': 'nf',
+    'da3latent':                   'nf',
+}
+
+
+def avg_scale_min_front(avg_scale_ref, num_frames):
+    """avg_scale_ref 가 요구하는 최소 앞쪽 context 길이 (없으면 0)."""
+    v = AVG_SCALE_MIN_FRONT.get(str(avg_scale_ref))
+    return 0 if v is None else (int(num_frames) if v == 'nf' else int(v))
+
 
 def resolve_pose_source(cfg):
     ps = getattr(cfg, 'pose_source', 'transforms') or 'transforms'
@@ -135,9 +177,14 @@ def resolve_dataset_cfg(cfg, verbose=True):
     pose_source = resolve_pose_source(cfg)
     # [new 2026-08-10] da3 의 저장된 avg_scale 을 어느 기준점에서 잰 파일로 읽을지.
     # 'centroid'(기본) = 기존 동작, 'context_first_cam' = <scene>/da3/avg_scale_context_first_cam.
+    # [new 2026-08-13] 'front_first_anchor' / 'front_first_anchor_same_len' 은 context range 를
+    # target 앞쪽으로 고정하고 기준점을 **target segment 첫 카메라 s** 로 잡은 변형이다
+    # (scripts/data/make_avg_scale_da3_front_anchor.py). cam_param 의 재고정 기준(frame s)과
+    # 분모의 기준점을 일치시킨다. 앞쪽 context 를 못 채우는 세그먼트는 파일이 없고,
+    # dataset_dl3dv._load_index 가 인덱스에서 아예 뺀다.
     avg_scale_ref = str(getattr(cfg, 'avg_scale_ref', 'centroid') or 'centroid')
-    if avg_scale_ref not in ('centroid', 'context_first_cam'):
-        raise ValueError(f"avg_scale_ref must be 'centroid' or 'context_first_cam', "
+    if avg_scale_ref not in AVG_SCALE_REFS:
+        raise ValueError(f"avg_scale_ref must be one of {sorted(AVG_SCALE_REFS)}, "
                          f"got {avg_scale_ref!r}")
     if avg_scale_ref != 'centroid' and pose_source != 'da3':
         raise ValueError(f"avg_scale_ref={avg_scale_ref!r} 는 pose_source='da3' 에서만 "
@@ -259,9 +306,24 @@ def resolve_dataset_cfg(cfg, verbose=True):
             # reference view 를 고른다. V<3 이면 그 경로가 통째로 빠져 동작이 달라진다.
             raise ValueError(f"geo_encoder='da3' + geo_posed=False 는 geo_num_views>=3 이어야 "
                              f"한다 (got {_v}; DA3 의 reference-view 선택 임계값)")
+        _front_pair = ('front_first_anchor_same_len', 'da3latent')
+        if _samp == 'front_uniform' and avg_scale_ref not in _front_pair:
+            # front_uniform 의 존재 이유가 "분모를 만든 range 와 context view range 를 일치"인데
+            # 분모가 다른 range 에서 온 값이면 그 일치가 깨진다. 조용히 어긋나면 안 되는 자리.
+            say(f"[geo da3] WARNING: geo_view_sampling='front_uniform' 인데 "
+                f"avg_scale_ref={avg_scale_ref!r} 다 -> context view range([s-L,s)) 와 분모를 "
+                f"만든 range 가 다르다 (의도한 것이 아니면 {_front_pair} 중 하나로 맞출 것)")
+        if avg_scale_ref == 'da3latent' and _samp != 'front_uniform':
+            # da3latent 값은 front_uniform 이 고른 그 view 집합의 cam_dec 출력으로 만들어졌다.
+            # view 가 달라지면 latent 이 보는 스케일도 달라져 분모가 그냥 틀린 값이 된다.
+            raise ValueError(
+                f"avg_scale_ref='da3latent' 는 geo_view_sampling='front_uniform' 에서만 유효하다 "
+                f"(got {_samp!r}). 이 분모는 그 view 집합으로 돌린 cam_dec 출력에서 나온 값이라 "
+                f"view 가 바뀌면 의미가 없다 — scripts/data/make_avg_scale_da3_latent.py 참고")
         say(f"[geo da3] model={getattr(cfg, 'da3_geo_model', 'da3nested-giant-large')} "
             f"input_hw={geo_hw} grid={geo_hw[0] // _p}x{geo_hw[1] // _p} "
-            f"posed={bool(getattr(cfg, 'geo_posed', False))}")
+            f"posed={bool(getattr(cfg, 'geo_posed', False))} "
+            f"view_sampling={_samp} V={_v} avg_scale_ref={avg_scale_ref}")
 
     geo_test_inseg_k = getattr(cfg, 'geo_test_inseg_k', None) or 0
     if geo_test_inseg_k and geo_latent_cache_dir is not None:      # [cascade 3/4]

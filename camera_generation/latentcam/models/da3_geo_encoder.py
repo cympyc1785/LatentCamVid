@@ -136,8 +136,10 @@ class DA3SceneEncoder(nn.Module):
 
     def __init__(self, repo_path, model_name='da3nested-giant-large', ckpt_path=None,
                  hf_home=None, input_hw=None, layers='last', layer_fuse='concat',
-                 norm='ln', ref_view_strategy='saddle_balanced', debug=False):
+                 norm='ln', ref_view_strategy='saddle_balanced', debug=False,
+                 keep_cam_dec=False):
         super().__init__()
+        self.keep_cam_dec = bool(keep_cam_dec)
         layers = str(layers or 'last')
         if layers not in self.LAYER_MODES:
             raise ValueError(f"da3_geo_layers must be one of {self.LAYER_MODES}, got {layers!r}")
@@ -208,7 +210,8 @@ class DA3SceneEncoder(nn.Module):
 
         # cam_enc 는 cam_dec 가 있을 때만 생성된다 -> 만든 뒤에 지운다.
         net.head = None
-        net.cam_dec = None
+        if not self.keep_cam_dec:
+            net.cam_dec = None      # 기본: geo 토큰만 필요하므로 삭제 (기존 arm 과 비트 동일)
         net.gs_head = None
         net.gs_adapter = None
         if net.cam_enc is None:
@@ -222,7 +225,8 @@ class DA3SceneEncoder(nn.Module):
             raise FileNotFoundError(
                 f"DA3 weights not found: {path} (da3_geo_ckpt_path / da3_geo_hf_home 확인)")
         sd = load_file(path)
-        keep = tuple(state_prefix + p for p in ('backbone.', 'cam_enc.'))
+        _parts = ['backbone.', 'cam_enc.'] + (['cam_dec.'] if self.keep_cam_dec else [])
+        keep = tuple(state_prefix + p for p in _parts)
         sd = {k[len(state_prefix):]: v for k, v in sd.items() if k.startswith(keep)}
         if not sd:
             raise RuntimeError(f"{path} 에 '{state_prefix}backbone.*' 키가 없다 "
@@ -295,6 +299,39 @@ class DA3SceneEncoder(nn.Module):
                             (int(hw[b, 0].item()), int(hw[b, 1].item())))
                     for b in range(B)], dim=0)
         return tok.float()
+
+    # ------------------------------------------------------- cam_dec (opt-in)
+    @torch.no_grad()
+    def predict_cameras(self, images, cam_token=None):
+        """DA3 가 원래 하듯 latent 에서 **카메라를 뽑는다** — `keep_cam_dec=True` 일 때만.
+
+        왜 필요한가: `cam_enc` 로 pose 를 넣어 줘도 나오는 **translation 은 항상 예측값**이다.
+        `cam_dec.py:35` 의 `out_t = self.fc_t(feat)` 에는 echo 경로가 아예 없고 (rotation/fov 만
+        `camera_encoding` 이 주어지면 echo 된다), `da3.py:216` 은 `camera_encoding` 없이 부른다.
+        즉 latent 이 실제로 표현하는 카메라 스케일은 우리가 넣어 준 스케일(median camera
+        distance) 과 다르다. 그 비율을 재려면 이 예측 카메라가 필요하다.
+
+        `da3.py:_process_camera_estimation` 과 같은 경로다:
+          pose_enc = cam_dec(feats[-1][1]) -> pose_encoding_to_extri_intri -> c2w, K
+        `feats[-1][1]` 은 마지막 out_layer 의 **camera token** (dim = embed, cat 안 된 쪽)이라
+        `forward()` 가 버리는 `outs[i][1]` 이다.
+
+        returns c2w (B,V,3,4) float32, K (B,V,3,3) float32 — DA3 자기 출력 공간 그대로.
+        """
+        if self.net.cam_dec is None:
+            raise RuntimeError("predict_cameras() 는 keep_cam_dec=True 로 만든 encoder 에서만 "
+                               "쓸 수 있다 (기본은 cam_dec 를 지운다)")
+        from depth_anything_3.model.utils.transform import pose_encoding_to_extri_intri
+
+        x = self._prep_images(images)
+        H, W = x.shape[-2], x.shape[-1]
+        outs, _ = self.net.backbone(
+            x, cam_token=cam_token, export_feat_layers=[],
+            ref_view_strategy=self.ref_view_strategy)
+        with torch.autocast(device_type=x.device.type, enabled=False):   # da3.py:218 과 동일
+            pose_enc = self.net.cam_dec(outs[-1][1].float())
+            c2w, K = pose_encoding_to_extri_intri(pose_enc, (H, W))
+        return c2w.float(), K.float()
 
     # ---------------------------------------------------------------- forward
     def _prep_images(self, images):

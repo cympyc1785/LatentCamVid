@@ -164,9 +164,11 @@ class Config:
     #                    space (greedy max set-coverage).
     #   'front_uniform': [new 2026-08-13] context range = the L=e-s frames immediately
     #                    BEFORE the target, [s-L, s), sampled uniformly to geo_num_views.
-    #                    No retrieval, deterministic, leakage-free. Pairs with
+    #                    No retrieval, deterministic. Pairs with
     #                    avg_scale_ref='front_first_anchor_same_len' (divisor built from
     #                    the SAME range); dataset_cfg warns when the two disagree.
+    #                    Honours geo_first_view_target_s: on -> view0 = frame s and the
+    #                    remaining (geo_num_views-1) context views go in REVERSE time order.
     geo_view_sampling = 'even'  # ['even', 'random_inseg', 'hybrid', 'frustum_cover', 'front_uniform']
     geo_cover_k = 6             # (frustum_cover) number of context views
     geo_cover_radius = 2.5      # (frustum_cover) candidate/space ball = R * segment-scale

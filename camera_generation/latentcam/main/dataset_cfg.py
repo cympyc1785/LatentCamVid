@@ -313,6 +313,22 @@ def resolve_dataset_cfg(cfg, verbose=True):
             say(f"[geo da3] WARNING: geo_view_sampling='front_uniform' 인데 "
                 f"avg_scale_ref={avg_scale_ref!r} 다 -> context view range([s-L,s)) 와 분모를 "
                 f"만든 range 가 다르다 (의도한 것이 아니면 {_front_pair} 중 하나로 맞출 것)")
+        # [2026-08-13] 앵커 정합. DA3 는 cam_token 을 **view0 기준**으로 재고정한다
+        # (da3_geo_encoder.build_cam_token: w2c @ c2w[:, :1], DA3 api.py:439-440 과 동일).
+        # target 은 rel = E @ inv(E_s) 로 **프레임 s 기준**이다. 그래서 view0 != s 면 두 트랙의
+        # R,t 앵커가 서로 다른 카메라가 되고, latent 이 표현하는 궤적과 모델이 맞춰야 하는 궤적이
+        # 강체변환만큼 어긋난 채 학습된다 (스케일 분모로는 못 고치는 축).
+        if getattr(cfg, 'geo_posed', False) and not getattr(cfg, 'geo_first_view_target_s', False):
+            say("[geo da3] WARNING: geo_posed=True 인데 geo_first_view_target_s=False 다 -> "
+                "DA3 의 view0(=cam_token 재고정 기준)가 target 앵커 프레임 s 가 아니라서 geo "
+                "latent 과 target rel 의 R,t 앵커가 서로 다른 카메라다")
+        if avg_scale_ref == 'da3latent' and not getattr(cfg, 'geo_first_view_target_s', False):
+            # 저장된 M*sigma 는 view0 = s 인 view 집합으로 cam_dec 를 돌려 만든 값이다
+            # (scripts/data/make_avg_scale_da3_latent.py). view0 가 바뀌면 M 도 sigma 도 바뀐다.
+            raise ValueError(
+                "avg_scale_ref='da3latent' 는 geo_first_view_target_s=True 에서만 유효하다 "
+                "(분모를 view0 = 프레임 s 인 view 집합으로 만들었다). "
+                "scripts/data/make_avg_scale_da3_latent.py 참고")
         if avg_scale_ref == 'da3latent' and _samp != 'front_uniform':
             # da3latent 값은 front_uniform 이 고른 그 view 집합의 cam_dec 출력으로 만들어졌다.
             # view 가 달라지면 latent 이 보는 스케일도 달라져 분모가 그냥 틀린 값이 된다.
@@ -323,7 +339,8 @@ def resolve_dataset_cfg(cfg, verbose=True):
         say(f"[geo da3] model={getattr(cfg, 'da3_geo_model', 'da3nested-giant-large')} "
             f"input_hw={geo_hw} grid={geo_hw[0] // _p}x{geo_hw[1] // _p} "
             f"posed={bool(getattr(cfg, 'geo_posed', False))} "
-            f"view_sampling={_samp} V={_v} avg_scale_ref={avg_scale_ref}")
+            f"view_sampling={_samp} V={_v} avg_scale_ref={avg_scale_ref} "
+            f"view0={'frame s' if getattr(cfg, 'geo_first_view_target_s', False) else 'context'}")
 
     geo_test_inseg_k = getattr(cfg, 'geo_test_inseg_k', None) or 0
     if geo_test_inseg_k and geo_latent_cache_dir is not None:      # [cascade 3/4]

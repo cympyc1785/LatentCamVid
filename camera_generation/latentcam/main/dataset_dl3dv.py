@@ -691,12 +691,34 @@ class CamDataset(torch.utils.data.Dataset):
         (분모를 만든 range 와 context view 를 뽑는 range 가 일치). 그래서 이 sampler 는 그 분모와
         같이 쓰는 것을 전제로 한다 — dataset_cfg 가 어긋난 조합에 경고를 낸다.
 
-        target 프레임 [s,e) 는 절대 안 들어간다 -> leakage-free. 앞쪽이 L 보다 짧으면 있는 만큼만
-        쓰지만, front_first_anchor_same_len 은 그런 세그먼트를 인덱스에서 이미 뺐다.
+        geo_first_view_target_s (2026-08-13 추가):
+          False (legacy) -> `[s-L, s)` 에서 k 장, **오름차순**. 프레임 s 는 안 들어간다.
+          True           -> `[s-L, s]` **s 포함** 구간에서 k 장을 uniform 으로 뽑고 **역순**으로
+                            돌린다 -> `[s, s-10, s-20, ...]` (L=49, k=6 기준). s 를 따로 prepend
+                            하고 나머지 k-1 을 `[s-L, s)` 에서 뽑으면 마지막 픽이 s-1 이라 view0 과
+                            1 프레임짜리 중복 view 가 생긴다 — 포함 구간에서 한 번에 뽑으면 그게
+                            없다. frustum_cover 의 같은 플래그(:771 k_retr = geo_cover_k - 1)와
+                            동일하게 s 는 k **안에** 들어 토큰 예산 V*P 가 다른 arm 과 같다.
+                            이게 필요한 이유: DA3 는 cam_token 을 view0 기준으로 재고정하므로
+                            (da3_geo_encoder.build_cam_token) view0 != s 면 geo latent 의 앵커가
+                            target rel(= E @ inv(E_s), 앵커 s)과 다른 카메라가 된다. view0 = s 로
+                            두면 두 트랙의 R,t 앵커가 같은 카메라가 되고 남는 어긋남은 스케일뿐이다.
+                            (역순 자체는 DA3 에 대해 no-op 이다 — cam_token 을 주면 ref-view 재정렬이
+                            꺼지고 RoPE/cls 토큰이 view 인덱스를 안 쓴다. 순서를 시간순으로 읽히게
+                            둔 것뿐이고 실제 앵커 효과는 view0 = s 에서 나온다.)
+
+        legacy(False) 는 target 프레임 [s,e) 가 절대 안 들어간다 -> leakage-free. True 는 앵커
+        프레임 s 하나만 들어간다 (추론 시 s 는 주어지는 프레임이라 leakage 가 아니다).
+        앞쪽이 L 보다 짧으면 있는 만큼만 쓰지만, front_first_anchor_same_len 은 그런 세그먼트를
+        인덱스에서 이미 뺐다.
         """
         L = e - s
         pool = list(range(max(0, s - L), s))
         k = int(self.geo_num_views)
+        if self.geo_first_view_target_s:
+            inc = pool + [s]                          # [s-L, s] (s 포함)
+            picks = [inc[i] for i in self._even_indices(len(inc), k)]
+            return picks[::-1]                        # view0 = s, 그 다음 과거로 역순
         if not pool:                                  # s == 0 (해당 분모에서는 인덱스에서 제외됨)
             return [s] * k
         return [pool[i] for i in self._even_indices(len(pool), k)]

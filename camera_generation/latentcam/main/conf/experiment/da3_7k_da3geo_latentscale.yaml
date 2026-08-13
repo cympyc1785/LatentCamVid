@@ -33,6 +33,12 @@
 # 쓴 view 집합이 바로 이 sampler 의 결정적 6 view 이기 때문이다.
 #
 # !! vae_latent_scale 은 0.96032625 그대로 (다른 arm 들과 같은 축에서 loss 를 보기 위해 고정).
+# [2026-08-13 앵커 정합] geo_first_view_target_s: true
+#   DA3 는 cam_token 을 view0 기준으로 재고정한다 (build_cam_token: w2c @ c2w[:, :1] — DA3 원본
+#   api.py:439-440 _normalize_extrinsics 와 같은 식). target 은 rel = E @ inv(E_s) 로 프레임 s
+#   기준이다. view0 != s 면 두 트랙의 R,t 앵커가 다른 카메라라 강체변환만큼 어긋난 채 학습된다.
+#   -> view0 = 프레임 s 로 둔다. s 는 geo_num_views(=geo_cover_k) **안에** 든다 (나머지 k-1 장만
+#   retrieval/uniform) — 토큰 예산 V*P 를 다른 arm 과 같게 유지.
 exp_name: da3_7k_da3geo_latentscale
 pose_source: da3
 avg_scale_ref: da3latent
@@ -51,6 +57,7 @@ da3_geo_layers: last
 
 geo_view_sampling: front_uniform   # [s-L, s) 에서 uniform. 분모를 만든 그 view 집합
 geo_num_views: 6                   # front_uniform 이 읽는 view 수 (geo_cover_k 아님)
+geo_first_view_target_s: true   # view0 = 프레임 s + 나머지 5 장을 [s-L,s) 에서 역순
 
 scale_mode: avg_scale
 intr_norm: rel                # vae_20260302_300 = frame-0-relative-intrinsics ckpt

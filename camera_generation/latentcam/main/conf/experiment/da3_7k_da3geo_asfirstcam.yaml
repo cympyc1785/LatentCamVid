@@ -28,6 +28,12 @@
 #   근거: results/20260812_da3_res_probe_giant
 #     448 vs 504  AbsRel 0.0176~0.0564 / delta<1.25 0.958~0.9995 (6 scene)
 #     504 vs 저장본  AbsRel 0.0069~0.0164 (같은 모델이라 사실상 재현)
+# [2026-08-13 앵커 정합] geo_first_view_target_s: true
+#   DA3 는 cam_token 을 view0 기준으로 재고정한다 (build_cam_token: w2c @ c2w[:, :1] — DA3 원본
+#   api.py:439-440 _normalize_extrinsics 와 같은 식). target 은 rel = E @ inv(E_s) 로 프레임 s
+#   기준이다. view0 != s 면 두 트랙의 R,t 앵커가 다른 카메라라 강체변환만큼 어긋난 채 학습된다.
+#   -> view0 = 프레임 s 로 둔다. s 는 geo_num_views(=geo_cover_k) **안에** 든다 (나머지 k-1 장만
+#   retrieval/uniform) — 토큰 예산 V*P 를 다른 arm 과 같게 유지.
 exp_name: da3_7k_da3geo_asfirstcam
 pose_source: da3
 avg_scale_ref: context_first_cam
@@ -47,7 +53,7 @@ da3_geo_layers: last
 geo_view_sampling: frustum_cover
 geo_cover_out_of_seg: true
 geo_cover_centered_at_s: true
-geo_first_view_target_s: false
+geo_first_view_target_s: true 
 geo_cover_subtract_first: false
 
 scale_mode: avg_scale

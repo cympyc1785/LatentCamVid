@@ -97,6 +97,31 @@ All notable changes to the latentcam sub-project. Follows [Keep a Changelog](htt
   `da3_7k_da3pose_frontanchor.yaml`, `da3_7k_da3pose_frontanchor_samelen.yaml`.
 
 ### Fixed
+- **`geo_encoder='da3'` 에서 geo latent 의 앵커가 target 궤적의 앵커와 다른 카메라였다** —
+  DA3 는 `cam_token` 을 **view0 기준**으로 재고정한다 (`da3_geo_encoder.build_cam_token`,
+  DA3 원본 `api.py:439-440 _normalize_extrinsics` 와 같은 식: `w2c @ c2w[:, :1]`).
+  반면 target 은 `rel = E @ inv(E_s)` 로 **타깃 세그먼트 첫 프레임 s 기준**이다. 지금까지 da3 arm
+  들은 `geo_first_view_target_s: false` 라 view0 가 context 프레임이었고, 그래서 geo latent 이
+  표현하는 궤적과 모델이 맞춰야 하는 궤적이 **강체변환만큼 어긋난 채** 학습됐다 (스케일 분모로는
+  못 고치는 축이다 — `avg_scale_da3latent` 도 스케일만 고친다).
+  이제 da3 arm 4 개 전부 `geo_first_view_target_s: true` 로 **view0 = 프레임 s** 다.
+  검증: 6 샘플에서 `geo_c2w[0] == c2w[s]`, 재고정 후 `w2c[0] == I`, `target rel[0] == I`.
+- **`_sample_geo_front_uniform` 이 `geo_first_view_target_s` 를 무시했다** — `frustum_cover` 는
+  이미 이 플래그를 구현하고 있었는데(`k_retr = geo_cover_k - 1` 후 `picks = [s] + picks`)
+  `front_uniform` 에는 그 경로가 없어 항상 `[s-L, s)` 오름차순이었다. 이제 플래그가 켜지면
+  **`[s-L, s]` (s 포함) 구간에서 `geo_num_views` 장 uniform → 역순**으로 돌려
+  `[s, s-10, s-20, ...]` 을 준다 (L=49, V=6). s 는 V **안에** 들어 토큰 예산 `V*P = 6*576 = 3456`
+  이 다른 arm 과 같다. s 를 따로 prepend 하고 나머지 5 장을 `[s-L, s)` 에서 뽑는 방식은 마지막
+  픽이 `s-1` 이라 view0 과 1 프레임짜리 중복 view 가 생겨서 쓰지 않았다.
+  플래그가 꺼진 경우(legacy)의 동작은 bit-identical.
+  참고: DA3 는 `cam_token` 을 주면 `select_reference_view` 재정렬이 꺼지고 RoPE/cls 토큰이 view
+  인덱스를 쓰지 않아 **view 순서 자체는 permutation-equivariant** 다. 즉 역순은 no-op 이고 실제
+  효과는 전부 "view0 이 어느 카메라인가"에서 나온다.
+- **`dataset_cfg.py` 에 앵커 가드 2 개 추가** — ① `geo_encoder='da3' + geo_posed=True` 인데
+  `geo_first_view_target_s=False` 면 앵커가 어긋난다고 `say()` 경고. ② `avg_scale_ref='da3latent'`
+  는 `geo_first_view_target_s=True` 를 **raise 로 강제** — 저장된 `M*sigma` 는 view0 = s 인 view
+  집합으로 `cam_dec` 를 돌려 만든 값이라 view0 이 바뀌면 M 도 sigma 도 달라져 그냥 틀린 분모가 된다.
+  `[geo da3]` 요약 로그에 `view0=frame s | context` 를 찍는다.
 - **`train_latent_cam_dm.py` 의 full-resume 이 optimizer 모멘트를 엉뚱한 param 에 실었다** —
   `opt.state_dict()` 는 param 을 **인덱스**로만 참조하는데, 저장 이후 `nn.Module` 등록 순서가
   바뀌면 개수가 같아도 인덱스가 어긋난다. 이제 `resume.pth` 에 `opt_param_names` (optimizer

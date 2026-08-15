@@ -1,0 +1,54 @@
+# @package _global_
+# da3_7k_da3geo_frontanchor.yaml 에서 **`vae_latent_scale` 한 줄만 바꾼** arm.
+#
+# 왜: frontanchor arm 의 주석에 적어 둔 그대로 0.96032625 는 **이 분모에 맞춰 측정한 값이 아니다**
+# (SCVideo 시절 값을 arm 간 loss 비교 축을 맞추려고 그냥 물려 둔 것). target 을
+# avg_scale_ref='front_first_anchor' 분모로 나누면 cam_param 의 스케일이 바뀌므로 VAE latent 의
+# 실제 std 도 바뀐다. train 은 `camera_vae.encode(traj) / cfg.vae_latent_scale` 로 나누므로
+# (train_cam_dm_attn_sup.py:233) 이 값이 어긋나면 diffusion 이 std != 1 인 분포를 배운다.
+#
+# 실측 (2026-08-16, scripts/vae/vae_scale_matrix.py, **전체 코퍼스**):
+#   MAX_SCENES=none META=meta_da3_7k.csv MODES=avg_scale CKPTS=vae_20260302_300 TAILS=1
+#   CFG=pose_source=da3,avg_scale_ref=front_first_anchor,+ train/test seg list + blacklist
+#   -> 32677 train sample (frontanchor arm 의 학습 인덱스와 정확히 같은 수)
+#      intr rel : lat.std 0.62722  (recon rot 0.00639 / trans 0.00537 / intr 0.00316)
+#      intr raw : lat.std 0.61653  (intr_L1 0.35443 -> 이 ckpt 는 rel 전용, 예상대로)
+#      tails: max|trans| med 0.6782 / p99.9 2.6892 / max 7.2252,
+#             |z| med 4.049 / p99.9 12.220 / max 21.846,
+#             trans recon L1 med 0.00440 / p99.9 0.03226 / max 0.06529
+#   intr_norm='rel' 이므로 rel 행을 쓴다 -> vae_latent_scale = 0.62722 (기존 대비 0.6531 배).
+#
+# !! 그래서 이 arm 의 loss_latent 는 da3_7k_da3geo_frontanchor 와 **직접 비교하면 안 된다**
+#    (latent 의 단위가 다르다). 비교는 decode 후 지표(loss_traj / clatr / fcd) 로 한다.
+exp_name: da3_7k_da3geo_frontanchor_vaescale
+pose_source: da3
+avg_scale_ref: front_first_anchor
+vae_latent_scale: 0.62722
+batch_size: 8
+epochs: 100
+ckpt_at_epochs: [50]
+
+geo_encoder: da3
+geo_cam_embed: null           # 카메라는 DA3 cam_enc 토큰으로만 들어간다
+geo_latent_cache_dir: null    # LayerNorm/proj 가 학습되므로 출력을 얼릴 수 없다
+geo_posed: true               # DA3 cam_enc 에 GT pose 주입 (DA3 규약으로 정규화)
+geo_shuffle_order: false      # DA3 는 view0 를 reference 로 쓴다 -> 셔플 금지 (dataset 이 raise)
+da3_geo_model: da3nested-giant-large
+da3_geo_input_hw: [252, 448]  # 14 의 배수. dataset/encoder 가 어긋나지 않게 명시
+da3_geo_layers: last
+
+# geo context view 는 frontanchor arm 과 **한 글자도 같게** 둔다 (vae_latent_scale 만 바뀐 것을
+# 재려면 여기가 같아야 한다).
+geo_view_sampling: frustum_cover
+geo_cover_out_of_seg: true
+geo_cover_centered_at_s: true
+geo_first_view_target_s: true
+geo_cover_subtract_first: false
+
+scale_mode: avg_scale
+intr_norm: rel                # vae_20260302_300 = frame-0-relative-intrinsics ckpt
+cam_dim: 64                   # = 그 ckpt 의 latent_dim
+meta_csv: meta_da3_7k.csv
+train_seg_list: /data1/cympyc1785/data/DL3DV/scenes/latentcam_da3_7k_train_seg_list.txt
+test_seg_list: /data1/cympyc1785/data/DL3DV/scenes/latentcam_da3_7k_test_seg_list.txt
+coverage_blacklist_path: /data1/cympyc1785/LatentCamVid/camera_generation/latentcam/data/seg_blacklist_jump_da3_7k.csv

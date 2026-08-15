@@ -1,0 +1,50 @@
+# @package _global_
+# da3_7k_da3geo_frontanchor_vaescale.yaml 의 **geo encoder 만 lagernvs 로 바꾼** 짝 arm.
+# 두 arm 의 차이는 `geo_encoder` 와 그에 딸린 입력 규약뿐이고, target 쪽(pose_source,
+# avg_scale_ref, scale_mode, intr_norm, cam_dim, vae_latent_scale, seg list, blacklist)은
+# 전부 같다 -> 학습 인덱스가 동일해서 paired 비교가 된다 (32677 train / 3629 val 예상).
+#
+# vae_latent_scale 은 **target cam_param 의 정규화에만** 달려 있고 geo encoder 와 무관하므로
+# da3 arm 과 같은 실측치 0.62722 를 쓴다 (측정 상세는 da3geo 짝 config 주석 참조).
+#
+# lagernvs 쪽에서 달라지는 것
+# ---------------------------
+#   * frozen VGGT reconstructor -> 768-d scene token. proj 가 Identity 라 geo 쪽 학습 파라미터가
+#     없다 (DA3 arm 은 LayerNorm+Linear 가 학습된다).
+#   * 카메라 정규화가 DA3 규약(view0 재고정 + median camera distance)이 아니라 lagernvs 의
+#     **1.35 * max(context) 거리** 규약이다. geo_lagernvs_skip_ctx_norm 은 끈 채로 둔다
+#     (기본값 false = lagernvs 원래 정규화).
+#   * 입력 해상도는 config.py 기본 geo_image_hw=[256,448] (DA3 의 252x448 과 다르지만 각
+#     인코더가 학습된 격자를 따르는 게 맞다).
+#   * !! `geo_latent_cache_dir` 은 **null 로 못 박는다**. /data1/.../DL3DV/latent_cache 는
+#     pose_source='transforms' + meta_worldtraj 코퍼스로 만든 캐시라 여기 쓰면 da3 pose 와
+#     다른 카메라로 만든 latent 이 조용히 들어온다 (dataset 은 hit/miss 를 구분해 주지 않는다).
+exp_name: da3_7k_lagernvsgeo_frontanchor_vaescale
+pose_source: da3
+avg_scale_ref: front_first_anchor
+vae_latent_scale: 0.62722
+batch_size: 8
+epochs: 100
+ckpt_at_epochs: [50]
+
+geo_encoder: lagernvs
+geo_cam_embed: null           # 카메라는 lagernvs cam_token 으로만 들어간다 (da3 arm 과 동일)
+geo_latent_cache_dir: null    # 위 주석 참조 -- transforms pose 로 만든 캐시라 재사용 금지
+geo_posed: true               # lagernvs reconstructor 에 GT pose 주입 (1.35*max 정규화)
+geo_shuffle_order: false
+geo_lagernvs_skip_ctx_norm: false
+
+# geo context view 는 da3 짝 arm 과 **한 글자도 같게** 둔다.
+geo_view_sampling: frustum_cover
+geo_cover_out_of_seg: true
+geo_cover_centered_at_s: true
+geo_first_view_target_s: true
+geo_cover_subtract_first: false
+
+scale_mode: avg_scale
+intr_norm: rel                # vae_20260302_300 = frame-0-relative-intrinsics ckpt
+cam_dim: 64                   # = 그 ckpt 의 latent_dim
+meta_csv: meta_da3_7k.csv
+train_seg_list: /data1/cympyc1785/data/DL3DV/scenes/latentcam_da3_7k_train_seg_list.txt
+test_seg_list: /data1/cympyc1785/data/DL3DV/scenes/latentcam_da3_7k_test_seg_list.txt
+coverage_blacklist_path: /data1/cympyc1785/LatentCamVid/camera_generation/latentcam/data/seg_blacklist_jump_da3_7k.csv

@@ -5,20 +5,24 @@ All notable changes to the latentcam sub-project. Follows [Keep a Changelog](htt
 ## [Unreleased]
 
 ### Added
-- **`vae_latent_scale` 를 실측한 arm 2개** — `da3_7k_da3geo_frontanchor_vaescale.yaml` /
-  `da3_7k_lagernvsgeo_frontanchor_vaescale.yaml` (experiment config 만 추가, 코드 변경 0줄).
-  기존 da3 arm 6개는 전부 `vae_latent_scale=0.96032625` 를 물려 썼는데 이 값은 SCVideo 시절
-  상수라 `pose_source='da3'` + `avg_scale_ref='front_first_anchor'` 분모에 맞춰 측정한 값이
-  아니다. 학습은 `camera_vae.encode(traj) / cfg.vae_latent_scale` 로 나누므로
-  (`train_cam_dm_attn_sup.py:233`) 어긋나면 diffusion 이 std != 1 인 분포를 배운다.
-  `scripts/vae/vae_scale_matrix.py` 를 **전체 코퍼스**(`MAX_SCENES=none`, `meta_da3_7k.csv`,
-  32677 sample = frontanchor arm 의 학습 인덱스 수와 일치) 로 돌려 `intr=rel` 에서
-  **lat.std 0.62722** (기존값의 0.6531 배), recon rot 0.00639 / trans 0.00537 / intr 0.00316 을
-  얻었고 그 값을 두 config 에 박았다. 두 arm 은 target 쪽 설정이 완전히 동일하고
-  `geo_encoder` 만 `da3` vs `lagernvs` 로 갈려 paired 비교가 된다.
-  `lagernvs` arm 은 `geo_latent_cache_dir: null` 로 못 박았다 — 기존 캐시는
-  `pose_source='transforms'` + `meta_worldtraj` 로 만든 것이라 da3 pose 와 다른 카메라로 만든
-  latent 이 조용히 들어온다. 자세한 수치는 `EXPERIMENTS.log [12]`.
+- **`front_first_anchor` arm 2개 추가 + `vae_latent_scale` 실측치** — experiment config 만
+  추가/수정, 코드 변경 0줄.
+  - `da3_7k_lagernvsgeo_frontanchor.yaml` (신규): 기존 `da3_7k_da3geo_frontanchor.yaml` 에서
+    `geo_encoder` 만 `da3` → `lagernvs` 로 바꾼 짝 arm. target 쪽(pose_source, avg_scale_ref,
+    scale_mode, intr_norm, cam_dim, vae_latent_scale, seg list, blacklist)이 전부 같아
+    학습 인덱스가 동일하고 paired 비교가 된다. `geo_latent_cache_dir: null` 로 못 박았다 —
+    기존 캐시는 `pose_source='transforms'` + `meta_worldtraj` 로 만든 것이라 da3 pose 와 다른
+    카메라로 만든 latent 이 조용히 들어온다.
+  - `da3_7k_da3geo_frontanchor_vaescale.yaml` (신규): `da3_7k_da3geo_frontanchor.yaml` 에서
+    **`vae_latent_scale` 한 줄만** 바꾼 arm. 기존 da3 arm 들이 물려 쓰던 0.96032625 는 SCVideo
+    시절 상수라 `pose_source='da3'` + `avg_scale_ref='front_first_anchor'` 분모에 맞춰 측정한
+    값이 아니다. 학습은 `camera_vae.encode(traj) / cfg.vae_latent_scale` 로 나누므로
+    (`train_cam_dm_attn_sup.py:233`) 어긋나면 diffusion 이 std != 1 인 분포를 배운다.
+    `scripts/vae/vae_scale_matrix.py` 를 **전체 코퍼스**(`MAX_SCENES=none`, `meta_da3_7k.csv`,
+    32677 sample = frontanchor arm 의 학습 인덱스 수와 일치) 로 돌려 `intr=rel` 에서
+    **lat.std 0.62722** (기존값의 0.6531 배), recon rot 0.00639 / trans 0.00537 / intr 0.00316.
+    **이 값을 쓰는 arm 은 이것 하나뿐**이고 나머지는 기존 값을 유지한다 (다른 arm 과 loss 를
+    같은 축에서 비교하기 위해). 자세한 수치는 `EXPERIMENTS.log [12]`.
 - **`geo_encoder: 'da3'` — Depth-Anything-3 백본을 geo encoder 로 쓰는 네 번째 backend.**
   기존 `custom` 은 frozen DINOv2-L (single-view) 라 view 간 대응을 못 만들고 3D 는 dataset 이
   깔아 준 Plücker/log-depth 픽셀 채널로만 들어갔다. DA3 백본은 block 13 부터 local/global

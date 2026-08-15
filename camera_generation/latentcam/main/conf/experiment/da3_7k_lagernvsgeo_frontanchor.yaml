@@ -1,11 +1,12 @@
 # @package _global_
-# da3_7k_da3geo_frontanchor_vaescale.yaml 의 **geo encoder 만 lagernvs 로 바꾼** 짝 arm.
+# da3_7k_da3geo_frontanchor.yaml 의 **geo encoder 만 lagernvs 로 바꾼** 짝 arm.
 # 두 arm 의 차이는 `geo_encoder` 와 그에 딸린 입력 규약뿐이고, target 쪽(pose_source,
 # avg_scale_ref, scale_mode, intr_norm, cam_dim, vae_latent_scale, seg list, blacklist)은
-# 전부 같다 -> 학습 인덱스가 동일해서 paired 비교가 된다 (32677 train / 3629 val 예상).
+# 전부 같다 -> 학습 인덱스가 동일해서 paired 비교가 된다 (29414 train / 3263 val).
 #
-# vae_latent_scale 은 **target cam_param 의 정규화에만** 달려 있고 geo encoder 와 무관하므로
-# da3 arm 과 같은 실측치 0.62722 를 쓴다 (측정 상세는 da3geo 짝 config 주석 참조).
+# vae_latent_scale 은 **손대지 않는다** (config.py 기본 0.96032625). 실측치 0.62722 를 쓰는
+# 쪽은 da3_7k_da3geo_frontanchor_vaescale.yaml 하나뿐이고, 이 arm 을 포함한 나머지는 기존
+# 6 arm 과 같은 축에서 loss 를 비교하기 위해 기존 값을 유지한다.
 #
 # lagernvs 쪽에서 달라지는 것
 # ---------------------------
@@ -19,10 +20,9 @@
 #   * !! `geo_latent_cache_dir` 은 **null 로 못 박는다**. /data1/.../DL3DV/latent_cache 는
 #     pose_source='transforms' + meta_worldtraj 코퍼스로 만든 캐시라 여기 쓰면 da3 pose 와
 #     다른 카메라로 만든 latent 이 조용히 들어온다 (dataset 은 hit/miss 를 구분해 주지 않는다).
-exp_name: da3_7k_lagernvsgeo_frontanchor_vaescale
+exp_name: da3_7k_lagernvsgeo_frontanchor
 pose_source: da3
 avg_scale_ref: front_first_anchor
-vae_latent_scale: 0.62722
 batch_size: 8
 epochs: 100
 ckpt_at_epochs: [50]

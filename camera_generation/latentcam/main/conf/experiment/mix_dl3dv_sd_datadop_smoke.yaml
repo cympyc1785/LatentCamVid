@@ -51,8 +51,8 @@ datasets:
       sd_split: whuman
       sd_geo_views: 6
       sd_pair_mode: random_scene
-      train_seg_list: /data1/cympyc1785/data/Scene-Decoupled-Video-dataset/latentcam_lists/sd_whuman_train.txt
-      test_seg_list: /data1/cympyc1785/data/Scene-Decoupled-Video-dataset/latentcam_lists/sd_whuman_test.txt
+      train_seg_list: /data1/cympyc1785/data/Scene-Decoupled-Video-dataset/latentcam_lists/sd_whuman_r90_train.txt
+      test_seg_list: /data1/cympyc1785/data/Scene-Decoupled-Video-dataset/latentcam_lists/sd_whuman_r90_test.txt
       coverage_blacklist_path: null
 
   - name: datadop

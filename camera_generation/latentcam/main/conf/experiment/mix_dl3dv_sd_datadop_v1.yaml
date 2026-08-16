@@ -77,17 +77,33 @@ datasets:
   #      오차가 신호의 50% 이상인 샘플 2.3%, 100% 이상 0.3%
   #    즉 DA3 cam_token 의 재고정 기준(view0)과 target rel 의 기준(frame s)이 그만큼 어긋난 채
   #    학습된다. DL3DV/DataDoP 는 구조적으로 0 이라 **코퍼스 간 비대칭**이기도 하다.
-  #    꼬리를 자르려면 sim3 resid 필터를 더 좁히는 게 지렛대다 (seg list 재생성 필요).
+  #    다만 **절대** 오차는 작다 (`scripts/data/viz_sd_anchor_error.py`): 모델 단위로
+  #    med 0.0049 / p99 0.0419 — DL3DV 의 m 중앙값 0.4367 에 비하면 작고, 픽셀로는 worst
+  #    케이스도 두 frame0 의 |diff| mean 0.0040 이라 거의 안 보인다.
+  #    전수 측정(`scripts/data/sd_anchor_error_filters.py`, 58044 pair)으로 원인을 갈랐다:
+  #      - static clip 은 이미 리스트에서 빠져 있다 (학습에 쓰이는 15566 clip 중 was_static 0개).
+  #      - 단일 원인이 아니다. ratio 와의 log 상관은 resid_max +0.690 > m −0.509 이고,
+  #        ratio>0.5 인 1009 pair 중 **72.9%** 가 "m 작음 ∧ resid 큼" 교집합(전체의 10.4%)이다.
+  #        그 구간의 불량률 12.21% vs m 만 작은 구간 0.57% / resid 만 큰 구간 2.52% / 둘 다
+  #        아닌 구간 0.03%. => "안 움직이는 카메라" 만으로는 안 잘리고 sim3 잔차가 지렛대다.
+  #    그래서 seg list 를 **resid p90 컷**으로 다시 뽑아 쓴다 (아래 `_r90` 리스트):
+  #      pair 58044 -> 49328 (85.0%), ratio p95 0.3169 -> 0.2026, p99 0.6204 -> 0.3676,
+  #      max 3.8141 -> 1.1428, `>0.5` 1.74% -> 0.31%, 앵커 절대오차 p99 0.0419 -> 0.0250.
+  #    비용: 살아남는 clip 집합이 바뀌어 scene 분할이 달라진다 (train scene 3006 -> 2925,
+  #    test 334 -> 325) => `sd_whuman_customgeo_v6` 와 SD testset paired 비교는 깨진다.
+  #    되돌리려면 아래 두 경로에서 `_r90` 만 빼면 된다.
+  #    앵커를 ctx view0 로 옮기는 방식은 안 된다 — DA3 cam_token 입력이 global rigid+uniform
+  #    scale 에 **불변**이라(측정 max diff 4.8e-07) geo_c2w 로는 이 offset 을 넣을 수 없다.
   - name: scene_decoupled
     weight: 1.0
     scale_gain: 1.0
     override:
       sd_split: whuman
       sd_geo_views: 6                     # DL3DV geo_cover_k 와 맞춰 토큰 예산 V*P 동일
-      sd_pair_mode: random_scene          # 고유 target clip 당 1행 (52286 -> 14017) + epoch 마다
+      sd_pair_mode: random_scene          # 고유 target clip 당 1행 (44424 -> 약 12k) + epoch 마다
                                           #   context clip 이 바뀌는 augmentation
-      train_seg_list: /data1/cympyc1785/data/Scene-Decoupled-Video-dataset/latentcam_lists/sd_whuman_train.txt
-      test_seg_list: /data1/cympyc1785/data/Scene-Decoupled-Video-dataset/latentcam_lists/sd_whuman_test.txt
+      train_seg_list: /data1/cympyc1785/data/Scene-Decoupled-Video-dataset/latentcam_lists/sd_whuman_r90_train.txt
+      test_seg_list: /data1/cympyc1785/data/Scene-Decoupled-Video-dataset/latentcam_lists/sd_whuman_r90_test.txt
       coverage_blacklist_path: null
 
   - name: datadop

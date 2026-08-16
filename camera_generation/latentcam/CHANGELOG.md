@@ -50,7 +50,52 @@ All notable changes to the latentcam sub-project. Follows [Keep a Changelog](htt
   추론에는 코퍼스 라벨이 없다. gain 이 균일 닮음변환으로 남는 것은 모든 채널이 같은 `norm_scale`
   로 나눠지는 `geo_custom`(lagernvs) 경로뿐이다. → **혼합 arm 은 gain 없이(전부 1.0) 간다.**
 
+- **`scripts/data/sd_build_seg_lists.py` 에 `--resid-pct` / `--tag` 추가 + static 집계 정정**
+  (기본값 `--resid-pct 99 --tag ""` = 기존 리스트와 bit-identical). 그전엔 sim3 잔차 컷이 p99 로
+  하드코딩돼 있었고 출력 파일명도 고정이라 실험용 리스트를 만들 수 없었다. 아울러 static 판정을
+  `moving` → **`was_static`** 으로 바꿨다: 2026-08-11 `sd_static_scale_transfer.py` 가 static
+  7682개에 scene 중앙값 `s`/`t`/`matrix4` 를 채워 넣으면서 **`moving` 이 전부 true 로 뒤집혀서**
+  요약이 "static 제외 0" 이라고 잘못 찍혔다 (이 clip 들은 `resid_rmse_over_rad` 가 없어 align 컷
+  에서 자동 탈락하므로 **리스트 내용 자체는 그때도 옳았다** — 집계만 틀렸다). CSV 에 `was_static`
+  열 추가.
+- **혼합 arm 2개의 SD seg list 를 resid p90 컷(`_r90`)으로 교체**
+  (`mix_dl3dv_sd_datadop_v1.yaml`, `_smoke.yaml`; 코드 변경 0줄). 위 `sd_anchor_error_filters.py`
+  전수 측정에서 앵커 불일치의 지렛대가 sim3 잔차로 나왔으므로 `--resid-pct 90 --tag _r90` 으로
+  리스트를 다시 뽑았다. clip 23408 → static 7682 / align 컷 1573 제외 → 남은 clip **14153**
+  (p99 리스트는 15568), clip ≥2 인 scene 3250/3344, train scene **2925 → pair 44424** /
+  test **325 → 4904** (p99 는 3006/52286, 334/5758). 측정 pair 기준 효과: 49328/58044 (85.0%)
+  유지, ratio p95 0.3169→**0.2026**, p99 0.6204→**0.3676**, max 3.8141→**1.1428**,
+  `>0.5` 1.74%→**0.31%**, 앵커 절대오차 p99 0.0419→**0.0250**.
+  **비용**: 살아남는 clip 집합이 바뀌어 scene 단위 분할도 달라진다 ⇒ `sd_whuman_customgeo_v6` 와의
+  SD testset paired 비교는 깨진다. 되돌리려면 YAML 의 두 경로에서 `_r90` 만 빼면 된다.
+  재빌드 검증: SD index 49328 pair → 14092 target (ctx 후보 ≥2 인 sample 13808, 평균 3.50개),
+  `[mixed] total 67152 samples | train 60447 / val 6705`, key set OK (14 keys).
+  참고 — 앵커를 ctx view0 로 **옮기는** 대안은 불가능하다: DA3 `build_cam_token` 입력이 global
+  rigid + uniform scale 에 불변이라 (측정 max diff 4.77e-07 / 6.56e-07) `geo_c2w` 로는 이 offset 을
+  넣을 수 없다.
+
 ### Added
+- **`scripts/data/viz_sd_anchor_error.py` (신규)** — SD 앵커 잔차(`A = w2c_target[s] @
+  inv(w2c_ctx[view0])`)를 sample 단위로 재고 worst/p99/p95/median/best 를 그림으로 낸다.
+  케이스마다 target clip frame s / context clip view0 / 두 장의 `|diff|` / 정렬된 world 에서의
+  두 궤적 + 앵커 잔차 선분 + 수치 패널. `--reuse` 로 재측정 없이 그림만 다시 그린다.
+  실측(n=200, `mix_dl3dv_sd_datadop_v1`): ratio(=앵커 이동 오차 / target motion `m`)
+  med 0.0661 / p95 0.2769 / max 1.1667, `>0.5` 인 샘플 **2.5%**(5/200); 회전 med 0.47° /
+  max 7.99°; **절대** 앵커 오차는 med 0.0054 / p99 0.0368 (모델 단위, DL3DV 의 `m` med 0.4367
+  대비 작다). 꼬리의 원인은 분모·분자 양쪽이다 — ratio>0.5 인 5개는 `m` 이 중앙값의 1/3.6,
+  오차는 중앙값의 2.3배. 픽셀에서는 거의 안 보인다 (worst 케이스도 `|diff|` mean 0.0040).
+- **`scripts/data/sd_anchor_error_filters.py` (신규)** — 같은 앵커 잔차를 **전수**(58044 pair)로
+  재고 clip 통계(`sd_<split>_clip_stats.csv`)와 join 해서 필터 sweep 7종을 낸다. 이미지 디코딩
+  없이 `_target_out` 만 직접 불러 재므로 인덱스 빌드 단계 필터로 그대로 쓸 수 있다.
+  `--from_csv` 로 재측정 없이 집계만 다시 돌린다. 결과 → `results/mixed/sd_anchor_filters/`.
+  실측 결론: **static clip 은 이미 리스트에서 빠져 있다** (학습에 쓰는 15566 clip 중 `was_static`
+  0개) 인데도 `ratio>0.5` 가 1009/58044 = **1.74%**, max 3.8141 로 남는다. 단일 원인이 아니다 —
+  ratio 와의 log 상관은 `resid_max` **+0.690** > `tgt_resid` +0.678 > `ctx_resid` +0.521 >
+  `m` **−0.509** > `tgt_rad` −0.350 > `tgt_plen` −0.311 이고, 불량 1009 pair 중 **72.9%**(736)가
+  "`m` 작음 ∧ resid 큼" 교집합(전체의 10.4%, 그 구간 불량률 **12.21%**)에 몰려 있다.
+  비교: `m` 만 작은 구간 0.57% / resid 만 큰 구간 2.52% / 둘 다 아닌 구간 0.03%.
+  ⇒ "안 움직이는 카메라" 컷만으로는 안 잘리고 **sim3 잔차가 지렛대**다 (m≥0.05 는 pair 26% 를
+  버려도 `>0.5` 가 0.50% 로만 주는 반면, resid_max p90 컷은 10% 만 버리고 0.49%).
 - **`main/conf/experiment/mix_dl3dv_sd_datadop_v1.yaml` + `_smoke.yaml` (신규 arm, Phase 6)** —
   DL3DV + Scene-Decoupled + DataDoP 3코퍼스 혼합. 공통부는 `da3_7k_da3geo_frontanchor` 와 동일한
   shape 규약(대조군이라 갈라지면 비교 불가). `scale_gain` 전부 1.0. smoke 검증 결과:

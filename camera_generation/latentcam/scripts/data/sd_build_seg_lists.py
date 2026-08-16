@@ -6,23 +6,32 @@ umeyama 가 아예 안 풀린다. 매 epoch 무작위로 짝을 고르면 어떤
 재현이 안 되고, arm 끼리(customgeo vs textonly) 본 데이터가 달라져 비교가 깨진다.
 
 필터 두 개:
-  static      `umeyama_gt.json` 의 `moving: false` -> 카메라가 안 움직여 Umeyama 가 풀리지
-              않는다 (`s`,`t`,`avg_scale_align` 자체가 파일에 없다). context 로도 target 으로도
-              제외. 살리는 방법은 scripts/data/sd_static_scale_transfer.py 에 있으나 이번엔 뺀다.
-  align p99   `resid_rmse_over_rad` (sim3 정렬 잔차 / 궤적 반경) 의 코퍼스 p99 초과 clip 제외.
-              2026-08-10 재생성(`convention: gtrot`) 이후 이 값은 실제로 쓸 만한 필터다:
-              cross-clip frame-0 중심 불일치와 corr(log) = +0.61 (rot_spread_deg 는 +0.57).
-              --rot-p99 를 주면 rot_spread_deg p99 컷도 같이 건다 (기본 off).
+  static      원래는 `umeyama_gt.json` 의 `moving: false` 로 판정했다. 그런데 2026-08-11
+              `sd_static_scale_transfer.py` 가 7682 개를 되살려 **`moving` 은 이제 전부 true**
+              다 (s/t/matrix4 가 같은 scene moving clip 의 중앙값 s 로 채워졌고
+              `s_source: scene_moving_median` / `was_static: true` 로 표시된다).
+              그래서 판정은 `was_static` 으로 한다. 이들은 `resid_rmse_over_rad` 가 아예 없어
+              (자기 궤적으로 sim3 를 푼 게 아니다) 아래 align 컷에서도 자동 탈락한다.
+  align pXX   `resid_rmse_over_rad` (sim3 정렬 잔차 / 궤적 반경) 의 코퍼스 백분위 초과 clip 제외
+              (`--resid-pct`, 기본 99 = 기존 리스트와 동일). 2026-08-10 재생성
+              (`convention: gtrot`) 이후 이 값은 실제로 쓸 만한 필터다: cross-clip frame-0
+              중심 불일치와 corr(log) = +0.61 (rot_spread_deg 는 +0.57).
+              `--rot-p99` 를 주면 rot_spread_deg p99 컷도 같이 건다 (기본 off).
+              **어디로 낮출지는 `scripts/data/sd_anchor_error_filters.py` 실측을 본다.**
+              p90 (=0.0928) 이면 pair 58044 -> 49328 (85.0%) 이고, DA3 view0 와 target 앵커의
+              불일치 / target motion 비가 `>0.5` 인 pair 가 1.74% -> 0.31%, max 3.81 -> 1.14
+              로 준다. 단 살아남는 clip 집합이 바뀌므로 **scene 단위 분할도 달라진다**
+              (p99 3006/334 scene -> p90 2925/325) — 기존 SD arm 과 paired 비교가 깨진다.
 
 쌍 열거: 한 scene 안에서 살아남은 clip 들의 **순서 있는** 모든 (target, ctx) 쌍.
 분할: **scene 단위** 90/10 (같은 scene 이 train 과 test 에 동시에 들어가면 context 가 새는 셈).
 
-출력 (--out-dir, 기본 <데이터셋 루트>/latentcam_lists):
-  sd_<split>_train.txt / sd_<split>_test.txt   한 줄 = data_name = "<scene>__<target>__<ctx>"
-  sd_<split>_lists_summary.md                  임계값과 탈락 수 (원본 수치 그대로)
-  sd_<split>_clip_stats.csv                    clip 별 moving/resid/rot_spread/keep
+출력 (--out-dir, 기본 <데이터셋 루트>/latentcam_lists, 접미사는 --tag):
+  sd_<split><tag>_train.txt / _test.txt        한 줄 = data_name = "<scene>__<target>__<ctx>"
+  sd_<split><tag>_lists_summary.md             임계값과 탈락 수 (원본 수치 그대로)
+  sd_<split><tag>_clip_stats.csv               clip 별 moving/was_static/resid/rot_spread/keep
 
-env 없음. CLI: --split whuman --train-frac 0.9 --seed 42 [--rot-p99]
+env 없음. CLI: --split whuman --train-frac 0.9 --seed 42 [--resid-pct 90] [--tag _r90] [--rot-p99]
 """
 import argparse
 import csv
@@ -42,10 +51,16 @@ def scan_clip(args):
     try:
         u = json.load(open(p))
     except Exception:
-        return dict(scene=scene, clip=clip, ok=0, moving=0,
+        return dict(scene=scene, clip=clip, ok=0, moving=0, was_static=0,
                     resid=float("nan"), rot_spread=float("nan"))
     mv = bool(u.get("moving", False))
+    # 2026-08-11 `sd_static_scale_transfer.py` 가 static clip 7682 개를 되살렸다: moving 이
+    # true 로 뒤집히고 s/t/matrix4 가 채워졌다 (`s_source: scene_moving_median`,
+    # `was_static: true`). 다만 **`resid_rmse_over_rad` 는 없다** — 자기 궤적으로 sim3 를 푼 게
+    # 아니라 같은 scene 의 moving clip 중앙값 s 를 빌려온 것이라 잔차를 정의할 수 없다.
+    # 그래서 static 판정은 `moving` 이 아니라 `was_static` 으로 본다 (moving 은 이제 전부 true).
     return dict(scene=scene, clip=clip, ok=1, moving=int(mv),
+                was_static=int(bool(u.get("was_static", False))),
                 resid=float(u.get("resid_rmse_over_rad", float("nan"))) if mv else float("nan"),
                 rot_spread=float(u.get("rot_spread_deg", float("nan"))))
 
@@ -57,6 +72,13 @@ def main():
     ap.add_argument("--seed", type=int, default=42)
     ap.add_argument("--rot-p99", action="store_true",
                     help="rot_spread_deg p99 컷도 같이 건다 (기본 off — resid 컷만)")
+    ap.add_argument("--resid-pct", type=float, default=99.0,
+                    help="resid_rmse_over_rad 컷 백분위 (기본 99 = 기존 리스트와 동일). "
+                         "낮출수록 cross-clip 앵커 잔차가 줄어든다 — 실측은 "
+                         "scripts/data/sd_anchor_error_filters.py 의 report.md")
+    ap.add_argument("--tag", default="",
+                    help="출력 파일 접미사. 기존 리스트를 덮어쓰지 않으려면 반드시 줄 것 "
+                         "(예: --tag _r90 -> sd_whuman_r90_train.txt)")
     ap.add_argument("--out-dir", default=os.path.join(ROOT, "latentcam_lists"))
     a = ap.parse_args()
 
@@ -75,7 +97,7 @@ def main():
     moving = [r for r in rows if r["ok"] and r["moving"]]
     resid = np.array([r["resid"] for r in moving], dtype=np.float64)
     rot = np.array([r["rot_spread"] for r in moving], dtype=np.float64)
-    resid_p99 = float(np.nanpercentile(resid, 99))
+    resid_p99 = float(np.nanpercentile(resid, a.resid_pct))
     rot_p99 = float(np.nanpercentile(rot, 99))
 
     for r in rows:
@@ -107,26 +129,29 @@ def main():
     te = [x for sc in sorted(te_scenes) for x in pairs_of(sc)]
 
     os.makedirs(a.out_dir, exist_ok=True)
-    pre = os.path.join(a.out_dir, f"sd_{a.split}")
+    pre = os.path.join(a.out_dir, f"sd_{a.split}{a.tag}")
     open(pre + "_train.txt", "w").write("\n".join(tr) + "\n")
     open(pre + "_test.txt", "w").write("\n".join(te) + "\n")
     with open(pre + "_clip_stats.csv", "w", newline="") as f:
-        w = csv.DictWriter(f, ["scene", "clip", "ok", "moving", "resid", "rot_spread", "keep"])
+        w = csv.DictWriter(f, ["scene", "clip", "ok", "moving", "was_static", "resid",
+                               "rot_spread", "keep"])
         w.writeheader()
         w.writerows(rows)
 
-    n_static = sum(1 for r in rows if r["ok"] and not r["moving"])
-    n_cut = sum(1 for r in rows if r["ok"] and r["moving"] and not r["keep"])
+    n_static = sum(1 for r in rows if r["ok"] and (not r["moving"] or r["was_static"]))
+    n_cut = sum(1 for r in rows if r["ok"] and r["moving"] and not r["was_static"]
+                and not r["keep"])
     n_bad = sum(1 for r in rows if not r["ok"])
     L = [f"# Scene-Decoupled 학습 리스트  split={a.split}  seed={a.seed}  "
          f"train_frac={a.train_frac}", "",
          f"clip 총 {len(rows)}  (umeyama_gt.json 읽기 실패 {n_bad})",
-         f"  static (moving=false) 제외      {n_static}",
+         f"  static 제외 (moving=false 또는 was_static -> resid 없음)  {n_static}",
          f"  align 컷 제외                    {n_cut}",
          f"  남은 clip                        {sum(r['keep'] for r in rows)}", "",
          f"컷 기준 (moving clip {len(moving)} 개 위에서 잰 코퍼스 백분위)",
          f"  resid_rmse_over_rad  p50 {np.nanmedian(resid):.4f}  p90 "
-         f"{np.nanpercentile(resid,90):.4f}  **p99 {resid_p99:.4f}**  max {np.nanmax(resid):.4f}",
+         f"{np.nanpercentile(resid,90):.4f}  p99 {np.nanpercentile(resid,99):.4f}  "
+         f"max {np.nanmax(resid):.4f}   **컷 = p{a.resid_pct:g} = {resid_p99:.4f}**",
          f"  rot_spread_deg       p50 {np.nanmedian(rot):.4f}  p90 "
          f"{np.nanpercentile(rot,90):.4f}  p99 {rot_p99:.4f}  max {np.nanmax(rot):.4f}"
          + ("   <- 이 컷도 적용" if a.rot_p99 else "   (컷 미적용)"), "",

@@ -15,9 +15,14 @@ All notable changes to the latentcam sub-project. Follows [Keep a Changelog](htt
   올려서 재도 같다** — `ptcam`(mean||P−C_0||)은 `meanray` 와 수치가 같고(정의가 같다), DL3DV
   `centroid` 규약(`ptcent`) 0.721 / RMS 0.724 / bbox 대각 0.739 / 원경 40% trim 0.704 전부 raw
   보다 나쁘다. 스케일 동차 제약(sum a_i = 1) 아래 11개 feature 를 전부 쓴 **최적 조합의 상한도
-  0.691** (holdout 0.683, R^2 < 0) = frame-0 에서 만드는 어떤 divisor 도 raw 를 못 이긴다. 원인은 MonST3R
-  재구성이 이미 shot 단위로 스케일 정규화되어 있다는 것(`sd(log10 D)` 전체 0.288 인데 같은
-  소스 영상 안에서만도 0.249). 결론은 그래도 `meanray` 사용 — 산포가 아니라 **추론 가능성**
+  0.691** (holdout 0.683, R^2 < 0) = frame-0 에서 만드는 어떤 divisor 도 raw 를 못 이긴다.
+  원인은 **MonST3R 가 metric 이 아니고 재구성이 이미 shot 단위로 정규화돼 있다**는 것 — DUSt3R
+  loss 가 pred/GT 를 둘 다 `avg_dis`(점들의 카메라까지 평균거리)로 나누고(`dust3r/losses.py:178-181`,
+  `utils/geometry.py:293-295`), global aligner 가 `norm_pw_scale=True` + `base_scale=0.5` 로
+  pairwise scale 기하평균을 고정한다(`cloud_opt/base_opt.py:66,108,230-233`). GenDoP 는 저장 시
+  스케일을 안 건드린다(`Dataset_DataDoP.py:338-400` 은 coordinate flip + clean + 리샘플뿐;
+  `core/provider.py:165-170` 의 `max||c2w_t||` 정규화는 학습 시점 on-the-fly).
+  방증: `sd(log10 D)` 전체 0.288 인데 같은 소스 영상 안에서만도 0.249. 결론은 그래도 `meanray` 사용 — 산포가 아니라 **추론 가능성**
   때문이다(raw 는 새 입력 이미지에 정의되지 않는다). 자세한 건 그 디렉토리의 `summary.md`.
 - **`front_first_anchor` arm 2개 추가 + `vae_latent_scale` 실측치** — experiment config 만
   추가/수정, 코드 변경 0줄.

@@ -290,9 +290,21 @@ def resolve_dataset_cfg(cfg, verbose=True):
             raise ValueError("geo_shuffle_order=True 는 geo_encoder='da3' 와 같이 쓸 수 없다 "
                              "(DA3 는 view0 를 reference 로 쓴다)")
         if getattr(cfg, 'geo_posed', False) and pose_source != 'da3':
-            # cam_enc 에 넣는 pose 의 스케일 공간이 depth/pose 코퍼스와 달라진다.
-            raise ValueError("geo_encoder='da3' + geo_posed=True 는 pose_source='da3' 가 "
-                             f"필요하다 (got {pose_source!r})")
+            # 원래 이유: "cam_enc 에 넣는 pose 의 스케일 공간이 depth/pose 코퍼스와 달라진다."
+            # [2026-08-16] 이 가드는 custom backend 의 근거를 그대로 옮겨 온 것이라 da3 backend
+            # 에는 과하다. da3 는 (a) 디스크 depth 를 안 읽고 (geo_logd/geo_valid 는 geo_custom
+            # 분기 전용, dataset_dl3dv.py:1417-1423), (b) cam_enc 입력을 view0 재고정 +
+            # **per-sample median camera distance** 로 정규화하므로 (build_cam_token) 포즈
+            # 코퍼스의 절대 스케일에 불변이다 -> transforms(COLMAP) pose 로도 성립한다.
+            # 그래도 기본은 raise 로 둔다: da3 코퍼스 arm 에서 pose_source 를 빠뜨리는 오타를
+            # 잡아 주는 값이 크다. 의도적으로 섞는 arm 만 플래그로 opt-in 한다.
+            if not getattr(cfg, 'da3_geo_allow_transforms_pose', False):
+                raise ValueError("geo_encoder='da3' + geo_posed=True 는 pose_source='da3' 가 "
+                                 f"필요하다 (got {pose_source!r}). 의도한 것이면 "
+                                 "da3_geo_allow_transforms_pose=true 로 명시할 것")
+            say(f"[geo da3] pose_source={pose_source!r} 로 cam_enc 를 태운다 "
+                f"(da3_geo_allow_transforms_pose=true). cam_token 은 per-sample median camera "
+                f"distance 로 정규화되므로 포즈 코퍼스의 절대 스케일에 불변이다")
         if geo_latent_cache_dir is not None:      # [cascade 2b/5]
             # LayerNorm/proj 가 **학습되는** 파라미터라 그 출력을 파일로 얼리면 안 된다.
             say("[geo cache] DISABLED: geo_encoder='da3' -> the geo encoder is trainable")

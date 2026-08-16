@@ -1,0 +1,79 @@
+# @package _global_
+# 20260731_001511_dl3dv_geo_worldtraj (wandb c4d2k5y4) 의 세팅에서 **geo encoder 만**
+# lagernvs -> da3 로 바꾼 arm. 포즈는 그 run 그대로 **COLMAP (transforms.json)** 이다
+# (da3 pose 코퍼스가 아니다 — 사용자 명시 지시).
+#
+# 그 run 의 저장된 config (results/20260731_001511_dl3dv_geo_worldtraj/config.yaml) 대비
+# 현재 config.yaml 기본값과 다른 키는 아래 8개뿐이라, 그 8개를 그대로 옮기고 encoder 만 바꿨다:
+#   meta_csv / geo_view_sampling / geo_cover_out_of_seg / geo_posed /
+#   geo_first_view_target_s / geo_anchor_first_frame(=현재 geo_cover_centered_at_s) /
+#   geo_cover_subtract_first / geo_latent_cache_dir
+# 나머지(batch_size 8, lr 1e-4, random_seed 42, scale_mode avg_scale, intr_norm rel, cam_dim 64,
+# vae_20260302_300.pth, vae_latent_scale 0.96032625, train/test_seg_list null -> in-run
+# random_split, coverage_blacklist_path null)는 전부 현재 기본값 = 그 run 값이다.
+#
+# 의도적으로 바꾼 것 3가지 (그 run 과 다른 점, 전부 아래에 이유)
+# --------------------------------------------------------------
+#  1) geo_encoder: lagernvs -> da3          <- 이 arm 의 존재 이유
+#  2) geo_latent_cache_dir: 경로 -> null    <- 강제. da3 는 LayerNorm/proj 가 **학습되는**
+#     파라미터라 출력을 파일로 얼릴 수 없다 (dataset_cfg.py 의 cascade 2b/5 가 어차피 끈다).
+#     그 run 은 캐시로 4.16 it/s 였지만 이 arm 은 매 step DA3 forward 를 탄다 (~1.7 it/s 예상).
+#     게다가 그 캐시(/data1/.../DL3DV/latent_cache)는 lagernvs 출력이라 재사용 자체가 불가능.
+#  3) epochs: 2000 -> 100 + ckpt_at_epochs [50]  <- 그 run 은 2000 으로 걸어 두고 도중에
+#     끊은 것이고, 지금 캠페인의 da3geo arm 들이 전부 100 epoch 기준이라 축을 맞춘다.
+#
+# !! pose_source='transforms' + geo_encoder='da3' + geo_posed=true 는 원래 dataset_cfg.py 가
+#    raise 하던 조합이다. 그 가드는 custom backend 의 근거("ray x depth 가 같은 스케일 공간이어야
+#    한다")를 옮겨 온 것이라 da3 에는 과하다:
+#      * da3 backend 는 디스크 depth 를 **안 읽는다** (geo_logd/geo_valid 는 geo_custom 분기
+#        전용, dataset_dl3dv.py:1417-1423). 섞일 스케일 공간이 없다.
+#      * cam_enc 입력은 view0 재고정 + **per-sample median camera distance** 로 정규화된다
+#        (da3_geo_encoder.build_cam_token) -> 포즈 코퍼스의 절대 스케일에 불변이다.
+#    그래도 오타 방지 가치가 있어 기본은 raise 로 두고, 이 arm 만 플래그로 opt-in 한다.
+#
+# 비교 축
+# -------
+#   vs 20260731_001511 (c4d2k5y4, lagernvs)  : geo encoder 만 다르다. 그 run 은 caption/VAE
+#     ckpt 세대가 같고 vae_latent_scale 도 0.96032625 로 같아 loss 축이 그대로 붙는다.
+#     (geo_worldtraj.yaml 은 2026-08-01 에 vae_latent_scale 을 0.47637 로 pin 했으므로 그 이후
+#      geo_worldtraj run 들과는 loss 를 직접 비교하면 안 된다 — 여기서는 **pin 하지 않는다**.)
+#     !! 다만 **held-out set 이 같지 않다**. train/test_seg_list 가 null 이라 split 이 in-run
+#        random_split 인데, 코퍼스가 그 뒤 39,830 -> **39,817** 로 줄어서 seed 42 라도 분할이
+#        재섞인다 (geo_worldtraj_camembed_plucker.yaml:29 참고 — c4d2k5y4 의 held-out 3,983 중
+#        약 89% 가 이 arm 의 TRAIN 으로 들어간다). val/* 곡선을 직접 겹쳐 읽지 말 것.
+#        공정한 대조는 **공통 testset eval** (scripts/eval_testset.py, --sample-seed 고정) 이다.
+#   vs da3_7k_da3geo_* arm 들                : 포즈 코퍼스(transforms vs da3)와 세그먼트 코퍼스
+#     (meta_worldtraj vs meta_da3_7k)가 달라 **paired 가 아니다**. 수치 직접 비교 금지.
+exp_name: dl3dv_geo_worldtraj_da3geo
+pose_source: transforms       # <- COLMAP. da3 pose 코퍼스가 아니다 (기본값이지만 못 박는다)
+epochs: 100
+ckpt_at_epochs: [50]
+meta_csv: meta_worldtraj.csv
+coverage_blacklist_path: null
+
+geo_encoder: da3
+geo_cam_embed: null           # 카메라는 DA3 cam_enc 토큰으로만 (c4d2k5y4 도 camembed 없음)
+geo_latent_cache_dir: null    # 위 (2) 참조 — da3 는 학습되는 인코더라 캐시 불가
+geo_posed: true               # DA3 cam_enc 에 GT(COLMAP) pose 주입
+geo_shuffle_order: false      # DA3 는 view0 를 reference 로 쓴다 -> 셔플 금지 (dataset 이 raise)
+da3_geo_allow_transforms_pose: true   # 위 !! 참조
+da3_geo_model: da3nested-giant-large
+da3_geo_input_hw: [252, 448]  # 14 의 배수. 다른 da3geo arm 과 같은 격자(18x32)
+da3_geo_layers: last
+
+# context view 선택 — 20260731_001511 의 값 그대로.
+geo_view_sampling: frustum_cover
+geo_cover_out_of_seg: true
+geo_cover_before_only: false  # <- 그 run 그대로 (양쪽 중 긴 쪽). frontanchor arm 의 2026-08-16
+                              #    before_only 변경은 **분모가 [0,s) 라서** 필요했던 것이고,
+                              #    이 arm 의 분모는 avg_scale(centroid) = context range 에서 잰
+                              #    값이라 range 불일치가 없다.
+geo_cover_centered_at_s: true # = 그 run 의 geo_anchor_first_frame: true (2026-07-31 rename)
+geo_first_view_target_s: true
+geo_cover_subtract_first: true
+
+scale_mode: avg_scale         # transforms 코퍼스의 저장된 point-cloud avg_scale
+                              # (<scene>/avg_scale/<seg>.json). avg_scale_ref 는 da3 전용이라
+                              # 여기서는 'centroid' 고정 (다른 값은 dataset_cfg.py 가 raise).
+intr_norm: rel
+cam_dim: 64

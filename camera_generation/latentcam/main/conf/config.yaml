@@ -356,6 +356,15 @@ da3_geo_layer_fuse: concat    # (all 일 때) 현재 concat 만 구현
 da3_geo_norm: ln              # ln | none. cat_token 의 두 반쪽은 앞이 un-normed local_x,
                               #   뒤가 norm 통과라 분산 스케일이 크게 다르다. 끄면 한쪽이 먹는다.
 da3_geo_debug: false
+# [new 2026-08-16] geo_encoder=da3 + geo_posed=true 는 기본적으로 pose_source='da3' 를 요구한다
+#   (dataset_cfg.py 의 raise — da3 코퍼스 arm 에서 pose_source 를 빠뜨리는 오타를 잡는 가드다).
+#   true 로 켜면 transforms(COLMAP) pose 코퍼스로도 돌린다. 안전한 이유:
+#     * DA3 cam_enc 는 view0 재고정 + **per-sample median camera distance** 로 정규화하므로
+#       (da3_geo_encoder.build_cam_token) 포즈의 절대 스케일에 불변이다.
+#     * da3 backend 는 디스크 depth 를 안 읽는다 (geo_logd/geo_valid 는 geo_custom 분기 전용,
+#       dataset_dl3dv.py:1417-1423) -> 섞일 스케일 공간 자체가 없다.
+#   custom backend 는 여전히 pose_source='da3' 를 강제한다 (ray x depth 가 같은 공간이어야 함).
+da3_geo_allow_transforms_pose: false
 
 # --- geo cross-attention tracking (val 때만, 첫 배치 하나) ------------------------
 # 켜면 wandb 에 val/geo/* 스칼라와 val/geo/attn_map 이미지가 올라간다. 기본 off 라

@@ -255,6 +255,9 @@ class Config:
     da3_geo_norm = 'ln'         # cat_token 두 반쪽(un-normed local | normed global)의 스케일을
                                 #   맞추는 LayerNorm. 'none' 으로 끄면 한쪽이 다른 쪽을 먹는다.
     da3_geo_debug = False
+    # [new 2026-08-16] da3 backend 를 transforms(COLMAP) pose 로도 허용할지. 기본 False =
+    # 기존 raise 유지. 근거는 conf/config.yaml 의 같은 키 주석 참고.
+    da3_geo_allow_transforms_pose = False
 
     clip_version = 'ViT-B/32'
     clip_max_length = 77

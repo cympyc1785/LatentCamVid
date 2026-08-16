@@ -19,8 +19,30 @@ All notable changes to the latentcam sub-project. Follows [Keep a Changelog](htt
   뺐다) — 32677 samples / 6090 scenes, split 29414/3263 그대로라 이전 arm 들과 계속 paired 다.
   캐시 키에 `bo{0,1}` 이 들어가므로 (`dataset_dl3dv.py:403`) 새 인덱스 파일이 빌드되고 기존
   `bo0` 캐시는 그대로 남는다.
+- **`geo_encoder='da3' + geo_posed=true` 가 `pose_source='transforms'` 도 받는다**
+  (`main/dataset_cfg.py`, 새 플래그 `da3_geo_allow_transforms_pose`, 기본 `false`).
+  그 전까지는 무조건 raise 였다. 그 가드는 custom backend 의 근거(`ray x depth` 가 같은 스케일
+  공간이어야 한다)를 그대로 옮겨 온 것이라 da3 backend 에는 과하다: da3 는 (a) 디스크 depth 를
+  전혀 안 읽고 (`geo_logd`/`geo_valid` 는 `geo_custom` 분기 전용, `dataset_dl3dv.py:1417-1423`),
+  (b) `cam_enc` 입력을 view0 재고정 + **per-sample median camera distance** 로 정규화하므로
+  (`da3_geo_encoder.build_cam_token`) 포즈 코퍼스의 절대 스케일에 불변이다. 기본값을 `false` 로
+  둔 이유는 da3 코퍼스 arm 에서 `pose_source` 를 빠뜨리는 오타를 잡아 주는 값이 크기 때문이고,
+  의도적으로 섞는 arm 만 opt-in 한다 → 기존 arm 전부 동작 불변 (검증: 플래그 off 에서 여전히
+  raise, `da3_7k_da3geo_frontanchor` / `da3_7k_lagernvsgeo_frontanchor` / `geo_worldtraj` 의
+  resolved spec 무변화).
 
 ### Added
+- **`main/conf/experiment/worldtraj_da3geo.yaml` (신규 arm)** — `20260731_001511_dl3dv_geo_worldtraj`
+  (wandb `c4d2k5y4`) 의 세팅에서 **geo encoder 만** lagernvs → da3 로 바꾼 arm. 포즈는 그 run 그대로
+  **COLMAP (`pose_source: transforms`, `meta_worldtraj.csv`)** 다. 그 run 의 저장된 config 와 현재
+  기본값의 차이 8개(`meta_csv` / `geo_view_sampling` / `geo_cover_out_of_seg` / `geo_posed` /
+  `geo_first_view_target_s` / `geo_anchor_first_frame`→`geo_cover_centered_at_s` /
+  `geo_cover_subtract_first` / `geo_latent_cache_dir`)를 그대로 옮겼고, 의도적으로 다른 것은
+  ① encoder, ② `geo_latent_cache_dir: null` (da3 는 LayerNorm/proj 가 학습돼 캐시 불가 — 어차피
+  cascade 가 끈다), ③ `epochs 2000 → 100 + ckpt_at_epochs [50]` (현 캠페인 축에 맞춤) 세 개뿐이다.
+  인덱스 39817 samples / 6095 scenes, 4479 it/epoch @ bs8. **held-out set 은 c4d2k5y4 와 같지
+  않다** (코퍼스가 39,830→39,817 로 줄어 in-run `random_split` 이 재섞인다) → 대조는 공통 testset
+  eval 로 할 것.
 - **`scripts/smoke_before_only.py` (신규)** — 위 변경의 smoke. 실험 config 를 hydra 로 실제
   compose 해 dataset 을 만들고, 표본 세그먼트에서 `_sample_geo_frustum_cover` 가 돌려주는
   context view 가 ① view0 == `s` ② 나머지가 전부 `< s` ③ target `[s,e)` 를 안 건드리는지

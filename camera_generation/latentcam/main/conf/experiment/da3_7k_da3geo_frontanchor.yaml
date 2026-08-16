@@ -1,6 +1,8 @@
 # @package _global_
-# da3_7k_da3geo_asfirstcam.yaml 에서 **`avg_scale_ref` 한 줄만 바꾼** arm
-# (context_first_cam -> front_first_anchor). geo 설정은 한 글자도 안 바뀐다.
+# da3_7k_da3geo_asfirstcam.yaml 에서 `avg_scale_ref` 를 바꾼 arm
+# (context_first_cam -> front_first_anchor).
+# !! 2026-08-16 부터 geo 도 같이 앞쪽으로 제한한다 (`geo_cover_before_only: true`, 아래 참조).
+#    그 전 버전(geo 는 양쪽 중 긴 쪽)의 100 epoch 결과는 eval_my/common100ep 에 남아 있다.
 #
 # 무엇이 바뀌나 — **target cam_param 의 분모 하나뿐이다.**
 #   점 집합 규약은 세 변형이 전부 같다 (da3 depth unproject, conf >= 전역 P40, pixel_stride 2,
@@ -54,12 +56,31 @@ da3_geo_model: da3nested-giant-large
 da3_geo_input_hw: [252, 448]  # 14 의 배수. dataset/encoder 가 어긋나지 않게 명시
 da3_geo_layers: last
 
-# geo context view 는 asfirstcam arm 과 동일하게 둔다 (분모만 바뀐 것을 재려면 여기가 같아야 한다).
-# 즉 view 는 여전히 target 양쪽에서 뽑힌다 — 앞쪽 제한은 분모에만 적용된다.
+# [2026-08-16 정합] geo_cover_before_only: true  <- 이 arm 의 유일한 변경점
+#   그 전까지 이 arm 은 **분모만** 앞쪽([0,s))으로 제한하고 geo context view 는 asfirstcam 과 같게
+#   양쪽 중 긴 쪽에서 뽑았다 (분모 단독 효과를 재려고 geo 를 고정한 것). 그 결과 학습 샘플의
+#   **43.4%** (train 12781/29414, val 1415/3263) 에서 context 가 target 뒤쪽 [e,N) 에 잡혀
+#   **분모를 만든 공간을 모델이 아예 못 보는** 상태가 됐다 -> 그 샘플의 분모는 context 만으로
+#   복원 불가능한 잡음이다. (대조: context_first_cam 은 분모 range == context range 라 항상
+#   복원 가능하지만 앵커가 프레임 e 로 옮겨간다. 둘 다 결함이 하나씩 있었다.)
+#   게다가 실제 배치는 source video 가 연속으로 앞에 오는 causal 상황이라 뒤쪽 context 자체가
+#   test 분포에 없다 -> train/test 분포 불일치.
+#   뒤쪽을 섞어 얻는 이득의 증거도 없다: 공통 testset 3263 세그먼트 paired 비교에서
+#   frustum_cover(43% 뒤쪽) - front_uniform(100% 앞쪽) clatr_score = -0.0894
+#   (d_z -0.006, 세그먼트 win-rate 0.499) — 9 arm 대비 중 가장 작은 갭이다.
+#   -> 분모와 context 를 둘 다 [0,s) 로 맞춘다.
+#   **인덱스는 안 바뀐다**: before_only 필터는 s < geo_cover_k(=6) 만 거르는데
+#   (dataset_dl3dv.py:468,572) 세그먼트가 s in {0,49,98,...} 이고 front_first_anchor 가 이미
+#   s==0 을 뺐으므로 추가로 빠지는 게 없다 (29414/3263 유지 -> 이전 arm 과 계속 paired).
+#   앞쪽 pool 길이(= s) 분포 p05 49 / p25 98 / p50 147 / p75 245 / p95 294 로 최악도 49프레임
+#   = samelen 이 쓰는 window 와 같아 후보가 고갈되지 않는다. samelen 과 달리 window 를 49 로
+#   고정하지 않으므로 **넓은 context range 도 학습에 들어간다** (samelen 은 그 첫 세그먼트에 해당).
+#   !! 캐시 키에 bo{0,1} 이 들어가므로 (dataset_dl3dv.py:403) 인덱스가 새로 빌드된다.
 geo_view_sampling: frustum_cover
 geo_cover_out_of_seg: true
+geo_cover_before_only: true   # <- context 도 [0,s) 앞쪽만 (분모와 정합 + causal)
 geo_cover_centered_at_s: true
-geo_first_view_target_s: true 
+geo_first_view_target_s: true
 geo_cover_subtract_first: false
 
 scale_mode: avg_scale

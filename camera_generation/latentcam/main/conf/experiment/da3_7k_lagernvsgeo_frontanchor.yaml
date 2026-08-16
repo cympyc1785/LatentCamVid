@@ -35,8 +35,12 @@ geo_shuffle_order: false
 geo_lagernvs_skip_ctx_norm: false
 
 # geo context view 는 da3 짝 arm 과 **한 글자도 같게** 둔다.
+# [2026-08-16] da3 짝 arm 을 따라 geo_cover_before_only 를 true 로 올린다 — 근거는
+# da3_7k_da3geo_frontanchor.yaml 주석 참조 (분모 range [0,s) 와 context range 정합 +
+# 실제 배치가 causal). 인덱스는 그대로 29414/3263 이라 두 arm 은 계속 paired 다.
 geo_view_sampling: frustum_cover
 geo_cover_out_of_seg: true
+geo_cover_before_only: true   # <- context 도 [0,s) 앞쪽만 (분모와 정합 + causal)
 geo_cover_centered_at_s: true
 geo_first_view_target_s: true
 geo_cover_subtract_first: false

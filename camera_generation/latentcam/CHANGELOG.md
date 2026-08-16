@@ -4,7 +4,27 @@ All notable changes to the latentcam sub-project. Follows [Keep a Changelog](htt
 
 ## [Unreleased]
 
+### Changed
+- **`frontanchor` arm 2개에 `geo_cover_before_only: true`** (`da3_7k_da3geo_frontanchor.yaml`,
+  `da3_7k_lagernvsgeo_frontanchor.yaml`; experiment config 만, 코드 변경 0줄). 그 전까지 이 arm 은
+  **분모만** 앞쪽(`[0,s)`)으로 제한하고 geo context view 는 양쪽 중 긴 쪽에서 뽑았다
+  (`dataset_dl3dv.py:775-778`). 실측 결과 학습 샘플의 **43.45%** (train 12781/29414,
+  val 1415/3263) 에서 context 가 target 뒤쪽 `[e,N)` 에 잡혀 **분모를 만든 공간을 모델이 아예 못
+  보는** 상태였다 — 그 샘플의 분모는 context 로부터 복원 불가능한 잡음이다. 게다가 실제 배치는
+  source video 가 연속으로 앞에 오는 causal 상황이라 뒤쪽 context 는 test 분포에 없다.
+  뒤쪽을 섞어 얻는 이득의 증거도 없었다: 공통 testset paired 비교에서 frustum_cover(43% 뒤쪽) −
+  front_uniform(100% 앞쪽) `clatr_score` = −0.0894 (d_z −0.006, 세그먼트 win-rate 0.499).
+  → 분모와 context 를 둘 다 `[0,s)` 로 맞춘다. **인덱스는 안 바뀐다** (before_only 필터는
+  `s < geo_cover_k(=6)` 만 거르는데 `s ∈ {0,49,…}` 이고 `front_first_anchor` 가 이미 `s==0` 을
+  뺐다) — 32677 samples / 6090 scenes, split 29414/3263 그대로라 이전 arm 들과 계속 paired 다.
+  캐시 키에 `bo{0,1}` 이 들어가므로 (`dataset_dl3dv.py:403`) 새 인덱스 파일이 빌드되고 기존
+  `bo0` 캐시는 그대로 남는다.
+
 ### Added
+- **`scripts/smoke_before_only.py` (신규)** — 위 변경의 smoke. 실험 config 를 hydra 로 실제
+  compose 해 dataset 을 만들고, 표본 세그먼트에서 `_sample_geo_frustum_cover` 가 돌려주는
+  context view 가 ① view0 == `s` ② 나머지가 전부 `< s` ③ target `[s,e)` 를 안 건드리는지
+  검사한다. 300 세그먼트 표본에서 전부 0 위반 (SMOKE PASS).
 - **`scripts/eval_paired_bootstrap.py` (신규)** — 공통 testset eval arm 간 차이를 **세그먼트
   단위로 짝지어(paired)** 부트스트랩한다. 전 arm 이 `--sample-seed 42` 로 같은 3263 세그먼트 ·
   같은 x_T 를 썼으므로(common random numbers) arm 차이가 짝지어지고, 세그먼트를 리샘플해

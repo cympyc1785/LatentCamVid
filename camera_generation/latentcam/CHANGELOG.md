@@ -75,6 +75,17 @@ All notable changes to the latentcam sub-project. Follows [Keep a Changelog](htt
   넣을 수 없다.
 
 ### Added
+- **`scripts/data/check_mixed_multigpu_shard.py` (신규)** — multi-GPU 에서 `PerCorpusBatchSampler`
+  의 "배치 하나 = 코퍼스 하나" 가 유지되는지 검사한다 (plan Verification #7). `num_processes > 1`
+  이면 accelerate 가 우리 batch_sampler 를 `BatchSamplerShard` 로 감싸는데, 그 래퍼의 배치 분할/
+  tail padding 이 다른 코퍼스 인덱스를 한 배치에 섞으면 `collate_fn` 의
+  `torch.stack(images (V,3,H,W))` 가 코퍼스별 `V` 차이(DL3DV 6 / SD 6 / DataDoP 1) 때문에 터진다.
+  GPU 도 데이터도 안 쓰고 인덱스→코퍼스 라벨만 조회하므로 2-GPU 로 올리기 전에 싸게 잡는다.
+  실측(`--sizes 29414 12689 18344` = `mix_dl3dv_sd_datadop_v1` 의 실제 train 수, bs 8):
+  train/val 모두 nproc 1/2/4 에서 **혼합 배치 0 → PASS**. 참고로 nproc=2 는
+  `len(base sampler)=3777` 인데 rank 별 실제 순회는 1888 이라 `itr_per_epoch` 이 multi-GPU 에서
+  2배로 잡히지만, `itr_per_epoch` 은 `main/*.py`·`scripts/*.py` 어디에도 **소비처가 없고**
+  단일 코퍼스 경로도 같은 규약이라 무해하다.
 - **`scripts/data/viz_sd_anchor_error.py` (신규)** — SD 앵커 잔차(`A = w2c_target[s] @
   inv(w2c_ctx[view0])`)를 sample 단위로 재고 worst/p99/p95/median/best 를 그림으로 낸다.
   케이스마다 target clip frame s / context clip view0 / 두 장의 `|diff|` / 정렬된 world 에서의

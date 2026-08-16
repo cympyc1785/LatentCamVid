@@ -5,6 +5,16 @@ All notable changes to the latentcam sub-project. Follows [Keep a Changelog](htt
 ## [Unreleased]
 
 ### Added
+- **`scripts/eval_paired_bootstrap.py` (신규)** — 공통 testset eval arm 간 차이를 **세그먼트
+  단위로 짝지어(paired)** 부트스트랩한다. 전 arm 이 `--sample-seed 42` 로 같은 3263 세그먼트 ·
+  같은 x_T 를 썼으므로(common random numbers) arm 차이가 짝지어지고, 세그먼트를 리샘플해
+  평균차의 95% CI 를 낸다. `preds_scores.csv` 에서 per-sample 인 열
+  (`clatr/{clatr_score,pred_ref_cosine}`, `captions/{precision,recall,fscore}`)만 CI 를 내고,
+  `clatr/{precision,recall,density,coverage,fcd}` 는 전 행에 전역 값이 복제된 집합 단위 지표라
+  점추정만 보고한다 (CI 를 내려면 trajectory embedding 재추출 필요 — 디스크에는
+  `token/test/`·`seq/test/` 에 caption embedding 만 있다). 결과
+  `eval_my/common100ep/paired_bootstrap.{md,json}`. **CI 는 eval 추출 잡음만 덮고 학습 seed
+  분산은 못 덮는다** (arm 당 학습 1회).
 - **`scripts/data/datadop_divisor_spread.py` (신규)** — DataDoP 를 혼합 학습에 넣기 전에
   "frame-0 depth 로 translation 을 정규화하면 canonical 해지는가"를 재는 스크립트.
   `norm_divisor_compare.py` / `sd_clip_divisor_spread.py` 와 같은 지표(divisor D, reach,

@@ -59,7 +59,17 @@ class SDCamDataset(CamDataset):
         # context view 수. None -> context clip segment 의 **모든** 프레임 (49).
         # dynamic scene 이라 시간축을 통째로 줘야 한다는 사용자 결정(2026-08-10). int 면 균등 subsample.
         self.sd_geo_views = getattr(cfg, 'sd_geo_views', None)
-        self.ctx_of = []                      # sample idx -> context clip idx
+        # [new 2026-08-16] 'list'(기본) = 리스트에 적힌 (target, ctx) 쌍 그대로 — 기존과 bit-identical.
+        # 'random_scene' = 고유 target clip 당 1행으로 줄이고, ctx 는 **그 scene 에서 리스트가
+        # 허용한 clip 중** 매번 무작위로 뽑는다. 노리는 것 두 가지:
+        #   (a) 코퍼스 균형 — whuman 기준 52286 쌍 -> 14017 target 으로 3.7배 축소해서
+        #       DL3DV/DataDoP 와 샘플 수가 같은 자릿수가 된다.
+        #   (b) epoch 마다 context 가 바뀌는 augmentation.
+        self.pair_mode = str(getattr(cfg, 'sd_pair_mode', 'list') or 'list')
+        if self.pair_mode not in ('list', 'random_scene'):
+            raise ValueError(f"sd_pair_mode must be 'list' | 'random_scene', got {self.pair_mode!r}")
+        self.ctx_of = []                      # sample idx -> context clip idx (list 모드의 고정 ctx)
+        self.ctx_pool_of = []                 # sample idx -> [ctx 후보 clip idx] (random_scene 전용)
         super().__init__(cfg, type=type, only_segments=only_segments)
 
     # ------------------------------------------------------------------ index
@@ -92,8 +102,10 @@ class SDCamDataset(CamDataset):
             if n not in seen:
                 seen.add(n); ordered.append(n)
 
+        # 캐시 키에 pair_mode 가 **반드시** 들어가야 한다 — 지금까지는 정렬된 이름 목록만 해시해서
+        # 모드를 바꿔도 옛 캐시를 조용히 재사용했다 ("쌍을 줄였는데 샘플 수가 그대로").
         key = (f"sd_{self.sd_split}__nf{self.num_frames}__n{len(ordered)}"
-               f"__{_short_hash(ordered)}")
+               f"__pm{self.pair_mode}__{_short_hash(ordered)}")
         cache_dir = osp.join(self.sd_root, '.latentcam_index')
         os.makedirs(cache_dir, exist_ok=True)
         cache_path = osp.join(cache_dir, key + '.pt')
@@ -101,6 +113,7 @@ class SDCamDataset(CamDataset):
             idx = torch.load(cache_path, weights_only=False)
             self.samples = idx['samples']; self.hw_list = idx['hw_list']
             self.ctx_of = idx['ctx_of']
+            self.ctx_pool_of = idx.get('ctx_pool_of', [])
             self.scene_dir_list = [osp.join(self.root, c) for c in idx['clip_rel']]
             print(f"[SD index cache] {len(self.samples)} pairs / "
                   f"{len(self.scene_dir_list)} clips <- {cache_path}")
@@ -124,9 +137,17 @@ class SDCamDataset(CamDataset):
             return i
 
         from tqdm import tqdm
+        scene_pool, seen_tgt = {}, {}          # scene -> [ctx 후보 clip idx] / (scene,tgt) -> sample idx
         for name in tqdm(ordered):
             scene, tgt, ctx = name.split('__')
             ti, ci = clip_idx(scene, tgt), clip_idx(scene, ctx)
+            # 후보 pool 은 **리스트에 ctx 로 등장한 clip 만** 모은다 — sd_build_seg_lists.py 가
+            # static clip 과 sim3 품질 하위 컷을 이미 걸러 뒀고, 그 필터를 우회하면 안 된다.
+            p = scene_pool.setdefault(scene, [])
+            if ci not in p:
+                p.append(ci)
+            if self.pair_mode == 'random_scene' and (scene, tgt) in seen_tgt:
+                continue                       # 같은 target 의 두 번째 쌍부터는 행을 만들지 않는다
             seg = cap_cache.get(ti)
             if seg is None:
                 pj = json.load(open(osp.join(self.scene_dir_list[ti], 'prompts.json')))['0']
@@ -135,10 +156,27 @@ class SDCamDataset(CamDataset):
                        pcs.get('concise', "") if isinstance(pcs, dict) else (pcs or ""))
                 cap_cache[ti] = seg
             s, e, caption = seg
+            seen_tgt[(scene, tgt)] = len(self.samples)
+            # data_name 은 random_scene 에서도 **리스트에 처음 나온 쌍의 이름 그대로** 둔다.
+            # 이걸 '<scene>__<tgt>' 로 줄이면 base.py 의 seg-list 분할(id2idx)이 리스트 id 와
+            # 맞지 않아 train/val 이 통째로 비어 버린다. 즉 이름의 세 번째 칸은 random_scene 에서
+            # "이 target 이 리스트에 처음 등장했을 때의 ctx"라는 뜻이고, 실제 사용된 ctx 가 아니다.
             self.samples.append((ti, s, e, caption, name))
             self.ctx_of.append(ci)
 
+        if self.pair_mode == 'random_scene':
+            # sample 마다 자기 자신(target clip)을 뺀 후보를 미리 굳혀 둔다 -> __getitem__ 은 O(1).
+            for i, (ti, _s, _e, _c, name) in enumerate(self.samples):
+                scene = name.split('__')[0]
+                pool = [c for c in scene_pool[scene] if c != ti]
+                self.ctx_pool_of.append(pool if pool else [self.ctx_of[i]])
+            n_multi = sum(1 for p in self.ctx_pool_of if len(p) > 1)
+            print(f"[SD pair_mode=random_scene] {len(ordered)} 쌍 -> {len(self.samples)} target, "
+                  f"ctx 후보 2개 이상인 sample {n_multi} "
+                  f"(평균 {np.mean([len(p) for p in self.ctx_pool_of]):.2f}개)")
+
         torch.save({'samples': self.samples, 'hw_list': self.hw_list, 'ctx_of': self.ctx_of,
+                    'ctx_pool_of': self.ctx_pool_of,
                     'clip_rel': [osp.relpath(d, self.root) for d in self.scene_dir_list]},
                    cache_path)
         print(f"[SD index build] {len(self.samples)} pairs / {len(self.scene_dir_list)} clips "
@@ -256,10 +294,24 @@ class SDCamDataset(CamDataset):
             idxs = [idxs[i] for i in self._even_indices(len(idxs), int(v))]
         return idxs
 
+    # ------------------------------------------------------------------ context 선택
+    def _pick_ctx(self, idx):
+        """random_scene 에서 쓸 context clip. RNG 는 (worker seed, idx) 기반이라 worker/epoch
+        마다 달라진다 -> 같은 target 이 epoch 마다 다른 ctx 를 본다 (그게 이 모드의 목적).
+
+        val 도 같이 흔들린다는 점은 알고 쓸 것: val loss 곡선이 조금 더 시끄러워진다. 고정된
+        쌍으로 평가하려면 그 arm 은 `sd_pair_mode: list` 로 두거나 only_segments 를 쓴다.
+        """
+        pool = self.ctx_pool_of[idx]
+        if len(pool) == 1:
+            return pool[0]
+        seed = (int(torch.initial_seed()) + idx * 2654435761) % (2 ** 63 - 1)
+        return pool[int(np.random.default_rng(seed).integers(len(pool)))]
+
     # ------------------------------------------------------------------ item
     def __getitem__(self, idx):
         tgt, s, e, caption, data_name = self.samples[idx]
-        ctx = self.ctx_of[idx]
+        ctx = self._pick_ctx(idx) if self.pair_mode == 'random_scene' else self.ctx_of[idx]
         extrinsics = self.extrinsics_list[tgt][s:e]              # (T,4,4) w2c, meters
         intrinsics = self.intrinsics_list[tgt][s:e]
         h, w = self.hw_list[tgt]

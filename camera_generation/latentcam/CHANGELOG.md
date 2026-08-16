@@ -31,7 +31,58 @@ All notable changes to the latentcam sub-project. Follows [Keep a Changelog](htt
   raise, `da3_7k_da3geo_frontanchor` / `da3_7k_lagernvsgeo_frontanchor` / `geo_worldtraj` 의
   resolved spec 무변화).
 
+- **DataDoP divisor 주석의 레벨 근거를 정정** (`main/conf/config.yaml`, `main/dataset_datadop.py`
+  docstring; 코드 동작 변화 0). 그전까지 "D=1 이면 p95 0.4493 으로 DL3DV 의 p95 0.456 과 1.5%
+  차이로 붙는다" 고 적혀 있었는데, 그 DL3DV 앵커(med 0.141 / p95 0.456)가 **재현되지 않았다**.
+  아래 `corpus_scale_probe.py` 로 데이터셋에서 직접 재면 DL3DV(frontanchor) 는 med 0.4367 /
+  p95 0.8934 이고, DataDoP D=1 은 med 0.0911 로 **4.8배 낮다**. `datadop_divisor: none` 이라는
+  선택 자체는 유지된다 — 근거가 "레벨 정합" 이 아니라 MonST3R 게이지 논거 + 더 작은 산포
+  (sd(log10 m) 0.488 < meanray 0.508) 로 바뀌었을 뿐이다. `datadop_norm_gain` 은 혼합 경로에서
+  쓰지 않는다고 명시 (아래 `norm_scale_gain` 으로 통일).
+
 ### Added
+- **코퍼스별 translation 레벨 정합 훅 `norm_scale_gain`** (`main/dataset_dl3dv.py` `_target_out`,
+  기본 `1.0` = 동작 불변). `norm_scale` 을 gain 으로 **나눠서** 모델이 보는
+  `m = mean_t‖C_t − C_s‖ / norm_scale` 이 gain 배가 되게 한다. 여기가 유일하게 안전한 주입점이다
+  — `out['norm_scale']` 를 사후에 곱하면 `cam_param` 과 geo 채널이 이미 계산된 뒤라 **궤적과 RGBD
+  단위가 갈라진다**. 세 코퍼스가 전부 이 함수를 지나므로 한 군데로 끝난다. `mixed` 경로에서는
+  `datasets[i].scale_gain` 이 코퍼스별 cfg 복제본의 이 키로 복사된다.
+- **`main/dataset_mixed.py` + `main/mixed_sampler.py` (신규, Phase 1-3)** — `dataset_name: 'mixed'`.
+  `MixedCamDataset` 은 코퍼스마다 `copy.deepcopy(cfg)` + 화이트리스트 override 로 **평평한 cfg**
+  를 만들어 기존 클래스를 그대로 생성한다 (`dataset_dl3dv.py`/`dataset_cfg.py` 무수정).
+  전역 index 는 offset concat 이고 `out['corpus']` 태그만 추가한다 (`data_name` 은 **안 건드린다**
+  — `seg_key` 의 `rsplit('_',1)` 과 eval 경로가 깨진다). `_check_key_sets` 로 코퍼스 간 key set
+  동일성을 init 때 검사한다 (`collate_fn` 이 `batch[0]` 의 키만 순회해서 다르면 **조용히 유실**).
+  `PerCorpusBatchSampler` 는 배치 하나 = 코퍼스 하나를 보장하고 (V 가 DL3DV≈6 / SD 6~49 /
+  DataDoP 1 로 달라 `torch.stack` 이 터진다), weight 를 pool 반복(매번 재셔플)으로 실현하며,
+  학습 루프가 `set_epoch` 을 안 부르므로 `__iter__` 안에서 epoch 을 self-advance 한다.
+  **accelerate 1.12.0 설치본 소스를 직접 읽고 확인한 것**: `.batch_size` 는 반드시 노출해야 하고
+  (`data_loader.py:165` 가 None + even_batches 면 raise), `drop_last=False` 면 tail padding 이
+  앞 배치들을 평탄화한 인덱스에서 채워 와 (`:223,:258`) **코퍼스가 섞인 배치**를 만든다 →
+  train/val 양쪽 다 `drop_last=True`.
+- **`main/base.py` mixed 배선** — `build_dataset` 에 `'datadop'`/`'mixed'` 지연 import 분기,
+  `_make_batch_generator` 는 기존 `if tr_list and te_list:` **앞에서** early-return 해서 현행 두
+  경로를 바이트 그대로 둔다. 새 `_make_mixed_loaders` 가 `batch_sampler` 를 붙이고
+  `itr_per_epoch = len(sampler)`.
+- **`main/dataset_datadop.py` (신규, Phase 4)** — `DataDoPCamDataset`. shot 당 120 포즈 1 세그먼트,
+  context 는 `<shot>_rgb.png` **한 장** (V=1), 포즈는 OpenGL c2w → `@ _GL2CV` → `inv`.
+- **`sd_pair_mode: random_scene` (Phase 5, `main/dataset_scene_decoupled.py`)** — 고유 target clip
+  당 1행으로 dedupe 하고 (whuman 52286 쌍 → 14017) context 는 그 scene 의 **리스트가 허용한**
+  clip 중에서 매 `__getitem__` 마다 무작위로 뽑는다. 기본값 `list` 는 기존과 bit-identical.
+  **인덱스 캐시 키에 `pm{mode}` 추가** — 지금까지는 정렬된 이름 목록만 해시해서 모드를 바꿔도
+  옛 캐시를 조용히 재사용했다.
+- **`scripts/data/corpus_scale_probe.py` (신규)** — 코퍼스 레벨을 **`__getitem__` 출력에서 직접**
+  잰다 (`m = mean_t‖cam_param[t,6:9]‖`). 기존 표들은 pose.npz + avg_scale json 을 손으로 재현한
+  값이라 `normalize_camera_extrinsics_and_points` / `max_trans_norm` / `_even_indices` /
+  `norm_scale_gain` 이 빠져 있었다. 단일 코퍼스와 `mixed`(sub-dataset 별 그룹) 둘 다 처리.
+  결과 `results/mixed/scale_probe/{config}_{stats.json,per_sample.csv,summary.md}`.
+- **`scripts/data/avgscale_variant_levels.py` (신규)** — DL3DV avg_scale 변형 8종의 레벨/산포를
+  7000 scene 전수로 비교 (`results/dl3dv/avgscale_variant_levels/`). 인과성(`[0,s)` 범위 제한)이
+  레벨을 얼마나 움직이는지 재기 위한 것.
+- **`scripts/data/datadop_scale_levels.py` (신규)** — DataDoP index 필터 구간별 keep 율 / 잔존 산포 /
+  DL3DV 중앙값 정렬 gain / gain 적용 후 p95 를 스윕 (`results/datadop/scale_levels/`).
+- **`main/conf/experiment/datadop_smoke.yaml` (신규)** — DataDoP 단독 smoke / 스케일 실측용.
+  공통부는 `da3_7k_da3geo_frontanchor` 와 같은 shape 규약.
 - **다중 코퍼스 혼합 학습 config surface (Phase 0)** — `main/conf/config.yaml` + `main/config.py`.
   전부 기본값이 현행 동작을 보존한다 (아직 읽는 코드가 없어 동작 변화 0).
   `dataset_name` 에 `'datadop'` / `'mixed'` 값 추가(문서화), `datasets: null` (코퍼스별 override

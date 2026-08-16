@@ -1,0 +1,45 @@
+# @package _global_
+# DataDoP 단독 smoke / 스케일 실측용. 공통부는 da3_7k_da3geo_frontanchor 와 같은 shape 규약을
+# 쓴다 (혼합 arm 이 그 위에 서므로 여기서 갈라지면 비교가 안 된다):
+#   geo_encoder=da3, geo_posed=true, da3_geo_input_hw=[252,448], intr_norm=rel, cam_dim=64.
+# DataDoP 고유: context 는 shot 의 frame0 **한 장**이라 V=1 이고, view sampling 개념이 없다.
+#
+# V=1 의 구조적 귀결 (버그 아님): geo_idxs=[0] 이고 앵커가 extrinsics[0] 이라 rel = I 다.
+# 즉 geo_cam_param 이 모든 sample 에서 상수이고, 정보를 나르는 건 ray direction(intrinsics)과
+# 이미지뿐이다. 그게 "첫 view 만 context" 의 정의 그대로다.
+exp_name: datadop_smoke
+dataset_name: datadop
+batch_size: 8
+epochs: 100
+
+geo_encoder: da3
+geo_cam_embed: null
+geo_latent_cache_dir: null
+geo_posed: true
+geo_shuffle_order: false
+da3_geo_model: da3nested-giant-large
+da3_geo_input_hw: [252, 448]
+da3_geo_layers: last
+
+geo_num_views: 1              # shot 당 이미지가 _rgb.png 한 장뿐이다
+geo_view_sampling: even
+geo_cover_out_of_seg: false
+geo_cover_before_only: false
+geo_first_view_target_s: true # DataDoP 는 view0 = json frame0 = target 첫 프레임 s 라 구조적으로 참
+
+scale_mode: avg_scale
+avg_scale_ref: centroid       # DataDoP 는 자체 divisor 를 쓰므로 이 키는 부모 dispatch 용 자리
+# DataDoP 포즈는 MonST3R 산이라 'da3' 도 'transforms' 도 아니다. 그런데 DataDoPCamDataset 은
+# _load_index/_load_scene 을 전부 덮어써서 **spec 도 pose_source 도 읽지 않는다** (self.root 를
+# datadop_root 로 직접 세팅). 즉 이 키는 DataDoP 경로에서 완전히 사용되지 않는다.
+# 'da3' 로 두는 건 dataset_cfg.py:317 의 "da3 encoder + posed 면 COLMAP 포즈를 먹이지 말라"는
+# DL3DV 전용 가드를 통과시키기 위한 것뿐이다 (그 가드가 막으려는 상황 자체가 여기엔 없다).
+pose_source: da3
+intr_norm: rel
+cam_dim: 64
+
+datadop_divisor: none         # D = 1 (MonST3R 게이지 그대로). conf/config.yaml 주석에 근거.
+datadop_norm_trans_min: 0.005
+datadop_norm_trans_max: 1.0
+norm_scale_gain: 1.0          # 실측 전에는 1.0. 값은 corpus_scale_probe.py 로 정한다.
+train_frac: 0.9

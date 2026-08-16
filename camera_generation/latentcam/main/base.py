@@ -24,6 +24,8 @@ def build_dataset(cfg):
     """[new 2026-08-10] cfg.dataset_name 으로 코퍼스를 고른다. 기본 'dl3dv' 는 기존 동작 그대로.
       'dl3dv'           dataset_dl3dv.CamDataset            (scene 안의 다른 프레임 구간 = context)
       'scene_decoupled' dataset_scene_decoupled.SDCamDataset (같은 scene 의 다른 clip = context)
+      'datadop'         dataset_datadop.DataDoPCamDataset    (shot 의 frame0 한 장 = context, V=1)
+      'mixed'           dataset_mixed.MixedCamDataset        (위 셋을 cfg.datasets 블록으로 혼합)
     """
     name = getattr(cfg, 'dataset_name', None) or 'dl3dv'
     if name == 'dl3dv':
@@ -31,7 +33,14 @@ def build_dataset(cfg):
     if name == 'scene_decoupled':
         from dataset_scene_decoupled import SDCamDataset      # 지연 import (기존 경로 영향 X)
         return SDCamDataset(cfg=cfg)
-    raise ValueError(f"dataset_name must be 'dl3dv' | 'scene_decoupled', got {name!r}")
+    if name == 'datadop':
+        from dataset_datadop import DataDoPCamDataset
+        return DataDoPCamDataset(cfg=cfg)
+    if name == 'mixed':
+        from dataset_mixed import MixedCamDataset
+        return MixedCamDataset(cfg=cfg)
+    raise ValueError(f"dataset_name must be 'dl3dv' | 'scene_decoupled' | 'datadop' | 'mixed', "
+                     f"got {name!r}")
 
 
 class Base(object):
@@ -67,6 +76,11 @@ class Trainer(Base):
         generator = torch.Generator().manual_seed(self.cfg.random_seed)
 
         dataset = build_dataset(self.cfg)
+        if getattr(self.cfg, 'dataset_name', None) == 'mixed':
+            # [new 2026-08-16] 혼합 경로. 아래 두 경로(seg-list / random_split)는 **한 바이트도**
+            # 안 건드리도록 여기서 먼저 return 한다. 분할은 MixedCamDataset 이 코퍼스마다 자기
+            # 규칙으로 끝내 뒀고(train_idx/val_idx), 여기서는 배치 샘플러만 붙인다.
+            return self._make_mixed_loaders(dataset, include_train, include_val)
         tr_list = getattr(self.cfg, 'train_seg_list', None)
         te_list = getattr(self.cfg, 'test_seg_list', None)
         if tr_list and te_list:
@@ -118,6 +132,47 @@ class Trainer(Base):
                 batch_size=self.cfg.num_gpus * self.cfg.batch_size,
                 shuffle=False, num_workers=self.cfg.num_thread,
                 persistent_workers=True, collate_fn=collate_fn)
+
+    def _make_mixed_loaders(self, dataset, include_train, include_val):
+        """dataset_name='mixed' 전용 DataLoader 구성. 배치 하나 = 코퍼스 하나.
+
+        DataLoader 에 `batch_sampler` 를 주면 `batch_size`/`shuffle`/`drop_last` 를 **같이 주면
+        안 된다** (거부한다) — 그래서 세 인자가 여기엔 없다.
+        """
+        from mixed_sampler import PerCorpusBatchSampler
+        bs = self.cfg.num_gpus * self.cfg.batch_size
+        seed = int(getattr(self.cfg, 'random_seed', 42))
+        n_c = len(dataset.names)
+        self.trainset_loader = Subset(dataset, dataset.train_idx)
+        self.validset_loader = Subset(dataset, dataset.val_idx)
+        if include_train:
+            sampler = PerCorpusBatchSampler(
+                dataset.corpus_of_positions(dataset.train_idx), batch_size=bs,
+                weights=dataset.weights, shuffle=True, drop_last=True,
+                seed=seed, num_corpora=n_c)
+            self.batch_generator = DataLoader(
+                dataset=self.trainset_loader, batch_sampler=sampler,
+                num_workers=self.cfg.num_thread, persistent_workers=True,
+                collate_fn=collate_fn)
+            self.itr_per_epoch = len(sampler)
+            print(f"[mixed loader] train {len(sampler)} batches (bs {bs}) "
+                  f"per corpus {sampler._n_batches}")
+        if include_val:
+            # drop_last=True 는 val 에서도 **의도적**이다: accelerate 1.12 의 BatchSamplerShard
+            # 는 drop_last=False 일 때만 tail padding 을 도는데, 그 padding 이 앞 배치들을
+            # 평탄화한 인덱스에서 채워 와 **코퍼스가 섞인 배치**를 만든다 (data_loader.py:223,258).
+            # 근거는 mixed_sampler.py 모듈 docstring 참고. 잃는 건 코퍼스당 최대 bs-1 개.
+            v_sampler = PerCorpusBatchSampler(
+                dataset.corpus_of_positions(dataset.val_idx), batch_size=bs,
+                weights=None, shuffle=False, drop_last=True,
+                interleave=bool(getattr(self.cfg, 'mix_val_interleave', True)),
+                seed=seed, num_corpora=n_c)
+            self.valid_batch_generator = DataLoader(
+                dataset=self.validset_loader, batch_sampler=v_sampler,
+                num_workers=self.cfg.num_thread, persistent_workers=True,
+                collate_fn=collate_fn)
+            print(f"[mixed loader] val {len(v_sampler)} batches "
+                  f"(interleave={v_sampler.interleave}) per corpus {v_sampler._n_batches}")
 
     def _make_model(self):
         model = get_model()

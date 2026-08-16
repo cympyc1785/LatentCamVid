@@ -1220,8 +1220,18 @@ class CamDataset(torch.utils.data.Dataset):
         복사본을 두면 한쪽만 고치는 사고가 난다.
 
         scale_mode 는 intr_norm='auto' 의 legacy 커플링에만 쓰인다 (None -> cfg 에서 다시 해석).
+
+        [new 2026-08-16] `cfg.norm_scale_gain` (기본 1.0 = 무동작) 은 혼합 학습에서 코퍼스별
+        translation 레벨을 맞추는 상수다. **여기서 분모에 거는 것이 유일하게 안전한 지점**이다:
+        반환된 `out['norm_scale']` 을 나중에 곱하면 cam_param 은 이미 옛 분모로 나눠진 뒤라
+        궤적과 geo depth 의 단위가 갈라진다. 세 코퍼스가 전부 이 함수를 지나가고, 호출부가
+        `norm_scale = out['norm_scale']` 로 되받아 geo helper 에 넘기므로 RGBD 도 같이 따라온다.
+        gain 을 **나누는** 이유: m = mean||t|| / norm_scale 이라 gain>1 이면 m 이 gain 배로 커진다.
         """
         _scale_mode = scale_mode or resolve_scale_mode(self.cfg)
+        _gain = float(getattr(self.cfg, 'norm_scale_gain', 1.0) or 1.0)
+        if _gain != 1.0:
+            norm_scale = norm_scale / _gain
         normalized_extrinsics, _, norm_scale, _ = normalize_camera_extrinsics_and_points(
             extrinsics, avg_scale=norm_scale, max_trans_norm=self.cfg.max_trans_norm)
 

@@ -63,12 +63,24 @@ _POSE_SOURCES = ('transforms', 'da3')
 # 넷 다 같고 range/기준점만 다르다. 생성기:
 #   centroid / context_first_cam        pipeline/workspace/make_avg_scale_da3{,_firstcam}.py
 #   front_first_anchor{,_same_len}      scripts/data/make_avg_scale_da3_front_anchor.py
+#   front_centroid{,_same_len}          scripts/data/make_avg_scale_da3_front_anchor.py
 #   da3latent                           scripts/data/make_avg_scale_da3_latent.py
+#
+# 축은 2x2 다 — **range**(어느 프레임에서 점을 모으나 = 인과성) x **origin**(어디서 거리를 재나):
+#                       range                       origin
+#   centroid            [0,s)/[e,N) 중 긴 쪽         context 카메라 centroid  (비인과, ~50%가 미래)
+#   context_first_cam   같음                         context range 첫 카메라  (비인과)
+#   front_centroid      [0,s)                        context 카메라 centroid  (인과)
+#   front_first_anchor  [0,s)                        target 첫 카메라 s       (인과)
+# front_centroid 는 centroid 와 **range 만** 다르다 -> "인과성 비용"을 origin 변경과 분리해 잰다.
 AVG_SCALE_DIRS = {
     'centroid':                      'avg_scale',
     'context_first_cam':             'avg_scale_context_first_cam',
     'front_first_anchor':            'avg_scale_front_first_anchor',
     'front_first_anchor_same_len':   'avg_scale_front_first_anchor_same_len',
+    # [new 2026-08-16] 2x2 의 빈 칸 (앞쪽 range + centroid origin).
+    'front_centroid':                'avg_scale_front_centroid',
+    'front_centroid_same_len':       'avg_scale_front_centroid_same_len',
     # [new 2026-08-13] 위 넷은 점 구름에서 잰 **기하학적 거리**지만 이건 **DA3 latent 이 실제로
     # 쓰는 카메라 스케일**이다: M x sigma. M = cam_token 을 만들 때 쓴 per-sample median camera
     # distance, sigma = cam_dec 가 예측한 카메라 center 를 우리가 넣어 준 center 에 맞추는
@@ -92,6 +104,9 @@ AVG_SCALE_MIN_FRONT = {
     'front_first_anchor':          1,
     'front_first_anchor_same_len': 'nf',
     'da3latent':                   'nf',
+    # [new 2026-08-16] range 가 같으니 제약도 같다 (origin 만 다르다).
+    'front_centroid':              1,
+    'front_centroid_same_len':     'nf',
 }
 
 
@@ -318,7 +333,7 @@ def resolve_dataset_cfg(cfg, verbose=True):
             # reference view 를 고른다. V<3 이면 그 경로가 통째로 빠져 동작이 달라진다.
             raise ValueError(f"geo_encoder='da3' + geo_posed=False 는 geo_num_views>=3 이어야 "
                              f"한다 (got {_v}; DA3 의 reference-view 선택 임계값)")
-        _front_pair = ('front_first_anchor_same_len', 'da3latent')
+        _front_pair = ('front_first_anchor_same_len', 'front_centroid_same_len', 'da3latent')
         if _samp == 'front_uniform' and avg_scale_ref not in _front_pair:
             # front_uniform 의 존재 이유가 "분모를 만든 range 와 context view range 를 일치"인데
             # 분모가 다른 range 에서 온 값이면 그 일치가 깨진다. 조용히 어긋나면 안 되는 자리.

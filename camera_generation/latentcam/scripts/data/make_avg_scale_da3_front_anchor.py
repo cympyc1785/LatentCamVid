@@ -13,6 +13,18 @@
   ---- 이 스크립트가 만드는 것 ----
   avg_scale_front_first_anchor            **[0, s)** (앞쪽만)   **target segment 첫 카메라 s**
   avg_scale_front_first_anchor_same_len   **[s-L, s)**, L=e-s   **target segment 첫 카메라 s**
+  avg_scale_front_centroid                **[0, s)**            **context 카메라 centroid**
+  avg_scale_front_centroid_same_len       **[s-L, s)**, L=e-s   **context 카메라 centroid**
+
+[new 2026-08-16] 뒤의 두 개(front_centroid*)를 왜 추가했나
+--------------------------------------------------------
+혼합 학습에서 DL3DV 의 translation 레벨을 다른 코퍼스와 맞춰야 하는데, 위 4개 변형이
+레벨을 3배 넘게 흔든다. 축을 정리하면 **range**(긴 쪽 vs 앞쪽만 = 인과성)와
+**origin**(context centroid vs target 첫 카메라)이 독립이라 2x2 인데 대각선 두 칸만 있었다:
+  기존 `avg_scale`                = (긴 쪽, centroid)   — 인과적이지 않음(약 50% 가 미래 프레임)
+  기존 `avg_scale_front_first_anchor` = (앞쪽, s 앵커)   — 인과적
+빠진 칸 (앞쪽, centroid) 을 채워야 "인과성만 바꿨을 때 레벨이 얼마나 움직이는가"를
+origin 변경과 분리해서 볼 수 있다. `avg_scale` 과는 **range 만** 다르고 origin 은 같다.
 
 왜 앞쪽만인가: 기존 두 변형은 context range 가 target 오른쪽([e,N))에 잡힐 수 있는데, 그때
 target 첫 카메라 s 를 기준점으로 거리를 재면 "아직 안 지나간 뒤쪽 공간까지의 거리"를 재는 셈이라
@@ -42,11 +54,20 @@ from tqdm import tqdm
 
 ROOT = "/data1/cympyc1785/data/DL3DV/scenes"
 PS, PCTL = 2, 40.0                       # make_avg_scale_da3_firstcam.py 와 동일
-DIR_FULL = "avg_scale_front_first_anchor"
-DIR_SAME = "avg_scale_front_first_anchor_same_len"
+
+# name -> (출력 디렉토리, same_len 여부, origin). origin 'anchor' = target 첫 카메라 c_s,
+# 'centroid' = context 카메라 중심들의 평균. 점 집합(pf)은 네 변형이 공유하므로 무거운
+# unproject 는 한 번만 돈다 -- 변형을 추가해도 IO/연산이 거의 안 는다.
+VARIANTS = {
+    'first_anchor':            ("avg_scale_front_first_anchor",           False, 'anchor'),
+    'first_anchor_same_len':   ("avg_scale_front_first_anchor_same_len",  True,  'anchor'),
+    'centroid':                ("avg_scale_front_centroid",               False, 'centroid'),
+    'centroid_same_len':       ("avg_scale_front_centroid_same_len",      True,  'centroid'),
+}
 
 
-def worker(da3):
+def worker(args):
+    da3, want = args
     try:
         pr_path = os.path.join(da3, "prompts.json")
         if not os.path.exists(pr_path):
@@ -71,33 +92,33 @@ def worker(da3):
             else:
                 pf.append(np.zeros((0, 3), np.float32))
         prompts = json.load(open(pr_path))
-        d_full = os.path.join(da3, DIR_FULL); os.makedirs(d_full, exist_ok=True)
-        d_same = os.path.join(da3, DIR_SAME); os.makedirs(d_same, exist_ok=True)
-        w_full = w_same = 0
+        out_dirs = {}
+        for v in want:
+            d = os.path.join(da3, VARIANTS[v][0]); os.makedirs(d, exist_ok=True)
+            out_dirs[v] = d
+        wrote = {v: 0 for v in want}
         for k in sorted(prompts, key=int):
             if "frame_idx" not in prompts[k]:
                 continue
             s, e = prompts[k]["frame_idx"]
             L = e - s
-            anchor = cam_c[s]                            # target segment 첫 카메라
-            for ctx, out_dir, is_same in ((list(range(0, s)), d_full, False),
-                                          (list(range(max(0, s - L), s)), d_same, True)):
+            for v in want:
+                _dirname, is_same, origin = VARIANTS[v]
+                ctx = list(range(max(0, s - L), s)) if is_same else list(range(0, s))
                 if len(ctx) == 0 or (is_same and len(ctx) < L):
                     continue                             # 파일 없음 = 학습에서 제외
                 P = np.concatenate([pf[i] for i in ctx], 0)
                 if len(P) == 0:
                     continue
-                av = float(np.linalg.norm(P - anchor[None, :], axis=1).mean())
+                o = cam_c[s] if origin == 'anchor' else cam_c[ctx].mean(0)
+                av = float(np.linalg.norm(P - o[None, :], axis=1).mean())
                 if not np.isfinite(av) or av <= 0:
                     continue
-                json.dump(av, open(os.path.join(out_dir, f"{int(k)}.json"), "w"))
-                if is_same:
-                    w_same += 1
-                else:
-                    w_full += 1
-        return ("ok", w_full, w_same)
+                json.dump(av, open(os.path.join(out_dirs[v], f"{int(k)}.json"), "w"))
+                wrote[v] += 1
+        return ("ok", wrote, None)
     except Exception as ex:
-        return ("fail", f"{da3} :: {ex}", 0)
+        return ("fail", f"{da3} :: {ex}", None)
 
 
 def main():
@@ -105,6 +126,14 @@ def main():
     ap.add_argument("--splits", nargs="+", required=True)
     ap.add_argument("--workers", type=int, default=12)
     ap.add_argument("--limit", type=int, default=0)
+    ap.add_argument("--variants", nargs="+", default=list(VARIANTS),
+                    choices=list(VARIANTS),
+                    help="만들 변형. 기본은 전부. 이미 있는 것은 같은 값으로 덮어쓴다(멱등).")
+    # [new 2026-08-16] 통계만 보려고 전량(약 460GB depth+conf 읽기)을 돌리지 않기 위한 표본.
+    # 앞에서 N개 자르는 --limit 과 달리 **전 split 에서 무작위**로 뽑는다 -- split 순서에는
+    # 촬영 성격이 몰려 있어서 앞부분만 자르면 편향된다.
+    ap.add_argument("--sample", type=int, default=0, help="무작위 표본 scene 수 (0=전량)")
+    ap.add_argument("--sample-seed", type=int, default=0)
     a = ap.parse_args()
     da3s = []
     for sp in a.splits:
@@ -117,17 +146,22 @@ def main():
                 da3s.append(da3)
     if a.limit:
         da3s = da3s[:a.limit]
-    print(f"scenes: {len(da3s)} (front-only ctx + target-first-cam anchor, mean, "
-          f"P{PCTL}, PS{PS})", flush=True)
-    c = {}; nf = ns = 0; fails = []
+    if a.sample and a.sample < len(da3s):
+        rng = np.random.default_rng(a.sample_seed)
+        da3s = [da3s[i] for i in sorted(rng.choice(len(da3s), a.sample, replace=False))]
+    print(f"scenes: {len(da3s)} | variants: {a.variants} | mean, P{PCTL}, PS{PS}", flush=True)
+    c = {}; tot = {v: 0 for v in a.variants}; fails = []
+    jobs = [(d, a.variants) for d in da3s]
     with ProcessPoolExecutor(max_workers=a.workers) as ex:
-        for st, i1, i2 in tqdm(ex.map(worker, da3s, chunksize=4), total=len(da3s)):
+        for st, i1, _ in tqdm(ex.map(worker, jobs, chunksize=4), total=len(jobs)):
             c[st] = c.get(st, 0) + 1
             if st == "ok":
-                nf += i1; ns += i2
+                for v, n in i1.items():
+                    tot[v] += n
             elif st == "fail" and len(fails) < 10:
                 fails.append(i1)
-    print("DONE:", c, f"| {DIR_FULL}: {nf} files | {DIR_SAME}: {ns} files", flush=True)
+    print("DONE:", c, "|", " | ".join(f"{VARIANTS[v][0]}: {n} files" for v, n in tot.items()),
+          flush=True)
     for f in fails:
         print("  FAIL", f, flush=True)
 

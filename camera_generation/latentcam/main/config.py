@@ -161,6 +161,8 @@ class Config:
     sd_pair_mode = 'list'          # 'list' (기존 동작) | 'random_scene'
     datasets = None                # dataset_name='mixed' 일 때만 읽는 코퍼스별 override 리스트
     mix_val_interleave = True
+    mix_check_keys = True          # 코퍼스 간 key set 동일 확인 (collate_fn 이 batch[0] 키만 순회)
+    norm_scale_gain = 1.0          # m = mean||t||/norm_scale 에 거는 코퍼스 상수 (1.0 = 무동작)
 
     # Geo encoder (image-based scene encoder feeding camera_diffusion_model_latent's geo latent)
     geo_encoder = 'lagernvs'    # ['lagernvs', 'scenetok', 'custom', 'da3']

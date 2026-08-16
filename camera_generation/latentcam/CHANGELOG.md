@@ -11,7 +11,11 @@ All notable changes to the latentcam sub-project. Follows [Keep a Changelog](htt
   m = reach/D, 헤드라인 `sd(log10 m)`)를 쓴다. 22314 shot 전수 결과
   (`results/datadop/datadop_divisor_spread/`): **정규화가 산포를 못 줄인다** —
   raw(D=1) 0.655 → meanray 0.695, 다른 divisor(medray/meanz/medz/p10z/p90z)도 0.70~0.71.
-  `corr(log10 reach, log10 D) = +0.077` 로 사실상 0이라 D 가 잡음만 얹는다. 원인은 MonST3R
+  `corr(log10 reach, log10 D) = +0.077` 로 사실상 0이라 D 가 잡음만 얹는다. **point cloud 로
+  올려서 재도 같다** — `ptcam`(mean||P−C_0||)은 `meanray` 와 수치가 같고(정의가 같다), DL3DV
+  `centroid` 규약(`ptcent`) 0.721 / RMS 0.724 / bbox 대각 0.739 / 원경 40% trim 0.704 전부 raw
+  보다 나쁘다. 스케일 동차 제약(sum a_i = 1) 아래 11개 feature 를 전부 쓴 **최적 조합의 상한도
+  0.691** (holdout 0.683, R^2 < 0) = frame-0 에서 만드는 어떤 divisor 도 raw 를 못 이긴다. 원인은 MonST3R
   재구성이 이미 shot 단위로 스케일 정규화되어 있다는 것(`sd(log10 D)` 전체 0.288 인데 같은
   소스 영상 안에서만도 0.249). 결론은 그래도 `meanray` 사용 — 산포가 아니라 **추론 가능성**
   때문이다(raw 는 새 입력 이미지에 정의되지 않는다). 자세한 건 그 디렉토리의 `summary.md`.

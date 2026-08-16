@@ -50,7 +50,13 @@ OUT = osp.join(osp.dirname(osp.dirname(osp.dirname(osp.abspath(__file__)))),
 # OpenGL c2w -> OpenCV c2w. dataset_dl3dv.py:108 의 _GL2CV 와 같은 행렬.
 GL2CV = np.diag([1.0, -1.0, -1.0, 1.0])
 
-DIVISORS = ["meanray", "medray", "meanz", "medz", "p10z", "p90z"]
+DIVISORS = ["meanray", "medray", "meanz", "medz", "p10z", "p90z",
+            "ptcam", "ptcent", "ptstd", "ptbbox", "ptcam_t60", "ptcent_t60"]
+# 상한 회귀에 쓸 스케일 feature (전부 world 단위에서 1차 동차라야 divisor 로 성립한다)
+SCALE_FEATS = ["meanray", "medray", "meanz", "medz", "p10z", "p90z",
+               "ptcent", "ptstd", "ptbbox", "ptcam_t60", "ptcent_t60"]
+# 무차원 covariate (자유 계수 허용 — 스케일 동차성을 안 깬다)
+SHAPE_FEATS = ["fx_over_w", "aspect"]
 
 
 def measure(base):
@@ -76,13 +82,67 @@ def measure(base):
         rayn = np.sqrt(xs[None, :] ** 2 + ys[:, None] ** 2 + 1.0)
         ray = dep * rayn
         out = dict(shot=osp.relpath(base, ROOT), T=int(M.shape[0]), h=h, w=w,
+                   fx_over_w=float(fx / w), aspect=float(h / w),
                    reach=reach, mean_disp=mean_disp,
                    meanray=float(ray.mean()), medray=float(np.median(ray)),
                    meanz=float(dep.mean()), medz=float(np.median(dep)),
                    p10z=float(np.percentile(dep, 10)), p90z=float(np.percentile(dep, 90)))
+
+        # ---- point cloud 를 실제로 만들어 재는 변형 (DL3DV 의 avg_scale 규약들과 짝)
+        # P = depth * K^-1 [u+.5, v+.5, 1] (카메라 좌표, C_0 = 원점). pixel_stride 2 = DL3DV 규약.
+        st = 2
+        z = dep[::st, ::st]
+        px = z * xs[None, ::st]
+        py = z * ys[::st, None]
+        P = np.stack([px, py, z], -1).reshape(-1, 3)                 # (Np,3)
+        cen = P.mean(0)
+        dc = np.linalg.norm(P - cen, axis=1)
+        out["ptcam"] = float(np.linalg.norm(P, axis=1).mean())       # == meanray (규약 확인용)
+        out["ptcent"] = float(dc.mean())                             # DL3DV 'centroid' 규약
+        out["ptstd"] = float(np.sqrt((dc ** 2).mean()))              # RMS 반경
+        out["ptbbox"] = float(np.linalg.norm(P.max(0) - P.min(0)))   # bbox 대각
+        # 하늘/원경 절단: 가까운 60% 픽셀만 (DA3 conf>=P40 컷의 DataDoP 대응물)
+        r = np.linalg.norm(P, axis=1)
+        near = r <= np.percentile(r, 60)
+        out["ptcam_t60"] = float(r[near].mean())
+        Pn = P[near]
+        out["ptcent_t60"] = float(np.linalg.norm(Pn - Pn.mean(0), axis=1).mean())
         return out
     except Exception:
         return None
+
+
+def ceiling(rows):
+    """frame-0 에서 뽑을 수 있는 **어떤** 스칼라 divisor 로도 못 넘는 상한.
+
+    divisor 는 world 단위에서 1차 동차여야 한다 (D 가 scale s 배면 m 이 안 변해야 divisor 다).
+    그래서 log D = sum_i a_i log f_i + b·u + c 를 **sum_i a_i = 1 제약** 아래 최소제곱으로 맞춘다
+    (u = 무차원 covariate). 잔차 sd 가 곧 달성 가능한 최소 sd(log10 m) 이고, 이 값이 raw 와
+    비슷하면 "frame 0 로는 못 한다"가 divisor 선택 문제가 아니라 정보의 문제임을 뜻한다.
+    제약은 y - x_1 = sum_{i>=2} a_i (x_i - x_1) + b·u + c 로 재파라미터화해 없앤다.
+    """
+    y = np.log10(np.array([r["reach"] for r in rows]))
+    X = np.stack([np.log10(np.array([r[f] for r in rows])) for f in SCALE_FEATS])   # (F,n)
+    U = np.stack([np.log10(np.array([r[f] for r in rows])) for f in SHAPE_FEATS])
+    A = np.concatenate([(X[1:] - X[0]), U, np.ones((1, y.size))]).T                 # (n,F-1+S+1)
+    t = y - X[0]
+    coef, *_ = np.linalg.lstsq(A, t, rcond=None)
+    resid = t - A @ coef
+    # holdout: feature 가 서로 강하게 공선이라 in-sample R^2 는 부풀 수 있다. 짝/홀로 갈라 확인.
+    ev, od = np.arange(y.size) % 2 == 0, np.arange(y.size) % 2 == 1
+    ch, *_ = np.linalg.lstsq(A[ev], t[ev], rcond=None)
+    rh = t[od] - A[od] @ ch
+    a = np.empty(len(SCALE_FEATS))
+    a[1:] = coef[:len(SCALE_FEATS) - 1]
+    a[0] = 1.0 - a[1:].sum()
+    return dict(sd_log10_resid=float(resid.std(ddof=1)),
+                sd_log10_raw=float(y.std(ddof=1)),
+                r2=float(1 - resid.var() / y.var()),
+                sd_log10_resid_holdout=float(rh.std(ddof=1)),
+                sd_log10_raw_holdout=float(y[od].std(ddof=1)),
+                r2_holdout=float(1 - rh.var() / y[od].var()),
+                weights={f: float(v) for f, v in zip(SCALE_FEATS, a)},
+                shape_coef={f: float(v) for f, v in zip(SHAPE_FEATS, coef[len(SCALE_FEATS) - 1:-1])})
 
 
 def _lstats(v):
@@ -145,6 +205,28 @@ def main():
             f"{np.median(m):.4f} | {np.percentile(m,5):.4f} | "
             f"{np.percentile(m,95):.4f} | **{lm.std(ddof=1):.3f}** | {corr:+.3f} | "
             f"{float((m>1).mean()):.3f} | {float((m<0.1).mean()):.3f} |")
+
+    cl = ceiling(rows)
+    stats["ceiling"] = cl
+    lines += ["",
+              "## 상한 — frame-0 에서 뽑는 **어떤** 스칼라 divisor 로도 못 넘는 선",
+              "",
+              f"1차 동차 제약(sum a_i = 1) 하에 {len(SCALE_FEATS)}개 스케일 feature +"
+              f" {len(SHAPE_FEATS)}개 무차원 covariate 를 전부 써서 log10 reach 를 맞춘 잔차:",
+              "",
+              f"- raw sd(log10 reach) **{cl['sd_log10_raw']:.3f}**",
+              f"- 최적 조합 잔차 sd **{cl['sd_log10_resid']:.3f}**  (R^2 = {cl['r2']:.3f})",
+              f"- holdout(짝수 fit / 홀수 eval) 잔차 sd **{cl['sd_log10_resid_holdout']:.3f}** "
+              f"vs raw {cl['sd_log10_raw_holdout']:.3f}  (R^2 = {cl['r2_holdout']:.3f})",
+              "",
+              "R^2 < 0 은 버그가 아니라 **제약이 무는 것**이다: 스케일 동차성 때문에 divisor 는 "
+              "log D 를 한 단위 통째로 써야 하는데, D 가 reach 와 무상관이면 그 한 단위가 전부 "
+              "잡음이라 정규화 안 한 것보다 나빠진다. 즉 frame-0 depth 로 만드는 **어떤** "
+              "divisor 도 raw 를 못 이긴다.",
+              "",
+              "가중치는 feature 가 강하게 공선이라 개별 해석 불가: "
+              + ", ".join(f"{k} {v:+.2f}" for k, v in cl["weights"].items()),
+              ""]
 
     # mean_disp 기준도 같이 (계획서/이전 측정과 잇기 위해)
     md = np.array([r["mean_disp"] for r in rows])

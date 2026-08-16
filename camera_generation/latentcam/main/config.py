@@ -147,6 +147,21 @@ class Config:
     train_seg_list = None      # explicit train segment-list file (<batch>/<hash>/<seg>); None = random 90/10
     test_seg_list = None       # explicit val/test segment-list file; val = its first N segments (shuffle=False)
 
+    # [new 2026-08-16] DataDoP / 다중 코퍼스 혼합. 근거·실측은 conf/config.yaml 의 같은 키 주석 참고.
+    # (전부 getattr 기본값으로도 읽히지만, Config() 를 직접 만드는 비-hydra 스크립트를 위해 둔다.)
+    datadop_root = '/data1/cympyc1785/data/DataDoP/DataDoP_with_scene'
+    datadop_caption_key = 'Concise Interaction'
+    datadop_divisor = 'none'       # 'none' (D=1, MonST3R 게이지 그대로) | 'meanray'
+    datadop_norm_gain = 1.0
+    datadop_norm_trans_min = 0.005
+    datadop_norm_trans_max = 1.0
+    datadop_window_stride = None   # None = shot 당 120프레임 1 세그먼트
+    datadop_index_workers = 24
+    datadop_letterbox = False
+    sd_pair_mode = 'list'          # 'list' (기존 동작) | 'random_scene'
+    datasets = None                # dataset_name='mixed' 일 때만 읽는 코퍼스별 override 리스트
+    mix_val_interleave = True
+
     # Geo encoder (image-based scene encoder feeding camera_diffusion_model_latent's geo latent)
     geo_encoder = 'lagernvs'    # ['lagernvs', 'scenetok', 'custom', 'da3']
     geo_latent_dim = 768        # must match CameraDiffusionModel(geo_latent_dim=...)

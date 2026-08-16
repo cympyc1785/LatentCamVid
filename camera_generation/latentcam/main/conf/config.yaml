@@ -161,17 +161,85 @@ point_encoder: concerto
 #     스케일 규약: clip 별 umeyama sim3 로 pose/depth 를 GT meters 로 올린 뒤 **context clip 의**
 #     avg_scale_align 하나로 전부 나눈다 (추론 때 아는 건 context 뿐이라 target 분모는 누수).
 #     dl3dv_root / meta_csv / coverage_blacklist_path 는 이 모드에서 쓰이지 않는다.
+#   [new 2026-08-16]
+#   'datadop'  main/dataset_datadop.py — shot 당 궤적 1개, **frame 0 한 장만 context** (V=1).
+#     세그먼트 프레임 시퀀스가 없어 out-of-seg context 라는 개념 자체가 없다. datadop_* 참고.
+#   'mixed'    main/dataset_mixed.py — 위 셋을 한 학습에 섞는다. `datasets:` 블록으로 코퍼스별
+#     override 를 준다. **배치 하나 = 코퍼스 하나** (V/geo_hw 가 코퍼스마다 달라 torch.stack 이
+#     안 되므로; main/mixed_sampler.py PerCorpusBatchSampler).
 dataset_name: dl3dv
 sd_root: /data1/cympyc1785/data/Scene-Decoupled-Video-dataset
 sd_split: whuman              # 'whuman' | 'wohuman'
 sd_geo_views: null            # context view 수. null = context clip segment 의 49 프레임 전부
                               #   (dynamic scene 이라 시간축이 다 필요하다는 결정, 2026-08-10).
                               #   int 면 균등 subsample — OOM 시 줄이는 손잡이.
+# [new 2026-08-16] Scene-Decoupled 의 (target, context) 페어링 방식.
+#   'list'         (기본, 기존 동작과 bit-identical) seg list 의 `scene__tgt__ctx` 행을 그대로 쓴다.
+#                  sd_build_seg_lists.py 가 scene 당 **모든 순서쌍**을 나열하므로 train 52286 행.
+#   'random_scene' 고유 target clip 당 1행으로 dedupe(52286 -> 14017) 하고, context 는 __getitem__
+#                  에서 **같은 scene 의 다른 clip 중 균등 추출**. (a) 혼합 시 코퍼스 균형(3.7배 축소),
+#                  (b) epoch 마다 context 가 바뀌는 augmentation. 인덱스 캐시 키에 들어간다.
+sd_pair_mode: list
 dl3dv_root: /data1/cympyc1785/data/DL3DV/scenes   # DL3DV scene root (images_8 = 480x270; see dataset_dl3dv.py)
 meta_csv: meta.csv            # [new] scene-list CSV under dl3dv_root (e.g. meta_worldtraj.csv = 1K-7K − blacklist)
 max_scenes: null              # cap #scenes loaded (null = all; small int for smoke tests)
 train_seg_list: null          # [new] explicit train segment-list file (<batch>/<hash>/<seg>); null = random 90/10 split
 test_seg_list: null           # [new] explicit val/test segment-list file; val = its first (val_max_batches×batch_size) segments
+
+# ===== [new 2026-08-16] DataDoP (dataset_name: 'datadop') =====
+# shot 당 궤적 1개 + `<shot>_rgb.png` 한 장 + `<shot>_depth.npy` 한 장이 전부라 context 는
+# **frame 0 하나(V=1)** 다. 포즈는 `<shot>_transforms_cleaning.json` 의 OpenGL c2w 120 프레임
+# (DL3DV 와 같은 `c2w @ _GL2CV` -> inv 변환). mp4 는 **열지 않는다** (별도 재다운로드라 frame0 이
+# _rgb.png 와 다르다 — 실측 best match mp4 frame 1~6).
+datadop_root: /data1/cympyc1785/data/DataDoP/DataDoP_with_scene
+datadop_caption_key: 'Concise Interaction'   # med 182자. 'Movement'(101자)는 scene 단어가 없어
+                              #   혼합 시 "scene 단어 없음 ⇒ DataDoP" 지름길을 학습한다. 쓰지 말 것.
+# translation 분모(divisor). 모델이 보는 값은 m = mean_t||c_t − c_0|| / D.
+#   'none' (기본) D = 1. **MonST3R 가 이미 게이지를 걸어 놨기 때문**에 이게 맞다:
+#     loss 가 pred/GT 를 둘 다 norm_mode='avg_dis' 로 나누고(미터를 배울 기회 없음),
+#     global aligner 가 norm_pw_scale=True(하드코딩) + base_scale=0.5 로 pairwise 스케일의
+#     **기하평균을 0.5 에 못 박는다**. 즉 world 단위가 shot 마다 임의가 아니라 이미 공통이다.
+#     소스 추적 + 수치: results/datadop/monst3r_scale_normalization.md
+#     실측: D=1 이면 p95=0.4493 으로 DL3DV 의 p95 0.456 과 **1.5% 차이**로 붙는다.
+#   'meanray'     D = frame0 의 mean(depth · ||K⁻¹[u+.5,v+.5,1]||). 정의는 DL3DV 의 저장된
+#     avg_scale(mean||P − C_ctx0||)과 같지만, 이미 걸린 게이지를 **한 번 더 거는** 셈이라
+#     산포가 오히려 커진다 (sd(log10 m) 0.685 -> 0.717) 그리고 p95 가 DL3DV 의 3.5배가 된다.
+datadop_divisor: none
+datadop_norm_gain: 1.0        # m 에 곱하는 코퍼스 상수. **중앙값 정렬 gain 을 걸지 말 것** —
+                              #   D=1 을 DL3DV 중앙값에 맞추면 gain 1.938 이고 p95 가 0.871 (기준
+                              #   0.456 의 1.9배)로 넘친다. 중앙값이 2배 낮은 건 단위 불일치가
+                              #   아니라 DataDoP 에 저모션 shot 이 많다는 실제 성질이라 min 필터로 다룬다.
+# index 필터 (m 기준). 기본값은 D='none' 스케일에 맞춘 값이다 — divisor 를 바꾸면 같이 바꿔야 한다.
+#   실측(n=22314): [0.005,1.0] keep 91.3% (하단 7.43% / 상단 1.23%), 잔존 sd(log10 m) 0.685 -> 0.488
+#   (DL3DV 0.317 에 접근). 참고 [0.002,1.0] 95.0%/0.545, [0.01,1.0] 86.5%/0.438.
+datadop_norm_trans_min: 0.005 # 사실상 정지 shot 제거 (m→0 이면 궤적이 잡음뿐)
+datadop_norm_trans_max: 1.0   # MonST3R 폭주 제거
+datadop_window_stride: null   # null = shot 당 120프레임 **1 세그먼트**. 캡션이 shot 전체를
+                              #   묘사하므로("정지 -> 좌측 이동 -> 복귀") 슬라이딩 윈도우는 캡션과
+                              #   내용이 체계적으로 어긋난다. int 면 윈도우 모드.
+datadop_index_workers: 24     # 인덱스 빌드 병렬도 (shot 당 json+depth 프로브; 전 코퍼스 ~10초)
+datadop_letterbox: false      # [자리만] h ∈ {160..416} 이라 34% 가 종횡비가 크게 다르다. 지금은
+                              #   비등방 resize (안전 근거: _geo_pixel_plucker 가 정규화 좌표에서
+                              #   원본 K 를 다시 걸고, DA3 build_cam_token 의 fov 도 full-frame
+                              #   resize 에 불변). letterbox 가 필요하다고 판명되면 여기에 붙인다.
+
+# ===== [new 2026-08-16] 다중 코퍼스 혼합 (dataset_name: 'mixed') =====
+# null 이 아니면 코퍼스 리스트. 각 원소:
+#   {name: dl3dv|scene_decoupled|datadop, weight: 1.0, scale_gain: 1.0, override: {...}}
+# MixedCamDataset 이 코퍼스마다 copy.deepcopy(cfg) 로 평평한 cfg 를 만들고 override 를 얹은 뒤
+# **기존 클래스를 그대로** 생성한다 -> dataset_dl3dv.py / dataset_scene_decoupled.py /
+# resolve_dataset_cfg 는 한 줄도 안 바뀐다.
+#   override 화이트리스트: dl3dv_root, sd_root, sd_split, sd_geo_views, sd_pair_mode, datadop_*,
+#     meta_csv, max_scenes, train_seg_list, test_seg_list, coverage_blacklist_path, train_frac,
+#     pose_source, avg_scale_ref, scale_mode, geo_view_sampling, geo_num_views, geo_cover_k,
+#     geo_cover_radius, geo_cover_out_of_seg, geo_cover_before_only, geo_cover_centered_at_s,
+#     geo_first_view_target_s
+#   override 금지 (geo encoder 인스턴스가 하나라 토큰 수 P 가 상수여야 한다): geo_encoder,
+#     geo_posed, geo_cam_embed, custom_geo_channels, geo_image_hw, custom_geo_input_hw,
+#     da3_geo_input_hw, num_frames, intr_norm, trans_repr, cam_dim, vae_*, max_trans_norm
+datasets: null
+mix_val_interleave: true      # val 배치를 코퍼스 round-robin. val_max_batches 로 앞부분만 잘리므로
+                              #   (train_latent_cam_dm.py:604-605) 이게 false 면 한 코퍼스만 평가된다.
 geo_encoder: lagernvs         # scene-context encoder: lagernvs (frozen VGGT recon -> 768-d tokens)
                               #   | custom (models/custom_geo_encoder.py: frozen DINOv2 + trainable
                               #     Plücker/depth tokenizer; RGBD 입력, custom_geo_* 참고)

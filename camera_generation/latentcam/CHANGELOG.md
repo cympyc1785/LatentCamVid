@@ -32,6 +32,22 @@ All notable changes to the latentcam sub-project. Follows [Keep a Changelog](htt
   resolved spec 무변화).
 
 ### Added
+- **다중 코퍼스 혼합 학습 config surface (Phase 0)** — `main/conf/config.yaml` + `main/config.py`.
+  전부 기본값이 현행 동작을 보존한다 (아직 읽는 코드가 없어 동작 변화 0).
+  `dataset_name` 에 `'datadop'` / `'mixed'` 값 추가(문서화), `datasets: null` (코퍼스별 override
+  블록 + 화이트리스트/금지 목록 명시), `mix_val_interleave: true`, `sd_pair_mode: list`,
+  `datadop_root/caption_key/divisor/norm_gain/norm_trans_min/norm_trans_max/window_stride/
+  index_workers/letterbox`.
+  **`datadop_divisor: none` (D=1) 이 기본값**인 근거는 아래 `datadop_nodivisor_levels.py` 실측과
+  `results/datadop/monst3r_scale_normalization.md` 소스 추적이다 — MonST3R 가 이미
+  `norm_pw_scale=True` + `base_scale=0.5` 로 게이지를 걸어 놔서 한 번 더 나누면 잡음만 얹는다.
+  필터 기본값 `[0.005, 1.0]` 도 D=1 스케일 기준(실측 keep 91.3%, 잔존 sd(log10 m) 0.685→0.488).
+- **`results/datadop/monst3r_scale_normalization.md` (신규 문서)** — DataDoP world 좌표의 1 이
+  무엇인지 MonST3R 소스로 추적. loss 단계(`dust3r/losses.py:177-181` 가 pred/GT 를 둘 다
+  `norm_mode='avg_dis'` 로 나눔 → 미터 학습 불가), global alignment 단계
+  (`cloud_opt/base_opt.py:107` `norm_pw_scale=True` 하드코딩 + `:64` `base_scale=0.5` +
+  `:229-238` 가 pairwise 스케일 기하평균을 0.5 로 고정), GenDoP 내보내기가 스케일 미변경
+  (`Dataset_DataDoP.py:267,338-400`; `core/provider.py:165-170` 는 학습 시점 on-the-fly).
 - **`scripts/data/datadop_nodivisor_levels.py` (신규 분석 스크립트)** — DataDoP 를 혼합 학습에 넣을 때
   translation 분모(divisor)를 **아예 안 쓰는(D=1)** 후보를 실측한다. 기존
   `datadop_divisor_spread.py` 가 남긴 `per_shot.csv` 만 읽어 재스캔이 없다(~1초). 산포뿐 아니라

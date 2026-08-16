@@ -32,6 +32,12 @@ All notable changes to the latentcam sub-project. Follows [Keep a Changelog](htt
   resolved spec 무변화).
 
 ### Added
+- **`scripts/data/datadop_nodivisor_levels.py` (신규 분석 스크립트)** — DataDoP 를 혼합 학습에 넣을 때
+  translation 분모(divisor)를 **아예 안 쓰는(D=1)** 후보를 실측한다. 기존
+  `datadop_divisor_spread.py` 가 남긴 `per_shot.csv` 만 읽어 재스캔이 없다(~1초). 산포뿐 아니라
+  **레벨과 꼬리**를 잰다: `m = mean_disp/D` 의 분위수, 다른 코퍼스 중앙값에 맞추는 상수 gain 과 그
+  gain 적용 후 꼬리 위치, index 필터 잔존율, scene 내부 `sd(log10 m)`. 결과는
+  `results/datadop/datadop_nodivisor_levels/stats.json`.
 - **`main/conf/experiment/worldtraj_da3geo.yaml` (신규 arm)** — `20260731_001511_dl3dv_geo_worldtraj`
   (wandb `c4d2k5y4`) 의 세팅에서 **geo encoder 만** lagernvs → da3 로 바꾼 arm. 포즈는 그 run 그대로
   **COLMAP (`pose_source: transforms`, `meta_worldtraj.csv`)** 다. 그 run 의 저장된 config 와 현재

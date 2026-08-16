@@ -40,7 +40,27 @@ All notable changes to the latentcam sub-project. Follows [Keep a Changelog](htt
   (sd(log10 m) 0.488 < meanray 0.508) 로 바뀌었을 뿐이다. `datadop_norm_gain` 은 혼합 경로에서
   쓰지 않는다고 명시 (아래 `norm_scale_gain` 으로 통일).
 
+- **`norm_scale_gain` 을 `geo_encoder='da3' + geo_posed=true` 에서 raise 로 막았다**
+  (`main/dataset_mixed.py` `_make_sub_cfg`; 기본 1.0 이라 기존 동작 변화 0). 그 경로의 context 는
+  `norm_scale` 을 **안 거친다**: `__getitem__` 이 raw `geo_c2w` 를 월드 단위로 내보내고
+  (`dataset_dl3dv.py:1437-1444`) `da3_geo_encoder.build_cam_token` 이 DA3 자기 규약(context view
+  들의 **median camera distance**)으로 재정규화한다 (`:279-282`). 그래서 gain 을 걸면 target
+  `cam_param` 만 gain 배가 되고 context cam token 은 **불변**이라, context 가 함의하는 스케일과
+  target 크기의 대응이 코퍼스별 상수만큼 어긋난다 — 모델은 그 상수를 context 에서 읽을 수 없고
+  추론에는 코퍼스 라벨이 없다. gain 이 균일 닮음변환으로 남는 것은 모든 채널이 같은 `norm_scale`
+  로 나눠지는 `geo_custom`(lagernvs) 경로뿐이다. → **혼합 arm 은 gain 없이(전부 1.0) 간다.**
+
 ### Added
+- **`main/conf/experiment/mix_dl3dv_sd_datadop_v1.yaml` + `_smoke.yaml` (신규 arm, Phase 6)** —
+  DL3DV + Scene-Decoupled + DataDoP 3코퍼스 혼합. 공통부는 `da3_7k_da3geo_frontanchor` 와 동일한
+  shape 규약(대조군이라 갈라지면 비교 불가). `scale_gain` 전부 1.0. smoke 검증 결과:
+  배치 동질성 위반 **0/401**, 코퍼스 간 key set 동일(14키), shape 코퍼스별 일정
+  (SD `(6,3,252,448)` / DataDoP `(1,3,252,448)`), `len(sampler)==실제 배치 수`(7337),
+  `weights=[3,1,1]` 에서 dl3dv 배치 70→211 (3.01배), `val_max_batches=20` 안에 3코퍼스 전부
+  (7/7/6). **알려진 갭**: SD 는 clip 간 sim3 정렬 잔차 때문에 DA3 view0 와 target 앵커 frame s 가
+  정확히 일치하지 않는다 (n=300: 회전 med 0.46°/p95 2.06°, 앵커 오차/신호 크기 med 0.062/p95
+  0.367, 신호의 50% 초과 2.3%). `geo_first_view_target_s` 는 SD 경로에서 **기능이 없어**
+  (`_ctx_view_idxs` 가 덮어씀) 켜도 정합되지 않으므로 false 로 두고 기록만 한다.
 - **코퍼스별 translation 레벨 정합 훅 `norm_scale_gain`** (`main/dataset_dl3dv.py` `_target_out`,
   기본 `1.0` = 동작 불변). `norm_scale` 을 gain 으로 **나눠서** 모델이 보는
   `m = mean_t‖C_t − C_s‖ / norm_scale` 이 gain 배가 되게 한다. 여기가 유일하게 안전한 주입점이다

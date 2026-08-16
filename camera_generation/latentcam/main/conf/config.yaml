@@ -251,10 +251,16 @@ mix_check_keys: true          # init 에서 코퍼스마다 item 0 을 한 번 �
                               #   collate_fn(base.py:148)이 batch[0]의 키만 순회해서, 키가 다르면
                               #   학습이 죽지 않고 텐서만 조용히 유실된다. 비용은 코퍼스당 item 1개.
 # 모델이 보는 translation 크기 m = mean_t||t|| / norm_scale 에 거는 코퍼스 상수. 분모를 gain 으로
-# **나눈다** -> m 이 gain 배가 된다. 걸리는 지점은 CamDataset._target_out 한 곳뿐이라 cam_param 과
-# geo depth 가 항상 같은 단위로 남는다 (out['norm_scale'] 을 사후에 곱하면 갈라진다).
+# **나눈다** -> m 이 gain 배가 된다. 걸리는 지점은 CamDataset._target_out 한 곳뿐이다.
 # mixed 에서는 datasets[i].scale_gain 이 코퍼스 cfg 복제본의 이 키로 내려온다.
-# **1.0 = 기존 동작과 bit-identical.**
+# !! `geo_encoder='da3' + geo_posed=true` 에서는 **켜면 안 된다** — dataset_mixed 가 raise 한다.
+#    그 경로의 context 는 norm_scale 을 안 거친다: raw geo_c2w 를 내보내고(dataset_dl3dv.py:1437)
+#    build_cam_token 이 DA3 자기 규약(median camera distance)으로 재정규화한다
+#    (da3_geo_encoder.py:279-282). 즉 target 만 gain 배가 되고 context cam token 은 불변이라
+#    context 가 함의하는 스케일과 target 크기의 대응이 코퍼스별 상수만큼 어긋난다 — 모델은 그
+#    상수를 context 에서 못 읽고 추론엔 코퍼스 라벨이 없다. 균일 닮음변환으로 남는 것은 모든
+#    채널이 같은 norm_scale 로 나눠지는 geo_custom(lagernvs) 경로뿐이다.
+# **1.0 = 기존 동작과 bit-identical.** 혼합 arm 은 1.0 으로 간다 (2026-08-16 결정).
 norm_scale_gain: 1.0
 geo_encoder: lagernvs       # scene-context encoder: lagernvs (frozen VGGT recon -> 768-d tokens)
                               #   | custom (models/custom_geo_encoder.py: frozen DINOv2 + trainable

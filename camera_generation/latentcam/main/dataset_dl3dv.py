@@ -1222,11 +1222,22 @@ class CamDataset(torch.utils.data.Dataset):
         scale_mode 는 intr_norm='auto' 의 legacy 커플링에만 쓰인다 (None -> cfg 에서 다시 해석).
 
         [new 2026-08-16] `cfg.norm_scale_gain` (기본 1.0 = 무동작) 은 혼합 학습에서 코퍼스별
-        translation 레벨을 맞추는 상수다. **여기서 분모에 거는 것이 유일하게 안전한 지점**이다:
-        반환된 `out['norm_scale']` 을 나중에 곱하면 cam_param 은 이미 옛 분모로 나눠진 뒤라
-        궤적과 geo depth 의 단위가 갈라진다. 세 코퍼스가 전부 이 함수를 지나가고, 호출부가
-        `norm_scale = out['norm_scale']` 로 되받아 geo helper 에 넘기므로 RGBD 도 같이 따라온다.
-        gain 을 **나누는** 이유: m = mean||t|| / norm_scale 이라 gain>1 이면 m 이 gain 배로 커진다.
+        translation 레벨을 맞추려던 상수다. 분모에 거는 것이 **이 파일 안에서는** 유일하게
+        안전한 지점이다 (반환된 `out['norm_scale']` 을 나중에 곱하면 cam_param 이 이미 옛 분모로
+        나눠진 뒤라 궤적과 geo depth 단위가 갈라진다). gain 을 **나누는** 이유:
+        m = mean||t|| / norm_scale 이라 gain>1 이면 m 이 gain 배가 된다.
+
+        !! 그러나 `geo_encoder='da3'` + `geo_posed=True` 에서는 **켜지 말 것** (2026-08-16 확인).
+        그 경로의 context 는 `norm_scale` 을 **안 거친다**: `__getitem__` 이 raw `geo_c2w` 를
+        월드 단위 그대로 내보내고(:1437-1444), `da3_geo_encoder.build_cam_token` 이 그걸 DA3
+        자기 규약(context view 들의 **median camera distance**)으로 다시 정규화한다(:279-282).
+        결과: target cam_param 은 gain 배로 커지는데 context cam token 은 **불변**이라, context 가
+        함의하는 스케일과 target 크기의 대응이 코퍼스별 상수만큼 어긋난다. 모델은 그 상수를
+        context 에서 읽어낼 수 없어 코퍼스 정체성으로 추측해야 하고, 추론 시엔 그 라벨이 없다.
+        gain 이 무해한 것은 모든 채널이 같은 `norm_scale` 로 나눠지는 `geo_custom`(lagernvs,
+        `_geo_pixel_plucker` + `_geo_depth_maps`) 경로뿐이다 — 거기서는 균일 닮음변환이다.
+        => 혼합 arm 은 **gain 없이(전부 1.0)** 간다. 코퍼스 간 레벨 차이는 필터/분모 정의로
+        다루고, 이 훅을 켜려면 위 조건을 먼저 확인할 것.
         """
         _scale_mode = scale_mode or resolve_scale_mode(self.cfg)
         _gain = float(getattr(self.cfg, 'norm_scale_gain', 1.0) or 1.0)

@@ -12,10 +12,16 @@ DataDoP 1 로 달라 `collate_fn` 의 `torch.stack(images (V,3,H,W))` 가 섞인
 모델에 BatchNorm 류가 없어(`models/camera_diffusion_model_latent.py` 확인) 배치를 코퍼스로
 가르는 데 통계적 부작용이 없다.
 
-`scale_gain` 은 여기서 sample 을 만지지 않고 **sub_cfg.norm_scale_gain 으로 내려보낸다**.
-반환된 `out['norm_scale']` 을 사후에 곱하면 cam_param 이 이미 옛 분모로 나눠진 뒤라 궤적과 geo
-depth 의 단위가 갈라진다 — 유일하게 안전한 지점은 `CamDataset._target_out` 안이고
-(세 코퍼스가 전부 그곳을 지난다) 그 훅이 읽는 키가 `norm_scale_gain` 이다.
+`scale_gain` 은 **기본 1.0 (무동작) 이고 da3 arm 에서는 아예 raise 한다** — `_make_sub_cfg` 참고.
+코퍼스별 translation 레벨을 상수로 맞추려던 손잡이인데, `geo_encoder='da3' + geo_posed=True`
+에서는 context 가 `norm_scale` 을 안 거치기 때문에(raw `geo_c2w` -> DA3 median camera distance
+재정규화) target 만 gain 배가 되고 context 는 불변이라 대응이 깨진다. 켤 수 있는 것은 모든
+채널이 같은 `norm_scale` 로 나눠지는 `geo_custom`(lagernvs) 경로뿐이고, 그때도 sample 을 여기서
+만지지 않고 `sub_cfg.norm_scale_gain` 으로 내려보낸다 (`CamDataset._target_out` 이 유일하게
+안전한 주입점 — 반환된 `out['norm_scale']` 을 사후에 곱하면 cam_param 이 이미 옛 분모로 나눠진
+뒤라 궤적과 geo depth 단위가 갈라진다).
+=> 혼합 arm 의 코퍼스 간 레벨 차이(DL3DV 0.4367 vs SD 0.0878 vs DataDoP 0.0911)는 gain 이 아니라
+필터/분모 정의로 다루고, 남는 차이는 그대로 둔 채 학습한다.
 
 `data_name` 에는 코퍼스 태그를 **붙이지 않는다.** 세 이름 공간(`1K_<64hex>_<seg>` /
 `<scene>__<tgt>__<ctx>` / `<scene>__<shot>`)이 충돌하지 않고, prefix 를 붙이면
@@ -159,7 +165,21 @@ class MixedCamDataset(Dataset):
             setattr(sub_cfg, k, v)
         # scale_gain -> _target_out 이 읽는 키. 이름이 다른 이유는 그 훅이 단일 코퍼스 학습에서도
         # 쓸 수 있는 일반 손잡이이기 때문 (mixed 전용 키로 두면 dataset_dl3dv 가 mixed 를 알아야 한다).
-        sub_cfg.norm_scale_gain = float(_spec_get(spec, 'scale_gain', 1.0) or 1.0)
+        gain = float(_spec_get(spec, 'scale_gain', 1.0) or 1.0)
+        if gain != 1.0 and str(getattr(cfg, 'geo_encoder', '') or '') == 'da3' \
+                and bool(getattr(cfg, 'geo_posed', False)):
+            raise ValueError(
+                f"datasets[{ci}]('{name}').scale_gain={gain} 은 geo_encoder='da3' + geo_posed=True "
+                f"에서 **좌표계를 깨뜨린다**. 이 경로의 context 는 norm_scale 을 안 거친다: "
+                f"__getitem__ 이 raw geo_c2w 를 월드 단위로 내보내고(dataset_dl3dv.py:1437-1444) "
+                f"build_cam_token 이 DA3 자기 규약(median camera distance)으로 다시 정규화한다"
+                f"(da3_geo_encoder.py:279-282). 즉 target cam_param 만 gain 배가 되고 context "
+                f"cam token 은 불변이라, context 가 함의하는 스케일과 target 크기의 대응이 "
+                f"코퍼스별 상수만큼 어긋난다 — 모델은 그 상수를 context 에서 읽을 수 없고 "
+                f"추론엔 코퍼스 라벨이 없다. gain 이 균일 닮음변환으로 남는 것은 모든 채널이 "
+                f"같은 norm_scale 로 나눠지는 geo_custom(lagernvs) 경로뿐이다. "
+                f"=> scale_gain 은 1.0 으로 두고 레벨 차이는 필터/분모 정의로 다룰 것.")
+        sub_cfg.norm_scale_gain = gain
         return sub_cfg
 
     @staticmethod

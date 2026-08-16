@@ -1,0 +1,106 @@
+# @package _global_
+# 3개 코퍼스 혼합 학습 arm. DL3DV(정적 scene) + Scene-Decoupled(동적 scene) + DataDoP(영화 궤적).
+#
+# 공통부는 `da3_7k_da3geo_frontanchor.yaml` 을 그대로 따른다 — 그 arm 이 이 혼합의 **대조군**이라
+# shape 규약이 갈라지면 비교가 안 된다: geo_encoder=da3 / geo_posed=true /
+# da3_geo_input_hw=[252,448] / intr_norm=rel / cam_dim=64 / scale_mode=avg_scale / num_frames=49.
+# 이 키들은 `dataset_mixed.OVERRIDE_FORBIDDEN` 이라 코퍼스 블록에서 못 바꾼다 (geo encoder
+# 인스턴스가 하나뿐이라 토큰 수 P 가 배치마다 달라지면 안 된다).
+#
+# 배치 하나 = 코퍼스 하나 (`mixed_sampler.PerCorpusBatchSampler`). 코퍼스마다 context view 수 V 가
+# 달라서(DL3DV 6 / SD 6 / DataDoP 1) 한 배치에 섞으면 collate_fn 의 torch.stack 이 터진다.
+# 배치 **순서는** 셔플한다 — task-by-task 순차 학습은 확실히 망한다 (PolyViT 0.3% vs 86.9%).
+# 모델에 BatchNorm 류나 sample 간 결합 연산이 없어 코퍼스로 가르는 데 통계적 부작용은 없다.
+#
+# !! scale_gain 은 **전부 1.0** 이다 (2026-08-16 결정). 코퍼스별 translation 레벨이 실측으로
+#    DL3DV 0.4367 / SD 0.0878 / DataDoP 0.0911 로 4.8배 갈리지만, 상수 gain 으로 맞추면 안 된다:
+#    이 arm 의 context 는 norm_scale 을 **안 거친다** (raw geo_c2w -> DA3 가 median camera
+#    distance 로 재정규화, da3_geo_encoder.py:279-282). gain 을 걸면 target cam_param 만 커지고
+#    context cam token 은 불변이라 둘의 대응이 코퍼스별 상수만큼 어긋나고, 모델은 그 상수를
+#    context 에서 읽을 수 없다 (추론엔 코퍼스 라벨도 없다). dataset_mixed 가 raise 한다.
+#    레벨 차이는 그대로 두고 학습한다 — 이 arm 이 그게 문제가 되는지를 재는 실험이다.
+#
+# vae_latent_scale 은 0.96032625 그대로 (DL3DV 캘리브레이션 값). 코퍼스별로 두는 것은 불가능하다
+# — ckpt 속성이라 추론 시 어느 값을 쓸지 정할 수 없고, VAE 뒤에 걸려 geo depth 를 못 따라온다.
+exp_name: mix_dl3dv_sd_datadop_v1
+dataset_name: mixed
+batch_size: 8
+epochs: 100
+ckpt_at_epochs: [50]
+
+pose_source: da3
+scale_mode: avg_scale
+intr_norm: rel                # vae_20260302_300 = frame-0-relative-intrinsics ckpt
+cam_dim: 64                   # = 그 ckpt 의 latent_dim
+
+geo_encoder: da3
+geo_cam_embed: null           # 카메라는 DA3 cam_enc 토큰으로만 들어간다
+geo_latent_cache_dir: null    # mixed 는 강제 null (경로가 data_name 접두사라 코퍼스 간 충돌)
+geo_posed: true               # DA3 cam_enc 에 GT pose 주입 (DA3 규약으로 정규화)
+geo_shuffle_order: false      # DA3 는 view0 를 reference 로 쓴다 -> 셔플 금지
+da3_geo_model: da3nested-giant-large
+da3_geo_input_hw: [252, 448]
+da3_geo_layers: last
+
+mix_val_interleave: true      # val 을 코퍼스 round-robin. val_max_batches=20 이라 이게 없으면
+                              #   앞 20 배치가 한 코퍼스로만 채워져 나머지 둘이 평가에서 사라진다.
+mix_check_keys: true
+
+# weight 1.0 = 그 코퍼스를 한 epoch 에 정확히 한 바퀴. 샘플 수 그대로 비율이 된다
+# (DL3DV 29414 / SD 12615 / DataDoP 18345 ~ 49%/21%/31%). MapAnything·CUT3R 처럼 샘플 수를
+# 그대로 쓰는 게 3D vision 쪽 표준이라 1차 arm 은 여기서 시작한다. 튜닝은 T5 식 temperature
+# (T=2) 나 UniMax 식 epoch cap 이 후보지만, 먼저 이 baseline 이 필요하다.
+datasets:
+  - name: dl3dv
+    weight: 1.0
+    scale_gain: 1.0
+    override:
+      meta_csv: meta_da3_7k.csv
+      train_seg_list: /data1/cympyc1785/data/DL3DV/scenes/latentcam_da3_7k_train_seg_list.txt
+      test_seg_list: /data1/cympyc1785/data/DL3DV/scenes/latentcam_da3_7k_test_seg_list.txt
+      coverage_blacklist_path: /data1/cympyc1785/LatentCamVid/camera_generation/latentcam/data/seg_blacklist_jump_da3_7k.csv
+      avg_scale_ref: front_first_anchor   # 분모 기준점 = target 첫 카메라 s, 범위 [0,s)
+      geo_view_sampling: frustum_cover
+      geo_cover_k: 6
+      geo_cover_out_of_seg: true
+      geo_cover_before_only: true         # context 도 [0,s) 앞쪽만 (분모와 정합 + causal)
+      geo_cover_centered_at_s: true
+      geo_first_view_target_s: true
+
+  # !! 알려진 갭: SD 는 `geo_first_view_target_s` 를 켤 수 없다. 그 플래그는 DL3DV 의 view 선택
+  #    (dataset_dl3dv.py:793,796,816)에만 걸리고 SD 는 `_ctx_view_idxs` 를 덮어써서 **기능적으로
+  #    아무 일도 안 한다** — true 로 두면 경고만 사라지고 정합은 안 되므로 false 로 남긴다.
+  #    구조적으로 context clip frame0 과 target clip frame0 은 같은 카메라여야 하는데(같은 scene 을
+  #    7개 궤적으로 렌더), clip 간 sim3 정렬 잔차 때문에 정확히 일치하지 않는다. 실측(n=300):
+  #      회전       med 0.46° / p95 2.06° / p99 4.25° / max 7.58°
+  #      이동(앵커 오차 / 예측해야 할 translation 크기)  med 0.062 / p95 0.367 / p99 0.584
+  #      오차가 신호의 50% 이상인 샘플 2.3%, 100% 이상 0.3%
+  #    즉 DA3 cam_token 의 재고정 기준(view0)과 target rel 의 기준(frame s)이 그만큼 어긋난 채
+  #    학습된다. DL3DV/DataDoP 는 구조적으로 0 이라 **코퍼스 간 비대칭**이기도 하다.
+  #    꼬리를 자르려면 sim3 resid 필터를 더 좁히는 게 지렛대다 (seg list 재생성 필요).
+  - name: scene_decoupled
+    weight: 1.0
+    scale_gain: 1.0
+    override:
+      sd_split: whuman
+      sd_geo_views: 6                     # DL3DV geo_cover_k 와 맞춰 토큰 예산 V*P 동일
+      sd_pair_mode: random_scene          # 고유 target clip 당 1행 (52286 -> 14017) + epoch 마다
+                                          #   context clip 이 바뀌는 augmentation
+      train_seg_list: /data1/cympyc1785/data/Scene-Decoupled-Video-dataset/latentcam_lists/sd_whuman_train.txt
+      test_seg_list: /data1/cympyc1785/data/Scene-Decoupled-Video-dataset/latentcam_lists/sd_whuman_test.txt
+      coverage_blacklist_path: null
+
+  - name: datadop
+    weight: 1.0
+    scale_gain: 1.0
+    override:
+      geo_num_views: 1                    # shot 당 이미지가 _rgb.png 한 장뿐
+      geo_view_sampling: even
+      geo_cover_out_of_seg: false
+      geo_cover_before_only: false
+      geo_first_view_target_s: true       # view0 = json frame0 = target 첫 프레임 s (구조적으로 참)
+      avg_scale_ref: centroid             # 부모 dispatch 용 자리 (DataDoP 는 자체 divisor 를 쓴다)
+      datadop_divisor: none               # D = 1, MonST3R 게이지 그대로
+      datadop_norm_trans_min: 0.005
+      datadop_norm_trans_max: 1.0
+      train_frac: 0.9                     # seg list 가 없어 random split

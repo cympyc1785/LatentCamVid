@@ -1,0 +1,72 @@
+# @package _global_
+# mix_dl3dv_sd_datadop_v1 의 smoke 판. **규약은 한 글자도 안 바꾸고** 규모만 줄인다
+# (max_scenes / epochs / batch_size). 규약을 건드리면 smoke 가 통과해도 본 학습을 보증하지 못한다.
+#
+# DL3DV/DataDoP 는 max_scenes 로 자르고, SD 는 seg list 기반이라 그 리스트를 그대로 쓰되
+# train_frac 은 건드리지 않는다 (리스트가 있으면 무시된다).
+exp_name: mix_dl3dv_sd_datadop_smoke
+dataset_name: mixed
+batch_size: 2
+num_thread: 4
+epochs: 1
+
+pose_source: da3
+scale_mode: avg_scale
+intr_norm: rel
+cam_dim: 64
+
+geo_encoder: da3
+geo_cam_embed: null
+geo_latent_cache_dir: null
+geo_posed: true
+geo_shuffle_order: false
+da3_geo_model: da3nested-giant-large
+da3_geo_input_hw: [252, 448]
+da3_geo_layers: last
+
+mix_val_interleave: true
+mix_check_keys: true
+
+datasets:
+  - name: dl3dv
+    weight: 1.0
+    scale_gain: 1.0
+    override:
+      meta_csv: meta_da3_7k.csv
+      max_scenes: 30
+      coverage_blacklist_path: /data1/cympyc1785/LatentCamVid/camera_generation/latentcam/data/seg_blacklist_jump_da3_7k.csv
+      avg_scale_ref: front_first_anchor
+      geo_view_sampling: frustum_cover
+      geo_cover_k: 6
+      geo_cover_out_of_seg: true
+      geo_cover_before_only: true
+      geo_cover_centered_at_s: true
+      geo_first_view_target_s: true
+      train_frac: 0.9
+
+  - name: scene_decoupled
+    weight: 1.0
+    scale_gain: 1.0
+    override:
+      sd_split: whuman
+      sd_geo_views: 6
+      sd_pair_mode: random_scene
+      train_seg_list: /data1/cympyc1785/data/Scene-Decoupled-Video-dataset/latentcam_lists/sd_whuman_train.txt
+      test_seg_list: /data1/cympyc1785/data/Scene-Decoupled-Video-dataset/latentcam_lists/sd_whuman_test.txt
+      coverage_blacklist_path: null
+
+  - name: datadop
+    weight: 1.0
+    scale_gain: 1.0
+    override:
+      geo_num_views: 1
+      geo_view_sampling: even
+      geo_cover_out_of_seg: false
+      geo_cover_before_only: false
+      geo_first_view_target_s: true
+      avg_scale_ref: centroid
+      datadop_divisor: none
+      datadop_norm_trans_min: 0.005
+      datadop_norm_trans_max: 1.0
+      max_scenes: 30
+      train_frac: 0.9

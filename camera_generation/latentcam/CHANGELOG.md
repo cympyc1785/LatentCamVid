@@ -5,6 +5,16 @@ All notable changes to the latentcam sub-project. Follows [Keep a Changelog](htt
 ## [Unreleased]
 
 ### Added
+- **`scripts/data/datadop_divisor_spread.py` (신규)** — DataDoP 를 혼합 학습에 넣기 전에
+  "frame-0 depth 로 translation 을 정규화하면 canonical 해지는가"를 재는 스크립트.
+  `norm_divisor_compare.py` / `sd_clip_divisor_spread.py` 와 같은 지표(divisor D, reach,
+  m = reach/D, 헤드라인 `sd(log10 m)`)를 쓴다. 22314 shot 전수 결과
+  (`results/datadop/datadop_divisor_spread/`): **정규화가 산포를 못 줄인다** —
+  raw(D=1) 0.655 → meanray 0.695, 다른 divisor(medray/meanz/medz/p10z/p90z)도 0.70~0.71.
+  `corr(log10 reach, log10 D) = +0.077` 로 사실상 0이라 D 가 잡음만 얹는다. 원인은 MonST3R
+  재구성이 이미 shot 단위로 스케일 정규화되어 있다는 것(`sd(log10 D)` 전체 0.288 인데 같은
+  소스 영상 안에서만도 0.249). 결론은 그래도 `meanray` 사용 — 산포가 아니라 **추론 가능성**
+  때문이다(raw 는 새 입력 이미지에 정의되지 않는다). 자세한 건 그 디렉토리의 `summary.md`.
 - **`front_first_anchor` arm 2개 추가 + `vae_latent_scale` 실측치** — experiment config 만
   추가/수정, 코드 변경 0줄.
   - `da3_7k_lagernvsgeo_frontanchor.yaml` (신규): 기존 `da3_7k_da3geo_frontanchor.yaml` 에서

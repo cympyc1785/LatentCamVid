@@ -1,0 +1,75 @@
+# @package _global_
+# da3_7k_da3geo_frontanchor 의 **scale-align ablation**.
+# 대조군 = 20260816_204955_da3_7k_da3geo_frontanchor (wandb iby28bbp).
+#
+# 이 arm 이 바꾸는 것은 **분모 하나뿐이다.**
+#   대조군  norm_scale = 세그먼트마다 저장된 point-cloud avg_scale
+#            = mean(|| [0,s) 프레임의 da3 점 - target 첫 카메라 s ||)   <- scene 크기에 적응
+#   이 arm  norm_scale = 코퍼스 상수 3.982685 (전 세그먼트 동일)        <- 적응 없음
+# 나머지는 전부 동일: 앵커 재고정 E @ inv(E_s), intr_norm='rel', trans_repr, cam_dim,
+# geo context 선택(frustum_cover, before_only), geo_first_view_target_s, 학습 하이퍼.
+#
+# 왜 "norm_scale = 1" 이 아니라 상수 3.982685 인가
+# ------------------------------------------------
+# 1 로 두면 translation 이 중앙값 기준 3.6배 커져서 (mean||t|| raw med 1.5313 vs 정규화 후
+# 0.4228) camera VAE (vae_20260302_300) 가 학습 분포 밖으로 나가고 `vae_latent_scale`
+# 0.96032625 도 의미가 달라진다 -- 그러면 이 arm 의 손실이 "scale align 을 뺀 효과"가 아니라
+# "VAE 를 OOD 로 밀어 넣은 효과"가 된다. 코퍼스 **기하평균**을 분모로 쓰면
+# log(mean||t||/분모) 의 평균 레벨이 대조군과 같은 자리에 남는다 — 1500 세그먼트 실측
+# (mean||t|| = 세그먼트 내 mean ||t_i||, 앵커 frame s):
+#   상수 3.982685  med 0.3845  log10mean -0.4301  log10std 0.3107
+#   대조군 avg_scale med 0.4228  log10mean -0.4339  log10std 0.3144
+# 로그 평균 차이 0.0038 dex (0.9%) -> diffusion 입력 std 가 arm 간에 안 흔들린다.
+#
+# 상수의 출처 (2026-08-17 실측, 이 arm 의 학습 집합 그대로):
+#   da3_7k train 29414 세그먼트 (blacklist 933 제외, s==0 제외) 의
+#   avg_scale_front_first_anchor 기하평균 = 3.982685 (med 3.614095, log10std 0.3287)
+#   test 3375 세그먼트 기하평균 3.971595 -> train/test 갭 0.6% 라 train 값으로 충분하다.
+#
+# 무엇을 재는 실험인가
+# --------------------
+# 분모는 분산을 줄이지 **않는다**: mean||t|| 원본 log10std 0.3107 -> avg_scale 로 나눈 뒤
+# 0.3144 (오히려 미세하게 증가). 즉 이 정규화가 하는 일은 "크기 분포를 좁히는 것"이 아니라
+# 궤적 크기를 **scene 크기 대비 단위**로 바꾸는 것이다. 그 단위 변환이 실제로 필요한지 —
+# 즉 모델이 context 로부터 scene 크기를 읽어 절대 크기를 맞출 수 있는지 — 를 재는 arm 이다.
+#
+# 추론/eval 경로는 손댈 필요가 없다: scripts/eval_testset.py 가 dataset 이 내보낸
+# `avg_scale` 을 그대로 out_to_trajectory(scale=...) 에 곱해 되돌린다. 이 arm 에서는 그 값이
+# 상수 3.982685 라 곱셈이 상수배가 될 뿐 코드 분기가 없다.
+#
+# 인덱스는 대조군과 **동일**하다 (29414/3263). avg_scale_ref 는 분모 계산에는 안 쓰이지만
+# (scale_mode='const' 는 파일을 안 읽는다) 인덱스 필터 (dataset_cfg.avg_scale_min_front ->
+# s==0 제외) 에는 계속 관여하므로 일부러 남긴다 -> paired 비교가 유지된다.
+#
+# vae_latent_scale 은 0.96032625 그대로 (대조군과 같은 축에서 loss 를 보기 위해).
+exp_name: da3_7k_da3geo_frontanchor_noscale
+pose_source: da3
+avg_scale_ref: front_first_anchor   # 분모에는 무관, **인덱스 필터 정합용** (위 설명)
+batch_size: 8
+epochs: 100
+ckpt_at_epochs: [50]
+
+geo_encoder: da3
+geo_cam_embed: null
+geo_latent_cache_dir: null
+geo_posed: true
+geo_shuffle_order: false
+da3_geo_model: da3nested-giant-large
+da3_geo_input_hw: [252, 448]
+da3_geo_layers: last
+
+geo_view_sampling: frustum_cover
+geo_cover_out_of_seg: true
+geo_cover_before_only: true
+geo_cover_centered_at_s: true
+geo_first_view_target_s: true
+geo_cover_subtract_first: false
+
+scale_mode: const                   # <- 유일한 실질 변경점
+norm_scale_const: 3.982685          # da3_7k train 29414 세그먼트 기하평균
+intr_norm: rel
+cam_dim: 64
+meta_csv: meta_da3_7k.csv
+train_seg_list: /data1/cympyc1785/data/DL3DV/scenes/latentcam_da3_7k_train_seg_list.txt
+test_seg_list: /data1/cympyc1785/data/DL3DV/scenes/latentcam_da3_7k_test_seg_list.txt
+coverage_blacklist_path: /data1/cympyc1785/LatentCamVid/camera_generation/latentcam/data/seg_blacklist_jump_da3_7k.csv

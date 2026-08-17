@@ -93,6 +93,8 @@ class Config:
     #                     denominator form, 1.35*max||center - window's first center||, averaged
     #                     over the windows (leakage-free; lands in LagerNVS's context units).
     #   'first_farthest_135' / 'geo_lagernvs' : LagerNVS-style 1.35*max variants.
+    #   'const' : 세그먼트별로 재지 않고 코퍼스 상수 `norm_scale_const` 로만 나눈다
+    #             (= scale align 을 뺀 ablation arm; 상수는 기하평균을 쓸 것).
     # Legacy names still accepted: 'saved_avg_scale'->'avg_scale', 'target_cam'->'cam_dist_mean'.
     scale_mode = 'cam_dist_mean'
 
@@ -163,6 +165,8 @@ class Config:
     mix_val_interleave = True
     mix_check_keys = True          # 코퍼스 간 key set 동일 확인 (collate_fn 이 batch[0] 키만 순회)
     norm_scale_gain = 1.0          # m = mean||t||/norm_scale 에 거는 코퍼스 상수 (1.0 = 무동작)
+    norm_scale_const = None        # scale_mode='const' 전용 분모. 코퍼스 **기하평균**을 쓸 것
+                                   # (da3_7k/front_first_anchor train 29414: 3.982685)
 
     # Geo encoder (image-based scene encoder feeding camera_diffusion_model_latent's geo latent)
     geo_encoder = 'lagernvs'    # ['lagernvs', 'scenetok', 'custom', 'da3']

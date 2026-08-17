@@ -42,6 +42,16 @@ scale_mode (what the camera translations are divided by):
                        RANGE's num_frames windows (LagerNVS's denominator form, leakage-free)
   'first_farthest_135' 1.35 * max(||center_i - center_0||) over the segment (LagerNVS-style)
   'geo_lagernvs'       1.35 * max(||geo-context center - frame s||) (full LagerNVS alignment)
+  'const'              [new 2026-08-17] 세그먼트마다 재지 않고 **코퍼스 상수** `cfg.norm_scale_const`
+                       하나로 나눈다 = "scale align 을 뺀" ablation arm. 위 분모들은 전부
+                       세그먼트별로 scene 크기에 맞춰 적응하는데(=scale align), 이건 그 적응만
+                       없애고 나머지(앵커 E@inv(E_s), intr_norm, 채널 규약)는 그대로 둔다.
+                       상수를 코퍼스 **기하평균**으로 잡으면 mean||t||/분모 의 로그 평균 레벨이
+                       보존되므로 vae_latent_scale / diffusion 입력 std 를 안 흔든다 —
+                       da3_7k train 29414 세그먼트 실측: geomean 3.982685, med 3.614095.
+                       (분산은 원래도 안 줄고 있었다: mean||t|| 원본 log10std 0.3107 vs
+                        avg_scale 로 나눈 뒤 0.3144. 분모가 하는 일은 분산 축소가 아니라
+                        "scene 크기 대비" 로의 단위 변환이다.)
 Legacy aliases accepted: 'saved_avg_scale' -> 'avg_scale', 'target_cam' -> 'cam_dist_mean'.
 
 pose_source (pose/caption/avg_scale 를 어느 코퍼스에서 읽을지) — 자세한 근거는
@@ -1256,7 +1266,9 @@ class CamDataset(torch.utils.data.Dataset):
         normalized_intrinsics = torch.cat([(fx / wv)[:, None], (fy / hv)[:, None]], dim=-1).float()
         _intr_norm = getattr(self.cfg, 'intr_norm', 'auto')
         if _intr_norm == 'auto':      # legacy coupling to scale_mode (see module docstring)
-            _intr_norm = 'rel' if _scale_mode == 'avg_scale' else 'raw'
+            # 'const' 는 avg_scale 의 ablation 짝이라 같은 쪽에 붙인다 (분모만 다른 arm 끼리
+            # intr 규약이 갈리면 비교가 안 된다). 기존 mode 들의 매핑은 그대로다.
+            _intr_norm = 'rel' if _scale_mode in ('avg_scale', 'const') else 'raw'
         if _intr_norm == 'rel':
             # frame0-relative -> frame0 intr = [1,1] (dataset_large.py:313)
             normalized_intrinsics = normalized_intrinsics / normalized_intrinsics[0:1, :]
@@ -1337,6 +1349,16 @@ class CamDataset(torch.utils.data.Dataset):
             # and leakage-free (no target view enters the divisor).
             cs = self._first_farthest_context(scene_idx, s, e)
             norm_scale = cs if cs is not None else self._first_farthest_scale(extrinsics)
+        elif _scale_mode == 'const':
+            # [new 2026-08-17] scale-align ablation: 세그먼트별 적응 분모 대신 코퍼스 상수 하나.
+            # 파일도 안 읽고 카메라도 안 재므로 avg_scale_ref 는 **분모에는 무관**하다 (인덱스
+            # 필터에는 계속 관여한다 -> 대조군과 같은 샘플 집합을 유지하려고 일부러 남긴다).
+            _c = getattr(self.cfg, 'norm_scale_const', None)
+            if _c is None or float(_c) <= 0:
+                raise ValueError("scale_mode='const' 는 cfg.norm_scale_const > 0 이 필요하다 "
+                                 f"(got {_c!r}). 코퍼스 기하평균을 쓸 것 — da3_7k/"
+                                 "front_first_anchor 는 3.982685")
+            norm_scale = torch.tensor([float(_c)])
         elif _scale_mode == 'first_farthest_135':
             # LagerNVS-style: 1.35 * max ||center - first camera|| over the segment
             norm_scale = self._first_farthest_scale(extrinsics)

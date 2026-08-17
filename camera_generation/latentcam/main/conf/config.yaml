@@ -48,6 +48,12 @@ per_token_noise: false
 cfg_dropout_p: 0.1
 loss_tau_min: 0.02
 scale_mode: avg_scale
+# [new 2026-08-17] scale_mode: 'const' 전용 — 세그먼트별 적응 분모 대신 쓸 **코퍼스 상수**.
+# "scale align 만 뺀" ablation arm 용이다 (다른 scale_mode 에서는 읽지 않는다).
+# 코퍼스 **기하평균**으로 잡을 것: mean||t||/분모 의 로그 평균 레벨이 보존돼 vae_latent_scale 과
+# diffusion 입력 std 가 대조군과 같은 자리에 남는다. 실측(da3_7k train 29414 세그먼트,
+# avg_scale_ref=front_first_anchor): geomean 3.982685 / med 3.614095 / log10std 0.3287.
+norm_scale_const: null
 # [new] intrinsics encoding of cam_param[..., 9:11] — a property of the VAE CKPT, independent of
 # scale_mode. 'raw' = fx/2cx, fy/2cy (0.448, 0.796) | 'rel' = /frame0 (exactly 1.0 for DL3DV)
 # | 'auto' = legacy coupling ('rel' iff scale_mode == avg_scale). Mismatch vs the ckpt silently

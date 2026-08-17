@@ -4,6 +4,29 @@ All notable changes to the latentcam sub-project. Follows [Keep a Changelog](htt
 
 ## [Unreleased]
 
+### Added
+- **`scale_mode: 'const'` + `norm_scale_const`** (`main/dataset_dl3dv.py`, `main/conf/config.yaml`,
+  `main/config.py`) — 세그먼트마다 재는 적응형 분모 대신 **코퍼스 상수 하나**로만 나눈다.
+  기존 분모 6종은 전부 세그먼트별로 scene 크기에 맞춰 적응하는데(= scale align), 이 mode 는 그
+  적응만 없애고 나머지(앵커 재고정 `E @ inv(E_s)`, `intr_norm`, 채널 규약)는 그대로 둔다.
+  `norm_scale_const` 가 없거나 <= 0 이면 raise. `intr_norm: 'auto'` 매핑에서 `'const'` 는
+  `'avg_scale'` 과 같이 `'rel'` 로 간다 (분모만 다른 arm 끼리 intr 규약이 갈리면 비교가 안 된다);
+  다른 mode 의 auto 매핑은 불변. **기존 config 는 전부 동작 불변** (새 분기라 기존 dispatch 에
+  손대지 않았다).
+- **`main/conf/experiment/da3_7k_da3geo_frontanchor_noscale.yaml`** — 위 mode 를 쓰는
+  scale-align ablation arm. 대조군 `da3_7k_da3geo_frontanchor` 와 **분모 하나만** 다르다.
+  상수 3.982685 = 그 arm 의 train 29414 세그먼트 `avg_scale_front_first_anchor` **기하평균**
+  (med 3.614095, log10std 0.3287; test 3375 세그먼트는 3.971595 로 0.6% 차이). 기하평균을 쓰면
+  `log(mean||t||/분모)` 평균 레벨이 대조군과 0.0038 dex (0.9%) 안에서 일치해
+  (`const` med 0.3845 / log10mean −0.4301 vs `avg_scale` med 0.4228 / −0.4339) camera VAE 와
+  `vae_latent_scale: 0.96032625` 가 같은 자리에 남는다 — `norm_scale=1` 로 두면 translation 이
+  3.6배 커져 VAE 를 OOD 로 밀어 넣는 효과와 섞인다. 인덱스는 대조군과 동일(29414/3263):
+  `avg_scale_ref: front_first_anchor` 는 분모에는 안 쓰이지만 인덱스 필터(`s==0` 제외)에는 계속
+  관여하므로 paired 비교용으로 남겼다. 추론/eval 경로는 무수정 — `scripts/eval_testset.py` 가
+  dataset 이 내보낸 `avg_scale` 을 그대로 `out_to_trajectory(scale=...)` 에 곱해 되돌린다.
+  검증(paired, 30 샘플): `cam_param[:, 6:9]` 크기비 = `ns_ctrl / 3.982685` 와 1e-6 이내 일치,
+  rotation(0:6)·intrinsics(9:11) 채널은 **bit-identical**, 샘플 집합 동일.
+
 ### Changed
 - **`frontanchor` arm 2개에 `geo_cover_before_only: true`** (`da3_7k_da3geo_frontanchor.yaml`,
   `da3_7k_lagernvsgeo_frontanchor.yaml`; experiment config 만, 코드 변경 0줄). 그 전까지 이 arm 은

@@ -19,7 +19,20 @@
 # (mean||t|| = 세그먼트 내 mean ||t_i||, 앵커 frame s):
 #   상수 3.982685  med 0.3845  log10mean -0.4301  log10std 0.3107
 #   대조군 avg_scale med 0.4228  log10mean -0.4339  log10std 0.3144
-# 로그 평균 차이 0.0038 dex (0.9%) -> diffusion 입력 std 가 arm 간에 안 흔들린다.
+# 로그 평균 차이 0.0038 dex (0.9%).
+#
+# [2026-08-17 사후 실측 — 위 0.9% 는 mean||t|| 레벨이고 latent std 는 아니다. 정정]
+# scripts/vae/vae_scale_matrix.py 전체 코퍼스 (MODES=const, CKPTS=vae_20260302_300,
+# 32677 sample = avg_scale 측정과 같은 집합), intr rel 행:
+#                lat.std    rot     trans   intr_L1 | trans p99.9   max  | recL1 p99.9    max
+#   avg_scale   0.62722  0.00639  0.00537  0.00316 |  2.6892  7.2252 |  0.03226  0.06529
+#   const       0.67537  0.00641  0.00539  0.00319 |  4.9201  8.5457 |  0.04905  0.13898
+#   1) recon 이 소수 5자리까지 동일 -> const 분모가 VAE 를 OOD 로 밀지 **않았다**
+#      (기하평균 선택의 목적은 달성).
+#   2) 그러나 latent std 는 +7.7% 움직였다. arm 간 diffusion 입력 std 가 그만큼 다르다.
+#   3) tail 이 무겁다: trans p99.9 1.83배, 최악 recon L1 2.13배. 적응 분모를 빼면 큰 scene
+#      세그먼트가 정규화 후에도 크게 남는다 -- confound 가 아니라 이 ablation 이 재려는
+#      효과의 일부다.
 #
 # 상수의 출처 (2026-08-17 실측, 이 arm 의 학습 집합 그대로):
 #   da3_7k train 29414 세그먼트 (blacklist 933 제외, s==0 제외) 의
@@ -42,6 +55,11 @@
 # s==0 제외) 에는 계속 관여하므로 일부러 남긴다 -> paired 비교가 유지된다.
 #
 # vae_latent_scale 은 0.96032625 그대로 (대조군과 같은 축에서 loss 를 보기 위해).
+# 실측 std 는 0.67537 이라 이 값도 미보정이지만, 대조군 iby28bbp 도 같은 0.96032625 위에
+# 앉아 있으므로 여기만 바꾸면 변수가 둘이 되어 paired 비교가 깨진다. 보정값을 쓰는 arm 은
+# da3_7k_da3geo_frontanchor_vaescale (0.62722) 로 이미 따로 있다. 최종 판단은 decode 후
+# 지표(loss_traj / clatr / fcd) 로 할 것 -- loss_latent 는 나눗수는 같아도 실제 입력 크기가
+# arm 간 7.7% 다르다.
 exp_name: da3_7k_da3geo_frontanchor_noscale
 pose_source: da3
 avg_scale_ref: front_first_anchor   # 분모에는 무관, **인덱스 필터 정합용** (위 설명)

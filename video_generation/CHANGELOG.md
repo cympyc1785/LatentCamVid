@@ -49,6 +49,10 @@
   6/6 rc=0 완료. `make_concat.sh` 는 vista4d 판과 같은 무-`{clip}` 경로 규약을 쓰고, input 행에
   원본 `3.mp4`(1195프레임) 대신 `20260818_vista4d/src/rcm3_first49.mp4` 를 넣는다 — 모델은 앞 49
   프레임만 읽으므로 원본을 붙이면 input 행만 다른 구간을 보여준다.
+- `tools/recammaster/warp_grid_video.py --transpose` — 격자를 행=카메라 / 열=`--rows` 항목으로
+  뒤집는다 (기본은 그 반대, 무플래그 동작 불변). 한 카메라의 depth warp 과 gen 을 **가로로
+  나란히** 놓아 같은 프레임에서 warp 의 hole 이 그대로 생성으로 갔는지 바로 대조하려는 것
+  (memory `show-depth-warp-with-output`). 패널 라벨은 셀마다 `<카메라> | <행이름>` 그대로다.
 - `tools/recammaster/sd_revpair_prepare.py` (신규) — Scene-Decoupled 같은 scene 의 clip 2개를
   `rev(A)[80..1] + B[0..80]` (161장) 으로 이어 붙여 **한 번에** DA3 를 돌려 두 clip 의
   depth/카메라를 한 좌표계·한 스케일로 만든다 (clip 간 frame0 카메라가 동일해서 역재생이

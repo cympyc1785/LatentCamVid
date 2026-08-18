@@ -58,6 +58,12 @@
   depth/카메라를 한 좌표계·한 스케일로 만든다 (clip 간 frame0 카메라가 동일해서 역재생이
   자연스럽게 이어진다). `--split_recon` 이 clip 별로 되썰고 `--verify` 가 SD 의 GT 미터
   pose 와 대조한다 — clip 간 스케일 차이 0.33% / 1.96% / 2.29% (`results/20260818_sd_revpair/config.md`).
+  - 4번째 pair `scene1002_5x5_loc37_scene_Dragon_Rise__rev-05_24mm__01_24mm` 추가 (수동 `--pairs`,
+    사용자가 val 목록에서 찍은 조합). clip 간 s 차이 **1.10%**. `viser_revpair.py` 는 `clip_a` 를
+    context 로 칠하므로 val 의 `{scene}__{TARGET}__{CONTEXT}` 와 색을 맞추려면 `--pairs
+    <scene>:<CONTEXT>:<TARGET>` 순서로 넣어야 한다 (기존 3 pair 는 `rev-01__05` 라 색이 반대).
+    `--pairs` 경로는 `dir_angle_deg`/`min_path_len_m`/`resid_*` 를 안 재고 `nan` 으로 둔다.
+    `pairs.json` 을 통째로 덮어쓰므로 기존 3개 기록은 수동으로 합쳤다.
 - `results/20260818_taylor_gen/make_concat.sh` (신규) — 모델별 concat 영상
   (행 = input / depth warp / gen, 열 = 카메라 6종).
 - `results/20260818_vista4d/make_concat.sh` (신규) — 같은 3행 concat 의 Vista4D 판.

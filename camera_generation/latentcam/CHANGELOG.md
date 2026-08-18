@@ -5,6 +5,19 @@ All notable changes to the latentcam sub-project. Follows [Keep a Changelog](htt
 ## [Unreleased]
 
 ### Added
+- **`scripts/viewer/viser_revpair.py`** — SD 역재생 결합 recon
+  (`video_generation/results/20260818_sd_revpair/<pair>/recon.npz`, 161장 통짜 DA3) 을 viser 로 본다.
+  전역 index 를 `anchor_index`(=80) 에서 잘라 `[0,anchor)` = `rev(A)` = **context**(초록),
+  `[anchor,N)` = `B` = **target**(파랑 point / 청록 camera), anchor 한 장은 흰색 frustum 으로 따로
+  띄운다. frustum·색 규약은 `viser_val_cameras.py` 의 `add_frustums` / `_GL2CV` 를 **import 해서
+  그대로 쓴다** (기존 뷰어의 `main()` 은 `results/<exp>/test` glob + PRDC 에 묶여 있어 분기를 못
+  친다 — 형제 스크립트로 뺐다). `extrinsics` 는 OpenCV **w2c** 라 `c2w_gl = inv(w2c) @ _GL2CV`
+  (메모 `da3-extrinsics-are-w2c`). world 는 DA3 joint 게이지 그대로 — 여기서 sim3 를 또 태우면
+  "두 clip 이 통짜 recon 하나로 같은 좌표계에 들어왔나"라는 확인 대상 자체가 가려진다.
+  기본 tint, `--rgb` 로 `images` 원색. 기존 파일 변경 0줄.
+  주의: DA3 `conf` 는 **1.0 에 바닥**이 있고 Cabin_Lake recon 은 픽셀의 44.0% 가 정확히 1.0 이라
+  기본 `--pc-conf-pct 40` (= `viser_val_cameras.py` 와 같은 값) 이 임계 1.0000 → **아무것도 안
+  버린다**. 조용히 "p40 로 걸렀다"고 오해하지 않도록 임계 == conf 최소값이면 경고를 찍는다.
 - **`scale_mode: 'const'` + `norm_scale_const`** (`main/dataset_dl3dv.py`, `main/conf/config.yaml`,
   `main/config.py`) — 세그먼트마다 재는 적응형 분모 대신 **코퍼스 상수 하나**로만 나눈다.
   기존 분모 6종은 전부 세그먼트별로 scene 크기에 맞춰 적응하는데(= scale align), 이 mode 는 그

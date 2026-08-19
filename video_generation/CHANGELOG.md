@@ -7,6 +7,37 @@
 ## [Unreleased]
 
 ### Added
+- **Look-Before-Move Lite 1단계 — 4D point cloud 캐시 + 후보 렌더러**
+  (`camera_generation/models/Planner/CinemaTraj/lbm/{cloud,render}.py`).
+  ⚠ `camera_generation/models` 는 `.gitignore:222` 로 추적 대상이 아니라 이 파일들은 커밋에
+  들어가지 않는다 (`video_generation/tools` 와 같은 상황). 이 항목은 로컬 기록용.
+  - `cloud.py` — Vista4D `unproject()` 를 감싸 영상 1편을 `cloud.npz`(format `lbm_cloud_v1`)로
+    캐시한다. `visible (n,f)` 를 `np.packbits(axis=1)` 로 8배 줄여 저장. 게이지(`S`, `z_med`,
+    `parallax_ratio`)를 meta 에 같이 싣는다 — camel `S=4.6713 plx=0.0046`,
+    avocado-slice `S=4.6471 plx=0.1286` 으로 기존 실측치를 그대로 재현.
+  - **`preprocess_scene` 을 unproject 앞에 필수로 끼웠다** (`--no_preprocess` 로 raw 경로 재현).
+    저자 파이프라인(`render_single.py:72`)이 늘 거치는 단계인데 처음에 빼먹었더니 camel 재렌더가
+    20 dB 에 묶였다. 기본 `static_mask = ~dynamic_mask` 가 마스크 경계에서 프레임당 0.04% 씩
+    물체 표면을 흘리고, static 점은 전 프레임 visible 이라(`point_cloud.py:63`) 그 누수가 49프레임
+    한꺼번에 렌더되며, 유령이 진짜 물체와 z 가 거의 같아 z_tolerance(log1p 0.02) 안에서 가려지는
+    대신 **블렌딩**되어 반투명 빗살이 됐다. `S`/`z_med` 는 sky depth 가 `SKY_DEPTH=1e3` 으로 덮이기
+    전 raw depth 에서 잰다.
+  - `render.py` — `CloudRenderer` (cloud 를 GPU 에 한 번 올리고 pose 를 갈아끼움), `look_at_c2w`
+    (roll 은 중력축 기준 0), `measure()` (coverage / hole_fraction / subject bbox·면적·가시율),
+    `visible_at(temporal_persistence=)` (NTP = 그 프레임 유래 점만).
+  - **`--self_check` 의 규약 판정을 PSNR 에서 재투영 잔차로 교체.** 이 렌더러는 소스 pose 에서도
+    2x2 box blur 를 먹는다 (`point_cloud.py:129-138`: 픽셀 중앙 점이 `du=dv=0.5` → 네 이웃 0.25씩)
+    → PSNR 상한이 내용 의존적이라(camel 28 dB / avocado-slice 40 dB) 임계로 규약을 못 가린다.
+    대신 `reprojection_residual()` 이 프레임 f 유래 점을 그 카메라로 되쏘아 원래 픽셀과 비교한다:
+    실측 **0.0003 px**, y축 반전 음성 대조군 **719 px**. 음성 대조군 assert 를 같이 둬서 검사가
+    실제로 규약을 보고 있는지 확인한다. PSNR 은 데이터 품질 보조지표로 강등(NTP/TP 병기).
+    camel · avocado-slice 양쪽 PASS.
+- **`scripts/sam3_seg_instances.py`** — 배포본 `recon_and_seg` 를 읽기만 하고 SAM3 만 재실행해
+  per-instance track 을 별도 루트(`eval_data/seg_instances/`)에 쓴다. Pi3·DA3 재구성을 건너뛰므로
+  영상당 ~30 s 이고, 배포본을 안 덮어써서 끝난 eval 110 entry 의 재현성이 유지된다.
+  `--num_shards/--shard_id/--skip_done` + `--check_dynamic_mask` (우리 재실행을 OR 로 뭉갠 것 vs
+  배포본 `dynamic_mask` 의 프레임 평균 IoU — 낮으면 keyword/모델 버전이 어긋난 것이라 병합 임계를
+  논하기 전에 봐야 한다). 실측: camel 3 track / IoU 0.994, avocado-slice 8 track / IoU 0.988.
 - **SAM3 instance track 저장 + 중복 병합 후처리** — scene graph(PSG4D relation) 입력용.
   Vista4D 의 `run_sam3_video` 는 per-instance mask / 프레임 관통 track id / keyword / box / score 를
   이미 만드는데 (`utils/recon_and_seg/seg_sam3_official.py:18-88`) `recon_and_seg_single.py` 가 그걸

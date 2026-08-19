@@ -7,6 +7,36 @@
 ## [Unreleased]
 
 ### Added
+- **SAM3 instance track 저장 + 중복 병합 후처리** — scene graph(PSG4D relation) 입력용.
+  Vista4D 의 `run_sam3_video` 는 per-instance mask / 프레임 관통 track id / keyword / box / score 를
+  이미 만드는데 (`utils/recon_and_seg/seg_sam3_official.py:18-88`) `recon_and_seg_single.py` 가 그걸
+  vis 오버레이에만 쓰고 버린다 — 디스크에 남는 `dynamic_mask` 는 전 인스턴스를 OR 로 뭉갠 이진
+  마스크라 인스턴스가 사라진다. 그래서 SAM2 나 PSG4D tracking 모듈을 새로 붙일 필요가 없고
+  저장만 추가하면 된다.
+  - `models/Vista4D/utils/recon_and_seg/seg_sam3_utils.py` 에 `save_seg_instances` /
+    `load_seg_instances` 추가 (format `vista4d_seg_instances_v1`). `meta.json` (프레임별
+    id/keyword/score/box) + `masks.npz` (`np.packbits` 후 `savez_compressed`, 프레임당 키 하나).
+    인스턴스가 겹쳐도 손실이 없다 — DynamicVerse 의 단일 채널 instance-id PNG
+    (`stage2_sa2va.py:525` last-writer-wins) 와 달리 마스크를 인스턴스별로 따로 둔다.
+  - `models/Vista4D/scripts/preprocess/recon_and_seg_single.py --save_seg_instances`
+    (기본 off = 기존 동작 그대로). `seg_keywords` 가 비었거나 `_all_` 이면 SAM3 를 안 타므로
+    경고만 찍고 건너뛴다.
+    ⚠ Vista4D 는 자체 `.git` 을 가진 vendored repo 이고 `video_generation/models` 는
+    `.gitignore:224` 로 부모 추적에서 빠져 있다 — 위 두 파일은 이 커밋에 들어가지 않는다
+    (기존 `--keep_recon_sky` 패치와 같은 `# LOCAL:` 주석 규약으로 working tree 에만 존재).
+  - `scripts/merge_seg_instances.py` (신규) — 중복 keyword 를 **track 단위** mask IoU 로 병합.
+    Vista4D 는 keyword 하나당 SAM3 를 따로 돌리고 `obj_id_offset` 을 더하므로 `metadata.csv` 의
+    `woman,person,human` 같은 recall 우선 나열이 같은 사람을 track 3 개로 만든다 (scene graph 에선
+    노드 3 개 = 그래프 오염). Uni4D 처럼 프레임별 box NMS(0.5) 를 쓸 수는 없다 — Uni4D 는
+    GroundingDINO 한 forward 에서 전 프레이즈를 채점하지만 SAM3 의 PCS 는 프레이즈별 별도 패스라
+    억제할 자리가 없고, 프레임별로 걸면 살아남는 track 이 프레임마다 달라져 track 이 조각난다.
+    병합 조건은 공통 등장 프레임 평균 mask IoU >= `--iou` **그리고** 짧은 쪽 대비 공통 프레임 비율
+    >= `--min_co_frac`, union-find 로 묶는다. `--label_policy {score,area,keyword_order}`,
+    `--dry_run` (표만 출력), `--vis` (imageio+libx264 오버레이 영상).
+    출력은 항상 새 폴더(`<seg_instances>_merged`) 라 임계를 바꿔도 재-recon 이 필요 없다.
+    같은 v1 포맷 + `meta["merge"]` 에 node/alias/pairwise 표를 덧붙인다.
+    검증: 합성 데이터 왕복 무손실(W=101 로 8 의 배수 아닌 폭 + 빈 프레임 포함),
+    woman/person 중복쌍 mean_iou 0.943 -> 3 track 이 2 node 로, knife 는 분리 유지.
 - **Vista4D 어댑터** — 벤치마크 7번째 모델. 3단계라 "카메라 파일만 갈아끼우기"가 안 되고
   소스마다 4D 재구성을 먼저 돌려야 한다.
   - `tools/recammaster/vista4d_prepare.py` (신규) — canonical 단위 궤적 -> stage 2 의
@@ -41,6 +71,20 @@
   - `run_grid.py --model vista4d` + `--v4_recon <stage1 root>` — stage 2(`render_single`)
     -> `_cond/video_pc.mp4` 를 `_warp/warp.mp4` 로 복사 -> stage 3(`scripts.inference.inference`,
     Wan2.1-T2V-14B + `384p49_step=30000`). `--warp_only` 는 stage 2 까지만.
+- `results/20260819_vista4d_eval/run_eval_gen.sh` (신규) — Vista4D **공식 eval 데이터**
+  (`/data1/cympyc1785/data/Vista4D-Eval-Data`, 51 소스 x 2 카메라 = 110 entry) 를 저자 배포
+  스크립트 그대로 돌린다: `scripts.preprocess.render_eval` -> `scripts.inference.inference_eval`.
+  위의 `run_vista4d_grid.sh` 경로와 다른 점은 stage 1 재구성(depth/mask/`cameras.npz`)과 카메라
+  npz 를 **우리가 만들지 않고 저자 것을 그대로 쓴다**는 것 — 그래서 `vista4d_prepare.py` 도
+  `run_grid.py` 도 안 탄다. 출력 디렉토리를 `<video>/<camera>` 로 중첩시키려고 metadata 의
+  `name` 열만 `<video>/<camera>` 로 바꾼 사본(`meta_nested.csv`)을 쓴다 — 두 스크립트 다 `name`
+  을 그대로 하위 경로로 이어붙이므로 Vista4D 코드 수정 0줄. `gen/<video>/<camera>/` 에
+  `point_cloud.mp4`(=depth warp) 와 `video_seed=<seed>.mp4`(=생성) 가 같이 떨어져 memory
+  `show-depth-warp-with-output` 조건을 자동으로 만족한다. 인자: `STAGE=render|gen|all`,
+  `RES=384p|720p`, `FSFF=1`, `NUM_SHARDS`/`SHARD_ID`.
+  카메라 npz 에 키가 두 벌인데(`cam_c2w` / `cam_c2w_fsff`) **기본값은 frame 0 이 소스 카메라와
+  일치하지 않는다** — 우리 rcm3 anchor 규약과 다르니 대조할 때 주의. `FSFF=1` 이 그 차이를
+  없앤 변형이고 출력도 `_fsff` 로 갈린다.
 - `results/20260818_rcm3_gen/` (신규) — rcm3 x 카메라 6종 TrajectoryCrafter **좌표계 수정 +
   절대 pose** 렌더/생성. 기존 `20260813_camgrid_stage1/rcm3/trajectorycrafter/` 는 14개 태그가
   전부 `_legacyconv/` (2026-08-14 이전 버그난 규약, 절대 pose 아님) 라 새로 판다.

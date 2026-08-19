@@ -7,6 +7,95 @@
 ## [Unreleased]
 
 ### Added
+- **Look-Before-Move Lite 2단계 — scene graph 빌더**
+  (`camera_generation/models/Planner/CinemaTraj/scene_graph/*`,
+  `scripts/build_scene_graph.py`, format `planner_scene_graph_v1`).
+  ⚠ 위와 같은 이유로 커밋에 안 들어간다 (`camera_generation/models` 는 `.gitignore:222`).
+  - `io/scale/gravity/lift/instances/obb/relations/schema/viz` — RGBD + SAM3 instance track 을
+    중력 정렬 graph frame `G` 로 올리고 노드마다 OBB(`center/extent/yaw/R`) · track ·
+    `observed_faces` · `obs_az_span` · `viewing_distance.d_ref` 를 낸다. 계획서의 SDF /
+    occupancy / `free_space` 는 넣지 않았다 (`--build_sdf` 자리만 남김).
+  - **검증은 재투영 2종.** ① OBB center 를 최적 프레임에 되쏜 `reproj_px` ② 투영 OBB bbox 를
+    마스크 bbox 로 나눈 `size_ratio`. ①만으로는 규약은 잡아도 크기 부풀림을 못 잡는다.
+    실측 camel dyn_0 18.3 px / 1.12, dyn_1 4.1 px / 1.22, avocado-slice dyn_0 12.8 px / 1.28,
+    dyn_1 16.1 px / 1.58, dyn_2 1.7 px / 1.14 — 전부 통과.
+  - **`deinflate_depth_axis` 를 기본 off (`--deinflate` 로만 on) 로 뒤집었다.** "시차 0.005 인
+    씬에서 시선 방향 두께는 depth 노이즈"라는 원래 가정이 camel dyn_1 에서 틀렸다 —
+    `trim_depth_tail` + `fit_obb` yaw 규약 수정 후 `size_ratio` 가 1.22 로 떨어졌고, 그 상태에서
+    보정을 걸면 extent 가 `0.16,0.05,0.13` → `0.05,0.05,0.13` 이 되어 몸통 길이를 통째로 날린다.
+    부풀림 판정은 이제 추측이 아니라 `size_ratio` 실측이 한다.
+  - `relations.build_relations` 의 `supported_by` 에 **바닥면 면적 조건**을 추가했다. 없으면
+    avocado-slice 에서 `person supported_by avocado` 가 나온다 (사람이 상반신만 보여 `z_lo` 가
+    조리대 높이라 아보카도 윗면과 0.05 u 안에 든다). 기하로는 참인데 말로는 거짓이고 이 엣지는
+    VLM 프롬프트로 그대로 나간다.
+- **Look-Before-Move Lite 3단계 — 후보 풀 + 렌더 게이트 + observation board**
+  (`camera_generation/models/Planner/CinemaTraj/lbm/{candidates,gates,overlay}.py`,
+  `scripts/build_candidate_board.py`). 위와 같은 이유로 커밋에 안 들어간다.
+  - `gates.py` — G4 τ/view-angle(싼 프리필터) → G1 behind-surface(후보 위치를 소스 프레임 depth 에
+    되쏘아 `z_cam > depth + 0.02·S` 면 벽 속) → G2 coverage → G3 framing(중심/면적/가림) 순서로
+    싼 것부터 돌고 떨어지면 렌더를 건너뛴다. **전 후보 결과를 `gates.csv` 에 남긴다** — 탈락 사유
+    분포가 곧 진단이다. G3 가림은 `render(subset=subject_points)` 로 subject 단독 렌더를 분모로
+    쓴다 (점 개수로 나누면 거리에 따라 값이 통째로 움직여 임계를 못 정한다).
+  - **후보 풀 기본값을 계획서의 절대 격자에서 τ 예산 역산(`--pool_mode budget`)으로 바꿨다.**
+    절대 격자(az {0,±45,±90,±135,180} × el {12,28,45} × r {0.7,1.0,1.4}·d_ref)를 camel 에서
+    돌리니 72개 중 **70개가 G4_tau 에서 죽었다**. 산수 문제다: `max_tau 0.30`, `z_med 3.553`,
+    `S 4.6713` → 예산 `0.30·3.553/4.6713 = 0.228 u` 인데 `d_ref` 가 `0.64 u` 라 반경을 1.4배로
+    늘리기만 해도(0.256 u) 초과다. 방위각 한계는 ±20° 근처고 "정면 45도"는 도달 불가능하다.
+    계획서 격자는 `--pool_mode absolute` 로 남겨뒀다.
+  - **subject 선택에 화면 점유 하한(`--subject_min_area_frac 0.01`)을 "가장 많이 움직인 노드"보다
+    먼저 건다.** 없으면 avocado-slice 에서 화면 0.24% 짜리 아보카도 조각이 subject 로 뽑히고
+    (path 0.111 u) 사람(12.7%)이 밀려서 G3 area 가 45개를 전부 떨어뜨린다 — τ 예산 안에서는 그
+    조각을 3% 로 키울 만큼 다가갈 수 없다(실측 최대 0.43%). 움직임은 subject 를 **고르는** 기준이
+    아니라 같은 급 후보들 사이의 **순위** 기준이다.
+  - **contract 의 각도를 절대 subject-local 방위각에서 소스 카메라 기준 상대값(`d_az`/`d_elev`)으로
+    바꿨다.** OBB yaw 는 180° 대칭이라 절대 방위각은 "정면"이 어딘지 정하지 못한다 — VLM 에게
+    `az -146` 은 아무 정보가 아니다. `gates.csv` 와 타일 캡션에도 같이 실었다.
+  - 실측: camel pool 45 → 통과 34 → board 27 (탈락 G4_tau 6, G2_coverage 5),
+    avocado-slice pool 45 → 통과 24 → board 24 (G4_tau 8, G2_coverage 12, G3_occlusion 1).
+- **Look-Before-Move Lite 4단계 — trajectory preset + decode → `canonical.json`**
+  (`camera_generation/models/Planner/CinemaTraj/lbm/presets.py`,
+  `decode/{build_poses,emit}.py`, `scripts/build_decision_fallback.py`, `DECISIONS.md`).
+  위와 같은 이유로 커밋에 안 들어간다 (`camera_generation/models` 는 `.gitignore:222`).
+  - `presets.py` — LBM 17 preset 을 `tools/recammaster/traj.py` 조합으로 재현하고 `n=49` 로 뽑는다
+    (`traj.py` 기본 `N_POSES=21` 이 아니다). speed 4종(`steady/accel/decel/ease`)은 dense 궤적을
+    **index pick** 으로 리샘플한다(보간 없음). `s_curve` 는 `arc(+σ/2)` + `start_at` + `arc(−σ/2)`.
+  - **preset 마다 조준 모드 `aim` 을 나눴다** (`look_at` / `traj`). 전부 매 프레임 subject 를 다시
+    조준하게 하면 `pan_left` 가 pan 이 아니게 된다 — 회전을 넣어도 look-at 이 도로 끌어와 항등이
+    된다. `pan/truck/pedestal/static_hold_locked` 는 `aim="traj"`, 나머지는 `look_at`.
+    `aim="traj"` 에서는 `tracking` 이 무시되므로 `tracking_ignored` 를 canonical meta 에 싣는다.
+  - **궤적 크기는 사람이 정하지 않는다 — `fit_tau` 가 `target_tau` 를 만족하는 최대 배율을 8회
+    이분법으로 찾는다.** `DEFAULT_SHAPE` 는 모양만 정한다(dolly_frac 0.35, lateral_frac 0.35,
+    sweep 45°, pan 20°). 같은 `orbit_left_arc` 인데 실측 배율이 camel 0.42188 /
+    avocado-slice 1.40625 로 **3.3배** 갈린다.
+  - **τ 는 시작 pose 와 궤적이 나눠 쓰는 하나의 예산이다.** `tau(f)=|p_plan(f)−p_src(f)|/z_med` 가
+    시작 offset 과 움직임을 같이 세는데 계획서는 게이트 `max_tau 0.30`(후보용)과
+    `target_tau 0.20`(궤적용)을 따로 뒀다. 그래서 board 1위를 그냥 집으면 **카메라가 선다** —
+    실측 camel A1 `tau_start 0.2595`, avocado-slice A1 `0.2815` 로 둘 다 0.20 초과라 `fit_tau` 가
+    scale **0** 을 골라 `path_len_u 0.0000` 이 나왔다. 게이트를 건드리는 대신 **결정 층**에
+    `--start_tau_frac 0.5` 를 넣어 시작 pose 에 절반만 준다(`build_decision_fallback.py`).
+    고친 뒤 camel `traj_scale 0.42188 tau_max 0.1931 path_len_u 0.1453 view_angle_max 12.77°`,
+    avocado-slice `1.40625 / 0.1983 / 0.1404 / 9.86°`.
+  - ⚠ 그 결과 **fallback 이 고르는 시작 pose 는 소스 pose 자신**이다. board 후보의 τ 가
+    `[0.0, 0.12, 0.12, 0.15, ...]` 로 이산적이라(격자 한 칸이 이미 예산의 60%) headroom 0.10 안에
+    드는 게 중심 하나뿐이다. 보수적 기본값으로는 맞지만, 시작 pose 에 예산을 얼마나 쓸지는 원래
+    VLM 의 결정이므로 **5단계 프롬프트에 "τ 는 시작과 움직임이 나눠 쓴다"를 명시해야 한다.**
+    격자를 조밀하게(`--num_azimuth 9 --num_radius 5`) 하는 선택지도 남겨뒀다.
+  - `build_poses.py` — decision + graph → world c2w (49,4,4). tracking gain
+    `world 0.0 / drift 0.6 / lock 1.0`, look-at bias 는 방향 `gravity.up_world` · 크기 OBB 높이×S.
+    `det(R)=1` 전 프레임 assert, `aim="look_at"` 이면 중력축 대비 roll assert — 실측 둘 다 **0.00e+00**.
+  - `emit.py` — frame0 anchor(`rel[0]=I`, 실측 편차 1.1e-16 / 2.1e-17) → 49→21 **index pick**
+    `rint(linspace(0,48,21))` → unit scale(`rmax` 로 나눔). 원래 크기는 무차원 손잡이
+    `g = rmax/S` 로 meta 에 남는다 — camel `rmax 0.677318 g 0.14500`,
+    avocado-slice `rmax 0.650821 g 0.14005`. zoom 은 `emit_model_cams.py` 에 intrinsics 채널이
+    없어 통과하지 못하므로 `zoom_dropped` 플래그로만 남긴다. 모델별 함정 6종을
+    `canonical.json` 의 `notes` 에 같이 싣는다.
+  - **`emit_model_cams.py` 왕복 검증 통과** (camel, `--scales 0.340772`):
+    recammaster/sierpinskicam/infcam/trajectorycrafter/cameraanything 5종 전부 emit,
+    UE5 JSON 을 다시 OpenCV c2w 로 되돌린 오차 trans 2.7e-7 / rot 5.0e-7 (JSON 이 `%.6f`),
+    `rmax` 0.677318 로 양쪽 일치. emit 쪽 업샘플러 `resample(rel21,49)` 와 우리 49프레임 원본의
+    차이는 trans 0.00696 · 회전 0.126° (camel) / 0.00696 · 0.135° (avocado-slice) 로
+    검증 기준 0.02 이내. `rerope` 는 `NATIVE_1X` 에 없어 별도 경로다.
+  - `DECISIONS.md` 신설 — 3·4단계에서 계획서와 어긋나게 고른 15건의 선택지·이유·되돌리는 법.
 - **Look-Before-Move Lite 1단계 — 4D point cloud 캐시 + 후보 렌더러**
   (`camera_generation/models/Planner/CinemaTraj/lbm/{cloud,render}.py`).
   ⚠ `camera_generation/models` 는 `.gitignore:222` 로 추적 대상이 아니라 이 파일들은 커밋에

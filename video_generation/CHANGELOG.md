@@ -42,7 +42,51 @@
   - 프리뷰: `results/20260820_aim_lbm_lite/{camel,avocado-slice}/`. 예전 것은
     `results/20260820_lbm_lite/` 에 대조용으로 남겼다.
 
+### Changed
+- **LBM-Lite 후보 board 기본값을 27칸 → 9칸으로**
+  (`camera_generation/models/Planner/CinemaTraj/scripts/build_candidate_board.py`:
+  `--board_size 27 --board_columns 9 --tile_width 480 --tile_height 270` →
+  `9 / 3 / 640 / 360`). ⚠ `.gitignore:222` 라 코드는 커밋에 안 들어간다.
+  **예전 동작은 저 플래그 4개를 그대로 주면 재현된다** (기존 구조 유지 규칙).
+  - 근거는 DECISIONS D35(각도 다양성) + D36(실측). 27칸은 4352×818 의 5.32:1 띠라
+    select 턴 100 draw 중 **7 개가 `finish_reason=length` 로 잘렸고**(9칸 0/100),
+    숫자를 빼면 camel 최상위 타일 픽이 5/5 → 0/5 로 무너진다. 9칸은 1928×1088 (1.77:1),
+    prompt tok 평균 6040 → 4314, completion tok 평균 776 → 562.
+  - 두 영상 전 파이프라인(board → loop → decode → emit → verify) 재실행, 둘 다 `verdict PASS`.
+    camel `pool 45 → passed 33 → board 9`, preset `orbit_left_arc`, `tau_max 0.196051`,
+    `max_view_angle_delta 12.9615`, `jerk_ratio 1.97805e-05`, `roundtrip_resample 0.00694961`,
+    `anchor_identity 2.22045e-16`, emit `--scales 0.346156`.
+    avocado-slice `pool 45 → passed 14 → board 9`, subject **`stat_0 (table)`** (정적 노드),
+    preset **`static_hold_locked`**, `tau_start = tau_max = 0.1286`, `view_angle_max 7.47 deg`,
+    **`path_len_u 0.0000`**, emit **`--scales 0`** — PASS 지만 **카메라가 안 움직이는 퇴화 플랜**이다.
+  - ⚠ 현재 `lbm/loop.py` 는 `start_mode source_frame0` 이라
+    `{'select': 'skipped_source_frame0', 'micro': 'skipped_source_frame0', 'traj': 'vlm'}` —
+    board 는 VLM 입력이 아니라 **진단/프리뷰 산출물**이다. 이 변경은 렌더 비용과
+    select 재활성화 대비이지 오늘의 결정 경로를 바꾸지 않는다.
+
 ### Added
+- **VLM 구멍 인지 ablation v2 — `select` 턴 + 그림 개입(가짜 magenta) + 위치 대조군**
+  (`camera_generation/models/Planner/CinemaTraj/scripts/ablate_vlm_hole_perception.py`,
+  format `vlm_hole_ablation_v1` → **`vlm_hole_ablation_v2`**). ⚠ `.gitignore:222`.
+  - v1 이 "안 한 것"으로 남긴 것을 채웠다: 조건 4종 → **11종**
+    (`A_full`/`B_no_num`/`C_no_img`/`D_conflict`/`E_paint`/`F_paint_nonum`/`G_shuffle`/
+    `H_neutral`/`I_temp10`/`J_paint_low`/`K_paint_low_nonum`), 턴 `--turn {traj,select,both}`.
+    `select` 턴은 trace 가 없어 `board/contract.txt` + `prompts/system_select.md` +
+    `[board_candidates.png, source_frames.png]` 로 프롬프트를 재구성한다.
+  - `E/F/J/K` 는 **board PNG 타일 중앙 60%×60% 를 `HOLE_COLOR=(255,0,255)` 로 덮어**
+    가짜 구멍을 만든다 (traj board 는 preset 행의 중간·마지막 프레임만 — `system_traj.md` 가
+    그렇게 보라고 지시하므로). `J/K` 는 같은 면적을 **최하위 타일**에 칠하는 위치 대조군.
+  - traj 턴: 9조건 × 2영상 × 3 draw = 54 draw 중 `orbit_left_arc` 가 아닌 것은
+    camel `C_no_img` 3/3(`s_curve`) 과 단발 2건뿐. avocado-slice 27/27 전부 `orbit_left_arc`.
+    이름 중립화(`M01..M13`)·행 셔플·temperature 1.0·숫자 반전·가짜 magenta 다 못 흔들었다.
+  - select 턴 9칸 camel (순서 고정, 숫자 off, 5 draw, 칠한 타일 `A1,C2`):
+    `B_no_num`(깨끗) **5/5** · `K_paint_low_nonum`(대조군) **4/5** · `F_paint_nonum`(처치) **0/5**.
+    reasoning 이 칠한 타일을 이름으로 짚는다("Tiles A1 and C2 are heavily magenta").
+    숫자를 켜면 분리 소멸(`G_shuffle` 만으로도 1/5 로 내려간다).
+  - avocado-slice 는 안 먹는다 — 칠하기 전부터 전 타일 magenta 면적비가 **0.22~0.37** 이라
+    0.60 을 얹어도 순위가 안 바뀐다 (camel 은 0.03~0.15 위에 0.36~0.39). **그림 채널은
+    hole 대비가 클 때만 작동**하고 구멍 많은 씬에선 숫자가 유일한 채널이다.
+  - 산출물 `out/ablation/{hole_ablation_both.json, board27/, board9/, painted/}`.
 - **VLM 이 렌더 구멍(magenta)을 보는지 가르는 ablation**
   (`camera_generation/models/Planner/CinemaTraj/scripts/ablate_vlm_hole_perception.py`,
   format `vlm_hole_ablation_v1`). ⚠ `.gitignore:222` 라 코드는 커밋에 안 들어간다.

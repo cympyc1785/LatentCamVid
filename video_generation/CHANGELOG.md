@@ -7,9 +7,12 @@
 ## [Unreleased]
 
 ### Fixed
-- **LBM-Lite 디코더: `start_mode=source_frame0` 가 frame 0 의 회전까지 보존하도록 (`--aim_anchor`)**
+- **LBM-Lite 디코더에 조준 앵커 옵션 `--aim_anchor` 추가 (기본은 기존 동작 `subject`)**
   (`camera_generation/models/Planner/CinemaTraj/decode/build_poses.py`, `decode/emit.py`,
   `verify.py`). ⚠ `camera_generation/models` 는 `.gitignore:222` 라 커밋에 안 들어간다.
+  ⚠ **두 쪽을 다 렌더해 비교한 뒤 사용자가 기존 동작을 골랐다** — 기본값은 `subject` 로
+  되돌렸고 산출물도 원상복구했다 (`model_gauge_rmax` camel 0.68801962 / avocado 0.71040781 로
+  이전과 정확히 일치). 앵커는 `--aim_anchor {source_frame0,auto}` 로 켤 수 있다.
   - 증상: `plan_sbs.mp4` 의 첫 프레임이 소스와 다르다. 원인은 `aim="look_at"` preset
     (`orbit_left_arc` 포함)이 **f=0 을 포함한 전 프레임**의 회전을 subject 조준으로 덮어쓰기
     때문. `c2w_start` 는 위치만 살아남았다. `τ = |Δp|/z_med` 는 위치 전용이라 `tau[0]=0.0`,
@@ -21,12 +24,11 @@
   - hole 분해(위치·회전 교차 렌더): 두 씬 다 **회전만 바꾼 쪽**이 위치만 바꾼 쪽보다 구멍이
     크다. camel f48 은 회전 단독 0.4183 / 위치 단독 0.1730 인데 합치면 0.1265 로 내려간다 —
     orbit 이동이 새 조준 방향에 관측을 도로 대준다.
-  - 처방: `--aim_anchor {auto,source_frame0,subject}` + `--aim_ramp_frames 12`. `auto`(기본)
-    는 `start_mode` 를 따라간다. look_at 조준을 다 세운 뒤 frame 0 의 조준 오차를 world 회전
-    하나로 뽑아 smoothstep `w(f)=x²(3−2x), x=f/12` 로 되돌린다 (f=0 100%, f≥12 0%).
-    smoothstep 인 이유는 f=0 에서 기울기가 0 이라 첫 프레임이 안 튀기 때문 — 선형이면
-    avocado 가 f0→f1 에서 0.96°/frame 로 출발한다. **`--aim_anchor subject` 가 예전 동작**이고
-    `start_mode=board` 는 자동으로 그쪽이다.
+  - 옵션: `--aim_anchor {auto,source_frame0,subject}` + `--aim_ramp_frames 12`.
+    **기본 `subject` = 예전 동작.** `source_frame0`/`auto` 를 주면 look_at 조준을 다 세운 뒤
+    frame 0 의 조준 오차를 world 회전 하나로 뽑아 smoothstep `w(f)=x²(3−2x), x=f/12` 로
+    되돌린다 (f=0 100%, f≥12 0%). smoothstep 인 이유는 f=0 에서 기울기가 0 이라 첫 프레임이
+    안 튀기 때문 — 선형이면 avocado 가 f0→f1 에서 0.96°/frame 로 출발한다.
   - 앵커 각도 camel 3.2093° / avocado 11.5555°. 재실행 지표(GPU 1, 49f 1280×720, decision 동일,
     `subject` → `source_frame0`): `hole_fraction` camel 0.0737215 → 0.0704789,
     avocado 0.327682 → 0.280871. `subject_in_frame` 1 / 1 유지, `tau_max`·`max_view_angle_delta`

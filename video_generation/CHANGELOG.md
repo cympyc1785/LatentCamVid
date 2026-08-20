@@ -43,6 +43,39 @@
     `results/20260820_lbm_lite/` 에 대조용으로 남겼다.
 
 ### Added
+- **VLM 이 렌더 구멍(magenta)을 보는지 가르는 ablation**
+  (`camera_generation/models/Planner/CinemaTraj/scripts/ablate_vlm_hole_perception.py`,
+  format `vlm_hole_ablation_v1`). ⚠ `.gitignore:222` 라 코드는 커밋에 안 들어간다.
+  - 동기: `trace/turn_00.json` 이 "avoids the large magenta regions" 라고 답했는데 **같은
+    프롬프트에 preset 별 `coverage_min`/`coverage_end` 숫자가 이미 있어서** 그림을 본 건지
+    숫자를 읽은 건지 구분이 안 됐다. 4조건 × 3 draw × 2영상 = 24콜 (Qwen3-VL-30B-A3B, ~3 s/콜).
+  - 조건: `A_full`(그림+숫자) · `B_no_num`(숫자 제거) · `C_no_img`(이미지 제거) ·
+    `D_conflict`(**숫자만 1−x 로 반전**, 그림은 그대로).
+  - 결과 — camel: A `orbit_left_arc`×3 / B `orbit_left_arc`×3 /
+    C `orbit_left_arc, s_curve, s_curve` / D `orbit_left_arc`×3.
+    avocado-slice: **네 조건 전부 `orbit_left_arc`×3**.
+  - ① **구멍은 실제로 본다**: D_conflict 에서 숫자상 `orbit_left_arc`=0.10(최악),
+    `truck_right`=0.40 인데도 "truck_left or truck_right result in significant magenta regions"
+    라고 답했다 — 주어진 숫자와 반대이고 실제 그림과 일치(원본 0.68 / 0.60). B_no_num 에서
+    숫자를 없애도 magenta 지목이 유지된다.
+  - ② **정확하진 않다**: B_no_num 이 `rise_reveal` 을 "significant magenta" 로 지목했는데
+    실제 coverage 0.96 으로 두 번째로 높다. 큰 구멍(0.6대)은 맞히고 중간은 지어낸다.
+  - ③ **선택 자체는 prior 다**: `orbit_left_arc` 가 24 draw 중 22회. 이미지를 빼도 숫자를
+    지워도 뒤집어도 안 바뀐다. D_conflict 답변은 `"maintains coverage (0.10) at the end"` 로
+    **반전된 숫자를 인용하면서 그 숫자와 반대 결론**을 쓴다 — 모순을 못 알아챈다. 즉 preset
+    품질을 지키는 건 VLM 이 아니라 **게이트**다 (camel 은 게이트가 3 preset 을 미리 잘랐다).
+  - 미실시: 후보 `select` 턴 ablation, temperature 스윕, 다른 모델 대조, **그림 쪽을 조작하는
+    조건**(구멍 없는 렌더에 가짜 magenta 를 칠하기 — 숫자 반전보다 강한 검사).
+- **후보 board 기본값을 27칸 → 9칸으로 줄일 근거 측정** (`scripts/build_candidate_board.py`
+  기존 `--board_size/--board_columns/--tile_width/--tile_height` 를 그대로 사용, 코드 변경 없음).
+  27칸은 4352×818 px 로 **5.32:1 가로 띠**라 사람이 못 본다. 진짜 이유는 칸 수가 아니라 풀의
+  각도 폭이다 — d_az 폭이 camel 34° / avocado 26° 뿐이라 인접 타일이 방위 8°·고도 10°·거리
+  0.2× 차이로 육안 구분이 안 된다 (`pool_mode=budget` 이 τ 예산에서 역산하므로 의도된 좁음).
+  top-N 별 각도 다양성(az/el/dist 종): 27 → 5/3/3, 15 → 4/2/3, 12 → 4/2/2, **9 → 4/2/2**(camel)
+  · 3/2/2(avocado), 6 → 동일. **12칸과 9칸의 종 수가 같다.**
+  9칸 + 타일 640×360 = 1928×1088 (1.77:1), 12칸 = 2572×1088 (2.36:1).
+  ⚠ 기본값 변경은 **사용자 승인 대기 중** — 지금은 `/tmp/board_{9,12}/` 에 후보만 렌더했고
+  `out/*/board/` 의 27칸 승인 대상은 안 건드렸다.
 - **Look-Before-Move Lite 7단계 — 정적 명사 추출 + SAM3 정적 인스턴스 + `relations` 실배선**
   (`camera_generation/models/Planner/CinemaTraj/scripts/extract_static_nouns.py`,
   `scripts/sam3_static_instances.py`, `scene_graph/relations.py`, `scripts/build_scene_graph.py`,

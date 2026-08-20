@@ -515,6 +515,23 @@
 - `lbm/loop.py` 의 argparse 를 `build_parser()` 로 분리 (`__main__` 동작 동일).
 
 ### Changed
+- **LBM-Lite: 시작 pose 를 결정 대상에서 뺐다 — `--start_mode source_frame0` 이 기본**
+  (`CinemaTraj/lbm/loop.py`, `decode/build_poses.py`, `decode/emit.py`). 소스 카메라의
+  `cam_c2w_world[0]` 을 그대로 시작 pose 로 쓰고 select · micro 단계를 건너뛴다 — 남는 VLM
+  결정은 궤적 preset 하나(VLM 턴 3 → 1). 예전 3단 경로는 `--start_mode board` 로 그대로 돌아간다.
+  근거: ① emit 기본 규약 `rel = inv(P[0]) @ P` 가 시작 pose 의 상수 offset 을 어차피 버리고
+  ReCamMaster 는 `--free_start` 로 살려도 무시한다 ② 그런데 τ 예산은 먹었다 — avocado-slice 는
+  `start_tau` 0.1549 로 preset 16종이 전부 포화 ③ camel 의 select 결과는 소스 pose 자신이었다
+  (`d_az 0.0, d_el 0.0, dist 1.00`). 실측 avocado-slice `path_len_u` **0.0000 → 0.1533**,
+  포화 preset **16 → 0**; camel 은 before/after 사실상 동일(위 ③ 때문). 자세한 진단(R1 τ 는
+  움직이는 소스 기준 / R2 τ 는 사전 필터로 문서화됐지만 크기를 정하는 유일한 구속 / R3 intent
+  text 부재)과 안 채택한 처방은 `CinemaTraj/DECISIONS.md` D21.
+- `decision.json` 에 `start_mode` 필드 추가, `build_poses.resolve_start_mode()` 가
+  **decision 을 CLI 보다 우선**한다. 모드가 어긋나면 에러 없이 "다른 궤적"만 나오기 때문이다
+  (board 결정을 source_frame0 로 풀면 VLM 이 고른 pose 가 사라진다). `decision_fingerprint`
+  payload 에도 넣어 stale-poses 가드가 모드 전환을 잡는다.
+- `lbm/loop.py` 가 실행 시작 시 `trace/turn_*.json` · `micro_*.png` 를 지운다. `save_trace` 는
+  인덱스 순으로 덮어쓸 뿐이라 이번 실행이 더 짧으면 지난 실행 턴이 섞여 남는다.
 - `run_grid.py` 의 `_outputs()` 가 `source.mp4` / `point_cloud.mp4` / `point_cloud_masks.mp4`
   **파일 이름**도 제외한다. Vista4D stage 3 은 denoise **전에** 이 셋을 out_dir 바로 아래에
   쓰므로(`scripts/inference/inference.py:144-146`) 안 빼면 생성이 죽어도 `--skip_done` 이
@@ -531,6 +548,12 @@
   cleaning_stove 말고 다른 소스로 배율 사다리를 돌리려고 필요했다.
 
 ### Fixed
+- **`build_poses` 가 소스 카메라 pose 에서 `det(R) != 1` 로 죽었다** (`--start_mode
+  source_frame0` + `aim != "look_at"` preset). `cameras.cam_c2w_world` 는 DA3 w2c 를 뒤집어
+  저장한 값이라 열이 정확히 단위벡터가 아니다 (`|R[:,2]|` camel 1+1.71e-5, avocado-slice
+  1−2.19e-4). assert 를 완화하는 대신 `orthonormalize()` 로 SO(3) 에 한 번 투영한다 (polar
+  decomposition, 회전각 변화 ~1e-3°) — 궤적이 아니라 입력이 정규직교가 아닌 문제이기 때문.
+  `board` 경로는 `look_at_c2w` 가 만든 pose 라 해당 없다.
 - **`CinemaTraj/decode/emit.py` 가 낡은 `poses.npz` 를 조용히 emit 했다.** 루프가
   `decision.json` 을 새로 써도 `build_poses` 를 다시 안 돌리면 emit 은 이전 실행의 궤적을
   읽는다 — 실측: avocado-slice 가 `static_hold` 결정으로 `orbit_left_arc` poses(`path_len_u`

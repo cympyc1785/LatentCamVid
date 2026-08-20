@@ -6,6 +6,40 @@
 
 ## [Unreleased]
 
+### Fixed
+- **LBM-Lite 디코더: `start_mode=source_frame0` 가 frame 0 의 회전까지 보존하도록 (`--aim_anchor`)**
+  (`camera_generation/models/Planner/CinemaTraj/decode/build_poses.py`, `decode/emit.py`,
+  `verify.py`). ⚠ `camera_generation/models` 는 `.gitignore:222` 라 커밋에 안 들어간다.
+  - 증상: `plan_sbs.mp4` 의 첫 프레임이 소스와 다르다. 원인은 `aim="look_at"` preset
+    (`orbit_left_arc` 포함)이 **f=0 을 포함한 전 프레임**의 회전을 subject 조준으로 덮어쓰기
+    때문. `c2w_start` 는 위치만 살아남았다. `τ = |Δp|/z_med` 는 위치 전용이라 `tau[0]=0.0`,
+    `view_angle_deg[0]=0.0` 으로 찍혀 지표 어디에도 안 나왔다.
+  - 실측 frame 0 회전 각차 camel 3.1837° (forward 축 0.4765° — 사실상 roll) /
+    avocado-slice 11.6739° (forward 축 11.4534° — 진짜 재조준). 렌더 hole 은
+    소스 pose 0.0100 / 0.0127 → plan f0 0.0395 / **0.3648**. avocado 는 frame 0 이 클립
+    전체에서 가장 나쁜 프레임이었다.
+  - hole 분해(위치·회전 교차 렌더): 두 씬 다 **회전만 바꾼 쪽**이 위치만 바꾼 쪽보다 구멍이
+    크다. camel f48 은 회전 단독 0.4183 / 위치 단독 0.1730 인데 합치면 0.1265 로 내려간다 —
+    orbit 이동이 새 조준 방향에 관측을 도로 대준다.
+  - 처방: `--aim_anchor {auto,source_frame0,subject}` + `--aim_ramp_frames 12`. `auto`(기본)
+    는 `start_mode` 를 따라간다. look_at 조준을 다 세운 뒤 frame 0 의 조준 오차를 world 회전
+    하나로 뽑아 smoothstep `w(f)=x²(3−2x), x=f/12` 로 되돌린다 (f=0 100%, f≥12 0%).
+    smoothstep 인 이유는 f=0 에서 기울기가 0 이라 첫 프레임이 안 튀기 때문 — 선형이면
+    avocado 가 f0→f1 에서 0.96°/frame 로 출발한다. **`--aim_anchor subject` 가 예전 동작**이고
+    `start_mode=board` 는 자동으로 그쪽이다.
+  - 앵커 각도 camel 3.2093° / avocado 11.5555°. 재실행 지표(GPU 1, 49f 1280×720, decision 동일,
+    `subject` → `source_frame0`): `hole_fraction` camel 0.0737215 → 0.0704789,
+    avocado 0.327682 → 0.280871. `subject_in_frame` 1 / 1 유지, `tau_max`·`max_view_angle_delta`
+    ·`jerk_ratio` 불변, 두 씬 다 PASS. 평균 hole 하락은 ramp 12프레임이 싼 구간이라 평균을
+    끌어내린 것이고 정상 구간은 그대로다 (avocado f12 이후 0.333 복귀).
+  - 부수 변경: ① `look_at` 배열도 ramp 구간은 실제 시선축으로 다시 찍는다 (안 하면 npz 와
+    `plan_cam.mp4` 화살표가 회전과 어긋난다) ② roll assert 는 ramp 바깥에만 건다 ③ 지문
+    (`decision_fingerprint`)에 `aim_anchor`/`aim_ramp_frames` 추가 — 안 넣으면 이것만 바꿔
+    재빌드했을 때 emit/verify 의 stale-poses 가드가 못 잡는다. `emit.py`/`verify.py` 에도
+    같은 CLI 를 달았다. ④ `rotation_log`/`rotation_exp` 추가 (scipy 가 env 에 없다).
+  - 프리뷰: `results/20260820_aim_lbm_lite/{camel,avocado-slice}/`. 예전 것은
+    `results/20260820_lbm_lite/` 에 대조용으로 남겼다.
+
 ### Added
 - **Look-Before-Move Lite 6단계 — `verify.py` (지표 8종) + 프리뷰 6종**
   (`camera_generation/models/Planner/CinemaTraj/verify.py`, format `lbm_verify_v1`).

@@ -7,6 +7,40 @@
 ## [Unreleased]
 
 ### Added
+- **Look-Before-Move Lite 6단계 — `verify.py` (지표 8종) + 프리뷰 6종**
+  (`camera_generation/models/Planner/CinemaTraj/verify.py`, format `lbm_verify_v1`).
+  ⚠ 아래와 같은 이유로 커밋에 안 들어간다 (`camera_generation/models` 는 `.gitignore:222`).
+  - 디코드된 49프레임을 **프레임별로** Vista4D 렌더해서(`poses[f]` 를 시간 `f` 의 점군으로)
+    지표를 잰다. 전 프레임을 frame 0 점군으로 그리면 동적 subject 가 얼어붙어 subject 지표가
+    통째로 거짓이 된다. env 는 계획서 표의 `da3` 가 아니라 **`vista4d`** (렌더러가 GPU 를 쓴다).
+  - 지표 8종 + PASS/WARN/FAIL. 실측(GPU 1, `start_mode source_frame0`, preset `orbit_left_arc`)
+    — camel / avocado-slice: `hole_fraction` 0.0737215 / 0.327682, `subject_in_frame` 1 / 1,
+    `subject_pixel_coverage` 0.0917329 / 0.100786, `behind_surface_frames` 0 / 0,
+    `max_view_angle_delta` 12.9615 / 11.2966, `tau_max` 0.196051 / 0.197719,
+    `jerk_ratio` 1.97805e-05 / 6.33917e-05, `roundtrip_resample` 0.00694961 / 0.00687041,
+    `anchor_identity` 2.22045e-16 / 1.9535e-17. verdict 둘 다 **PASS**.
+  - **지표 4(behind_surface)는 여기서 처음 전 프레임 판정을 받는다.** 게이트는 frame 0 한 장만
+    보고 preset 프리뷰도 7프레임만 확인한다 — frame 48 에서 벽을 뚫는 궤적을 구조적으로 못 본다.
+  - **지표 8 은 `emit.roundtrip_error` 와 다른 것을 잰다.** 후자는 `rel_full_unit[idx]` 를 도로
+    뽑아 비교하므로 정의상 항상 0 이다. 여기서는 `emit_model_cams.resample`(SE(3) 측지 보간)로
+    21→49 를 되돌린다 — 실측 0.0069, 즉 21키로 깎는 데서 0.7% 를 잃는다.
+  - **jerk 분모는 소스 p95, 소스가 정지면 `1e-2·S` 로 갈아타고 `jerk_denominator` 에 기록한다.**
+    두 씬 다 소스 p95 가 0 이 아니어서(camel 0.0175792 u, avocado 0.00701176 u) 계획서 그대로
+    p95 를 썼다. 분모를 조용히 바꾸면 배율이 씬마다 다른 뜻이 된다.
+  - `poses.npz` 가 지금 `decision.json` 것인지 **emit 과 같은 `decision_fingerprint`** 로 확인한다
+    (`--allow_stale_poses` 로 우회). 안 하면 옛 궤적을 새 결정인 척 채점하고, 숫자가 그럴듯해서
+    안 들킨다.
+  - 프리뷰 6종 → `results/20260820_lbm_lite/<scene>/`: `obb_overlay.mp4` ·
+    `board_candidates.png`/`board_presets.png` · `plan_render.mp4`(hole 마젠타) ·
+    `plan_sbs.mp4`(소스|렌더) · `plan_cam.mp4`(top/front/side, 소스 회색/플랜 주황/subject 점선) ·
+    `decision_summary.txt`(지표표 + emit meta + preset board + 게이트 탈락 분포 + VLM 원문).
+    영상은 전부 `imageio.mimwrite(codec="libx264", quality=6, macro_block_size=1)`.
+  - **`make_camviz.py` 는 재사용하지 않았다.** rel 공간 궤적 **한 벌**을 정적 PNG 로 그리는
+    도구라 ① 움직이는 소스 궤적 ② subject track ③ 영상 출력이 전부 없다 — 셋을 넣으면
+    `draw_traj` 의 몸통이 남지 않는다 (DECISIONS.md D24).
+  - `plan_cam.mp4` 는 **2줄**이다 (`--cam_detail`, 기본 on). 카메라-subject 거리 0.6 u 대비
+    카메라 운동이 camel `ptp [0.0178, 0.146, 0.007]` u 라 한 눈금에 담으면 궤적이 뭉개진다.
+    위 = 씬 전체, 아래 = 카메라만 확대. `--no_cam_detail` 로 1줄.
 - **Look-Before-Move Lite 2단계 — scene graph 빌더**
   (`camera_generation/models/Planner/CinemaTraj/scene_graph/*`,
   `scripts/build_scene_graph.py`, format `planner_scene_graph_v1`).

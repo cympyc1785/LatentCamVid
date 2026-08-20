@@ -42,6 +42,24 @@
   - 프리뷰: `results/20260820_aim_lbm_lite/{camel,avocado-slice}/`. 예전 것은
     `results/20260820_lbm_lite/` 에 대조용으로 남겼다.
 
+### Added
+- **verify 지표 9번 `path_len_u` — "카메라가 실제로 움직였나"**
+  (`camera_generation/models/Planner/CinemaTraj/verify.py`, `--min_path_len_u` 기본 0.05 u,
+  WARN 은 그 절반, **`--min_path_len_u 0` 이면 행 자체가 안 생겨 예전 동작**).
+  ⚠ `.gitignore:222` 라 커밋에 안 들어간다.
+  - 동기: 계획서 지표 8종에 "움직여야 한다"가 없다. `static_hold_locked` 는 coverage 를
+    최대화하는 퇴화 해라 VLM 이 자주 고르는데(avocado-slice 7 draw 중 6번), **8종이 전부
+    PASS** 로 통과한다. VLM 자신의 설명이 그대로다 — "maintains 100% coverage throughout the
+    shot with no camera motion, ensuring no hallucinated regions" (coverage 0.99).
+    contract 가 coverage 를 상으로 주고 움직임에는 상을 안 주므로 정적이 최적해다.
+  - 실측(avocado-slice 정적 draw): `hole_fraction 0.0154063` / `subject_in_frame 1` /
+    `subject_pixel_coverage 0.334287` / `behind_surface_frames 0` /
+    `max_view_angle_delta 7.4702` / `tau_max 0.128633` / `jerk_ratio 0` /
+    `roundtrip_resample 0` / `anchor_identity 2.22045e-16` 전부 PASS,
+    **`path_len_u 0` FAIL** → verdict PASS → **FAIL**.
+    camel 은 `path_len_u 0.147629 PASS`, 나머지 지표 값 불변.
+  - 근본 해결(contract 에 움직임 보상 넣기 / subject 를 동적 노드로 강제)은 아직 안 했다.
+
 ### Changed
 - **LBM-Lite 후보 board 기본값을 27칸 → 9칸으로**
   (`camera_generation/models/Planner/CinemaTraj/scripts/build_candidate_board.py`:
@@ -56,15 +74,40 @@
     camel `pool 45 → passed 33 → board 9`, preset `orbit_left_arc`, `tau_max 0.196051`,
     `max_view_angle_delta 12.9615`, `jerk_ratio 1.97805e-05`, `roundtrip_resample 0.00694961`,
     `anchor_identity 2.22045e-16`, emit `--scales 0.346156`.
-    avocado-slice `pool 45 → passed 14 → board 9`, subject **`stat_0 (table)`** (정적 노드),
-    preset **`static_hold_locked`**, `tau_start = tau_max = 0.1286`, `view_angle_max 7.47 deg`,
-    **`path_len_u 0.0000`**, emit **`--scales 0`** — PASS 지만 **카메라가 안 움직이는 퇴화 플랜**이다.
+    avocado-slice `pool 45 → passed 14 → board 9`, subject **`stat_0 (table)`** (정적 노드).
+    ⚠ **avocado 의 preset 은 draw 마다 뒤집힌다** — 같은 설정 7 draw 중 **6번
+    `static_hold_locked`**(`path_len_u 0.0000`, emit `--scales 0`), 1번 `orbit_left_arc`
+    (`hole_fraction 0.289933`, `tau_max 0.197946`, `path_len_u 0.15771`, `--scales 0.36666`).
+    camel 은 5/5 `orbit_left_arc`. 디스크 산출물은 소수파(orbit) draw 다.
   - ⚠ 현재 `lbm/loop.py` 는 `start_mode source_frame0` 이라
     `{'select': 'skipped_source_frame0', 'micro': 'skipped_source_frame0', 'traj': 'vlm'}` —
     board 는 VLM 입력이 아니라 **진단/프리뷰 산출물**이다. 이 변경은 렌더 비용과
     select 재활성화 대비이지 오늘의 결정 경로를 바꾸지 않는다.
 
 ### Added
+- **LBM-Lite 오케스트레이터 + 설정 파일 + README** (`camera_generation/models/Planner/CinemaTraj/`:
+  `run_lbm_lite.py`, `configs/default.json` (`lbm_lite_config_v1`), `README.md`).
+  ⚠ `.gitignore:222` 라 커밋에 안 들어간다.
+  - `--stage nouns|seg|graph|board|loop|decode|emit|verify|all` (별칭 `cloud`→`board`,
+    `poses`→`decode`). `all` = graph,board,loop,decode,emit,verify — `nouns`/`seg` 는 공유
+    `eval_data` 에 쓰고 SAM3 가 GPU 를 오래 잡아서 이름을 직접 줘야 돈다.
+  - **존재 이유는 인자 어긋남 방지**다. `start_mode` 는 loop/decode/emit/verify 네 군데,
+    `aim_anchor`/`aim_ramp_frames` 는 decode/emit/verify 세 군데에 각자 기본값으로 있다.
+    어긋나면 emit 의 stale-poses 가드에 걸리거나(운이 좋을 때) 지문이 같아 조용히 옛 pose 를
+    재사용한다(운이 나쁠 때). config 의 `shared` 블록을 **그 키를 받는 단계에만** 뿌린다
+    (stage 별 `accepts` 목록).
+  - 각 단계는 그대로 단독 실행 가능하다 — subprocess 로 부르기만 하고 `--dry_run` 이 명령을
+    그대로 찍는다. bool 은 집 스타일 `--flag`/`--no_flag` 로 나간다.
+    `--set board.board_size=27` 식 덮어쓰기, `--cuda` 는 **0~5 만 허용**(assert).
+  - 단계 시작 전 `--help` 로 import 를 찔러보고(`--no_preflight` 로 끔) 실패하면 멈추고
+    `conda run -n <env>` 를 찍는다. 실측상 **전 단계가 `vista4d` 하나**에서 돈다
+    (계획서의 graph/decode = `da3` 표기는 틀렸다 — `build_scene_graph.py` 는 cv2·scipy·
+    imageio·numpy 만 쓴다).
+  - 실행 결과 `out/run_lbm_lite.json` (`lbm_lite_run_v1`: 해석된 config + 단계별 rc/초/명령).
+  - 검증: camel `--stage all --cuda 1` graph 8.64 s / board 18.34 s / loop 28.91 s /
+    decode 2.70 s / emit 2.61 s / verify 40.86 s, 전부 rc 0, `verdict PASS`, 지표 9종이
+    수동 실행과 **완전히 동일**(`hole_fraction 0.0737214560303288`,
+    `tau_max 0.19605113945287692`, `anchor_identity 2.220446049250313e-16`).
 - **VLM 구멍 인지 ablation v2 — `select` 턴 + 그림 개입(가짜 magenta) + 위치 대조군**
   (`camera_generation/models/Planner/CinemaTraj/scripts/ablate_vlm_hole_perception.py`,
   format `vlm_hole_ablation_v1` → **`vlm_hole_ablation_v2`**). ⚠ `.gitignore:222`.

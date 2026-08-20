@@ -43,6 +43,63 @@
     `results/20260820_lbm_lite/` 에 대조용으로 남겼다.
 
 ### Added
+- **Look-Before-Move Lite 7단계 — 정적 명사 추출 + SAM3 정적 인스턴스 + `relations` 실배선**
+  (`camera_generation/models/Planner/CinemaTraj/scripts/extract_static_nouns.py`,
+  `scripts/sam3_static_instances.py`, `scene_graph/relations.py`, `scripts/build_scene_graph.py`,
+  `scene_graph/viz.py`). format `static_nouns_v1`.
+  ⚠ `camera_generation/models` 는 `.gitignore:222` 라 커밋에 안 들어간다 — 이 항목만 기록된다.
+  - `extract_static_nouns.py`: VLM 이 이미 뽑아둔 명사(`out/vlm_nouns/vlm_nouns.json`)에서 정적
+    명사를 고른다. `--source {auto,vlm,prompt}` — **기본 `auto` = VLM 우선, 없으면 프롬프트
+    규칙 기반 fallback**. 계획서는 규칙 기반이 기본이었는데 실측이 뒤집었다: `--source prompt`
+    는 camel `enclosure tree sun` / avocado `table bowl butter bottle chalkboard` 로,
+    `sun` 은 물체가 아니고 `enclosure` 는 `fence` 를 놓친다.
+  - 필터 두 겹 (`--drop_surfaces` 기본 on, `--max_nouns 8`): ① 광역 표면
+    (`ground/wall/floor/sky/...`) 제거 — 이건 물체가 아니라 배경이라 SAM3 가 화면 절반을 문다
+    ② 동적 명사와 겹치는 것 제거. 버린 명사는 사유와 함께 `static_nouns.json` 에 남긴다.
+    실측: camel 5 → 4 (`fence roof tree bush`, `ground` 탈락),
+    avocado-slice 8 → 6 (`table chair window television bottle "cutting board"`,
+    `wall` 표면 · `plant` 동적중복 탈락).
+  - `sam3_static_instances.py`: 정적 명사 → SAM3 text PCS → `seg_instances_static/<video>/`
+    (`vista4d_seg_instances_v1`, 즉 `io.py` 가 이미 읽는 그 포맷). 저장 직전에 각 track 의
+    **픽셀 총합** 중 배포본 `dynamic_mask` 안에 든 비율(`dynamic_frac`)을 재서
+    `--max_dynamic_frac 0.5` 초과면 뺀다. 뺀 track 도 `static_report.json` 에 `kept:false` 로
+    남긴다. ⚠ **이 두 씬에서는 한 번도 발동하지 않았다** — 12개 track 전부 0.0000 이고 실측
+    겹침이 camel 140 px / 17,817,176 px, avocado 0 px / 21,656,235 px 다. 즉 이 필터는
+    검증된 게 아니라 **미발동**이다. 실행: GPU 1, screen `infer1`, camel 4/4 · avocado 8/8 유지.
+  - `--seg_static_root` 로 정적 노드를 켠 첫 실행에서 **잠복 버그 2개**가 드러나 같이 고쳤다
+    (둘 다 `lbm/overlay.py:contract_text` 가 VLM 프롬프트로 그대로 뽑는 필드다):
+    · `moving` 을 `path_len > 0.05u` 임계로 정하던 것을 **`kind=="dyn"` 조건과 AND** 로 바꿨다.
+      임계가 존재하지 않기 때문이다 — 큰 정적 물체는 프레임마다 보이는 부분이 달라져 OBB 중심이
+      떠돌고 그 떠돎이 실제 운동보다 크다. camel `path_len_u`: 울타리 0.3217 vs 낙타 0.0674
+      (4.8배). avocado: 창문 0.5742 vs 움직이는 아보카도 0.1110 (5.2배), `center_drift_u` 는
+      0.1137 vs 0.0093 (12.2배). 크기 보정도 안 통한다 — `bottle`(ext 0.027) 0.0505 >
+      `dyn_2 avocado`(ext 0.038) 0.0251. 측정치는 안 지우고 `center_drift_u` 를 새로 실었다.
+    · `against_wall` 임계를 `min(wall_u, wall_contact_frac·max(extent[:2]))` 로,
+      **물체 크기 비례**로 바꿨다 (`--wall_contact_frac 0.15`; `1e9` 면 예전 절대 임계 동작).
+      절대 `wall_u=0.08` 하나로는 camel 6개 노드가 전부 True 였다 — 실측 최근접 꼭짓점–벽면
+      거리가 fence 0.0010 / roof 0.0175 / tree 0.0063 인데 **낙타 본체도** 0.0436, 0.0569 다.
+      낙타는 울타리 앞에 서 있는 것이지 붙어 있는 게 아니고, 전부 True 인 플래그는 프롬프트에
+      0 비트를 넣는다. 고친 뒤 avocado 는 11개 중 3개만 True 이고, 같은 `wall_u` 상한을 쓰는
+      창문 두 개가 갈린다(`stat_1` True / `stat_2` False) — 임계가 실제로 뭔가를 재고 있다는 증거.
+  - `viz.obb_overlay_video(kinds=...)` 추가. **기본은 동적만이라 기존 `obb_overlay.mp4` 는
+    바이트 단위로 동일**(camel `f216e21cca3c`, avocado `89112f4efcae` — 승인본과 md5 일치).
+    정적 검수용은 별도 `obb_overlay_all.mp4` 로 나가고 정적은 1px·bbox 없이 얇게 그린다.
+    상자를 6~11개 겹쳐 그리면 정작 봐야 할 subject OBB 가 안 보이기 때문.
+  - **하류 기하 불변 확인**: 정적 노드 투입 전/후로 `dyn_*` 의 `obb`·`track`·`d_ref`·`moving`
+    이 전부 동일하고 `merge_log` 도 그대로다 (camel `[]`, avocado `dyn#0→dyn#1 0.9795`
+    `dyn#2→dyn#1 0.9764`). 이미 승인된 `decision.json`/`poses.npz`/`canonical.json` 은 재실행
+    없이 유효하다. 바뀐 건 프롬프트 텍스트뿐 — edges camel 0→4 / avocado 3→16, 그리고
+    avocado 의 `supported_by` 가 dyn 셋 다 `null` → `stat_0`(table). 정적 노드 없이 돌리면
+    VLM 이 **테이블 위 장면을 테이블 없이** 본다는 뜻이고 이게 이 단계의 본래 목적이다.
+  - ⚠ **정적 노드의 OBB 품질은 동적보다 나쁘다 (고치지 않고 기록)**: `reproj_px` 가 camel
+    `stat_0 fence` 151.0, avocado `stat_0 table` 111.8 · `stat_4 chair` 83.8 (동적은 1.7~18.3).
+    `size_ok NO` 는 camel `tree` 2.07, avocado `table` 2.11 · `window` 1.85.
+    `stat_4 chair` 는 extent `0.06,0.00,0.02` 로 w=0.00 인 퇴화 상자다. `in_bbox` 는 전부 Y —
+    **중심은 맞고 크기만 과대**하다. 정적 노드는 후보 풀 원점도 게이트 대상도 아니고 소비처가
+    `## NEIGHBORS` 의 `label`+`dist_u` 한 줄이라 지금은 받아들인다. 원인은 얇고 넓은 구조
+    (테이블 상판 h=0.02)의 `minAreaRect` 깊이축 부풀림 + depth 누출.
+  - 프리뷰: `results/2026-08-20_lbm_lite/{camel,avocado-slice}/obb_overlay_all.mp4`
+    + `topdown_all.png` (기존 승인본 `obb_overlay.mp4`/`topdown.png` 는 덮어쓰지 않고 남겼다).
 - **Look-Before-Move Lite 6단계 — `verify.py` (지표 8종) + 프리뷰 6종**
   (`camera_generation/models/Planner/CinemaTraj/verify.py`, format `lbm_verify_v1`).
   ⚠ 아래와 같은 이유로 커밋에 안 들어간다 (`camera_generation/models` 는 `.gitignore:222`).

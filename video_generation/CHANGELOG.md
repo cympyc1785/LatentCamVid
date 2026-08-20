@@ -491,6 +491,28 @@
 - `tools/recammaster/halfsplit_compare_grid.py` (신규) — `halfsplit_fullrecon_transfer.py` 가 낸
   모델별 mp4 를 가로로 이어 `compare_<src>.mp4` 를 만든다 (각 열 = 모델, 각 열은 이미
   위 = 전이 warp / 아래 = 정답 2행). `results/20260817_fullrecon_fix8/compare_*.mp4` 와 같은 배치.
+- **detector 어휘 제안기 6종 비교** (`results/2026-08-20_detector_compare/{sam3_timing_mem,
+  gsam2_timing,florence2_timing,detector_boxes_overlay}.py`). 같은 영상 2편(camel /
+  avocado-slice) · 같은 `Meter`(torch peak alloc·reserved, nvidia-smi per-PID, `/proc` RSS, 5 Hz)
+  로 wall-clock + 자원을 잰다. 설치 0건 — `pyshim/` 심링크 + monkeypatch 로 해결.
+  - **비교의 전제가 틀려 있었다.** 지금까지 "VLM keyword" 라 부른 것은
+    `Vista4D-Eval-Data/metadata.csv` 의 `dynamic` 열, 즉 **Vista4D 저자가 손으로 적은 정답
+    명사**다 (`sam3_seg_instances.py:30-42 read_keywords()` 가 쉼표로 자를 뿐, 모델이 없다).
+    avocado-slice 는 그 목록에 `avocado`/`knife` 가 이미 들어 있어 keyword arm 3종에 정답이
+    유출된다. 오버레이 라벨을 `authored kw` 로 바꿨다.
+- **`CinemaTraj/scripts/extract_nouns_vlm.py` (신규)** — 계획서 Stage 0 의 실제 구현. 프레임 →
+  Qwen3-VL-30B-A3B (로컬 vLLM :22002) → `{dynamic, static, subject}` JSON. `lbm/vlm.py` 의
+  `chat_json` + 스키마 validator 를 그대로 쓴다. `--frame_mode single`(frame0 1장 = 다른
+  detector 와 동일 입력) / `multi`(0/16/32/48) 두 조건.
+- `gsam2_timing.py --caption_json/--caption_frame_mode/--caption_include_static` — 위 VLM 명사를
+  GDINO caption 으로 먹인다. 기존 두 경로(`--ram`, meta.json keyword)는 분기 밖에 그대로 뒀다.
+- `detector_boxes_overlay.py` 6패널로 확장 — 조건 3그룹(저자 kw 3 / VLM 명사 1 / prompt-free 2).
+- **`CinemaTraj/scripts/smoke_micro_ops.py` (신규)** — micro-adjust 14연산을 VLM 없이 전부
+  적용해 게이트 결과를 표로 낸다. camel 첫 end-to-end 에서 VLM 이 round 0 에 `done:true` 를
+  내는 바람에 **`lbm/ops.py` 가 한 번도 실행되지 않았다** — 루프가 "성공"으로 끝나도 micro
+  경로는 미검증으로 남는 구조라 별도 스모크가 필요하다. 게이트 임계는
+  `loop.build_parser()` 에서 공유한다(손으로 다시 적으면 테스트만 통과한다).
+- `lbm/loop.py` 의 argparse 를 `build_parser()` 로 분리 (`__main__` 동작 동일).
 
 ### Changed
 - `run_grid.py` 의 `_outputs()` 가 `source.mp4` / `point_cloud.mp4` / `point_cloud_masks.mp4`
@@ -509,6 +531,25 @@
   cleaning_stove 말고 다른 소스로 배율 사다리를 돌리려고 필요했다.
 
 ### Fixed
+- **`CinemaTraj/decode/emit.py` 가 낡은 `poses.npz` 를 조용히 emit 했다.** 루프가
+  `decision.json` 을 새로 써도 `build_poses` 를 다시 안 돌리면 emit 은 이전 실행의 궤적을
+  읽는다 — 실측: avocado-slice 가 `static_hold` 결정으로 `orbit_left_arc` poses(`path_len_u`
+  0.14039)를 내보냈다. 타임스탬프로는 못 잡는다(같은 초에 쓰이면 순서를 모른다).
+  `build_poses.decision_fingerprint()` 가 pose 에 실제로 영향을 주는 필드만 뽑아 npz 에 심고,
+  emit 이 불일치면 멈춘다 (`--allow_stale_poses` 로 우회).
+- **정지 궤적에서 `rel[0] = I` assert 가 터졌다** — `static_hold`/`static_hold_locked` 는
+  카메라가 제자리에서 look-at 만 돌려 `rmax` 가 float 잡음(실측 1.43e-17)인데, 예전
+  `unit_scale` 이 `max(rmax, 1e-12)` 로 나눠 그 잡음을 1.39e-5 로 증폭시켰다. 규약이 깨진 게
+  아니라 0/0 을 한 것. 이제 `rmax < 1e-6 u` 면 t 를 정확히 0 으로 두고 `rmax=0`,
+  `translation_degenerate: true` 를 meta 에 싣고 경고를 찍는다 — 이동량 0 인 canonical 은
+  `--scales` 도 ReRoPE 의 |t| 정규화도 무의미해서, 안 걸러내면 "카메라 안 움직이는 영상"이
+  조용히 나온다 (`emit_model_cams --model sierpinskicam` 은 `rmax 0.0000` 로 통과시킨다).
+- **`lbm/loop.py:state_line()` 조건부 f-string 괄호 오류** — `if center else ""` 가 앞의 네
+  f-string 전체에 묶여, subject 를 못 찾은 턴에는 `coverage`/`subject_area`/`occlusion_pass`
+  까지 프롬프트에서 통째로 사라졌다. 모델이 왜 거절당했는지 알 길이 없어지는 종류의 버그.
+  `_number()` 헬퍼로 `None` → `n/a` 처리하고 `subject_center` 만 조건부로 남겼다.
+- `emit.py` 의 `MODEL_NOTES["rerope"]` 가 `emit_model_cams.py` 로 가는 것처럼 읽혔다 — ReRoPE 는
+  `--model` choices 6종에 없고 `recammaster/rerope_prepare.py` 가 따로 처리한다.
 - **`rerope_prepare.py` 가 소스 npz 를 날 c2w 로 써서 ReRoPE 내부 pose 가 축 순환 치환됐다.**
   `--axis_precomp {inv_conv(기본), none(구 동작)}` 추가. 아래 `--target_frame world` 로 원점을
   고친 뒤에도 **카메라가 엉뚱한 축으로 움직였다**. `convert_c2w_convention` 은

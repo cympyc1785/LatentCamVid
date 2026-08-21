@@ -43,6 +43,20 @@
     `results/20260820_lbm_lite/` 에 대조용으로 남겼다.
 
 ### Added
+- **뱅크 프리뷰를 영상으로 — `scripts/render_bank_videos.py`**
+  (`camera_generation/models/Planner/CinemaTraj/scripts/render_bank_videos.py`).
+  ⚠ `.gitignore:222` 라 커밋에 안 들어간다. `sample_camera_bank.py` 의 `preview.png` 는 그대로다.
+  - 동기(사용자 지시 2026-08-21 "앞으로 영상으로 보여줘"): 중간 프레임 **한 장**으로는 궤적을
+    판정할 수 없다 — 구멍이 언제 열리는지, subject 가 몇 프레임째에 나가는지, 마지막 10프레임
+    에서만 무너지는지가 안 보인다. τ 사다리의 요점이 "어디서 무너지나"라 프리뷰가 영상이어야 한다.
+  - `bank/poses.npz` + `bank.json` 을 읽어 변이를 전 프레임 렌더 → **타일 애니메이션** 1개
+    (`imageio` libx264, quality 6). 타일 캡션에 preset/anchor/τ/hole/path/프레임번호를 박는다.
+  - `--anchors` / `--presets` / `--tau` 세 필터가 그대로 세 가지 읽기가 된다: 강도 축(τ 사다리)
+    · 모양 축(preset 16종) · 표적 축(anchor 전량). 안 주면 τ 단으로 층화해 `--max_tiles` 만큼.
+    `--with_source` 로 소스 타일 동봉, `--per_variant` 로 변이별 mp4 도 따로 쓴다.
+  - 실측 (camel `dyn_0`, 전 49프레임): orbit τ0.1→1.0 hole 0.044 / 0.062 / 0.083 / 0.119 /
+    0.163. 같은 τ0.35 에서 preset 별 hole 은 `straight_ease 0.015` ~ `pedestal_down 0.651` 로
+    **43배** 벌어진다 — 강도보다 모양이 구멍을 더 좌우한다.
 - **카메라 augmentation sampler `scripts/sample_camera_bank.py` — VLM 선택자 대신 열거 + 실측**
   (`camera_generation/models/Planner/CinemaTraj/scripts/sample_camera_bank.py`).
   ⚠ `.gitignore:222` 라 커밋에 안 들어간다. 기존 `lbm/loop.py`(VLM 선택) 경로는 **그대로**다.

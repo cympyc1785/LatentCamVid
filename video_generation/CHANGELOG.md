@@ -42,7 +42,139 @@
   - 프리뷰: `results/20260820_aim_lbm_lite/{camel,avocado-slice}/`. 예전 것은
     `results/20260820_lbm_lite/` 에 대조용으로 남겼다.
 
+### Changed
+- **OBB 마진을 절대값에서 소스 대비 배수로 — `--obb_clear_src_ratio`(기본 0.3)**
+  (`camera_generation/models/Planner/CinemaTraj/lbm/gates.py`,
+  `scripts/{sample_camera_bank,fit_hole_ladder}.py`).
+  ⚠ `.gitignore:222` 라 커밋에 안 들어간다. 전체 근거는 `CinemaTraj/DECISIONS.md` **D51**.
+  - 동기(사용자 지시 "대신 충돌 판정을 조금 키워줘" → 절대 마진 4종 영상 후 **"camel 은 0.15 가
+    맞는데 avocado 는 0.06 정도가 적당한 것 같은데 왜이럼?"**): `u` 는 씬 전역 스케일만
+    정규화한다 (S camel 4.6713 / avocado 4.6471, **0.5% 차이**). 정작 판정에 들어가는 양들은
+    안 맞춰진다 — 소스 카메라 자신의 최소 OBB 여유 **4.4배**(0.5107 vs 0.1165), binding 노드
+    `max(extent)` 2.7배(0.137 vs 0.376), 최근접 `d_ref` 3.3배(0.639 vs 0.191).
+  - 절대 마진의 병리는 **균일 팽창**이다. `m` 은 모든 박스를 축마다 `2m` 부풀리므로 `m=0.15` 가
+    camel 낙타 얇은 축을 **6배**, avocado 의자 조각 얇은 축을 **61배** 키운다 — 물체가
+    무엇이든 금지구역이 같은 크기로 수렴한다.
+  - **크기 비례 가설은 세웠다가 실측으로 기각했다 (정직하게 기록).** 사용자가 고른 값을 지배
+    노드 `max_ext` 로 나누면 1.09 / 1.07 로 2% 안에 겹쳐서 `m_j = ratio·max_ext_j` 를 구현했는데,
+    돌려보니 camel 10.66 ✅ / avocado **1.19** ❌ 로 절대 0.06 의 2.25 보다 **나빴다**. 원인은
+    avocado 의 실제 binding 노드가 `stat_4`(의자, 최근접)가 아니라 `stat_0`(테이블
+    0.376×0.354×0.024)이고, 판때기라 `max_ext` 가 두께가 아니라 **너비**를 집어 cap 에 붙어
+    ratio 가 무력해지기 때문. `min_ext` 로 바꾸면 `stat_0` 은 1% 로 맞는 대신 `stat_4` 가
+    12배로 튄다 — 어느 척도든 binding 노드 셋 중 둘만 맞고 그 둘이 척도마다 바뀐다. 우연이었다.
+  - 채택: `m = β × (소스 카메라 자신의 최소 OBB 거리)`. **β<1 이면 소스 카메라가 정의상
+    통과**한다 (D47 이 standoff 에 쓴 것과 같은 꼴). 아무 정보도 안 줬는데 β=0.3 이 camel
+    **0.1532** 를 내놓아 사용자가 눈으로 고른 0.15 를 path 합 10.35 / obb binding 14 까지
+    재현한다. avocado 는 0.0350 으로 더 느슨해 움직임이 산다 (path 2.25 → **6.17**).
+  - 스윕 전량 (`dyn_0` anchor · 6 preset, path 합 / hole-only 변이 / obb-coll-hole binding):
+    절대 0.02 camel 12.84·0·0-12-12 / avo 6.18·7·0-11-13 · 절대 0.06 12.15·0·3-10-11 /
+    2.25·14·8-0-16 · 절대 0.10 11.82·0·7-7-10 / 0.89·20·8-0-16 · 절대 0.15 10.35·0·14-0-10 /
+    0.89·20·8-0-16 · 비례 1.0 10.66·0·14-0-10 / 1.19·18·8-0-16 ·
+    **β=0.3 10.35·0·14-0-10 / 6.17·7·1-10-13** · β=0.5 7.34·0·14-0-10 / 2.39·14·8-0-16.
+    사용자가 3분면 영상 `D51_obb_srcratio.mp4` 를 보고 **β=0.3** 을 골랐다.
+  - **소스 카메라 적법성 검사가 또 버그를 잡았다** (D47·D49 에 이어 세 번째): `cap 0.20` 이면
+    avocado **소스 카메라 자신의** slack 이 −0.036 (`stat_0`, 거리 0.164) 이라 원본 촬영이
+    기각된다 → `--obb_clear_cap` 기본 **0.12** (소스 slack camel +0.391 / avocado +0.044).
+  - 구현: `node_margins(nodes, ratio, floor, cap)` → `max(floor, min(ratio·size, cap))`.
+    `cap` 은 **비례 항에만** 건다 (`clip` 으로 짜면 camel floor 0.153 이 cap 0.12 에 잘린다;
+    `floor ≤ cap` 구간에선 `clip` 과 동일). `obb_clearance(..., margins=)` 가
+    `(dists, ids, slacks)` 3-tuple 이고 **노드 선택이 거리 최소 → slack 최소**로 바뀐다.
+    CSV `obb_slack` 열 추가, `bank.json.obb_gate` 에 노드별 마진 표를 통째로 남긴다.
+  - **회귀**: `--obb_clear_ratio 0 --min_obb_clear 0.06` 이 기존 절대 마진 뱅크와
+    9개 열 × 24 비교 **불일치 0**, `|obb_slack − (obb_clear − 0.06)|` max **0.000000**.
+    `ratio=0` + floor 만 주면 D49 동작과 비트 동일하다.
+  - **부수 발견(더 중요할 수 있음)**: 작동하는 모든 마진에서 G5 는 거의 전부 **anchor 노드
+    자신**에 binding 한다 (camel `dyn_0` 14/14, avocado `stat_0` 6~8/8). 지금 G5 는 장애물
+    회피가 아니라 "자기 subject 에 너무 가까이 가지 마라"는 **구도 제약**으로 작동하고
+    `push_in` 계열과 정면으로 싸운다. 선택지 4종은 D51 하단에 기록.
+- **`--min_standoff_ratio` 기본값 0.80 → 0.0 (standoff 판정 끔)**
+  (`camera_generation/models/Planner/CinemaTraj/scripts/fit_hole_ladder.py`). 근거 **D50**.
+  - standoff(D48)와 G5 OBB(D49)는 **같은 걸 두 번 잰다** — D49 가 이미 실측했듯 `clear0` 에서
+    OBB 를 침범한 33변이의 standoff 가 **33개 전부** 임계 아래였다. 붙어 있으면 항상 standoff 가
+    먼저 물어 G5 는 영원히 `binding` 에 안 잡힌다.
+  - 남길 하나로 G5 를 골랐다. standoff 는 소스 대비 배수라 **"조금 키운다"가 안 되는 축**이다 —
+    D48 에 이미 증거가 있다 (ratio 0.80↔0.90 에서 camel `push_in_arc` 가 0.939 → 0.020 불연속
+    붕괴). G5 마진은 거리에 절대값으로 더해져 0.02 → 0.06 → 0.15 가 매끄럽게 조여진다.
+  - `standoff` 열은 그대로 남고 `--min_standoff_ratio 0.8` 로 되켤 수 있다.
+    `near_depth`(D48 에서 기각)와 같은 취급 — **측정은 하되 판정에서 뺀다**.
+- **게이트 요약 줄 표기 수정** (`fit_hole_ladder.py`): `m_j = clip(ratio·max_ext, floor, cap)`
+  으로 찍으면 floor > cap 인 기본 모드(camel floor 0.153 > cap 0.12)에서 모순처럼 읽힌다.
+  실제 식 `max(floor, min(ratio·max_ext, cap))` 그대로 찍는다. 값은 원래부터 맞았다
+  (출력의 `[0.153, 0.153] u` 범위 표기가 실제 마진).
+
 ### Added
+- **뱅크 전량 → 태그 N개짜리 `canonical.json` — `scripts/emit_bank.py`**
+  (`camera_generation/models/Planner/CinemaTraj/scripts/emit_bank.py`).
+  ⚠ `.gitignore:222` 라 커밋에 안 들어간다. `decode/emit.py` 는 **건드리지 않았다**.
+  - 동기: `decode/emit.py` 는 **결정 하나**만 canonical 로 바꾸는데, 실제로 만든 건
+    `fit_hole_ladder.py` 가 푼 **뱅크**다 (camel 336 / avocado-slice 392). 사용자가 원한 게
+    소스 카메라 재현이 아니라 **다양한 카메라 움직임의 augmentation** 이므로 하류로 넘길 단위도
+    뱅크 전체다. 그 사이가 비어 있었다.
+  - **새 포맷을 안 만들었다.** `canonical.json` 의 `cameras` 는 원래부터 태그→궤적 dict 이고
+    `emit_model_cams.py` 는 `--cameras all` 로 전 태그를 돈다 (`:394,423` 이 `rel_c2w` 만 읽음).
+    그래서 `build_canonical()` 을 변이마다 부르고 `cameras` 만 합친다 — canonical 규약
+    (`rel[0]=I`, 단위 스케일, 21 index pick)의 구현은 계속 `decode/emit.py` 하나다.
+    태그 = `variant_id` = `<anchor>__<preset>__hole<target>` 그대로.
+  - `poses.npz` 에는 `cam_c2w` 만 있고 `build_canonical` 이 요구하는 `look_at`/`subject_track`/
+    `tau`/`info` 가 없어서 `build_poses` 를 **다시 돌린다** (렌더 0회, 전량 10초). 다시 푸는
+    이상 재현을 증명해야 하므로 재구성 궤적을 `poses.npz` 와 프레임 단위 대조하고 어긋나면
+    멈춘다 (`--pose_tol` 기본 1e-9, `--strict` 기본 on).
+  - **그 대조가 실제로 버그를 잡았다**: `min_sweep_deg` 기본값을 15.0 이 아니라 30.0 으로 잘못
+    적어 `dyn_1` 계열 궤적이 최대 **1.575e-2 u** 어긋났다 (path_len 자체가 0.0116 이라 궤적이
+    통째로 다른 수준인데, tau_max 0.015 → 0.0176 이라 표만 봐서는 정상으로 보인다).
+    근본 수정: `fit_hole_ladder.py` 에 `SHAPE_DEFAULTS` 상수를 두고 CLI 기본값과 `emit_bank`
+    fallback 이 **같은 출처**를 쓰게 했다. 예전 뱅크는 `fixed` 블록에
+    `aim_ramp_frames`/`orbit_span_frac`/`min_sweep_deg`/`num_frames` 가 없어서 이 fallback 을
+    타므로, 앞으로 생성되는 뱅크는 `fixed` 에 그 4개를 같이 싣는다.
+  - 검증: camel 336 변이 전량 **pose 재현 최대오차 0.000e+00**, 21↔49 왕복 0.000e+00.
+    `emit_model_cams.py --model sierpinskicam --cameras <tag>,<tag> --scales 1` 왕복 통과
+    (파일명에 variant_id 보존, `.` → `p`).
+  - **거르지 않는다 (D39/D45 규칙)**: 접힌 단도 정지 변이도 기본 전량 내보내고 요약과
+    manifest 에 수만 찍는다 — camel 336 중 **접힌 단 94 / `translation_degenerate` 68**,
+    `g = rmax/S` 범위 [0.00000, 2.28180] median 0.03875. 접힌 단은 `folded_onto` 로 대표
+    태그를 가리킨다. 빼려면 `--drop_folded`/`--min_path_len`/`--status`/`--anchors`/`--presets`.
+  - 산출물 `<bank>/canonical/{canonical.json,canonical.npz,manifest.json}`
+    (`lbm_bank_canonical_v1`). `notes` 는 태그마다 복제하지 않고 최상위에 한 번만 싣는다.
+- **세 번째 충돌 예산: 노드 OBB clearance (G5)** — `lbm/gates.py` 에 `obb_signed_distance` /
+  `obb_clearance`, `scripts/sample_camera_bank.py` 에 `source_obb_clear` + `--measure_obb`,
+  `scripts/fit_hole_ladder.py` 에 `--min_obb_clear`(기본 0.02 u) / `--obb_gate` /
+  `--no_obb_gate` / `--measure_obb` / `--no_measure_obb`.
+  ⚠ `camera_generation/models` 는 `.gitignore:222` 라 커밋에 안 들어간다.
+  - 동기(사용자 지시 "물체 obb 기준으로도 충돌 판정해줘"): G1 도 standoff 도 **관측된 표면**만
+    잰다. 표면은 껍질이라 카메라가 물체 **안**을 지나가도 반대쪽 껍질이 뒤에 남으면 G1 은
+    "표면 앞", standoff 는 "가까운 점"으로만 읽는다. OBB 는 부피 판정이라 그 구멍을 막는다.
+  - 부호 거리 `‖max(d,0)‖ + min(max(d),0)`, `d=|q|−extent/2`. 안팎이 한 식이라 이분법이 단조로
+    민다. 좌표는 그래프 프레임 G — `T_gw[:3,:3]=R_gw/S` 라 **G 좌표가 곧 u 단위**다.
+    동적 노드는 `node_obb_at(node, f)` 로 그 프레임 위치, 정적 노드는 고정 OBB (정적까지
+    프레임별 track 을 쓰면 camel `fence` 의 추정 jitter `path_len_u` 0.32 가 판정에 들어온다).
+    렌더 0회.
+  - 임계는 배수가 아니라 **절대 마진 0.02 u**: 소스 카메라 자신의 최소 OBB clearance 가
+    camel **+0.5107 u**(`stat_0` fence) / avocado-slice **+0.1165 u**(`stat_4` chair) 로 4배
+    차이라 배수로 걸면 camel 만 과하게 조여진다.
+    ⚠ **이 줄은 아래 Changed 의 "OBB 마진을 소스 대비 배수로" 항목에서 뒤집혔다.** 여기서 4배
+    차이를 "배수를 못 쓰는 근거"로 읽었는데 실은 **배수를 써야 하는 근거**였다. 기본값은 이제
+    `--obb_clear_src_ratio 0.3`, 판정량도 `obb_slack = obb_clear − m_j` 로 바뀌었다.
+  - `obb_node` 열로 **어느 노드와 부딪혔나**를 남긴다. 최근접 노드 분포 camel `stat_0` 306 /
+    `dyn_0` 16 / `dyn_1` 11 / `stat_1` 2 / `stat_2` 1; avocado `stat_4` 362 / `dyn_0` 22 /
+    `stat_0` 8.
+  - **이 두 씬에서는 한 번도 안 걸린다 (정직하게 기록).** 뱅크별 최소 부호거리 —
+    `holeonly` camel −0.0258 u/21변이, avocado −0.0351 u/22; `clear0`(G1만) camel +0.0011 u/0
+    (단 <0.02 가 13), avocado **−0.0281 u/20**; `r90` camel +0.1836/0, avocado +0.0755/0;
+    현재 `hole_bank`(standoff 0.80) camel +0.1615/0, avocado +0.0583/0.
+    `clear0` 에서 OBB 를 0.02 u 안쪽까지 침범한 33변이의 standoff 를 직접 재보니 **33개 전부**
+    현재 임계(camel 0.0680·S / avocado 0.1095·S) 아래였다 — standoff 가 이미 다 잡는다.
+    그래서 G5 를 켜도 손잡이가 한 행도 안 바뀐다. 넣는 이유는 ① 렌더 0회 ② standoff 가 잡는
+    건 물체가 작아서 생긴 우연이고 크고 속 빈 물체(방·큰 가구)에서는 안쪽 한가운데가 오히려
+    표면에서 멀다 ③ `obb_node` 진단. 즉 **회귀 감시기**다.
+  - 회귀: `--no_collision_free` 16행이 `hole_bank_holeonly` 와 **0건 불일치**.
+  - 영상: `out/avocado-slice/hole_bank/D49_obb_before_after.mp4` (위=G1만, 아래=standoff 0.80).
+- **`--min_standoff_ratio` 기본값 0.90 → 0.80** (`scripts/fit_hole_ladder.py`).
+  사용자가 4분면 영상(`D48_ratio_candidates.mp4`, r0.90/0.80/0.70/0.60 × `push_in_arc`)을 보고
+  고른 값. 0.90 은 camel 전진 preset 이 전 anchor 에서 손잡이 하한에 붙었다.
+  전량 효과는 camel 336행 중 **4행** — `dyn_0 push_in_arc` 4단이 0.020 → 0.939
+  (path 0.013 → 0.743), path_len_u 총합 97.933 → 100.856. 스윕을 `dyn_0` 하나에서 돌렸는데
+  그 anchor 만 경계에 걸려 있었다 (한 anchor 스윕으로 전량 외삽 금지).
+  ⚠ **다시 바뀌었다: 기본값은 이제 0.0(꺼짐)** — 아래 Changed 참조.
 - **뱅크 충돌·가림 감사 — `scripts/audit_bank_geometry.py`**
   (`camera_generation/models/Planner/CinemaTraj/scripts/audit_bank_geometry.py`).
   ⚠ `.gitignore:222` 라 커밋에 안 들어간다. 뱅크 생성 경로는 **건드리지 않았다** (감사만).

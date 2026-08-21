@@ -43,6 +43,32 @@
     `results/20260820_lbm_lite/` 에 대조용으로 남겼다.
 
 ### Added
+- **preset 별 크기 상한을 잰다 — `scripts/fit_hole_ladder.py` (hole 사다리)**
+  (`camera_generation/models/Planner/CinemaTraj/scripts/fit_hole_ladder.py`).
+  ⚠ `.gitignore:222` 라 커밋에 안 들어간다. `sample_camera_bank.py` 의 τ 사다리는 **그대로**다.
+  - 동기(사용자 확정 2026-08-21 "후자로 줘"): τ 한 값으로 전 preset 을 자르면 안 된다. 같은
+    τ=0.35 에서 hole 이 preset 마다 **43배** 갈리기 때문에(`straight_ease 0.015` ~
+    `pedestal_down 0.651`) 어떤 건 멀쩡한데 잘리고 어떤 건 이미 망가졌는데 살아남는다.
+  - 축을 뒤집는다: **hole 을 고정하고 크기 손잡이를 푼다.** `HOLE_LADDER (0.10, 0.20, 0.35,
+    0.50)` 각 단마다 (anchor, preset) 별 이분법 4회(5프레임) → 답을 13프레임으로 재측정.
+    손잡이는 이동 preset 은 `tau`, 회전 전용은 `pan_deg`. 산출물
+    `out/<video>/hole_bank/{bank.json,bank.csv,poses.npz,tau_caps.json}`
+    (`lbm_hole_bank_v1` / `lbm_tau_caps_v1`).
+  - 실측 (camel 336 변이 / 5,563 렌더, avocado-slice 392 / 6,500). hole 0.35 를 사는 τ 가
+    camel 에서 `pedestal_down 0.128` ~ `push_in_arc 1.875` 로 **15배** 갈린다. 전체 표는
+    `CinemaTraj/DECISIONS.md` D42.
+  - `aim="look_at"` 은 **움직이기 전에** hole 을 쓴다: `clamped_low`(camel 90행 / avocado
+    144행)가 **전부 look_at, `aim="traj"` 는 0행**. 그 행들은 `path_len_u` 0.010/0.000,
+    `view_angle_max_deg` 0.3°/4.2° 인데 hole 이 0.47/0.37 이다 — 궤적이 아니라 anchor 재조준
+    비용이다. anchor 별 최소 hole 은 `traj` 가 0.067~0.092 로 평평한 반면 `look_at` 은
+    0.057~0.647 로 11배 갈린다 (camel `stat_3` 0.647 / avocado `stat_4` 0.638). D43.
+  - `--shape_headroom 2.0` / `--shape_doublings 4`: `fit_tau` 의 `max_scale`(4.0) × 
+    `DEFAULT_SHAPE` 가 구조적 천장이라 τ 를 못 맞추는 경우가 있다 (스모크에서 knob 3.0 인데
+    `tau_max` 1.1493 에서 정지). `dolly_frac`/`lateral_frac` 을 배로 키워 재시도하고, 그러고도
+    붙어 있으면 `unreached` 가 아니라 **`shape_limited`** 로 찍어 손잡이 탓과 모양 탓을
+    구분한다. 수정 후 해당 행이 `solved`(knob 2.500, `shape_mult` 4.0)로 바뀌었다. D44.
+  - hole 만으로는 못 자른다 — hole 0.50 단에서 camel `pan_right` 는 hole 0.481 로 통과하는데
+    `subject_in_frame` 이 **0.15** 다. 두 열 다 기록만 하고 게이트하지 않는다. D45.
 - **뱅크 프리뷰를 영상으로 — `scripts/render_bank_videos.py`**
   (`camera_generation/models/Planner/CinemaTraj/scripts/render_bank_videos.py`).
   ⚠ `.gitignore:222` 라 커밋에 안 들어간다. `sample_camera_bank.py` 의 `preview.png` 는 그대로다.
@@ -57,6 +83,9 @@
   - 실측 (camel `dyn_0`, 전 49프레임): orbit τ0.1→1.0 hole 0.044 / 0.062 / 0.083 / 0.119 /
     0.163. 같은 τ0.35 에서 preset 별 hole 은 `straight_ease 0.015` ~ `pedestal_down 0.651` 로
     **43배** 벌어진다 — 강도보다 모양이 구멍을 더 좌우한다.
+  - `--bank_dir`(기본 `bank`) 추가: `hole_bank` 을 주면 `fit_hole_ladder.py` 의 hole 사다리
+    뱅크를 같은 코드로 깐다. 사다리 축만 `target_tau` → `target_hole` 로 갈리고(`rung_of`)
+    나머지 읽기·필터·층화는 그대로다. **τ 뱅크 동작은 기본값 그대로 유지.**
 - **카메라 augmentation sampler `scripts/sample_camera_bank.py` — VLM 선택자 대신 열거 + 실측**
   (`camera_generation/models/Planner/CinemaTraj/scripts/sample_camera_bank.py`).
   ⚠ `.gitignore:222` 라 커밋에 안 들어간다. 기존 `lbm/loop.py`(VLM 선택) 경로는 **그대로**다.

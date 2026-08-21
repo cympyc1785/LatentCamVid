@@ -43,6 +43,30 @@
     `results/20260820_lbm_lite/` 에 대조용으로 남겼다.
 
 ### Added
+- **카메라 augmentation sampler `scripts/sample_camera_bank.py` — VLM 선택자 대신 열거 + 실측**
+  (`camera_generation/models/Planner/CinemaTraj/scripts/sample_camera_bank.py`).
+  ⚠ `.gitignore:222` 라 커밋에 안 들어간다. 기존 `lbm/loop.py`(VLM 선택) 경로는 **그대로**다.
+  - 동기: 목표가 "이 씬에 가장 좋은 카메라 1개" → **"다양한 카메라 N개"**(augmentation)로
+    바뀌었다. traj 턴은 D34/D36/D37 에서 세 번 측정한 결과 prior 다 (54 draw 중
+    non-`orbit_left_arc` 5개). mode collapse 하는 선택자는 augmentation 에 못 쓴다.
+  - 축 4개: anchor(게이트 통과 노드 **전량**) × preset(14 이동 + 2 정지) ×
+    τ 사다리(`0.10 0.20 0.35 0.60 1.00`) × speed/tracking/look_at_bias(기본 각 1개).
+    하드 컷은 "anchor 가 소스 frame 0 에서 보일 것" 하나뿐이고, `hole_fraction` 은
+    **게이트가 아니라 각 단에서 실측해 기록**한다 (DECISIONS.md D39).
+  - 출력 `out/<video>/bank/{bank.json,bank.csv,poses.npz,preview.png}` (`lbm_camera_bank_v1`).
+    열거 camel 432 / avocado-slice 406. `--num_samples` 는 τ 단으로 층화 추출.
+  - 실측 hole (정지 preset 제외, τ 0.10→1.00): camel 0.245 / 0.298 / 0.359 / 0.424 / 0.480,
+    avocado(0.20→1.00) 0.301 / 0.343 / 0.389 / 0.450. τ 10배에 hole 은 2배가 안 된다.
+- **sampler 의 두 실측 버그 수정** (같은 파일, 1차 실행에서 드러난 것):
+  - `--pan_deg_at_max`(기본 60): `pan_left/right` 는 이동이 0 이라 τ 로 크기를 못 정한다 —
+    `fit_tau` 가 항상 `max_scale`(4.0)로 튀어 **사다리 5단이 전부 같은 궤적**이었다
+    (camel `path_len_u 0.0000` / `hole 0.740` × 5). 이 preset 만 사다리를 회전 각도로 옮겼고
+    (`pan_deg = pan_deg_at_max × rung/max_rung / FIT_TAU_MAX_SCALE`), 결과는 pan 6→60° 에
+    hole 0.067 → 0.679 로 단조. τ 요약표에서 빼고(`tau_invariant`) 별도 표로 찍는다.
+  - `--drop_saturated`(기본 켬): `tau_start > rung` 이면 `fit_tau` 가 움직임을 0 으로 눌러
+    `static_hold` 복제본이 나온다 — avocado τ0.1 에서 **98건 전량**이 그랬다. 빼고 몇 건인지
+    `bank.json.dropped_saturated` 와 요약표에 남긴다. **정지 preset 은 예외**(identity 가
+    의도한 결과 — 예외를 안 넣으니 `static_hold*` 14건이 통째로 사라졌다).
 - **verify 지표 9번 `path_len_u` — "카메라가 실제로 움직였나"**
   (`camera_generation/models/Planner/CinemaTraj/verify.py`, `--min_path_len_u` 기본 0.05 u,
   WARN 은 그 절반, **`--min_path_len_u 0` 이면 행 자체가 안 생겨 예전 동작**).

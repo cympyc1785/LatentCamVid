@@ -43,6 +43,26 @@
     `results/20260820_lbm_lite/` 에 대조용으로 남겼다.
 
 ### Added
+- **뱅크 충돌·가림 감사 — `scripts/audit_bank_geometry.py`**
+  (`camera_generation/models/Planner/CinemaTraj/scripts/audit_bank_geometry.py`).
+  ⚠ `.gitignore:222` 라 커밋에 안 들어간다. 뱅크 생성 경로는 **건드리지 않았다** (감사만).
+  - 동기: `lbm/gates.py` 는 `G1_behind`(카메라가 표면 뒤)와 `G3_occlusion`(subject 가림)을
+    처음부터 갖고 있는데 **뱅크 경로가 그걸 안 부른다** (행에 `"gates": None`). board 경로는
+    시작 pose 한 장만 검사하고, 뱅크는 `start_mode=source_frame0` 이라 시작 pose 는 소스
+    카메라 자신이다 — 위험이 전부 나머지 48프레임에 있었는데 아무도 안 보고 있었다.
+  - **hole 은 충돌을 못 잡는다**: 벽을 통과하면 벽 너머 관측이 그려져 `valid_mask` 가 멀쩡할
+    수 있다. `corr(hole, behind_frac)` = **−0.014** (camel) / **+0.059** (avocado), camel 은
+    위반 변이의 평균 hole 0.280 으로 정상 0.337 보다 오히려 **낮다**.
+  - 실측: camel `hole_bank` G1 24/336 (7.1%) · G3 14 · 둘 중 하나 36 (10.7%);
+    avocado `hole_bank` G1 23/392 (5.9%) · G3 56 · 둘 중 하나 78 (19.9%);
+    τ 사다리 뱅크는 camel 6/432 (1.4%) · avocado 11/406 (2.7%).
+    **G1 은 전진 preset 에 몰린다** — camel 24건 중 `straight_ease` 13 / `push_in_arc` 9.
+    최악은 `camel dyn_0 straight_ease hole0.5` 로 49프레임의 **73.5% 가 표면 뒤**인데 hole 은
+    0.356 (같은 anchor `truck_left` 0.507 보다 낮다). **G1 과 G3 은 거의 안 겹친다**
+    (36건 중 2 / 78건 중 1) — 별개의 고장이다. 전체는 `CinemaTraj/DECISIONS.md` D46.
+  - 산출물 `out/<video>/<bank_dir>/geometry.csv` (`behind_frames`/`behind_frac`/
+    `behind_worst_src`/`occlusion_pass`). **행을 지우지 않는다** — D39·D45 와 같이 재고 기록만.
+    G1 은 재투영뿐이라 렌더 0회(전 뱅크 수 초), G3 은 프레임당 렌더 2회라 `--occlusion` 으로 켠다.
 - **preset 별 크기 상한을 잰다 — `scripts/fit_hole_ladder.py` (hole 사다리)**
   (`camera_generation/models/Planner/CinemaTraj/scripts/fit_hole_ladder.py`).
   ⚠ `.gitignore:222` 라 커밋에 안 들어간다. `sample_camera_bank.py` 의 τ 사다리는 **그대로**다.

@@ -130,6 +130,21 @@
   (출력의 `[0.153, 0.153] u` 범위 표기가 실제 마진).
 
 ### Added
+- **OBB 기반 가림 감사 `--obb_occlusion` / `--obb_occlusion_diag`**
+  (`camera_generation/models/Planner/CinemaTraj/scripts/audit_bank_geometry.py`).
+  ⚠ `.gitignore:222` 라 커밋에 안 들어간다. **기본값 off** 라 기존 호출은 그대로 돈다.
+  - 동기(사용자): "구멍이 뚫리면 가렸는지 판단하기 힘드니 ... 물체 bbox 기준으로 판단하는 것도
+    실효성 있는지 봐줘." 렌더 기반 `occlusion_pass` 는 **가리는 물체가 재구성이 안 됐으면**
+    거기가 구멍이라 subject 가 비쳐서 "안 가려짐"으로 읽힌다는 가설.
+  - `obb_occl_pass`(렌더 0회, 노드 OBB convex hull painter's algorithm) + `obb_occluder`
+    (가장 많이 가린 노드) + `hole_at_occluder`(OBB 가 가렸다고 한 픽셀 중 렌더에서 실제로
+    구멍인 비율, `--obb_occlusion_diag` 일 때만; 프레임당 렌더 1회) 열을 `geometry.csv` 에 추가.
+  - **실측 결론: 가설된 기전은 1.4~3.0% 였다** — `hole_at_occluder` median 이 "렌더만 통과"
+    그룹에서 camel 0.014 / avocado 0.030. 불일치는 양방향(camel 17 vs 8, avocado 42 vs 51)
+    으로 나고 hole 과 무관하다(불일치 그룹 hole 평균 camel 0.322 vs 나머지 0.323,
+    avocado 0.316 vs 0.363). **게이트로는 안 쓴다** — 상세·선택지 4개는 `DECISIONS.md` D54.
+  - `scripts/render_bank_videos.py` 에 `--variant_ids` 추가 (감사에서 고른 변이를 그 순서대로).
+    영상 `out/{camel,avocado-slice}/hole_bank/occl_disagree.mp4`.
 - **뱅크 전량 → 태그 N개짜리 `canonical.json` — `scripts/emit_bank.py`**
   (`camera_generation/models/Planner/CinemaTraj/scripts/emit_bank.py`).
   ⚠ `.gitignore:222` 라 커밋에 안 들어간다. `decode/emit.py` 는 **건드리지 않았다**.

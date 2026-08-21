@@ -6,6 +6,33 @@
 
 ## [Unreleased]
 
+### Known issues (미수정)
+- **avocado-slice hole 뱅크의 절반이 조용히 정지 카메라다 — τ 하한(0.02)이 소스 시차보다 낮다**
+  (`camera_generation/models/Planner/CinemaTraj/lbm/presets.py:163-168`). 사용자 지시로
+  **이번엔 안 고쳤다** ("일단 이건 돌려놓고 나중에 수정하면 되니까"). 상세와 선택지 4개는
+  `CinemaTraj/DECISIONS.md` D53.
+  - 증상: avocado-slice 392 변이 중 `translation_degenerate` **204**, `g = rmax/S` median
+    **0.00000**. camel 은 336 중 68 / median 0.09372. pan 계열(이동 0 이 정의)을 빼면
+    avocado 는 **148 개가 "움직이라고 시켰는데 안 움직이는" 궤적**이고 147/148 이
+    `status=clamped_low`, 전부 `binding=hole`.
+  - 원인: `fit_tau` 는 `tau0`(카메라를 시작 pose 에 **얼려놓았을 때**의 τ) `>= target_tau` 면
+    궤적을 0 으로 만든다. τ 는 plan 과 **소스**의 프레임별 간격이라 소스가 움직이면 정지
+    plan 도 τ 를 쌓는다 → `tau_start` 는 anchor 무관 **씬 상수**다 (avocado 0.1286 /
+    camel 0.0042, 각 씬 `parallax_ratio` 0.129 / 0.0046 과 일치). `KNOB_RANGE["tau"]` 하한
+    0.02 가 avocado 에서는 **도달 불가능**이라 사다리가 손잡이를 내리는 순간 궤적이 사라진다.
+  - **궤적을 0 으로 만들어도 예산은 안 지켜진다** (이게 핵심): `stat_1__pull_out_arc` 는 4단
+    전부 path 0.0000 / 측정 hole 0.5895 로, hole0.5 단조차 못 맞췄다. anchor 의 정지 hole 이
+    이미 모든 단보다 높으면 어떤 손잡이로도 사다리가 안 만들어지는데, 코드는 그걸
+    `unreached` 가 아니라 `clamped_low` 로 찍어 **"작지만 정상인 카메라"와 구분이 안 된다**.
+  - anchor 별 hole@정지 (avocado): stat_5 0.2190 / stat_0 0.2616 / stat_3 0.3350 /
+    dyn_0 0.3559 / stat_2 0.3677 / **stat_1 0.5895** / **stat_4 0.6384**.
+    camel 은 `stat_3` 하나만 같은 병 (0.6482, 20/56 정지) — **저시차 씬에서 안 보이다가
+    고시차 씬에서 절반을 먹는 종류**다.
+  - 하류 대응은 해뒀다: `translation_degenerate` 가 canonical 의 **카메라별 meta** 에 실려
+    있어 (`emit_bank.py:217`) `--min_path_len` 로 즉시 거를 수 있다.
+  - 영상: `out/avocado-slice/hole_bank/ladder_collapse.mp4` (dyn_0/stat_1 × pull_out_arc 4단),
+    `out/camel/hole_bank/ladder_healthy.mp4` (정상 대조군).
+
 ### Fixed
 - **LBM-Lite 디코더에 조준 앵커 옵션 `--aim_anchor` 추가 (기본은 기존 동작 `subject`)**
   (`camera_generation/models/Planner/CinemaTraj/decode/build_poses.py`, `decode/emit.py`,
@@ -135,6 +162,10 @@
     태그를 가리킨다. 빼려면 `--drop_folded`/`--min_path_len`/`--status`/`--anchors`/`--presets`.
   - 산출물 `<bank>/canonical/{canonical.json,canonical.npz,manifest.json}`
     (`lbm_bank_canonical_v1`). `notes` 는 태그마다 복제하지 않고 최상위에 한 번만 싣는다.
+  - **avocado-slice 392 도 전량 통과** — pose 재현 0.000e+00, 왕복 0.000e+00, 접힌 단 98.
+    다만 `translation_degenerate` 가 **204** 이고 `g` median 이 **0.00000** 이다 (camel 은
+    68 / 0.09372). 아래 "avocado 뱅크 절반이 정지 카메라" 항목 참조 — **뱅크 쪽 결함이고
+    `emit_bank.py` 는 그걸 드러낸 것**이다.
 - **세 번째 충돌 예산: 노드 OBB clearance (G5)** — `lbm/gates.py` 에 `obb_signed_distance` /
   `obb_clearance`, `scripts/sample_camera_bank.py` 에 `source_obb_clear` + `--measure_obb`,
   `scripts/fit_hole_ladder.py` 에 `--min_obb_clear`(기본 0.02 u) / `--obb_gate` /

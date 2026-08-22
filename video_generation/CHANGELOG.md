@@ -7,6 +7,25 @@
 ## [Unreleased]
 
 ### Fixed
+- **소스 자신의 시차가 τ 사다리를 넘는 영상에서 `fit_hole_ladder` 가 assert 로 죽었다 — 이건
+  실패가 아니라 "해당 없음"이라 rc=0 + `skipped.json` 으로 바꿨다**
+  (`camera_generation/models/Planner/CinemaTraj/scripts/{fit_hole_ladder,emit_bank}.py`).
+  `tau_start`(정지 플랜의 τ — 플랜 카메라는 앵커 시작 pose 에 가만히 있는데 소스 카메라가
+  날아가서 생기는 시차)가 사다리 꼭대기 1.0 보다 크면 D53 의 "τ 하한 = `tau_start` + 0.02" 가
+  사다리 **전 단**을 saturated 로 밀어낸다. `sample_camera_bank` 가 움직이는 조합을 통째로
+  `dropped_saturated` 로 빼고 정지 preset 만 남기는데 그마저 saturated 표시라 이분법 루프가
+  전부 건너뛰고 `rows` 가 빈다. 예전에는 여기서 `assert rows` 가 터져 **배치 런너가 한 편 때문에
+  죽었고, 죽지 않더라도 "실패"와 "해당 없음"이 rc 로 구분되지 않았다.**
+  - 실측: `snowboard` `tau_start` **1.9441** (saturated 350 조합) / `snow-bike` **1.3765**
+    (210 조합). 둘 다 남은 변이는 `static_hold`/`static_hold_locked` 뿐. 52편 중 **2편 (3.8%)**.
+    `tau_start` 를 키우는 건 소스 이동량이 아니라 **이동량/깊이 비**다 — snow-bike 는 snowboard
+    보다 소스 이동이 작은데 `z_med` 가 절반(0.8145 vs 1.7510)이라 τ 는 오히려 크다.
+  - `fit_hole_ladder` 는 `rows` 가 비면 τ 뱅크에 **생존 조합이 있었는지**로 두 경우를 가른다.
+    있으면(=필터 오지정) 예전처럼 assert 로 죽고, 없으면 `hole_bank/skipped.json`
+    (`lbm_hole_bank_skipped_v1`: `tau_start`, 사다리, saturated 개수, 남은 preset, `S`, `z_med`)
+    을 쓰고 rc=0 으로 나간다.
+  - `emit_bank` 는 `bank.json` 이 없고 `skipped.json` 만 있으면 같은 사유를 그대로 찍고 rc=0.
+  - 확인: `snowboard`/`snow-bike` 둘 다 `fit` rc=0 → `emit_bank` rc=0.
 - **뱅크의 `knob` 이 표시용 5자리 반올림이라 `emit_bank` 가 궤적을 못 되만드는 행이 있었다**
   (`camera_generation/models/Planner/CinemaTraj/scripts/{fit_hole_ladder,emit_bank}.py`).
   `fit_tau` 이분법이 스케일을 **계단으로 양자화**한다 — 손잡이→궤적이 연속이 아니다. 그래서

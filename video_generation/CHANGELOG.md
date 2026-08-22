@@ -188,11 +188,15 @@
     avocado `hole 77 / approach 49 / elev 18 / ground 13 / none 11`.
 - **조사용 프로브 3종** (`camera_generation/models/Planner/CinemaTraj/scripts/`).
   ⚠ `.gitignore:222` 라 커밋에 안 들어간다.
-  - `probe_tau_divisor.py` — τ 분모 후보 8종(점 거리 median/mean, frame0/전 프레임, 정적 한정
-    포함)을 hole 사다리 단별 τ 중앙값으로 비교. **결론: 바꾸지 않는다.** '비 산포' 6.96 이
-    8후보 전부 동일하다 — 스칼라 분모는 한 씬의 τ 전부에 같은 배수라 단 사이 어긋남을 못 고친다.
-    현재 `z_med_f0` 비 기하평균 1.136, 최선 후보 `z_med_all` 1.114 (2% 개선).
+  - `probe_tau_divisor.py` — τ 분모 후보 **9종**(점 거리 median/mean, frame0/전 프레임/정적 한정,
+    frame0 카메라 기준 / **카메라 위치 median 기준** 점 거리)을 hole 사다리 단별 τ 중앙값으로
+    비교. **결론: 바꾸지 않는다.** '비 산포' 6.96 이 9후보 전부 동일하다 — 스칼라 분모는 한 씬의
+    τ 전부에 같은 배수라 단 사이 어긋남을 못 고친다. 현재 `z_med_f0` 비 기하평균 1.136,
+    최선 후보 `z_med_all` 1.114, 사용자 제안 `cloud_med_from_cammed` 1.128 (0.7% 개선).
     점 거리 **평균**(= S)이 최악(1.528/1.587), 점 거리 **중앙값**은 z-median 과 1~4% 이내.
+    더 근본적으로 **분모를 바꿔도 카메라가 안 바뀐다** — τ 는 이분법의 탐색 변수라 분모를 바꾸면
+    손잡이 눈금만 재매개화되고 같은 hole 목표에서 같은 궤적에 도달한다. 바뀌는 건 열의 숫자와
+    `KNOB_RANGE`/`tau_floor` 경계뿐이다.
   - `probe_near_depth_repeat.py` — 뱅크와 같은 경로(해상도·프레임 집합·S)로 `near_depth`
     반복 측정. D57 비트 동일성 검사의 잔여 차이를 렌더러 비결정성으로 확정하는 데 씀.
   - `probe_wall_planes.py` — CinemaTraj 의 벽 상자를 우리 씬에 이식 가능한지 판정 (D59).

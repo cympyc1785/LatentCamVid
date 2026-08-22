@@ -394,6 +394,31 @@
     원본은 shot 16개 기준이라 표본이 작다 — 배율(약 **8.6배**)만 읽을 것.
     quality 가 fast 보다 대당 시간은 비싸지만 **버려지는 카메라가 줄어** 쓸 수 있는 카메라
     1대당으로는 오히려 싸다(82.0 → 67.5 s).
+- **`trumans_to_lbm_demo.py --movement_terms` — shot 설명에 카메라 움직임 어휘를 심어 원본 LBM 의
+  preset 을 실제로 갈라지게 한다** (`camera_generation/models/Planner/CinemaTraj/scripts/
+  trumans_to_lbm_demo.py`). ⚠ `.gitignore:222` 라 커밋에 안 들어간다.
+  **LBM 에서 카메라 움직임을 정하는 건 LLM 이 아니라 shot 설명 문자열에 대한 키워드 정규식이다**
+  (`director_stage.infer_movement_intent:972-984`). Director 의 LLM 경로
+  (`director_engine_llm.py`) 에는 `movement` 라는 단어조차 없다. TRUMANS 의 액션 라벨
+  ("Pick up the book with both hands") 은 그 키워드를 하나도 안 건드려 전부 fallback `static` 이
+  되고, 그러면 `cinematographer_stage.py:5141-5144` 가 "명시적 lock 문구가 없는 static" 을
+  `subtle_motion` 으로 바꾸는데 그 함수는 close-up 이 아니면 **무조건 `push_in`** 을 준다
+  (`:346-352`). 실측: 앞선 두 실행(`trumans_00add26c`, `_q`) 은 **16 shot 전부 `push_in_arc`,
+  `motion_profile=semantic_light_dynamic`** — preset 어휘 17종 중 1종만 쓰였다.
+  - `MOVEMENT_TERMS` 6종을 shot 설명 **뒤에 돌려가며** 붙인다. 각 구절은 `infer_movement_intent`
+    (검사 순서 pan → pulls back → walks around → approaches → stares → static) ·
+    `infer_direction_label` · `infer_distance_label` 을 동시에 통과하되 `infer_shot_goal` 의
+    reveal/rush/chases 는 **일부러 피해** shot 당 카메라 1대를 유지하도록 골랐다.
+  - **17 preset 중 6종만 이 경로로 닿는다.** 나머지는 구조적으로 불가능하다 —
+    `orbit_*`/`pedestal_*` 은 `infer_movement_intent` 가 그 태그를 리턴하는 분기 자체가 없고
+    (`canonical_movement:220-244` 는 알지만 producer 가 없다), `pan_right`/`truck_right` 는
+    `preset_for_motion:787-807` 이 `direction=="right"` 를 요구하는데 `infer_direction_label` 은
+    left/back/front 만 리턴하며, `rise_reveal`/`drop_reveal`/`s_curve`/`straight_ease`/
+    `static_hold_locked` 은 어떤 movement_tag 에서도 매핑되지 않는다(후보 탐색이 직접 고를 때만).
+  - 기본값 `--no_movement_terms` 라 **앞선 실행과 바이트 단위로 같은 demo_root** 가 나온다.
+  - 오프라인 예측(두 stage 모듈을 import 해 `:5136-5149` 분기를 재현)에서 16/16 목표 preset 일치.
+    실측 Director 산출물(run `trumans_00add26c_mv`): `primary_movement` = static 4 / push_in 3 /
+    push_out 3 / pan 3 / truck 3 (무어휘 대조군은 static 16).
 - **TRUMANS 를 LBM-Lite 소스로 태우는 두 스크립트**
   (`camera_generation/models/Planner/CinemaTraj/scripts/trumans_{probe,clip}.py`).
   ⚠ `.gitignore:222` 라 커밋에 안 들어간다.

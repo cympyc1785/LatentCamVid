@@ -6,6 +6,28 @@
 
 ## [Unreleased]
 
+### Added
+- **`scripts/concat_videos.py` — mp4/프레임 디렉토리를 시간축으로 잇는다**
+  (`camera_generation/models/Planner/CinemaTraj/scripts/concat_videos.py`).
+  `stack_videos.py` 는 공간축(격자)만 붙여서, "한 recording 의 shot 들을 한 편으로"가 안 됐다.
+  Editor 가 내는 `exports/final_edit_v1.mp4` 는 편집본이라 shot 을 잘라낸다(실측 00add26c:
+  렌더 프레임 314 → final_edit 218). `--labels` 로 구간마다 좌상단 이름표, `--gap_frames` 로
+  구간 사이 검은 프레임.
+  - `--inputs` 는 **PNG 프레임 디렉토리도 받는다.** LBM VideoEngineer 가 떨구는
+    `clips/<shot>/<cam>/clip.mp4` 는 실측 결과 **전부 프레임 1장**이라(6편 30개 clip 전량)
+    포스터와 다를 게 없다. 실제 렌더는 옆의 `renders/<shot>/<cam>/frames/frame_*.png` 다.
+    정렬은 파일명 끝 숫자 기준 — 렌더가 stride 2 라 `frame_0001,0003,…` 로 띄엄띄엄이고
+    문자열 정렬이면 `0100` 이 `0099` 앞에 온다.
+  - 부수 실측: 그 stride 2 때문에 `clips_manifest_v1.json` 의 `duration_seconds` 는
+    `target_duration_seconds` 의 **정확히 절반**이다(3.6s→45프레임/1.80s, 2.5s→31/1.24,
+    3.0s→38/1.52, 3.8s→48/1.92). 선언된 25 fps 로 틀면 2배속이라 **12.5 fps 가 의도 속도**.
+- **`scripts/stack_videos.py --hold_short` — 짧은 타일을 자르는 대신 마지막 프레임으로 정지**
+  (`camera_generation/models/Planner/CinemaTraj/scripts/stack_videos.py`).
+  기본값은 예전 동작(`--no_hold_short`, 짧은 쪽에 맞춰 자르기) 그대로다 — before/after 두 줄은
+  프레임 대응이 생명이라 자르는 게 맞다. 길이가 제각각인 렌더를 격자로 볼 때만 필요하다:
+  실측으로 TRUMANS 6편 격자에서 34프레임짜리 `2b4c9b84` 하나가 나머지(164~338프레임)를 전부
+  **2.7초로** 잘라냈다.
+
 ### Fixed
 - **소스 자신의 시차가 τ 사다리를 넘는 영상에서 `fit_hole_ladder` 가 assert 로 죽었다 — 이건
   실패가 아니라 "해당 없음"이라 rc=0 + `skipped.json` 으로 바꿨다**

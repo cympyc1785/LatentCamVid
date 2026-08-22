@@ -86,6 +86,26 @@
     `results/20260820_lbm_lite/` 에 대조용으로 남겼다.
 
 ### Changed
+- **죽은 레버 7개 삭제 — `fit_hole_ladder.py` CLI 46 → 39개 (D57)**
+  (`camera_generation/models/Planner/CinemaTraj/scripts/fit_hole_ladder.py`).
+  ⚠ `.gitignore:222` 라 커밋에 안 들어간다. 전체 근거는 `CinemaTraj/DECISIONS.md` **D57**.
+  - 지운 것: `--min_standoff_ratio` / `--min_standoff` / `--min_near_depth` / `--near_pct`
+    (D50 이 standoff 판정을 껐고 D47 이 near_depth 를 기각한 뒤 한 번도 안 켰다),
+    `--obb_clear_ratio` / `--obb_clear_cap` / `--min_obb_clear` (셋 다 기본값에서 no-op 였고
+    비례항은 D51 이 실측으로 기각). `solve_knob` 예산 사슬에서 `clearance` 링크도 삭제.
+  - **`standoff` / `near_depth` 두 열은 계속 측정되어 뱅크에 남는다** — 사라진 건 판정과
+    손잡이뿐이다 (뱅크는 인벤토리, 거르는 건 소비자 몫 — D39/D45).
+  - **비트 동일성 확인**: `out/d57/camel` 재생성 vs 기존 뱅크에서 `poses.npz` 의 `cam_c2w`
+    168 변이 × 49프레임이 `max|diff| 0.000e+00`, `knob`·`status`·`binding`·`tau_max`·
+    `path_len_u`·`hole_fraction`·`behind_frac`·`standoff`·`obb_slack`·elev/ground/approach
+    열 전량 동일. 다른 건 진단 열 둘 — `near_depth` 78/168 행(max 18.20%),
+    `subject_area_med` 45/168 행(−4.35%~+0.36%).
+  - 그 차이는 **렌더러 비결정성**이다. 새 `scripts/probe_near_depth_repeat.py` 로 같은
+    pose·같은 프로세스 4회 반복: 최악 행 `dyn_0__orbit_left_arc__hole0.2` 가
+    0.3791/0.4414/0.3510/0.3510 (**산포 23.75% > 뱅크 간 차이 18.20%**), 두 뱅크 값
+    0.3275·0.3871 이 모두 그 범위 근처. 같은 조건에서 `dyn_0__straight_ease__hole0.1` 은
+    4회 0.2038 비트 동일 — 비결정성이 변이마다 다르다. `near_depth` 가 depth 의 1 백분위라
+    splat z-buffer 동률 몇 개에 값이 통째로 끌려간다 (D47 이 판정에서 기각한 이유와 같다).
 - **OBB 마진을 절대값에서 소스 대비 배수로 — `--obb_clear_src_ratio`(기본 0.3)**
   (`camera_generation/models/Planner/CinemaTraj/lbm/gates.py`,
   `scripts/{sample_camera_bank,fit_hole_ladder}.py`).
@@ -146,6 +166,39 @@
   (출력의 `[0.153, 0.153] u` 범위 표기가 실제 마진).
 
 ### Added
+- **전진 한계 게이트 (G7) — dolly 가 subject OBB 를 **지나쳐** 뒤에 서는 걸 막는다**
+  (`camera_generation/models/Planner/CinemaTraj/lbm/gates.py:approach_profile`,
+  `scripts/{sample_camera_bank,fit_hole_ladder}.py`).
+  ⚠ `.gitignore:222` 라 커밋에 안 들어간다. **`--no_approach_gate` 면 기존 뱅크와 전 열 비트
+  동일**하게 돈다. 전체 근거는 `CinemaTraj/DECISIONS.md` **D56**.
+  - 동기(사용자): "앞 뒤로 움직이는 것도 bbox 를 지나치기 전까지 적당한 거리까지만 움직이게끔."
+    G5 가 못 잡는 이유는 `obb_signed_distance` 가 **부호 없는 거리**라서다 — 박스를 통과해
+    반대편으로 나가면 거리가 다시 커져 통과한다.
+  - 시선축 `a` = normalize(anchor OBB 중심(frame 0) − 플랜 시작 카메라 위치), frame 0 고정.
+    `s(f) = (p_g(f) − c_j(f))·a`, `gap(f) = −half_a − s(f)`, `past(f) = s(f) − half_a`.
+    임계는 **소스 카메라 자신의 실측 `src_approach` 의 0.3배**(`--approach_src_ratio`, G5 의
+    β 와 일부러 같은 값). 재투영뿐이라 **렌더가 0회 늘어난다**. anchor 노드에만 적용.
+  - 게이트 off(`out/nog7`) vs on 매칭 비교: camel `dyn_0 push_in_arc` knob 1.000 → 0.573
+    (`path_len_u` 0.795 → 0.442, off 에서 `past_frames` **2**, on 에서 `gap` +0.173,
+    binding `obb` → `approach`), avocado `stat_0 push_in_arc` 0.681 → 0.149
+    (0.465 → 0.152, binding `collision` → `approach`), `stat_0 straight_ease` 0.574 → 0.149
+    (binding `elev` → `approach`).
+  - 재생성한 뱅크 336 변이(씬당 168) 전량에서 **`past_frames` = 0, `approach_frames` = 0**.
+    binding 분포 camel `hole 86 / approach 27 / ground 19 / elev 11 / obb 8 / none 17`,
+    avocado `hole 77 / approach 49 / elev 18 / ground 13 / none 11`.
+- **조사용 프로브 3종** (`camera_generation/models/Planner/CinemaTraj/scripts/`).
+  ⚠ `.gitignore:222` 라 커밋에 안 들어간다.
+  - `probe_tau_divisor.py` — τ 분모 후보 8종(점 거리 median/mean, frame0/전 프레임, 정적 한정
+    포함)을 hole 사다리 단별 τ 중앙값으로 비교. **결론: 바꾸지 않는다.** '비 산포' 6.96 이
+    8후보 전부 동일하다 — 스칼라 분모는 한 씬의 τ 전부에 같은 배수라 단 사이 어긋남을 못 고친다.
+    현재 `z_med_f0` 비 기하평균 1.136, 최선 후보 `z_med_all` 1.114 (2% 개선).
+    점 거리 **평균**(= S)이 최악(1.528/1.587), 점 거리 **중앙값**은 z-median 과 1~4% 이내.
+  - `probe_near_depth_repeat.py` — 뱅크와 같은 경로(해상도·프레임 집합·S)로 `near_depth`
+    반복 측정. D57 비트 동일성 검사의 잔여 차이를 렌더러 비결정성으로 확정하는 데 씀.
+  - `probe_wall_planes.py` — CinemaTraj 의 벽 상자를 우리 씬에 이식 가능한지 판정 (D59).
+    `find_wall_planes` 가 찾은 평면(camel 1 / avocado 3)을 반공간 fence 로 켜면 뱅크 카메라
+    **8,232 pose 중 위반 0.000** — G1(behind-surface)에 이미 포섭된다. 게다가 camel 평면 뒤에
+    정적 점 **41%** 가 있어 경계면도 아니다 (지면 벗긴 뒤 남은 최대 평면일 뿐).
 - **고도각 상한 + 지면 아래 금지 게이트 (G6) — `rise`/`drop` 이 물체 바로 위/아래로 가는 걸 막는다**
   (`camera_generation/models/Planner/CinemaTraj/lbm/gates.py:elevation_profile`,
   `scripts/sample_camera_bank.py`, `scripts/fit_hole_ladder.py`).

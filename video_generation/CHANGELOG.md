@@ -6,34 +6,50 @@
 
 ## [Unreleased]
 
-### Known issues (미수정)
-- **avocado-slice hole 뱅크의 절반이 조용히 정지 카메라다 — τ 하한(0.02)이 소스 시차보다 낮다**
-  (`camera_generation/models/Planner/CinemaTraj/lbm/presets.py:163-168`). 사용자 지시로
-  **이번엔 안 고쳤다** ("일단 이건 돌려놓고 나중에 수정하면 되니까"). 상세와 선택지 4개는
-  `CinemaTraj/DECISIONS.md` D53.
-  - 증상: avocado-slice 392 변이 중 `translation_degenerate` **204**, `g = rmax/S` median
-    **0.00000**. camel 은 336 중 68 / median 0.09372. pan 계열(이동 0 이 정의)을 빼면
-    avocado 는 **148 개가 "움직이라고 시켰는데 안 움직이는" 궤적**이고 147/148 이
-    `status=clamped_low`, 전부 `binding=hole`.
-  - 원인: `fit_tau` 는 `tau0`(카메라를 시작 pose 에 **얼려놓았을 때**의 τ) `>= target_tau` 면
-    궤적을 0 으로 만든다. τ 는 plan 과 **소스**의 프레임별 간격이라 소스가 움직이면 정지
-    plan 도 τ 를 쌓는다 → `tau_start` 는 anchor 무관 **씬 상수**다 (avocado 0.1286 /
-    camel 0.0042, 각 씬 `parallax_ratio` 0.129 / 0.0046 과 일치). `KNOB_RANGE["tau"]` 하한
-    0.02 가 avocado 에서는 **도달 불가능**이라 사다리가 손잡이를 내리는 순간 궤적이 사라진다.
-  - **궤적을 0 으로 만들어도 예산은 안 지켜진다** (이게 핵심): `stat_1__pull_out_arc` 는 4단
-    전부 path 0.0000 / 측정 hole 0.5895 로, hole0.5 단조차 못 맞췄다. anchor 의 정지 hole 이
-    이미 모든 단보다 높으면 어떤 손잡이로도 사다리가 안 만들어지는데, 코드는 그걸
-    `unreached` 가 아니라 `clamped_low` 로 찍어 **"작지만 정상인 카메라"와 구분이 안 된다**.
-  - anchor 별 hole@정지 (avocado): stat_5 0.2190 / stat_0 0.2616 / stat_3 0.3350 /
-    dyn_0 0.3559 / stat_2 0.3677 / **stat_1 0.5895** / **stat_4 0.6384**.
-    camel 은 `stat_3` 하나만 같은 병 (0.6482, 20/56 정지) — **저시차 씬에서 안 보이다가
-    고시차 씬에서 절반을 먹는 종류**다.
-  - 하류 대응은 해뒀다: `translation_degenerate` 가 canonical 의 **카메라별 meta** 에 실려
-    있어 (`emit_bank.py:217`) `--min_path_len` 로 즉시 거를 수 있다.
-  - 영상: `out/avocado-slice/hole_bank/ladder_collapse.mp4` (dyn_0/stat_1 × pull_out_arc 4단),
-    `out/camel/hole_bank/ladder_healthy.mp4` (정상 대조군).
-
 ### Fixed
+- **hole 사다리의 아랫단이 조용히 정지 카메라를 뱉던 문제 (D53) — τ 하한을 소스 시차 기준으로
+  올리고, 사다리 바닥을 anchor 의 정지 hole 로 옮기고, `fit_tau` 이분법 해상도를 고쳤다**
+  (`camera_generation/models/Planner/CinemaTraj/lbm/presets.py`, `decode/build_poses.py`,
+  `scripts/{fit_hole_ladder,sample_camera_bank,emit_bank}.py`). ⚠ `camera_generation/models` 는
+  `.gitignore:222` 라 커밋에 안 들어간다. 상세는 `CinemaTraj/DECISIONS.md` D53.
+  - 결함이 **셋**이었다. ① τ 는 plan 과 **소스**의 프레임별 간격이라 카메라를 시작 pose 에
+    얼려놔도 `tau_start` 만큼 쌓인다 — anchor 무관 **씬 상수**다 (avocado 0.1286 / camel
+    0.0042, 각 씬 `parallax_ratio` 0.129 / 0.0046 과 일치). `KNOB_RANGE["tau"]` 하한 0.02 가
+    avocado 에서 **도달 불가능**이라 사다리가 손잡이를 내리는 순간 궤적이 사라졌다.
+    → `--tau_floor_src` (기본 on): 하한을 `tau_start` 의 소스배수로 잡는다.
+  - ② 사다리 단(0.10/0.20/0.35/0.50)이 일부 anchor 의 **정지 hole 보다 낮았다** (avocado
+    `stat_1` 0.5895 / `stat_4` 0.6384, camel `stat_3` 0.6482) — 어떤 손잡이로도 못 맞추는데
+    코드는 `unreached` 가 아니라 `clamped_low` 로 찍어 "작지만 정상인 카메라"와 구분이 안 됐다.
+    → `--hole_mode excess` (기본): 단을 anchor 의 정지 hole **위의 증분**으로 매긴다.
+  - ③ (①·② 를 고친 뒤 드러남) 하한을 `tau_start` 바로 위로 올리면 그걸 맞추는 배율이
+    `fit_tau` 이분법의 **첫 눈금**(`max_scale/2**iterations` = 4/256 = 0.0156)보다 작아져서
+    `lo` 가 0 에 남는다 — **하한을 고쳐도 궤적이 여전히 정지**였다. avocado `stat_1
+    pull_out_arc`: 0.020/path 0.000 → (①만) 0.149/path 0.000 → (③까지) 0.149/path **0.012**.
+    → `presets.fit_tau(refine_zero=True)`: `lo==0` 이면 `[0, hi]` 에서 이분법을 한 번 더 돌린다.
+    플래그는 decision 의 `trajectory.tau_refine` 에 실려 `emit_bank` 재현까지 간다.
+  - 뱅크 재생성 전후 (변이 100% 겹침, camel 336 / avocado 392). **정지 궤적(`path_len_u`
+    < 1e-6) camel 68 → 48 / avocado 206 → 56** 인데, 남은 48·56 은 **정확히 `pan_left`/
+    `pan_right` 변이**다 (순수 회전이라 이동 0 이 정의). 즉 **pan 을 뺀 비-pan 궤적은
+    camel 20 → 0 / avocado 150 → 0 으로 전멸**했다. 수정 전 비-pan 정지의 preset 분포는
+    camel `straight_ease/push_in_arc/pull_out_arc/rise_reveal/drop_reveal` 각 4,
+    avocado 는 8 개 preset 에 16~21 개씩 고르게 퍼져 있었다.
+  - 비-pan `path_len_u` median camel 0.1110 → 0.4636 (mean 0.2853 → 0.6595) / avocado
+    0.0594 → 0.4341 (mean 0.2398 → 0.6644). 전 변이 기준 hole median camel 0.3063 →
+    0.3199 / avocado 0.3482 → 0.3661. `solved` camel 166 → 168 / avocado 182 → 189.
+  - `clamped_low` 가 camel 91 → 0 / avocado 149 → 0 으로 사라지고 그 자리가
+    `unreached`(camel 0 → 14 / avocado 1 → 33)와 `shape_limited`(19 → 42 / 9 → 47)로
+    갈렸다 — **"작아서 못 갔다"가 "무엇이 막았다"로** 바뀐 것이 이 수정의 요점이다.
+    `binding` 도 이제 실제 게이트 이름만 나온다 (avocado: hole 189 / none 80 / collision 54 /
+    elev 36 / ground 27 / obb 6).
+  - **예전 동작 보존 확인**: `--hole_mode absolute --no_tau_floor_src` 로 돌린 16 행을 수정 전
+    뱅크와 42 개 공유 열에서 대조 — `knob`/`status`/`binding`/`hole_fraction`/`tau_max`/
+    `path_len_u`/`obb_slack`/`elev_abs_max`/`ground_clear` **전부 동일**. 다른 18 셀은
+    `subject_area_med`/`near_depth` 의 소수 4째 자리뿐이고, 같은 명령을 두 번 돌려도 같은 두
+    열에서 16 개가 달라져 **렌더러 비결정성**임을 확인했다.
+  - 곁가지 버그 하나 같이 고침: `bank.csv` 는 따옴표 없이 `",".join` 으로 쓰는데 상태 접미사를
+    `status,tau_floor` 로 붙여 avocado 10 행의 뒤 열이 통째로 밀려 있었다 (`binding` 이
+    `tau_floor` 로 읽혔다). 구분자를 `+` 로 바꾸고 writer 에 **쉼표 금지 assert** 를 넣었다.
+  - 영상: `out/<video>/hole_bank/d53_before_after.mp4` (위=수정 전 / 아래=수정 후).
 - **LBM-Lite 디코더에 조준 앵커 옵션 `--aim_anchor` 추가 (기본은 기존 동작 `subject`)**
   (`camera_generation/models/Planner/CinemaTraj/decode/build_poses.py`, `decode/emit.py`,
   `verify.py`). ⚠ `camera_generation/models` 는 `.gitignore:222` 라 커밋에 안 들어간다.

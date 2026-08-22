@@ -7,6 +7,46 @@
 ## [Unreleased]
 
 ### Added
+- **`scripts/trumans_scene_probe.py` — `.blend` 씬 기하를 headless Blender 광선으로 잰다**
+  (`camera_generation/models/Planner/CinemaTraj/scripts/trumans_scene_probe.py`).
+  LBM-Lite 의 G1(`lbm/gates.py`)은 DA3 depth shell 위에서 "관측된 표면보다 뒤인가"로 벽 속을
+  *근사*했다. TRUMANS 는 씬 전체가 mesh 라 진짜 광선으로 판정할 수 있다 — full-house 씬이라
+  카메라를 아무데나 두면 벽 안에 박히고, 그건 depth shell 에서는 안 잡히던 실패 모드다.
+  사람 가슴 기준 (방위각 × 고도 × 거리) 격자마다 `clear`(시선 가림) / `clearance`(6방향 최단
+  히트 — 벽 속과 벽에 붙음을 한 값으로) / `floor_drop`(공중·지하) 을 재서 JSON 한 장으로.
+  `human_track` 은 루트 본 3축을 **다 실어 보낸다** (SMPL-X 정면 축을 하드코딩하면 리그가
+  바뀔 때 조용히 틀린다 — 걷는 방향과 맞는 축을 orchestrator 가 고른다).
+  - 실측 제약: 사람은 ARMATURE `zzy3` 이고 **그 자체는 아무것도 렌더하지 않는다**(deform 하는
+    mesh 12개가 그려진다). `.blend` 는 `scene.frame_step = 2` 로 저장돼 있어 명시적으로 1 로
+    되돌린다. `--cycles` 로 시작하는 CLI 플래그는 금지 — Cycles 애드온이 argv 를 prefix-match
+    로 훑어서 실행이 통째로 죽는다.
+- **`scripts/trumans_to_recon.py` — TRUMANS action 구간 하나 → LBM-Lite 입력**
+  (`camera_generation/models/Planner/CinemaTraj/scripts/trumans_to_recon.py`).
+  `scene_graph/io.py:load_scene` 규약(Vista4D 배포본 포맷: RGBD + 카메라 + SAM3 track)을 TRUMANS
+  는 **아무것도** 주지 않는다. `.blend` 를 직접 렌더해서 만들면 depth 와 사람 마스크가 추정치가
+  아니라 **정답**이 된다. probe(격자) → 궤적 합성 → probe(검증, 49 pose 프레임별 재검사) →
+  gt_render(EEVEE 16spp RGB + Cycles 1spp depth/index) → 변환 5단계.
+  - **소스 카메라를 합성하는 건 선택이 아니라 데이터 제약**이다: `<seq>_camera_pose.pkl` 은
+    recording 67편 중 **2편**(00add26c, 0aa05d5a)에만 있고, `.blend` 안의 CAMERA 4개는 **전부
+    정지**(`anim=False`, constraint/parent 없음)다. 정지 카메라를 소스로 쓰면 시차 0 이라 Lite 의
+    τ 축과 view-angle 축이 통째로 무의미해진다. 그래서 있는 2편의 통계에 맞춘다 — 프레임당
+    `|dt|` median **0.0128 m**, 49프레임 net `|dt|` median **0.58~0.62 m**, z-span **정확히 0**
+    (높이 일정), yaw 는 사람 추종 360°. 즉 "높이 고정 + 사람 추종 + 느린 호".
+  - 규약: `cam_c2w` 는 OpenCV, `cam_c2w[0] = I` 재앵커(rigid 라 metre 스케일 보존).
+    depth 는 Blender z-planar metre 인데 `utils.media.load_depths` 기본이 float16 이라 배경
+    sentinel `1e10` 을 그대로 두면 inf 가 된다 → `--sky_depth`(기본 1000 m) clamp + `sky_mask`.
+    사람 = object pass index 1 → `dynamic_mask` + `seg_instances` track 1, 나머지는
+    `seg_instances_static/`.
+- **`scripts/trumans_lite_bank.py` — recording 여러 편을 action 단위로 쪼개 배치**
+  (`camera_generation/models/Planner/CinemaTraj/scripts/trumans_lite_bank.py`).
+  `trumans_to_recon.py` 는 action 하나짜리이고 실패가 전부 assert 다. 97 action 을 돌리면
+  **실패하는 action 이 정상**이다 — 사람이 벽에 붙어 있거나 좁은 화장실에 있으면 카메라를 놓을
+  자리가 물리적으로 없다. 그래서 action 하나를 subprocess 로 격리하고 사유를
+  `bank_manifest.json`(`trumans_lite_bank_v1`) 에 적은 뒤 다음으로 넘어간다.
+  - 기본 `--workers 2`: RGB 가 EEVEE(GPU) 라 Blender 6편 동시 실행에서 `libnvidia-eglcore` 안에서
+    crash 했다 (2026-08-23 LBM 4ac2c1b3). 메모리가 아니라 GPU 컨텍스트 경합이다.
+  - `--min_action_frames`(기본 12): 너무 짧은 action 은 49프레임을 채우려 앞뒤로 늘리면 사실상
+    옆 action 이 된다.
 - **`scripts/concat_videos.py` — mp4/프레임 디렉토리를 시간축으로 잇는다**
   (`camera_generation/models/Planner/CinemaTraj/scripts/concat_videos.py`).
   `stack_videos.py` 는 공간축(격자)만 붙여서, "한 recording 의 shot 들을 한 편으로"가 안 됐다.

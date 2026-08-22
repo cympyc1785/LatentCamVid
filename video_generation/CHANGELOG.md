@@ -130,6 +130,40 @@
   (출력의 `[0.153, 0.153] u` 범위 표기가 실제 마진).
 
 ### Added
+- **고도각 상한 + 지면 아래 금지 게이트 (G6) — `rise`/`drop` 이 물체 바로 위/아래로 가는 걸 막는다**
+  (`camera_generation/models/Planner/CinemaTraj/lbm/gates.py:elevation_profile`,
+  `scripts/sample_camera_bank.py`, `scripts/fit_hole_ladder.py`).
+  ⚠ `.gitignore:222` 라 커밋에 안 들어간다. **`--no_elev_gate --no_ground_gate` 면 기존 뱅크와
+  전 열 비트 동일**하게 돈다 (열은 남고 판정에서만 빠진다). 직전 뱅크는 `hole_bank_pre_g6/`.
+  - 동기(사용자): "rise, drop은 너무 많이 움직여 ... 물체의 바로 위나 아래까지 가면 안됨."
+    실측으로 전제가 맞다 — `rise_reveal` 고도각 p95 camel **89.83°** / avocado **85.27°**,
+    `drop_reveal` p05 −83.99° / −84.58°, `pedestal_up` 도 avocado 77.63° 라 crane 만의 문제가
+    아니다. 최악 `stat_0__rise_reveal__hole0.35` 는 **89.960°** 인데 기존 예산을 전부 통과했다.
+  - 기전: 수직 이동은 hole 을 거의 안 늘려서(바닥에도 천장에도 점이 있다) shape 배증이 상한
+    16배까지 다 돌아 `lateral_frac 0.35 × 16 = 5.6` → `atan(5.6) = 80°`.
+  - 아래쪽은 **지면 관통**까지 간다 (camel 14 변이 / avocado 5, 최악 −1.282 u / 46-of-49 프레임).
+    G1 이 못 잡는 건 구조다 — 바닥 밑 카메라는 소스 뷰에 **화면 밖**으로 투영돼 채점 대상이
+    아니다 (해당 변이 `behind_frac` 전부 정확히 0.0000).
+  - **가림 지표로 커버 안 된다**(사용자 질문 (b) 답): 바닥은 노드가 아니라 OBB 가림이 구조적으로
+    못 보고(avocado `stat_0__drop_reveal__hole0.5` 바닥 아래 0.66 u 인데 `obb_occl_pass` 0.984),
+    렌더 가림은 바닥 밑에서 생기는 **구멍**을 "보임"으로 센다.
+  - 임계는 소스 대비(D47/D51 규칙): 고도 `max(--max_elev_deg 45, 소스 자신 + 10°)` — 소스가
+    −6.32°~**+35.09°**(avocado `stat_4` chair)라 절대값만으론 그 앵커가 기각된다. 지면
+    `--min_ground_clear_ratio 0.2 × 소스 카메라 자신의 높이` — 높이가 camel 0.1069 u /
+    avocado 0.3641 u 로 3.4배 벌어져 절대값이 안 된다.
+  - **ratio 0.2 는 스윕으로 골랐다**: 0.5 는 camel drop 을 τ 하한까지 눌러 **정지 클립**을
+    만들고(path 0.014 u, D53 과 같은 실패), 0.0 은 바닥을 0.003 u 로 스친다. 0.2 는
+    path 0.059 u / 여유 0.050 u. avocado 는 카메라가 높아 세 값이 같은 답을 낸다.
+  - 새 열: `elev_max` `elev_min` `elev_abs_max` `ground_clear` `below_ground_frames`
+    `src_elev_abs_max` `max_elev_deg` `src_ground_clear` `min_ground_clear`.
+    새 `binding`/`status`: `elev`/`elev_limited`, `ground`/`ground_limited`.
+    예산 사슬은 `collision → obb → ground → elev → clearance → hole`.
+  - 뱅크 재생성 결과 (2026-08-22): camel 336 변이 / avocado 392 변이 모두 **지면아래 0**,
+    G1·standoff·obb 잔여 위반도 0. `binding` 은 camel `elev 11 / ground 23`,
+    avocado `elev 17 / ground 12`. 크기 축소 예: camel `dyn_0__rise_reveal__hole0.35`
+    path **2.035 u → 0.483 u** (hole 0.319 → 0.046), `stat_0` 2.443 → 0.624 u.
+    남은 문제는 camel `drop_reveal` τ 0.078 (path 0.055 u) 처럼 τ 하한에 눌린 정지 클립 — D53 건.
+  - 상세·실측표·선택지 5개는 `DECISIONS.md` D55.
 - **OBB 기반 가림 감사 `--obb_occlusion` / `--obb_occlusion_diag`**
   (`camera_generation/models/Planner/CinemaTraj/scripts/audit_bank_geometry.py`).
   ⚠ `.gitignore:222` 라 커밋에 안 들어간다. **기본값 off** 라 기존 호출은 그대로 돈다.

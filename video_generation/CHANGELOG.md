@@ -411,14 +411,30 @@
     reveal/rush/chases 는 **일부러 피해** shot 당 카메라 1대를 유지하도록 골랐다.
   - **17 preset 중 6종만 이 경로로 닿는다.** 나머지는 구조적으로 불가능하다 —
     `orbit_*`/`pedestal_*` 은 `infer_movement_intent` 가 그 태그를 리턴하는 분기 자체가 없고
-    (`canonical_movement:220-244` 는 알지만 producer 가 없다), `pan_right`/`truck_right` 는
-    `preset_for_motion:787-807` 이 `direction=="right"` 를 요구하는데 `infer_direction_label` 은
-    left/back/front 만 리턴하며, `rise_reveal`/`drop_reveal`/`s_curve`/`straight_ease`/
-    `static_hold_locked` 은 어떤 movement_tag 에서도 매핑되지 않는다(후보 탐색이 직접 고를 때만).
+    (`canonical_movement:220-244` 는 알지만 producer 가 없다), `rise_reveal`/`drop_reveal`/
+    `s_curve`/`straight_ease`/`static_hold_locked` 은 어떤 movement_tag 에서도 매핑되지 않는다
+    (후보 탐색이 직접 고를 때만 등장).
   - 기본값 `--no_movement_terms` 라 **앞선 실행과 바이트 단위로 같은 demo_root** 가 나온다.
-  - 오프라인 예측(두 stage 모듈을 import 해 `:5136-5149` 분기를 재현)에서 16/16 목표 preset 일치.
-    실측 Director 산출물(run `trumans_00add26c_mv`): `primary_movement` = static 4 / push_in 3 /
-    push_out 3 / pan 3 / truck 3 (무어휘 대조군은 static 16).
+  - 실측 (run `trumans_00add26c_mv`, `--camera-quality quality`, 같은 입력·해상도):
+    Director `primary_movement` = static 4 / push_in 3 / push_out 3 / pan 3 / truck 3
+    (무어휘 대조군 `_q` 는 static 16). Cinematographer `motion_profile` = `authored` 14 +
+    `closeup_static` 2 — **`semantic_light_dynamic` 붕괴가 한 건도 안 일어났다** (대조군은 26/26).
+    최종 `trajectory_preset` **5종**: `truck_right` 3 / `static_hold` 2 / `push_in_arc` 1 /
+    `static_subtle_zoom` 1 / `pan_right` 1 (대조군은 `push_in_arc` 13/13).
+  - **정정: `pan_right`/`truck_right` 는 "도달 불가"가 아니라 오히려 pan/truck 에서 유일하게
+    도달하는 쪽이다.** `cinematographer_stage.py:5155-5157` 이 `direction_tag` 를 left/right 로
+    정규화한 `movement_direction` 은 **카메라 레코드에 저장되지 않는다**. 저장되는 건 원본
+    `direction_tag`(여기서는 전부 `front`)뿐이고, 하류의 모든 `preset_for_motion(...,
+    camera["direction_tag"], ...)` 호출(`:2287, :2735, :4445, :4480, :4624, :4766`)이 그
+    `front` 를 받아 `:800-804` 의 else 가지로 떨어져 `_right` 를 낸다. `_left` 를 내려면
+    `infer_direction_label` 이 `left` 를 리턴해야 하고, 그건 설명문에 `profile`/`side view` 가
+    있어야 한다 — 즉 **`_left` 쪽이 어려운 경로다.** 기하도 라벨과 일치한다(3개 truck 전부
+    `dot(Δloc, cam_right) > 0`).
+  - **주의: preset 이 갈려도 이동량은 안 커진다.** `travel_distance` 평균 0.0401 / 최대 0.0898
+    blender unit (대조군 0.0706 / 0.0786). 3.6 s 동안 9 cm 이므로 preset 라벨은 궤적의 *모양*만
+    바꾸고 *크기*는 후보 탐색이 따로 정한다. `pan_right` 는 제자리 회전이라 travel 0.0000.
+  - 통과 카메라는 **8/16** 으로 대조군 13/16 보다 줄었다 (게이트 warning 은 8대 모두 비어 있으니
+    차단은 Cinematographer 뒤쪽 VLM 리뷰 단계에서 일어난 것).
 - **TRUMANS 를 LBM-Lite 소스로 태우는 두 스크립트**
   (`camera_generation/models/Planner/CinemaTraj/scripts/trumans_{probe,clip}.py`).
   ⚠ `.gitignore:222` 라 커밋에 안 들어간다.

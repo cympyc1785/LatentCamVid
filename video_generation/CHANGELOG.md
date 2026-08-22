@@ -7,6 +7,146 @@
 ## [Unreleased]
 
 ### Fixed
+- **뱅크의 `knob` 이 표시용 5자리 반올림이라 `emit_bank` 가 궤적을 못 되만드는 행이 있었다**
+  (`camera_generation/models/Planner/CinemaTraj/scripts/{fit_hole_ladder,emit_bank}.py`).
+  `fit_tau` 이분법이 스케일을 **계단으로 양자화**한다 — 손잡이→궤적이 연속이 아니다. 그래서
+  5자리 반올림이 계단 경계를 1.8e-6 만 넘겨도 궤적이 통째로 한 칸 커진다. 실측: snow-dog
+  `stat_0__truck_right__hole0.1` 의 참 손잡이는 0.228128185878 인데 `0.22813` 으로 올라가면서
+  scale 0.01428 → 0.01434, 궤적이 **0.43% 확대**되어 pose 대조가 최대 1.793e-03 로 깨졌다.
+  회전은 비트 단위로 같고 시작 pose 도 같은 **순수 균등 스케일** 어긋남이라, pose 대조 assert 가
+  없었으면 뱅크가 그대로 나갔을 종류다.
+  - `fit_hole_ladder` 가 `knob_raw`(무반올림)를 행·CSV 에 같이 싣는다. `knob` 열은 그대로 둬서
+    기존 리더는 안 깨진다.
+  - `emit_bank` 는 `knob_raw` 를 우선해 읽고, 없는 **예전 뱅크는 `recover_knob` 이 반올림 구간
+    ±5e-6 을 훑어 참 손잡이를 되찾는다** (재현이 `--pose_tol` 안에 들 때만 채택 — 못 찾으면
+    조용히 넘기지 않고 그대로 멈춘다). 되찾은 행은 `manifest.json:recovered_knobs` 와 요약표에
+    찍힌다. 뱅크 37개를 다시 fit 하는 비용(전체 wall 의 ~80%)을 피하려는 경로다.
+  - 확인: snow-dog(1 행 복구) / basketball-four / camel 모두 pose 재현 최대오차 **0.000e+00**.
+    basketball-four 의 8.918 어긋남은 별건인 `shape_mult` 버그였고 그 패치로 이미 해결돼 있었다.
+- **원본 LBM 의 Blender 워커 2개가 씬 이름 fallback 이 없어 TRUMANS blend 에서 전 shot 이 죽었다**
+  (`camera_generation/models/Planner/Look-Before-Move/{VideoEngineer/blender_render_worker.py,
+  Cinematographer/cinematographer_quality_worker.py}`).
+  ⚠ `.gitignore:222` 라 커밋에 안 들어간다. **vendored LBM 에 낸 유일한 수정이다.**
+  LBM 은 씬을 `Scene_<id>_Shot_<n>` / `Scene_<id>` / `Scene <id>` / `scene_<id>` 규약으로 찾는데
+  TRUMANS 의 씬 이름은 그냥 `Scene` 이다. 리포에 씬 resolver 가 **5개** 있고 그중 2개만
+  fallback 이 없었다:
+
+  | resolver | fallback | 판정 |
+  |---|---|---|
+  | `Director/director_scene_context_builder.py:224` | 호출자 `:1107` 가 `bpy.context.scene` 로 | OK |
+  | `Cinematographer/cinematographer_preview_worker.py:82` | `bpy.data.scenes[0]` | OK |
+  | `Cinematographer/cinematographer_quality_worker.py:163` | **없음** | 수정 |
+  | `VideoEngineer/blender_render_worker.py:64` | **없음** | 수정 |
+  | `VideoEngineer/video_runtime.py:502` | 호출자가 넘긴 이름을 그대로 씀 | OK (실증) |
+
+  → 파일에 **딱 하나의 씬**이 있을 때만(= 선택이 모호하지 않을 때만) 그 씬으로 떨어지는 가지를
+  넣었다. `LBM_SINGLE_SCENE_FALLBACK=1` **opt-in 이라 기본 동작은 그대로**다. 두 파일 다 빠져
+  있던 `import os` 도 같이 넣었다.
+  - `blender_render_worker` 쪽 증상: 앞 단계는 멀쩡히 지나가고 렌더에서만 `missing scene` ×6 →
+    `RuntimeError: Blender scene render failed`. 고친 뒤 VideoEngineer 78.3 s 완주, rc=0.
+  - `quality_worker` 쪽 증상이 더 고약하다 — **조용히 성공한 척한다.** 워커가
+    `{"success": true, "row_count": 16}` 을 내는데 16행 전부 `error: "scene_not_found"` 이고,
+    후보 탐색이 아예 안 돌아 `candidate_count_raw_min=0` → 카메라 16대 전원
+    `downstream_blocked` → 렌더 0장. 게다가 **quality 모드가 fast 보다 빨라진다**
+    (39.8 s vs 86.4 s) 니 시간만 보면 정상으로 오독하기 딱 좋다.
+    고친 뒤 Cinematographer 232.7 s, shot 당 후보 raw ~1,200 (16 shot 합 19,235) 로
+    탐색이 실제로 돌았고 파이프라인 전체가 rc=0 으로 완주했다.
+  - 곁다리로 `--resume-from` 의미도 기록해 둔다(`run_full_pipeline.py:280-364`): 적은 단계의
+    **산출물을 재사용**하고 실행은 그 **다음** 단계부터다. VideoEngineer 를 다시 돌리려면
+    `--resume-from cinematographer` 다 — `videoengineer` 를 주면 아직 없는
+    `video_handoff_v1.json` 을 읽으려다 `FileNotFoundError`.
+- **`fit_hole_ladder` 의 `shape_mult` 가 실제로 쓴 배율보다 headroom 배 크게 기록됐다**
+  (`camera_generation/models/Planner/CinemaTraj/scripts/{fit_hole_ladder.py,emit_bank.py,
+  patch_bank_shape_mult.py}`). ⚠ `.gitignore:222` 라 커밋에 안 들어간다.
+  모양 확대 루프가 `mult` 를 판정 **뒤에** 곱해서, 루프가 `break` 없이 끝까지 다 돌면
+  (= `status == "shape_limited"`) `poses` 를 만든 배율은 `mult/headroom` 인데 행에는 `mult`
+  가 실렸다. `emit_bank` 가 그 배율로 되만들면 궤적이 2배가 된다 — 실측 basketball-four
+  `dyn_0__pull_out_arc__hole0.5` 에서 `poses.npz` 와 최대 **8.918** 어긋나 rc=1.
+  - 마지막 시도에서는 곱하지 않도록 고쳤다. 렌더 횟수·최종 궤적은 그대로고 기록되는 숫자만 바뀐다.
+  - `dolly_frac`/`lateral_frac` 을 안 쓰는 preset(orbit 계열, `s_curve`)에서는 배율이 궤적에
+    영향을 안 줘서 같은 버그가 있어도 emit 이 통과했다 — couple-hug·bmx-bumps 가 그 경우.
+    **즉 이 버그는 `pull_out_arc` 처럼 dolly 를 쓰는 행에서만 드러난다.**
+  - 이미 만든 뱅크는 `scripts/patch_bank_shape_mult.py` 로 `shape_mult` 열만 나눠서 고친다
+    (fit 재실행 영상당 ~1350 s 회피). 행의 측정치는 작은 쪽 궤적에서 잰 것이라 원래 맞다.
+    두 번 돌면 또 반토막 나므로 뱅크 최상위 `shape_mult_semantics: "as_built"` 를 표식으로
+    두고, 붙어 있으면 건너뛴다. 고친 뒤 확인은 `emit_bank` 의 "pose 재현 최대오차 0.000e+00".
+- **새 소스 1편을 넣을 때마다 `seg_instances` symlink 를 손으로 걸어야 했다**
+  (`camera_generation/models/Planner/CinemaTraj/scene_graph/io.py`). ⚠ `.gitignore:222`.
+  `recon_and_seg_single.py --save_seg_instances` 는 `recon_and_seg/<video>/seg_instances` 에
+  쓰는데 코퍼스 규약은 `eval_data/seg_instances/<video>` 다. 안 걸면 `"seg_instances 가 없다"`
+  로 죽었다 (TRUMANS 투입 때 실제로 걸림). → 동적 seg 에 한해 원본 위치를 fallback 으로 본다.
+  symlink 가 이미 있으면 그쪽이 먼저 잡히므로 기존 52편은 동작이 그대로다.
+- **실내 씬에서 ground RANSAC 이 inlier 문턱에 걸려 조용히 카메라-up 으로 떨어졌다**
+  (`camera_generation/models/Planner/CinemaTraj/{scene_graph/gravity.py,scripts/build_scene_graph.py}`).
+  각도·"카메라가 평면 위" 조건은 통과했는데 `inlier_ratio ≥ 0.15` 만 못 넘긴 후보가 버려지고,
+  대신 실제 바닥과 12~28° 어긋난 카메라 up 이 중력축이 됐다. 52편 중 15편이 fallback 인데
+  그중 3편이 이 경우다: `trumans-bedroom` 0.142/12.8°, `basketball-four` 0.132/28.2°,
+  `park-selfie` 0.105/11.4°. 나머지 12편은 각도 조건부터 못 넘겨 진짜 fallback 이 맞다.
+  → `--weak_inlier_ratio` 로 그 문턱만 낮춰 살리는 가지(`method: "ground_ransac_weak"`,
+  confidence 절반)를 넣었다. **기본값 0.0 = 꺼짐** — 51편 코퍼스 결과를 안 바꾸기 위해.
+- **51편 확장 파일럿에서 앞단(detection/segmentation/scene graph) 실패 모드 5종 실측 + 수정**
+  (`camera_generation/models/Planner/CinemaTraj/{scene_graph/instances.py,scripts/build_scene_graph.py,
+  scripts/extract_nouns_vlm.py,scripts/extract_static_nouns.py,scripts/stack_videos.py}`).
+  ⚠ `camera_generation/models` 는 `.gitignore:222` 라 커밋에 안 들어간다.
+  파일럿 대상은 새 5편 `goat / room-argue / car-roundabout / woman-pottery / parkour`.
+  - **① 명사 추출이 SAM3 출력에 순서 의존** — `extract_nouns_vlm.read_authored_keywords` 가
+    비교 기준을 `seg_instances/<video>/meta.json` 에서 읽었다. 그건 `metadata.csv:dynamic` 의
+    복사본일 뿐인데, "SAM3 를 먼저 돌려야 명사 추출이 된다"는 순서를 만들어 parkour 가 아직
+    안 끝난 상태에서 `FileNotFoundError` 로 7편 전체가 죽었다. → **원천 `metadata.csv` 를 직접
+    읽는다.** 없는 영상은 빈 목록(비교 기준만 없고 추출은 된다).
+  - **② 인스턴스 수 폭발** — 개별 track 은 다 멀쩡한데 수가 터진다: 동적 `car-roundabout` **69개**
+    (거리의 차 전부), 정적 `parkour` **56** / `car-roundabout` **54** / `goat` 은 `rock` 하나로
+    **31개**. 기존 기각 3종(`max_area_frac`/`visible_frames`/`mean_score`)은 track 을 하나씩만
+    보므로 이걸 원리적으로 못 막는다. 해로운 이유는 셋 — G5 상자 여유는 **전 노드 최소값**이라
+    상자 수십 개면 자유공간이 잘게 쪼개져 전 방향이 `obb_limited` 로 수렴하고, `rock` 31개는
+    사실 지형이라 OBB 자체가 무의미하며, graph 빌드 시간이 track 수에 선형이다.
+    → `scene_graph.instances.cap_instances`: keyword 별 상위 K + kind 별 전역 상한
+    (`--per_keyword_top_k 5 --max_dyn_nodes 6 --max_stat_nodes 10`, 0 이하면 상한 끔 = 예전 동작).
+    순위는 `max_area_frac` — `sample_camera_bank.py --min_area_frac` 이 앵커를 고를 때 쓰는 것과
+    **같은 양**이라 상·하류가 안 어긋난다. **버린 것은 전부 `diagnostics.dropped_tracks` 에 사유와
+    함께 남는다** (조용한 절단 금지).
+  - **③ lift 를 먼저 하고 나서 버렸다** — `car-roundabout` 은 track 123개인데 그중 100개 넘게
+    버릴 것을 49프레임씩 unproject 하고 나서 버렸다. 판정에 쓰는 세 양은 전부 2D 마스크만으로
+    나온다. → `summarize_tracks` (마스크 `sum()` 만) 로 사전 선별하고 `build_instances(select=...)`
+    가 살아남은 track 만 올린다. 사전 상한은 `--prescreen_factor 3` 배로 넉넉히 — 최종 상한은
+    merge 뒤에 걸어야 "면적 상위 K" 가 물체 단위로 세어진다(같은 물체 조각 5개가 상위 5칸을
+    먹으면 안 된다).
+  - **④ 마스크 depth 가 두 덩어리일 때 OBB 가 시선 방향으로 늘어남** — `goat` 의 OBB 투영 크기가
+    마스크의 **13.06배**, extent `[0.96, 0.05, 0.82] u` 로 두께가 사실상 0인 납작한 판이었다.
+    원인은 마스크 안 depth 가 **완전히 두 덩어리**라는 것: 염소 본체 z 0.62~1.0 에 44k px,
+    그리고 **중간이 텅 빈 채로** z 6.5~7.5 에 7000 px (마스크의 **14%**) — SAM3 가 언덕 저편의
+    다른 염소 무리를 같은 track 으로 묶었다. 기존 `trim_depth_tail` 은 양끝 1% 를 자르는 대칭
+    처리라 14% 를 못 자르고, `radius_outlier_mask` 도 못 잡는다(저쪽도 7000점이라 서로 이웃이다).
+    → `trim_depth_mode`: log z 히스토그램에서 **중앙값이 속한 덩어리만** 남긴다
+    (`--depth_mode_bins 40 --depth_mode_gap_frac 0.005`, bins 0 이면 끔). 단봉이면 무처리.
+  - 회귀 (camel, ④ 적용 전후): subject 는 그대로 `dyn_0` extent 0.137→0.133 / `dyn_1` 0.160→0.145,
+    **배경 누출로 부풀어 있던 정적 상자만 줄었다** — `stat_0 fence` 0.746→0.294 u,
+    `stat_2 fence` 0.303→0.173, `stat_3 tree` 0.597→0.384 (투영 크기비 2.07→**1.63**).
+    전 노드 `size_ok=Y`. G5 를 **느슨하게** 하는 방향이다. 기존 뱅크는
+    `out/<video>/{scene_graph_pre_52.json,hole_bank_pre_52/}` 로 보존.
+  - **⑤ 광역 표면이 두 단어로 새어 들어감** — `extract_static_nouns.SURFACE_NOUNS` 가 정확일치라
+    `brick wall` / `dirt track` / `tile floor` 가 그대로 통과했다(51편 실측). → `is_surface` 가
+    **머리단어(마지막 토큰)로도** 판정한다. 51편에서 올라온 `court`/`track`/`field`/`path`/
+    `hill`/`beach`/`dirt`/`carpet` 등도 목록에 추가.
+  - 파일럿 7편 재실행 실측 (GPU 1~3 병렬, `--no_skip_done`, 오버레이 포함):
+
+    | 영상 | 노드 dyn+stat | dropped | size_ratio 최대 | WALL |
+    |---|---|---|---|---|
+    | camel | 2+4 | 1 | 1.63 | 273.7 s |
+    | avocado-slice | 3+8 | 3 | 2.02 | 271.5 s |
+    | woman-pottery | 2+5 | 6 | 2.42 | 207.4 s |
+    | room-argue | 3+8 | 0 | 1.59 | 476.1 s |
+    | parkour | 1+10 | 42 | nan(꼭짓점이 카메라 뒤) | 422.0 s |
+    | car-roundabout | 6+10 | 93 | 1.54 | 535.6 s |
+    | goat | 1+5 | 18 | 3.65 | 333.4 s |
+
+    room-argue `pillow` 3개는 수정 전 3.47 / 3.85 / 5.86 → **1.06 / 0.76 / 1.06** (④의 직접
+    증거). car-roundabout 은 track 123개 → 노드 16개. **goat 만 남는데 이건 depth 추정기
+    한계다** — f=2289 px / 폭 1280 px 의 망원 샷이라 시선 방향 depth 오차가 물체 크기와
+    맞먹는다. 안 고친다 (OBB 가 크면 G5/G7 이 보수적일 뿐). 선택지는 `DECISIONS.md` D61.
+  - graph 단계 실측: camel **171.7 s** (오버레이 없이) / **273.7 s** (오버레이 포함).
+    대부분이 `radius_outlier_mask` 의 cKDTree 로, track 수 × 49프레임에 선형이다.
+  - 앞단 전체 실측: VLM 명사 51편 **81.7 s** · 정적 명사 정리 51편 <1 s · 동적 SAM3 ~40 s/편.
 - **hole 사다리의 아랫단이 조용히 정지 카메라를 뱉던 문제 (D53) — τ 하한을 소스 시차 기준으로
   올리고, 사다리 바닥을 anchor 의 정지 hole 로 옮기고, `fit_tau` 이분법 해상도를 고쳤다**
   (`camera_generation/models/Planner/CinemaTraj/lbm/presets.py`, `decode/build_poses.py`,
@@ -86,6 +226,34 @@
     `results/20260820_lbm_lite/` 에 대조용으로 남겼다.
 
 ### Changed
+- **명사 추출 두 스크립트에 `--merge` — 1편만 돌려도 나머지 51편이 안 날아간다**
+  (`camera_generation/models/Planner/CinemaTraj/scripts/extract_{nouns_vlm,static_nouns}.py`).
+  ⚠ `.gitignore:222` 라 커밋에 안 들어간다.
+  둘 다 `--videos` 로 준 영상만 계산한 뒤 결과 JSON 을 **통째로 덮어쓴다.** 코퍼스에 영상을
+  하나 추가하려고 `--videos <새영상>` 만 돌리면 `vlm_nouns.json` / `static_nouns.json` 이
+  그 1편짜리로 바뀌고, 다음 `sam3_static_instances.py` 가 나머지를 조용히 건너뛴다.
+  → `--merge` 는 기존 파일을 읽어 같은 키만 갈아끼우고 나머지를 유지한다
+  (`vlm_nouns` 는 `(video, frame_mode)` 기준, `static_nouns` 는 `video` 기준).
+  기본값은 `--no_merge` = **예전 그대로 덮어쓰기**.
+- **`render_bank_videos.py --no_sheet` + `--max_tiles 0` — 뱅크 전량을 변이별 mp4 로 스트리밍**
+  (`camera_generation/models/Planner/CinemaTraj/scripts/render_bank_videos.py`).
+  ⚠ `.gitignore:222` 라 커밋에 안 들어간다.
+  기존 `--per_variant` 는 **타일 시트에 올라간 것만** 변이별 mp4 로 떨궜고, 그 타일 수는
+  `--max_tiles 10` 이 상한이었다. "최종 남은 카메라 전량 depth render 저장"에는 둘 다 걸린다 —
+  수백 타일짜리 그리드는 읽을 수도 없고, 시트를 만들려면 전 변이의 49프레임을 동시에 메모리에
+  들고 있어야 한다 (480x270 기준 변이당 19 MB → 400 변이면 7.6 GB).
+  → `--no_sheet` 는 시트 합성을 건너뛰고 렌더 즉시 mp4 로 흘려보낸다(상주 메모리 = 변이 1개분),
+  `--max_tiles 0` 은 상한을 끈다. 기본값(`--sheet`, `--max_tiles 10`)은 예전 그대로.
+  `--no_sheet --no_per_variant` 는 나오는 게 없으므로 `assert` 로 막았다.
+- **`run_lbm_lite.py` 에 `pcd` stage 추가 (4D 점군 `cloud.npz`)**
+  (`camera_generation/models/Planner/CinemaTraj/run_lbm_lite.py`).
+  ⚠ `.gitignore:222` 라 커밋에 안 들어간다.
+  `board`/`bank`/`fit`/`bankvid` 는 전부 `<out>/<video>/cloud.npz` 를 **읽기만** 하고 없으면
+  `assert` 로 죽는데, 오케스트레이터에 그걸 **만드는 단계가 없었다.** 파일럿 2편
+  (`camel`/`avocado-slice`)은 손으로 `python -m lbm.cloud` 를 돌려놨어서 안 드러난 구멍이다.
+  51편 전량 확장에서는 첫 영상에서 바로 죽는다. → `pcd` = `python -m lbm.cloud`,
+  `ALL_STAGES` 와 `BANK_STAGES` 의 `graph` 바로 뒤에 넣었다. 기존 동작은 그대로 —
+  `--stage bank` 처럼 이름을 직접 주면 예전과 똑같이 그 단계만 돈다.
 - **죽은 레버 7개 삭제 — `fit_hole_ladder.py` CLI 46 → 39개 (D57)**
   (`camera_generation/models/Planner/CinemaTraj/scripts/fit_hole_ladder.py`).
   ⚠ `.gitignore:222` 라 커밋에 안 들어간다. 전체 근거는 `CinemaTraj/DECISIONS.md` **D57**.
@@ -166,6 +334,85 @@
   (출력의 `[0.153, 0.153] u` 범위 표기가 실제 마진).
 
 ### Added
+- **원본 Look-Before-Move 를 TRUMANS 로 실행할 수 있게 하는 어댑터 3종 + 실행 환경**
+  (`camera_generation/models/Planner/CinemaTraj/scripts/{probe_trumans_blend.py,
+  trumans_blend_layout_worker.py,trumans_to_lbm_demo.py,lbm_preview_reel.py}`).
+  ⚠ `.gitignore:222` 라 커밋에 안 들어간다.
+  이때까지 원본 LBM 은 **한 번도 안 돌아갔다** — 입력이 `.blend` 씬 자산이라 Vista4D 영상
+  코퍼스로는 줄 수가 없었고(리포가 "intentionally excluded" 한 JSON 5종), 머신에 Blender 도
+  없었다. TRUMANS 는 그 입력 형태를 그대로 갖고 있어서 처음으로 실측이 가능해졌다.
+  - 환경: **포터블 Blender 4.5.9 LTS** `/data1/cympyc1785/tools/blender/blender-4.5.9-linux-x64/`
+    (tarball 361 MB, root·pip 불필요) + ffmpeg 심링크 `/data1/cympyc1785/tools/bin/ffmpeg`
+    → `imageio_ffmpeg` 동봉 바이너리 재사용. **아무것도 설치하지 않았다.**
+  - `probe_trumans_blend.py` — headless 로 blend 내부를 덤프. `strings` 로는 문자열이 있다는
+    것만 알지 그게 오브젝트 이름인지 머티리얼 이름인지 모른다. 실측(`00add26c-…`): 씬이
+    **딱 하나이고 이름이 그냥 `Scene`**, 오브젝트 432 / mesh 417 / armature 1 / action 254,
+    CYCLES, 960×540, fps 25. 상호작용 물체 이름은 `obj_list.txt` 와 정확히 일치한다.
+  - `trumans_blend_layout_worker.py` — LBM `layout_description` 이 요구하는 world 위치·크기를
+    잰다. **`obj.location`/`obj.dimensions` 를 쓰면 안 된다** — TRUMANS 는 mesh 를
+    `<obj>_root_<obj>` EMPTY 에 매달아 애니메이션하므로 location 이 전부 0 근처로 읽히고,
+    dimensions 는 local bbox × scale 이라 부모 회전이 빠진다. 8개 bbox 코너를 `matrix_world`
+    로 보내 world AABB 를 다시 잡는다. 캐릭터는 `obj_list.txt` 에 없어 ARMATURE 타입으로 찾고
+    스킨 mesh 자손을 union 한다. `rotation.z` 는 **도(degree)** 로 낸다
+    (`cinematographer_stage.py:483` 이 `math.radians` 를 건다).
+  - `trumans_to_lbm_demo.py` — recording → LBM `demo_root`. take 식별이 핵심: 한 씬 uuid 에
+    실제 take 가 ~10개인데 `.blend` 에는 그중 하나만 구워져 있다. `scene_list`/`seg_name`/
+    `scene_flag` 로 시퀀스별 프레임 수를 세어 **blend 프레임 수와 일치하는 것 하나**를 고른다
+    (`00add26c-…` → 2077 프레임 → `2023-01-17@00-55-00`). 1.66 GB blend 는 **복사하지 않고
+    심링크** — LBM 은 blend 를 수정하지 않는다(전 워커가 `-b` 배경 실행). `scene_size` 는 잰
+    AABB 로 채운다(기본 ±10 을 그냥 두면 실내 5 m 씬에서 카메라 후보가 벽 밖으로 나간다).
+    `Actions/<seq>.txt` 는 **탭 3열 `start\end\text`** 다(id 열 없음) — 4열로 읽으면
+    `int('Pick')` 에서 죽는다. `shot_id` 는 줄 번호로 매긴다.
+  - `lbm_preview_reel.py` — shot 별 final preview 를 PASS/BLOCK 라벨 + 차단 사유와 함께
+    영상 1편으로. contact sheet 로 16개를 늘어놓으면 타일이 240 px 라 "프레임이 새하얗다"를
+    눈으로 못 가린다.
+  - **실측 (`--camera-quality fast`, 960×540, 로컬 Qwen3-VL-30B, run `trumans_00add26c`)**:
+    Director 288.2 s / Cinematographer 86.4 s / VideoEngineer 78.3 s / Editor 38.8 s,
+    합 491.7 s, rc=0. Actions 16줄 → shot 16 → 카메라 16대 → LBM 자기 VLM 게이트가 10대 차단
+    → 6대 렌더(38프레임씩 228장) → `final_edit_v1.mp4` 6.24 s.
+  - **주의: `fast` 는 look-before-move 가 아니다.** 후보 탐색·board 선택 전체가
+    `cinematographer_stage.py:5346 if config.camera_quality == "quality"` 안에 있어서
+    `candidate_count_raw_min=0, board_count=0` 으로 건너뛰어졌다. 카메라는
+    `asset_view_seed` 하나로 정해졌고 `trajectory_safety_report.travel_distance` 가 6대 전부
+    **0.0** (38프레임 동안 9 cm) — 사실상 정지 카메라다. 정직한 카메라당 시간은 `quality`
+    모드로 재야 한다.
+  - **실측 (`--camera-quality quality`, 같은 입력·해상도, run `trumans_00add26c_q`)**:
+    Director 288.2 s(fast 산출물 재사용) / Cinematographer **232.7 s** / VideoEngineer 218.5 s /
+    Editor 137.5 s, 합 **876.9 s**, rc=0. 이번엔 후보 탐색이 실제로 돌았다 — shot 당 raw 후보
+    **~1,200** (16 shot 합 19,235) → eligible 5,078 → retained 286 → dedup 352, shot 당
+    channel board 3장. 선택 출처는 `operation_expansion` 10 / `semantic_feet_s4_golden_ratio` 6.
+    VLM 게이트 통과가 fast 의 6/16 에서 **13/16** 으로 올랐다(차단은 shot 1·3·5).
+  - **카메라 1대당 시간 비교** (같은 머신, 같은 로컬 Qwen3-VL-30B):
+
+    | | LBM-Lite | 원본 LBM `fast` | 원본 LBM `quality` |
+    |---|---|---|---|
+    | 카메라 생산 (Director+Cinematographer) | — | 23.4 s | 32.6 s |
+    | 전 파이프라인 / 만든 카메라 | **7.85 s** | 30.7 s | 54.8 s |
+    | 전 파이프라인 / **쓸 수 있는** 카메라 | 7.85 s | 82.0 s (6/16) | 67.5 s (13/16) |
+
+    LBM-Lite 값은 13편 3,416 대 / 26,824.1 s 로 낸 것이고 `fit` 이 79.8% 를 먹는다.
+    원본은 shot 16개 기준이라 표본이 작다 — 배율(약 **8.6배**)만 읽을 것.
+    quality 가 fast 보다 대당 시간은 비싸지만 **버려지는 카메라가 줄어** 쓸 수 있는 카메라
+    1대당으로는 오히려 싸다(82.0 → 67.5 s).
+- **TRUMANS 를 LBM-Lite 소스로 태우는 두 스크립트**
+  (`camera_generation/models/Planner/CinemaTraj/scripts/trumans_{probe,clip}.py`).
+  ⚠ `.gitignore:222` 라 커밋에 안 들어간다.
+  - `trumans_probe.py` — 배포본에 카메라 파라미터가 **없다**는 기존 메모를 뒤집는다.
+    `smplx_result`(world) 와 `smplx_result_in_cam`(camera) 이 쌍으로 있으므로
+    `R_c = R_cw R_w`, `t_cw = J0 + t_c − R_cw (J0 + t_w)` 로 카메라를 **복원할 수 있다**.
+    무작위 12편 실측: `R_cw` 프레임간 편차 median **179.98°**, `|t_c|` median 2.10~2.13 m,
+    `z_c` median −2.05~−2.09 m. 즉 **사람을 반경 ~2.1 m 로 따라다니는 가상 카메라**이지
+    씬 고정 카메라가 아니다 — 그래서 이 pose 를 그대로 소스 카메라로 쓰면 안 된다.
+  - `trumans_clip.py` — 30 fps × 1,500~3,400 프레임 연속 녹화에서 코퍼스와 같은 **49프레임
+    창**을 잘라낸다. `--rank` 는 창을 (카메라 회전 폭, 사람 이동 거리, action label 종류 수)로
+    점수 매겨 정지 구간을 피하게 하고, `--identify` 는 이미 잘라둔 클립이 어느 녹화 몇 번째
+    프레임인지 되찾는다(provenance 복구).
+- **`stack_videos.py` 에 격자 + 타일 이름표** (`--columns` / `--tile_width` / `--labels`,
+  `camera_generation/models/Planner/CinemaTraj/scripts/stack_videos.py`). 셋 다 안 주면
+  **예전 동작 그대로** 한 줄(`--direction`)이다. 7~51편을 한 화면에서 훑으려면 세로 한 줄로는
+  못 보고, 이름표 없는 8칸 격자는 어느 타일이 어느 영상인지 셀 수 없어 벽지가 된다.
+  `--tile_width` 를 줄 때만 리사이즈하고, 그때도 **모든 타일에 같은 폭**을 강제한다
+  (타일 사이 배율이 갈리면 비교가 깨진다는 원래 설계 의도 유지).
 - **전진 한계 게이트 (G7) — dolly 가 subject OBB 를 **지나쳐** 뒤에 서는 걸 막는다**
   (`camera_generation/models/Planner/CinemaTraj/lbm/gates.py:approach_profile`,
   `scripts/{sample_camera_bank,fit_hole_ladder}.py`).

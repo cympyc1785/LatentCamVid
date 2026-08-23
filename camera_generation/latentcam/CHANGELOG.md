@@ -5,6 +5,38 @@ All notable changes to the latentcam sub-project. Follows [Keep a Changelog](htt
 ## [Unreleased]
 
 ### Added
+- **arm A(`trumans_lite_ctxuniform`) caption precision/recall/f1 정체 원인 진단 (2026-08-23).
+  코드 변경 없음** — 측정만. 긴 요약은
+  `camera_generation/models/Planner/CinemaTraj/summary.md` §7 (gitignore 대상).
+  - **input/target/좌표계 버그는 없다.** 덤프된 `_transforms_ref.json` 이 디스크
+    `da3/pose.npz` 를 w2c→c2w→OpenGL flip 한 것과 자릿수까지 일치
+    (`|dt| mean [0.00654 0.00462 0.00803]`) — `out_to_trajectory` 가 스케일을 정확히 복원해
+    raw TRUMANS 미터로 나간다. GT caption segment 도 생성 preset 과 의미 일치
+    (arc_right x 부호 일치 1.00 / arc_pull z 1.00 / push_in z 0.87 / hold 정지).
+  - **원인 ① caption metric 의 static 임계가 절대 world 단위다.**
+    `main/evaluate/eval/src/metrics/modules/caption.py:405-410` `fps=5`,
+    `t_velocities = 5·Δt_local`, `cam_static_threshold = 0.02`
+    → 축당 프레임당 0.004 world unit 을 넘어야 "움직임".
+    ref median `5·|Δt|` (x,y,z) / 임계 미만 축 비율:
+    DL3DV `[0.4291, 0.0805, 0.2095]` **3.3%** | mix arm B `[0.3148, 0.0647, 0.1398]` **2.7%** |
+    **TRUMANS `[0.0237, 0.0109, 0.0372]` 45.2%**. 클래스는 27×7=189 완전일치 +
+    `average="weighted"` 라 부분 점수가 없다 → static 비트 하나 뒤집히면 0.
+    (메모리 `caption-metric-thresholds-are-world-units` 의 DataDoP fscore 0 과 같은 현상.)
+  - **원인 ② `vae_latent_scale` 이 TRUMANS 에 대해 5× 틀렸다.**
+    `scripts/vae/vae_scale_matrix.py` 를 TRUMANS 전량 130 sample 에 실측:
+    `vae_20260302_300 / 64 / avg_scale / rel -> lat.std 0.19128, recon L1 rot 0.00286
+    trans 0.00174 intr 0.00169`. config 는 0.96032625 → **diffusion 입력 std 0.1992**
+    (DL3DV-only 는 0.47637/0.96032625 = 0.4960 이라 추가로 2.49× 더 작다).
+    VAE 자체는 in-distribution (trans recon 이 DL3DV 0.00336 보다 좋다) — 상수만 틀렸다.
+    결과(epoch 95, step 1330, val 14편): path_len ref 0.5723 / pred 2.7048,
+    net_disp 0.5213 / 1.0987, tortuosity **1.08 / 2.54**, 프레임당 속도비 축별
+    `[11.99, 31.37, 12.75]` — net 은 2.6× 인데 프레임당은 12–31× = 고주파 떨림.
+  - 모델은 학습 중이다: `val/loss_traj` 2.830574(ep0)→0.116155(ep52),
+    `val/clatr/clatr_score` 0→13.0794(step 1302), `val/clatr/fcd` 1390.85→1163.94(step 1246).
+    `val/captions/fscore` 만 0~0.0911 사이를 추세 없이 튄다.
+  - 후속 선택지(미판정): (A) `vae_latent_scale=0.19128` 입력 std 1.0 /
+    (B) `0.38565` 입력 std 0.4960 = DL3DV arm 과 paired / (C) `cam_static_threshold` 를
+    코퍼스별로(TRUMANS≈0.0011). A·B 는 원인②만, C 는 원인①만 고친다.
 - **TRUMANS-Lite 를 DL3DV-da3 코퍼스로 태우는 실험 config 2종** — 코드 변경 없이
   `dl3dv_root` + `meta_csv` 만 갈아끼워 기존 `dataset_dl3dv` 로더를 그대로 쓴다
   (변환기는 `camera_generation/models/Planner/CinemaTraj/scripts/trumans_lite_to_dl3dv.py`,

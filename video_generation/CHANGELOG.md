@@ -7,6 +7,23 @@
 ## [Unreleased]
 
 ### Added
+- **`scripts/audit_lite_framing.py` — 뱅크 프레이밍을 "보이는 OBB 면적 / 전체 OBB 면적"으로 잰다**
+  (`camera_generation/models/Planner/CinemaTraj/scripts/audit_lite_framing.py`).
+  그동안 뱅크 품질을 subject 의 **절대 화면 면적**으로 봤는데 그건 shot size 지 품질이 아니다 —
+  wide shot 은 작아도 좋은 그림이다. 판정 축을 보이는 비율로 바꾸고 두 항을 **분리해서** 찍는다:
+  `crop_keep`(화면 밖으로 나간 만큼) × `occl_keep`(앞에 뭐가 끼어 가려진 만큼). 1.0 에서 떨어진
+  이유가 잘림인지 가림인지 섞이면 못 고치기 때문.
+  - `crop_keep` 은 **해석적 면적**이다 (hull → Sutherland-Hodgman 클리핑 → shoelace).
+    `cv2.fillConvexPoly` 로 세면 분모까지 화면에 잘려서 **잘림 자체가 안 보인다**.
+  - `occl_keep` 은 픽셀마다 광선-AABB 입사 깊이 `t_enter` 를 구해 렌더 depth 와 비교한다.
+    사람 표면은 박스 **안**(depth ≥ t_enter)이라 자기 가림으로 안 잡힌다.
+  - `--preview` 로 판정 근거 영상 (청록 hull = 화면 안으로 접어 그림, 빨강 = 가려진 픽셀).
+  - 편향: OBB 는 실루엣보다 크므로 두 항 다 **과대** 보고 쪽이다 — 순위용이지 절대 기준이 아니다
+    (`audit_bank_geometry.py` 의 OBB 가림과 같은 단서).
+  - Lite 뱅크 95편 실측: `framing` median 0.743 / min 0.437. **crop 이 원인**이다 —
+    crop median 0.786 (`< 0.7` 이 22편), occl median 0.973 (`< 0.7` 이 6편).
+    반경별 crop median 은 1.5 m 0.762 (72편) / 2.2 m 0.885 (16) / 3.0 m 0.970 (5) / 4.0 m 1.000 (2)
+    로 **단조**고, occl 은 반대로 0.983 → 0.913 → 0.892 → 0.625 다 (멀수록 사이에 가구가 낀다).
 - **`scripts/trumans_scene_probe.py` — `.blend` 씬 기하를 headless Blender 광선으로 잰다**
   (`camera_generation/models/Planner/CinemaTraj/scripts/trumans_scene_probe.py`).
   LBM-Lite 의 G1(`lbm/gates.py`)은 DA3 depth shell 위에서 "관측된 표면보다 뒤인가"로 벽 속을

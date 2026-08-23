@@ -7,6 +7,26 @@
 ## [Unreleased]
 
 ### Added
+- **TRUMANS Lite 클립마다 `avg_scale` 저장 — context 로 쓸 때 카메라 이동량을 나눌 분모**
+  (`camera_generation/models/Planner/CinemaTraj/scripts/trumans_to_recon.py`,
+  신규 `scripts/make_avg_scale_trumans.py`). ⚠ 둘 다 `.gitignore:222` 라 커밋에 안 들어간다.
+  - 정의는 `avg_scale_first_cam()` **하나뿐**이고 DL3DV 의 `avg_scale_context_first_cam` 과 같다:
+    frame0 카메라 기준, sky 를 뺀 전 픽셀의 `z(u,v)·‖K⁻¹[u+0.5,v+0.5,1]‖` 평균 (pixel stride 2).
+    z-planar depth 를 ray 길이로 되돌리는 `‖K⁻¹·‖` 를 빼먹으면 화각 넓은 쪽이 과소평가된다.
+  - **centroid 가 아니라 first-cam 인 이유**: 이 값을 쓰는 순간은 클립을 context 로 집어들 때고,
+    그때 기준은 frame0 카메라다. 궤적 중앙을 기준으로 재면 같은 씬인데 클립마다 분모가 달라진다.
+  - `avg_scale` 은 사람 포함(사용자 정의 "모든 점"), `avg_scale_static` 은 사람까지 뺀 진단용.
+    저장 위치는 recon 폴더의 `avg_scale.json` — 소비 시점에 손에 있는 게 work 디렉토리가 아니라
+    이 폴더라서다. manifest 는 `render` 블록 아래에 같이 싣는다 (`sky_frac`/`depth_p50` 과 같은
+    "잰 값" 계열. top-level 은 `video`/`subject`/`caption` 같은 신원 필드).
+  - **`make_avg_scale_trumans.py` 는 뱅크 96편 backfill 용**. 편당 ~3분짜리 재렌더 없이
+    이미 있는 depth+카메라만으로 채운다. `--from_render` 는 렌더 원본 float32 `.npy`,
+    기본은 recon 폴더의 float16 EXR. **두 경로 실측 차이 ≤ 0.0002 %** (4편 대조) — 2 m 대에서
+    float16 간격이 ~1 mm 라 평균에 안 남는다. `--patch_manifest` 로 manifest 도 같이 갱신.
+  - **뱅크 96편 실측**: min/med/max **1.476 / 2.365 / 4.090 m**, `static/all` 0.9937~1.2553,
+    전체 spread **2.77×**. 이 2.77× 는 **recording 간이 아니라 recording 안**에서 나온다 —
+    recording 별 median 은 2.136~2.925 m 로 **1.37×** 밖에 안 벌어지고, 한 recording 안의
+    spread 가 1.46~2.17× 다. 즉 분모가 방 크기가 아니라 클립별 카메라-subject 거리를 재고 있다.
 - **TRUMANS Lite subject 를 사람 전용에서 {human, event, object} 로 일반화**
   (`camera_generation/models/Planner/CinemaTraj/scripts/trumans_scene_probe.py`,
   `trumans_to_recon.py`). ⚠ `.gitignore:222` 라 커밋에 안 들어간다.

@@ -6,7 +6,58 @@
 
 ## [Unreleased]
 
+### Fixed
+- **보행 채굴이 7편 중 5편에서 0건이던 원인 = fps** — `trumans_to_recon.py` 에 `--motion_fps`
+  (기본 **30**, `0` 이면 예전처럼 blend fps) 추가.
+  ⚠ `.gitignore:222` 라 커밋에 안 들어간다.
+  - `mine_walk_actions` 는 `step * fps > 0.4 m/s` 로 보행을 판정하는데 그 `fps` 를
+    `probe_meta["fps"]`(= blend `render.fps`)에서 받고 있었다. blend fps 는 편마다 **15 또는 25**다.
+  - 모션 배열의 실제 레이트는 **30** 이다: `video_render/<seq>.pkl.mp4` 7편 전부 프레임 수가
+    시퀀스 길이와 **1:1** 이고 fps 가 **30** 이다. blend 의 15/25 는 렌더 설정일 뿐이다.
+    프레임당 이동량 분포는 7편이 사실상 같다 (p90 0.0163~0.0362 m/frame) — 편차는 fps 뿐이었다.
+  - 실측 채굴 창 수 (`--walk_max` 무제한): blend fps 8/0/0/0/0/9/0 → **fps 30 에서
+    9/13/5/5/11/12/4 = 59**. `--walk_max 8` 을 걸면 8/8/5/5/8/8/4 = **46**.
+  - 확인용 영상 `results/2026-08-23_trumans_walk/walk_windows.mp4` (14타일) — 버려지던 창이
+    전부 49프레임 순 수평이동 0.82~1.87 m 의 실제 보행이다.
+
 ### Added
+- **hole 뱅크 dedup canonical (`<bank>/canonical_dedup/`, 50편)** — D68 옵션 ① 적용.
+  ⚠ `.gitignore:222` 라 커밋에 안 들어간다. **코드 변경 없음** — `emit_bank.py --drop_folded`
+  (:375) 를 켜고 `--out_dir` 로 새 디렉토리에 냈다. 기존 `<bank>/canonical/` 은 그대로 둔다.
+  - 게이트 천장이 사다리 첫 칸보다 낮으면 hole 0.1/0.2/0.35/0.5 **4단이 같은 궤적**이 된다
+    (예: avocado-slice `dyn_0__orbit_left_arc__hole{0.1,0.2,0.35,0.5}` 전부 knob 0.89358 /
+    path_len 0.5974 / 실측 hole 0.4087 / `approach_limited`). 태그는 4개인데 카메라는 1개라
+    하류가 같은 영상을 4번 생성하고 학습에서 4배 가중된다.
+  - **16,520 → 10,563 태그 (−5,957, −36.1 %)**, 편당 med 200.5 / min 35 / max 472.
+    `worst_pose_rebuild_error` · `worst_roundtrip_error` 둘 다 전 50편 **0.000e+00**.
+  - 감소 폭: elderly-tennis 280→70 (−75.0 %), martian-flag 168→42 (−75.0 %),
+    funeral-procession 336→170, parkour 392→204 … woman-pottery 56→43 (−23.2 %).
+    정확히 −75.0 % 인 2편은 **모든 조합이 4단을 1단으로 접었다**는 뜻.
+  - fold 키 검증: `knob`(5자리 반올림) 과 `knob_raw` 의 fold 수가 전 코퍼스에서 5,957 로
+    **동일**(갈리는 영상 0편) — D66 `recover_knob` 사례는 fold 경계에 안 걸린다.
+  - 접힌 4행은 `bank.json`/`bank.csv` 에 남아 있어 "이 조합은 hole 0.5 를 못 낸다"는 진단은
+    보존된다. 사라지는 건 canonical 태그뿐이다.
+  - 남은 문제: dedup 후에도 `translation_degenerate`(이동 0, 전부 `pan_left/right`)가
+    **2,300 개 = 21.8 %**. fold 로는 안 접힌다 (단마다 회전각이 다르다). D68 옵션 ③ 판정 대기.
+- **뱅크 드라이버에 보행 30 % + subject/anchor 분기 배선**
+  (`camera_generation/models/Planner/CinemaTraj/scripts/trumans_lite_bank.py`).
+  ⚠ `.gitignore:222` 라 커밋에 안 들어간다.
+  - **`--list_actions` 7열 포맷 파서 수정.** `{idx} {kind} {start} {end} {len} {prop}  {text}` 인데
+    예전 5열 파서가 `parts[1]` 을 start 로 읽어 `int("labeled")` 에서 **죽고 있었다**.
+    `kind`(labeled|walk) 와 `prop` 을 보존해 manifest 에 싣는다.
+  - **`--walk_ratio` (기본 0.30)** — 뱅크 안 보행 비율. 채굴량이 편마다 4~8 개, 라벨이 10~17 개라
+    그냥 다 넣으면 편별 보행 비율이 22~44 % 로 들쭉날쭉하다. `n_walk = round(n_labeled·r/(1−r))`
+    로 풀고 채굴량으로 상한을 건다. 7편 실측 **133 action (walk 36 = 27 %)**;
+    0aa05d5a/1d43e076/4ac2c1b3 은 채굴량이 모자라 23/23/27 % 다 (부족분을 print 에 명시).
+  - `--subject_kind` / `--anchor_origin` / `--walk_max` / `--walk_speed` / `--motion_fps` 를
+    `trumans_to_recon.py` 로 forward. 보행 인자는 `--list_actions` 와 실행에 **같은 값**이 가야
+    한다 — 채굴 개수가 하나만 달라도 목록의 idx 와 `--action <i>` 가 통째로 밀린다.
+  - **`--video_suffix`** — 같은 action 을 다른 subject 로 다시 뽑을 때 이름 충돌 방지.
+    비우면(기본) `--out_video`/`--work` 를 아예 안 넘겨 기존 96편과 명령이 비트 동일하다.
+    suffix 를 주면 work 디렉토리도 `<recording><suffix>` 로 가른다 — 중간 산출물이
+    `probe_a03.json` 처럼 **action 인덱스로만** 키가 잡혀서 안 가르면 예전 것을 덮어쓴다.
+  - 재현성: 보행은 목록 **뒤에** append 되므로 라벨 action 의 `--action` 인덱스가 불변이고,
+    기존 96편은 `--skip_done` 으로 보호된다 (dry-run 으로 명령 문자열 대조 확인).
 - **TRUMANS Lite 클립마다 `avg_scale` 저장 — context 로 쓸 때 카메라 이동량을 나눌 분모**
   (`camera_generation/models/Planner/CinemaTraj/scripts/trumans_to_recon.py`,
   신규 `scripts/make_avg_scale_trumans.py`). ⚠ 둘 다 `.gitignore:222` 라 커밋에 안 들어간다.

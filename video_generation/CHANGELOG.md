@@ -7,6 +7,25 @@
 ## [Unreleased]
 
 ### Added
+- **`scripts/audit_lbm_distance.py` — 원본 LBM 카메라의 거리를 미터로 재서 Lite 반경과 같은 자에 올린다**
+  (`camera_generation/models/Planner/CinemaTraj/scripts/audit_lbm_distance.py`).
+  LBM 출력에는 반경이 없다 — `distance_label` 과 후보 id 의 `d0`/`d5` 버킷 토큰뿐이라
+  Lite 의 `r ∈ {1.5, 2.2, 3.0, 4.0} m` 와 비교가 안 됐다. blend world 에서 직접 잰다.
+  - `d_focus` = 카메라 → `primary_focus_id` 중심, `d_human` = 카메라 → 사람 중심.
+    **둘을 따로** 재는 게 요점이다. LBM 의 focus 는 40/42 가 소품이라 `d_focus` 만 보면
+    적당한 거리로 보인다. shot_id ↔ TRUMANS action id ↔ Lite `manifest_a<NN>` 로 잇는다.
+  - 거리만으로는 "가깝다"를 못 가려서 `frame_h_m` (= 피사체 거리에서 화면이 덮는 세로 미터,
+    Blender 기본 sensor 36 mm · `sensor_fit AUTO`) 와 `person_fill_v` (= 사람 키 / `frame_h_m`,
+    `> 1` 이면 세로로 잘림) 을 같이 낸다. Lite 는 `fx` 666.667 px / 960 → **25.0 mm 고정**.
+  - 실측 (LBM 채택 42 대 vs Lite 96 편): `d_human` median **2.16 m vs 1.69 m** — LBM 이 오히려
+    **더 멀다**. 뒤집는 건 렌즈다 — `lens_mm` median **41.3 (24~200) vs 25.0 고정**,
+    그래서 `frame_h_m` median **1.14 m vs 1.37 m**, `person_fill_v` median **1.40 vs 1.12**,
+    `> 1.5` 가 **17/42 (40%) vs 3/96 (3%)**. 즉 "사람이 잘린다"의 원인은 거리가 아니라
+    **긴 렌즈 + 소품 겨냥**이다. 최악은 `1d43e076 shot4` (drawer, **200 mm**, d_human 1.72 m,
+    frame_h **0.17 m**, fill 7.19) 와 `00add26c shot4/14` (book_left, 65 mm, fill 6.67 / 5.25).
+  - `distance_label` 은 미터와 거의 무관하다: medium shot 38대 `d_human` median 2.25,
+    close-up 4대 1.67 — 버킷 토큰도 `d5` 28대 / `d0` 7대로 쏠려 있다.
+  - 출력 `out/trumans_lite_bank/{lbm_distance.csv, lite_distance.csv}`.
 - **`scripts/audit_lite_framing.py` — 뱅크 프레이밍을 "안 가려진 픽셀 / 화면에 투영된 OBB 면적"으로 잰다**
   (`camera_generation/models/Planner/CinemaTraj/scripts/audit_lite_framing.py`).
   그동안 뱅크 품질을 subject 의 **절대 화면 면적**으로 봤는데 그건 shot size 지 품질이 아니다 —

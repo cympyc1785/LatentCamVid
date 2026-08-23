@@ -7,6 +7,42 @@
 ## [Unreleased]
 
 ### Added
+- **TRUMANS Lite subject 를 사람 전용에서 {human, event, object} 로 일반화**
+  (`camera_generation/models/Planner/CinemaTraj/scripts/trumans_scene_probe.py`,
+  `trumans_to_recon.py`). ⚠ `.gitignore:222` 라 커밋에 안 들어간다.
+  probe `--subject_kind {human,event,object}` + `--prop_names`,
+  orchestrator `--subject_kind {human,auto,event,object}`(기본 `human`) + `--prop_names`.
+  - `human` = 사람 mesh union (기존) · `event` = 사람 ∪ 상호작용 소품 · `object` = 소품만.
+    `auto` 는 action text 에 소품이 잡히면 event, 아니면 human 으로 떨어진다 — 미매칭의
+    대부분(전체 라인의 20.9 %)이 stand up · sit down · squat · lie down 처럼 **소품이 없는 게
+    맞는** 동작이라서다. 반대로 `event`/`object` 를 **명시**했는데 못 찾으면 에러다
+    (조용히 human 으로 떨어지면 "object 뱅크"에 사람 클립이 섞인다).
+  - **소품 목록의 출처는 recording 폴더의 `obj_list.txt`** (66편 중 **61편**에 존재).
+    한 줄짜리 파이썬 리스트 리터럴이고 blend 오브젝트 이름과 그대로 맞는다
+    (`['cup_01', 'oven_base_01', 'oven_door_01', 'book_right_01', ...]`).
+    ⚠ `object_list.npy` 는 **쓸 수 없다** — (35,) 짜리 movable-chair 변종 목록일 뿐이고,
+    `action_label.npy` (F,10) 도 카테고리만 있지 인스턴스가 없다. 둘 다 확인 후 기각.
+  - `PROP_ALIASES` 는 61편의 stem 을 **전부** 덮는다 (미등록 stem 0건, assert 로 노출).
+    `PROP_VERBS` 는 목적어가 문장에 없는 표현용 — 이걸 넣기 전 미스 상위가 전부 여기였다
+    (`drink water` 271줄 / `write` 124 / `make a call` 24 / `type` 14).
+    9,488 라인 실측 커버리지: 단일 매칭 **69.2 %** / 모호 6.5 % / 무매칭 24.3 %
+    (verb 별칭 없이는 67.3 / 3.7 / 29.0). 모호할 땐 **그 recording 이 실제로 가진 소품**으로
+    먼저 좁히고 (대부분 여기서 풀린다) 그래도 남으면 사전순 첫 stem — 재현성 때문이다.
+  - `oven` 처럼 한 소품이 `_base`/`_door` 로 쪼개진 경우 stem 으로 묶어 **union** 으로 다룬다.
+    부품만 넘기면 문이 열릴 때 subject 가 문짝만 따라가 프레이밍이 튄다.
+  - **바닥과 키 눈금은 subject 를 따라가지 않는다.** `floor_z` 는 항상 사람 발에서 재고
+    (소품 AABB 최저점은 책상 상판이라 바닥이 0.7 m 위로 잡힌다), `human_height` 도 사람 값
+    그대로다 (컵을 찍는다고 카메라 고도 눈금을 15 cm 로 줄이면 안 된다). subject 자체 크기는
+    `subject_height` 로 따로 싣는다.
+  - manifest 에 `subject{kind,prop_names,prop_stem,anchor_origin,human_height,subject_height}`
+    와 `caption{target,event}` 추가, `source_camera.kind` 는
+    `synthesized_<kind>_anchored`. `--list_actions` 에 `prop` 열과 obj_list stem 목록 추가.
+  - **human 경로 비트 동일 실측** (00add26c a17, 사전/사후 probe JSON 대조):
+    `candidates` 576개 완전 일치, `human_track` 의 **기존 필드 전량 일치**, 추가된
+    `aim_points` 는 전 프레임에서 `body_points` 와 같다 (= 예전 폴백과 동일 값).
+  - event 스모크 (a10 `Open the oven with the left hand` → `oven_base_01`+`oven_door_01`):
+    subject union 15 member, 앵커가 사람 단독 대비 **y +0.285 m** 오븐 쪽으로 이동,
+    clear 1.00 / clearance 0.372 / subject_dist 1.550 로 게이트 통과.
 - **`scripts/audit_trumans_pkl_camera.py` — 실제 TRUMANS 카메라 2편이 보행에 어떻게 반응하는지 잰다**
   (`camera_generation/models/Planner/CinemaTraj/scripts/audit_trumans_pkl_camera.py`).
   ⚠ `.gitignore:222` 라 커밋에 안 들어간다.
@@ -146,6 +182,19 @@
   **2.7초로** 잘라냈다.
 
 ### Fixed
+- **TRUMANS Lite look-at 원점이 probe 격자 원점과 어긋나 머리 꼭대기를 겨눴다 (0.333 m)**
+  (`camera_generation/models/Planner/CinemaTraj/scripts/trumans_to_recon.py`).
+  ⚠ `.gitignore:222` 라 커밋에 안 들어간다. `FIX.log` 2026-08-23 항목에 상세.
+  `synth_source_path()` 가 look-at 기준점으로 `body_points[0]`(흉부, 발 기준 0.70·h)을
+  **무조건** 썼는데, `--anchor_origin` 도입으로 probe 격자 원점은 `obb_center`(0.50·h)가 됐고
+  `--aim_bias` 기본 +0.20 은 그 obb_center 위에 얹히도록 정한 값이다. 두 원점이 어긋난 채
+  bias 가 더해졌다. 실측 (a17, h=1.763 m): 실제 aim z = chest+0.20h = feet+**0.89 h**
+  vs 의도 = obb_center+0.20h = feet+**0.70 h**, 오차 **0.333 m**.
+  - **증상이 없는 종류다.** 게이트(clear_frac/clearance/subject_dist)를 전부 통과하고 렌더도
+    정상으로 나온다. 사람은 프레임 안에 있되 한 뼘 위를 겨눈 구도가 조용히 생긴다.
+  - 조치: probe JSON 이 자기 원점을 말하게 하고 synth 가 읽는다
+    (`probe.get("anchor_origin", "chest")`). 키가 없는 예전 JSON 은 chest 였으므로 폴백이 곧
+    **기존 뱅크 96편 재현 경로**다. 영향받은 산출물은 smoke `zzw_walk_a17` 1편뿐.
 - **소스 자신의 시차가 τ 사다리를 넘는 영상에서 `fit_hole_ladder` 가 assert 로 죽었다 — 이건
   실패가 아니라 "해당 없음"이라 rc=0 + `skipped.json` 으로 바꿨다**
   (`camera_generation/models/Planner/CinemaTraj/scripts/{fit_hole_ladder,emit_bank}.py`).

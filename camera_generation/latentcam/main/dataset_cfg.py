@@ -340,6 +340,13 @@ def resolve_dataset_cfg(cfg, verbose=True):
             say(f"[geo da3] WARNING: geo_view_sampling='front_uniform' 인데 "
                 f"avg_scale_ref={avg_scale_ref!r} 다 -> context view range([s-L,s)) 와 분모를 "
                 f"만든 range 가 다르다 (의도한 것이 아니면 {_front_pair} 중 하나로 맞출 것)")
+        if _samp == 'context_uniform' and str(avg_scale_ref).startswith('front_'):
+            # context_uniform 의 range 는 영상 전체 [0,N) 인데 front_* 분모는 [s-L,s) 에서
+            # 만든 값이다. front_uniform guard 와 같은 종류의 어긋남 — 조용히 지나가면
+            # context view 가 보는 스케일과 나누는 분모가 다른 구간에서 온다.
+            say(f"[geo da3] WARNING: geo_view_sampling='context_uniform' 인데 "
+                f"avg_scale_ref={avg_scale_ref!r} 다 -> context view range([0,N)) 와 분모를 "
+                f"만든 range([s-L,s)) 가 다르다")
         # [2026-08-13] 앵커 정합. DA3 는 cam_token 을 **view0 기준**으로 재고정한다
         # (da3_geo_encoder.build_cam_token: w2c @ c2w[:, :1], DA3 api.py:439-440 과 동일).
         # target 은 rel = E @ inv(E_s) 로 **프레임 s 기준**이다. 그래서 view0 != s 면 두 트랙의
@@ -434,7 +441,7 @@ def resolve_dataset_cfg(cfg, verbose=True):
         geo_custom_channels=geo_custom_channels,
         geo_depth_cache_dir=geo_depth_cache_dir,
         # geo context-view sampling (leakage ablation): 'even' (in-segment) | 'frustum_cover'
-        # | 'hybrid' | 'random_inseg'
+        # | 'hybrid' | 'random_inseg' | 'front_uniform' ([s-L,s)) | 'context_uniform' ([0,N))
         geo_view_sampling=getattr(cfg, 'geo_view_sampling', 'even'),
         geo_shuffle_order=getattr(cfg, 'geo_shuffle_order', False),
         # geo context view0 = target segment's FIRST camera s (rest = out-of-seg retrieved)

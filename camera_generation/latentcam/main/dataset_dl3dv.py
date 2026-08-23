@@ -733,6 +733,45 @@ class CamDataset(torch.utils.data.Dataset):
             return [s] * k
         return [pool[i] for i in self._even_indices(len(pool), k)]
 
+    def _sample_geo_context_uniform(self, scene_idx, s, e):
+        """[new 2026-08-23] geo_view_sampling='context_uniform': context range 를 **영상 전체**
+        `[0, N)` 로 두고 거기서 geo_num_views 장을 uniform 으로 뽑는다.
+
+        다른 sampler 들과의 차이는 range 하나뿐이다 — 'even' 은 target segment `[s,e)`,
+        'front_uniform' 은 바로 앞 `[s-L, s)`, 이건 영상 전체다. retrieval 이 없어서
+        (s, e) 와 무관하게 scene 마다 **같은 프레임 집합**이 나온다 (epoch 간 결정적).
+
+        왜 필요한가: SD/TRUMANS 처럼 context 가 target 과 **다른 clip** 인 코퍼스에서는
+        "target 앞/안"이라는 range 자체가 정의되지 않는다. 거기서 자연스러운 context 는
+        clip 전체이고, `dataset_scene_decoupled._ctx_view_idxs` 가 이미 같은 일을 한다
+        (`sd_geo_views` 장을 clip 전체에서 even). 이 sampler 는 그 정의를 DL3DV 쪽에도
+        같은 이름으로 열어 둔 것이다.
+
+        ⚠ leakage: 영상 전체를 보므로 target segment 프레임이 **들어올 수 있다**
+        (`even` 만큼은 아니지만 leakage-free 도 아니다). 누수 없는 비교군은 'front_uniform'.
+
+        geo_first_view_target_s:
+          False -> `[0, N)` 에서 k 장, 오름차순.
+          True  -> `[0, N)` 에서 k 장을 뽑은 뒤 **s 에 가장 가까운 픽을 s 로 치환**하고 view0 로
+                   올린다. 토큰 예산 V*P 는 다른 arm 과 같다 (frustum_cover :803 k_retr =
+                   geo_cover_k - 1 과 같은 "s 는 k 안에" 규칙).
+
+                   s 를 그냥 prepend 하고 나머지 k-1 을 `[0,N) \\ {s}` 에서 뽑으면 안 된다 —
+                   s=0 일 때 첫 픽이 프레임 1 이라 view0 과 **1프레임 차이** 중복 view 가
+                   생긴다 (DL3DV da3 는 s ∈ {0,49,98,...} 이라 매 scene 첫 세그먼트가 여기
+                   걸린다). front_uniform 이 포함 구간에서 한 번에 뽑아 피하는 것과 같은 함정.
+        """
+        n = len(self.frame_files_list[scene_idx])
+        k = int(self.geo_num_views)
+        picks = self._even_indices(n, k)
+        if not self.geo_first_view_target_s:
+            return picks
+        j = int(np.argmin(np.abs(np.asarray(picks) - s)))       # s 가 밀어낼 자리
+        rest = [p for m, p in enumerate(picks) if m != j and p != s]
+        if len(rest) < k - 1:                          # k > N 인 초단축 scene 방어
+            rest = (rest + [p for p in range(n) if p != s])[:k - 1]
+        return [s] + rest
+
     @staticmethod
     def _np_context_scale(centers, side, num_frames):
         """Mean per-window camera movement over the context `side`, chunked into
@@ -1422,6 +1461,8 @@ class CamDataset(torch.utils.data.Dataset):
                 geo_idxs = self._sample_geo_frustum_cover(scene_idx, g_s, g_e)
             elif self.geo_view_sampling == 'front_uniform':
                 geo_idxs = self._sample_geo_front_uniform(g_s, g_e)
+            elif self.geo_view_sampling == 'context_uniform':
+                geo_idxs = self._sample_geo_context_uniform(scene_idx, g_s, g_e)
             elif self.geo_view_sampling == 'hybrid':
                 geo_idxs = self._sample_geo_hybrid(scene_idx, g_s, g_e)
             elif self.geo_view_sampling == 'random_inseg':

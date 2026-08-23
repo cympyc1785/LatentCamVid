@@ -1,0 +1,29 @@
+# @package _global_
+# geo_view_sampling='context_uniform' 스모크 — da3geo_smoke.yaml 에서 sampler 와 V 만 바꾼 것.
+# context range 가 target segment 도 그 앞도 아닌 **영상 전체 [0,N)** 다 (config.py 주석 참고).
+# 분모는 centroid 로 둔다 — front_* 분모는 [s-L,s) 에서 만든 값이라 range 가 어긋나고
+# dataset_cfg 가 경고를 띄운다.
+exp_name: SMOKE_da3geo_ctxuniform
+pose_source: da3
+batch_size: 2
+epochs: 1
+max_scenes: 6
+
+geo_encoder: da3
+geo_cam_embed: null
+geo_latent_cache_dir: null
+geo_posed: true
+geo_shuffle_order: false
+da3_geo_model: da3nested-giant-large
+da3_geo_input_hw: [252, 448]
+da3_geo_layers: last
+
+geo_view_sampling: context_uniform
+geo_num_views: 6
+geo_first_view_target_s: true    # view0 = 프레임 s (geo_posed=true 라 앵커를 맞춰야 한다)
+
+scale_mode: avg_scale
+avg_scale_ref: centroid
+intr_norm: rel
+cam_dim: 64
+meta_csv: meta_da3_7k.csv

@@ -5,6 +5,32 @@ All notable changes to the latentcam sub-project. Follows [Keep a Changelog](htt
 ## [Unreleased]
 
 ### Added
+- **`geo_view_sampling: 'context_uniform'`** (`main/dataset_dl3dv.py`, `main/config.py`,
+  `main/dataset_cfg.py`) — geo context view 를 **영상 전체 `[0, N)`** 에서 uniform 으로 뽑는
+  sampler. 기존 5종(`even` / `random_inseg` / `hybrid` / `frustum_cover` / `front_uniform`) 은
+  전부 그대로 — `dataset_dl3dv.py` diff 는 **삭제 0줄**(순수 추가 41줄)이고 dispatch 도 `elif`
+  하나만 붙였다. 이유: context 가 **다른 clip** 인 코퍼스(SD / TRUMANS)에서는 "target 세그먼트
+  앞/안"이라는 range 자체가 정의되지 않고 clip 하나가 통째로 context 다 —
+  `dataset_scene_decoupled._ctx_view_idxs` 가 이미 같은 일을 하고 있어서 그 규약을 DL3DV 쪽
+  sampler 로 옮긴 것. **leakage-free 가 아니다**: `[0,N)` 이라 target 프레임이 뽑힐 수 있다
+  (leakage 없는 arm 은 `front_uniform` 뿐).
+  `geo_first_view_target_s` 를 지킨다 — on 이면 `[0,N)` 에서 k 장을 뽑은 뒤 **s 에 가장 가까운
+  픽을 s 로 치환**해 view0 로 올린다(토큰 예산 `V*P` 는 다른 arm 과 동일, `frustum_cover` 의
+  `k_retr = geo_cover_k - 1` 과 같은 "s 는 k 안에" 규칙). `s` 를 그냥 prepend 하고 나머지 k-1 을
+  `[0,N)\{s}` 에서 뽑으면 **s=0 일 때 첫 픽이 프레임 1** 이라 view0 과 1프레임 차이인 중복 view
+  가 생긴다 — DL3DV da3 는 `s ∈ {0,49,98,...}` 이라 매 scene 첫 세그먼트가 여기 걸린다
+  (`_sample_geo_front_uniform` 이 포함 구간에서 한 번에 뽑아 피하는 것과 같은 함정). 치환 방식의
+  실측 최소 간격: N=300 에서 38~59, N=49 에서 9.
+  `dataset_cfg.py` 가드 추가: `context_uniform` + `avg_scale_ref` 가 `front_*` 이면 경고
+  (context view range `[0,N)` 와 분모를 만든 range `[s-L,s)` 가 다르다 — `front_uniform` 가드와
+  같은 종류). `avg_scale_ref=front_first_anchor_same_len` 으로 실제 발화 확인.
+- **`main/conf/experiment/da3geo_ctxuniform_smoke.yaml`** — 위 sampler 의 스모크 설정.
+  `da3geo_smoke.yaml` 에서 `geo_view_sampling` 과 `geo_num_views: 6` 만 바꾼 것, 분모는 range 가
+  어긋나지 않는 `centroid`. 스모크 실측(GPU 1, `max_scenes=60 epochs=1 batch_size=2`,
+  `WANDB_MODE=disabled`): peak **30177 MiB**, 4.48 it/s, best `val/loss_traj` **3.266933**.
+  같은 조건 `frustum_cover` k=6 대조군: peak **30215 MiB**, 4.42 it/s, best `val/loss_traj`
+  **3.258861**. 메모리는 sampler 와 무관하다 — `V`·`batch_size` 가 같고 sampler 는 **어느 프레임을
+  읽을지**만 바꾼다.
 - **`scripts/viewer/viser_revpair.py`** — SD 역재생 결합 recon
   (`video_generation/results/20260818_sd_revpair/<pair>/recon.npz`, 161장 통짜 DA3) 을 viser 로 본다.
   전역 index 를 `anchor_index`(=80) 에서 잘라 `[0,anchor)` = `rev(A)` = **context**(초록),

@@ -190,7 +190,16 @@ class Config:
     #                    the SAME range); dataset_cfg warns when the two disagree.
     #                    Honours geo_first_view_target_s: on -> view0 = frame s and the
     #                    remaining (geo_num_views-1) context views go in REVERSE time order.
-    geo_view_sampling = 'even'  # ['even', 'random_inseg', 'hybrid', 'frustum_cover', 'front_uniform']
+    #   'context_uniform': [new 2026-08-23] context range = the WHOLE video [0, N), sampled
+    #                    uniformly to geo_num_views. No retrieval, deterministic per scene
+    #                    (independent of s/e). For corpora where context is a DIFFERENT clip
+    #                    (SD / TRUMANS) "before/inside the target" is undefined and the clip
+    #                    itself is the context; dataset_scene_decoupled._ctx_view_idxs already
+    #                    does this. NOT leakage-free: target frames can be picked.
+    #                    Honours geo_first_view_target_s: on -> view0 = frame s, remaining
+    #                    (geo_num_views-1) uniform over [0, N) minus s.
+    geo_view_sampling = 'even'  # ['even', 'random_inseg', 'hybrid', 'frustum_cover',
+                                #  'front_uniform', 'context_uniform']
     geo_cover_k = 6             # (frustum_cover) number of context views
     geo_cover_radius = 2.5      # (frustum_cover) candidate/space ball = R * segment-scale
                                # (swept 1.0-4.0 over 10 scenes: 2.5 = first radius with 0

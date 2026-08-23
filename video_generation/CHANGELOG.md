@@ -345,6 +345,24 @@
     `results/20260820_lbm_lite/` 에 대조용으로 남겼다.
 
 ### Changed
+- **`trumans_to_recon.py` 시작 pose 재시도 순서를 (반경 × 방위각) 으로 층화 — 뱅크가 1.5 m 코퍼스가 되는 걸 막는다**
+  (`camera_generation/models/Planner/CinemaTraj/scripts/trumans_to_recon.py`).
+  ⚠ `.gitignore:222` 라 커밋에 안 들어간다.
+  기존은 **방위각만** 8섹터로 층화하고 반경은 후보 풀에 있는 대로 뽑았다. 그런데 격자 통과율이
+  반경에 따라 급락한다 — 7편 × 384 격자 실측으로 `clear`/`clearance`/`floor_drop` 게이트 통과가
+  **1.5 m 50.3% / 2.2 m 23.2% / 3.0 m 8.4% / 4.0 m 2.3%**. 반경이 균일한 격자인데도 usable 풀은
+  1.5 m 로 60% 쏠리고, 첫 채택까지 가면 **76% (72/95)** 가 1.5 m 였다. 반경이 사실상 상수인
+  코퍼스라 카메라 거리 변화를 학습 신호로 못 쓴다.
+  - 고침: 반경을 **바깥 축**으로 두고 clip 마다 반경 순서를 섞은 뒤 반경당 `max_tries/len(radii)`
+    개씩 할당한다. 먼 반경이 통과율과 무관하게 1지망 자리를 갖는다. 할당량으로 `max_tries` 를
+    못 채우면 남은 (반경, 섹터) 조합으로 채운다 (먼 반경이 씨가 마른 씬).
+  - 기존 97 probe 파일로 오프라인 재생: 1지망 반경 분포 **74/20/2/1 → 37/26/22/12**
+    (1.5/2.2/3.0/4.0). 통과율 차이 때문에 최종 채택은 이보다 가까운 쪽으로 다시 쏠리지만,
+    먼 반경이 시도조차 안 되던 상태는 아니게 된다.
+  - `--radius_strata` (기본 on) / `--no_radius_strata` 쌍. off 브랜치는 rng 호출 순서까지
+    예전과 같아서 기존 96편이 비트 단위로 재현된다.
+  - smoke test 1편 (`00add26c` a00) 통과: az 60 elev 25 **r 1.5**, clear 1.00 clearance 0.454,
+    render 156.4 s / 전체 ~200 s.
 - **명사 추출 두 스크립트에 `--merge` — 1편만 돌려도 나머지 51편이 안 날아간다**
   (`camera_generation/models/Planner/CinemaTraj/scripts/extract_{nouns_vlm,static_nouns}.py`).
   ⚠ `.gitignore:222` 라 커밋에 안 들어간다.

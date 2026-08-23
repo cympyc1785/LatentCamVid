@@ -5,6 +5,23 @@ All notable changes to the latentcam sub-project. Follows [Keep a Changelog](htt
 ## [Unreleased]
 
 ### Added
+- **TRUMANS-Lite `vae_latent_scale` 재캘리브레이션 arm 2종 (2026-08-23).** 아래 진단의 원인 ②
+  를 고친 재시작. 두 config 모두 `trumans_lite_ctxuniform.yaml` 전량 복사본이고 주석 제외
+  실질 차이는 `exp_name` + `vae_latent_scale` **두 줄뿐**이다.
+  - `main/conf/experiment/trumans_lite_ctxuniform_vls019.yaml` — `vae_latent_scale: 0.19128`
+    = 전체 코퍼스(130 샘플) 실측 latent std → diffusion 입력 std **1.0** (절대 품질 최선).
+    screen train1 / GPU1 / wandb `aw35qouu`.
+  - `main/conf/experiment/trumans_lite_ctxuniform_vls039.yaml` — `vae_latent_scale: 0.38565`
+    = 0.19128/0.4960 → 입력 std **0.4960** = DL3DV arm 들과 같은 자리 (paired 비교용).
+    screen train3 / GPU3 / wandb `kq1nxqkp`.
+  - 베이스 arm `am3tzbk7` 은 epoch 182 에서 Ctrl+C 로 정지 (결과·wandb 는 대조군으로 보존).
+    `mix_dl3dv_trumans_v1`(train2/GPU2/`vk0kozz1`) 은 그대로 진행 중.
+  - !! 세 arm 의 `loss_latent` 는 서로 직접 비교 금지 — latent 단위가 다르다. 비교는 decode 후
+    지표(`loss_traj`/`clatr`/`fcd`/`caption`). 원인 ①(static 임계)은 이 두 arm 이 못 고친다.
+  - smoke(GPU3, `max_scenes=12 epochs=1`) 둘 다 exit 0, epoch0 `val/loss_traj`
+    0.091067(vls019) / 0.410090(vls039) — 베이스 arm 의 같은 smoke 2.830574 대비 상수 제곱비와
+    대체로 일치해 값이 실제로 먹고 있음을 확인. 결과 디렉토리는 삭제.
+  - 자세한 실측·설정 델타는 `EXPERIMENTS.log` 2026-08-23 21:26 항목.
 - **arm A(`trumans_lite_ctxuniform`) caption precision/recall/f1 정체 원인 진단 (2026-08-23).
   코드 변경 없음** — 측정만. 긴 요약은
   `camera_generation/models/Planner/CinemaTraj/summary.md` §7 (gitignore 대상).

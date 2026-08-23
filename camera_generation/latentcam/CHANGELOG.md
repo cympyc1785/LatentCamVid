@@ -5,6 +5,22 @@ All notable changes to the latentcam sub-project. Follows [Keep a Changelog](htt
 ## [Unreleased]
 
 ### Added
+- **TRUMANS-Lite text-only arm + caption 상한 진단 (2026-08-23).** `vae_latent_scale` 를 고쳐도
+  caption 이 안 올라가는 원인을 좁힌다.
+  - `main/conf/experiment/trumans_lite_textonly.yaml` — `trumans_lite_ctxuniform_vls019` 대비
+    `geo_encoder: da3 → null` **한 줄만** 다르다 (`vae_latent_scale` 0.19128 포함 나머지 동일).
+    screen train1 / GPU1 / wandb `hv21id7s`. 올라가면 da3 geo 토큰이 텍스트 신호를 덮는 것,
+    안 올라가면 130 클립·val 1 recording 코퍼스 쪽 문제.
+  - `scripts/vae/vae_roundtrip_val.py` (신규) — diffusion 을 건너뛰고 GT `cam_param` 을
+    encode→decode 만 시켜 학습 val 루프와 **같은** 후처리를 태우는 "완벽한 diffusion" 상한선.
+    frame0 오차 / tortuosity / `5·Δt_local` / static 축비율을 GT 와 나란히 찍는다.
+    → **frozen VAE 상한 가설은 기각**: median frame0 |Δt| 0.0019, frame0 rot 0.129°,
+    path_len 비 1.0220, tortuosity 1.1089→1.1340, static 축비율 0.4722→0.4583.
+    같은 잣대로 vls019 epoch 82 예측은 frame0 |Δt| 0.1105 / rot 1.79° / tortuosity 1.4~9.5.
+  - `scripts/render/topdown_gt_vs_pred.py` (신규) — GT vs 여러 run 의 카메라를 GT frame0 기준
+    재앵커해서 top-down / side / per-frame |Δcenter| / `5·Δt_local` 3축 + caption segment
+    문자열까지 한 패널에 찍는다. `--runs name=dir` 다중 지원.
+  - vls019 / vls039 는 epoch 82 부근에서 Ctrl+C 로 정지 (결과·wandb 는 대조군으로 보존).
 - **TRUMANS-Lite `vae_latent_scale` 재캘리브레이션 arm 2종 (2026-08-23).** 아래 진단의 원인 ②
   를 고친 재시작. 두 config 모두 `trumans_lite_ctxuniform.yaml` 전량 복사본이고 주석 제외
   실질 차이는 `exp_name` + `vae_latent_scale` **두 줄뿐**이다.

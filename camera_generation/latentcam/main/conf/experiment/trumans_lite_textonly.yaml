@@ -1,0 +1,77 @@
+# @package _global_
+# TRUMANS-Lite **text-only** arm. `trumans_lite_ctxuniform_vls019` 에서 `geo_encoder: null` 하나만
+# 바꾼 것 (da3_7k_textonly 가 da3_7k_da3geo 에 대해 하는 것과 같은 방식).
+#
+# ═══ 왜 text-only 를 먼저 도는가 ═════════════════════════════════════════════════════════
+# vls019 / vls039 (vae_latent_scale 을 실측 0.19128 / 0.38565 로 고친 arm 2종) 는 epoch 82 까지
+# val/loss_traj 를 0.091067 -> 0.014202 / 0.410090 -> 0.038593 로 떨어뜨렸고 fcd 도
+# 1767.430 -> 1083.874 / 1692.947 -> 1211.560 로 내려갔는데 **captions/fscore 는 안 움직였다**
+# (vls019 n=82 mean 0.0402 max 0.1043 / vls039 n=82 mean 0.0342 max 0.1243, 추세 없음).
+#
+# 원인 후보 중 **frozen VAE 상한**은 기각됐다 (scripts/vae/vae_roundtrip_val.py, val 전량):
+#   encode->decode 왕복만 시킨 "완벽한 diffusion" 의 median 값
+#     frame0 |dt| 0.0019  frame0 rot 0.129deg  path_len ratio 1.0220
+#     tortuosity  GT 1.1089 -> 왕복 1.1340      static 축비율 GT 0.4722 -> 왕복 0.4583
+#   -> VAE 는 caption 이 보는 양을 그대로 나른다. 상한은 VAE 가 아니다.
+# 같은 잣대로 **diffusion 예측**은 (vls019 epoch 82, val 14 타깃 median)
+#     frame0 |dt| 0.1105 (= GT path_len 의 0.20배)  frame0 rot 1.79deg
+#     tortuosity  GT 1.00~1.88 -> pred 1.4~9.5      path_len 1.04~26배
+#   -> 남은 건 조건화/데이터 쪽이다. text-only 는 그 중 **geo 조건화를 통째로 뺀** 하한선이다.
+#
+# 읽는 법: caption 은 "텍스트대로 움직였나"를 재는 지표라 원래 text 만으로도 올라가야 한다.
+#   - text-only 가 caption 을 올리면  -> da3 geo 토큰이 텍스트 신호를 **덮고 있다**.
+#   - text-only 도 안 올라가면        -> 130 클립 / 7 scene 코퍼스나 caption 라벨 쪽 문제다
+#     (val 이 recording 1개뿐이고 189-way exact match 라 표본이 없다는 쪽).
+#
+# ═══ vls019 대비 delta ═══════════════════════════════════════════════════════════════════
+# geo_encoder: da3 -> null.  그 외 전부 동일 (vae_latent_scale 0.19128 포함).
+# geo_* 나머지 키는 geo_encoder=null 이면 참조되지 않지만, vls019 와 줄 단위로 대조할 수 있게
+# 남겨 둔다 (da3_7k_textonly 는 아예 지웠지만 이 arm 은 paired 비교가 목적이다).
+#
+# ═══ 아래는 vls019 에서 그대로 물려받은 설명 ═════════════════════════════════════════════
+# scene = recording, segment = clip. TRUMANS Lite 한 클립은 49프레임 = num_frames 라 클립을
+# scene 으로 두면 context range 와 target range 가 같아진다 -> recording 의 클립 전부를 프레임
+# 축으로 이어 붙여 한 scene 으로 만들었다 (recording 당 14~22 클립, 686~1078 프레임).
+#
+# 분모(avg_scale): `context_first_cam` 디렉토리에 **recording 별 median** 을 넣었다. scene 상수라
+# 어느 context 클립에서도 같고 누수가 없다. 실측(130 세그먼트, mean||t||/분모): geomean 0.0945
+# med 0.0969 p05 0.0390 p95 0.2000. DL3DV 0.4367 의 1/4.6.
+#
+# vae_latent_scale: 전체 코퍼스 130 샘플 실측 (2026-08-23, scripts/vae/vae_scale_matrix.py)
+#   ckpt              dim mode       intr  lat.std   rot      trans    intr_L1
+#   vae_20260302_300   64 avg_scale  rel   0.19128  0.00286  0.00174  0.00169
+# -> 0.19128 을 쓰면 diffusion 입력 std 가 1.0. loss_latent 를 베이스 arm(am3tzbk7, 0.96032625)
+#    과 직접 비교 금지 — latent 단위가 다르다. 비교는 decode 후 지표.
+#
+# 분할: scene 단위 holdout. recording `2b4c9b84` (14 클립) 통째로 val -> train 116 / val 14.
+exp_name: trumans_lite_textonly
+vae_latent_scale: 0.19128          # 전체 코퍼스 실측 lat.std (입력 std 1.0). 위 블록 참고
+dl3dv_root: /data1/cympyc1785/data/TRUMANS-Lite/latentcam_da3
+meta_csv: meta_trumans.csv
+train_seg_list: /data1/cympyc1785/data/TRUMANS-Lite/latentcam_da3/seg_list_trumans_train.txt
+test_seg_list: /data1/cympyc1785/data/TRUMANS-Lite/latentcam_da3/seg_list_trumans_test.txt
+coverage_blacklist_path: null
+
+pose_source: da3
+scale_mode: avg_scale
+avg_scale_ref: context_first_cam   # 디렉토리 avg_scale_context_first_cam <- recording median
+intr_norm: rel                     # vae_20260302_300 = frame-0-relative-intrinsics ckpt
+cam_dim: 64                        # = 그 ckpt 의 latent_dim
+
+geo_encoder: null                  # ★ vls019 대비 유일한 delta (da3 -> null = text-only)
+geo_cam_embed: null
+geo_latent_cache_dir: null
+geo_posed: true
+geo_shuffle_order: false
+da3_geo_model: da3nested-giant-large
+da3_geo_input_hw: [252, 448]
+da3_geo_layers: last
+
+geo_view_sampling: context_uniform  # geo_encoder=null 이면 참조 안 됨. vls019 대조용으로 남김
+geo_num_views: 6
+geo_first_view_target_s: true
+
+# train 116 sample / batch 8 -> epoch 당 14 배치. vls019 와 같은 예산으로 맞춘다.
+batch_size: 8
+epochs: 600
+ckpt_at_epochs: [200, 400]

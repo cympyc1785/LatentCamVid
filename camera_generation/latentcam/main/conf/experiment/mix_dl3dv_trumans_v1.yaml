@@ -1,0 +1,101 @@
+# @package _global_
+# DL3DV(정적 scene) + TRUMANS-Lite(동적 인물, 합성 GT 카메라) 2-코퍼스 혼합 arm.
+#
+# 대조군은 `da3_7k_da3geo_frontanchor` 다 — DL3DV 블록을 그 arm 과 **한 글자도 다르지 않게**
+# 두었으므로 이 arm 과의 차이는 "TRUMANS 를 섞었는가" 하나다. shape 규약(geo_encoder=da3 /
+# geo_posed=true / da3_geo_input_hw=[252,448] / intr_norm=rel / cam_dim=64 / num_frames=49)은
+# `dataset_mixed.OVERRIDE_FORBIDDEN` 이라 블록에서 못 바꾼다.
+#
+# TRUMANS 코퍼스 자체의 구조(scene=recording 이어붙이기 / recording median 분모 / scene 단위
+# holdout)는 `trumans_lite_ctxuniform.yaml` 주석에 전부 적어 뒀다. 여기서는 **혼합 고유의**
+# 결정만 적는다.
+#
+# ═══ 코퍼스 이름이 둘 다 'dl3dv' 인 것에 대해 ═══════════════════════════════════════════
+# TRUMANS 는 DL3DV da3 on-disk 계약을 그대로 만족하도록 변환했으므로 전용 로더가 필요 없다
+# (`dl3dv_root` + `meta_csv` override 만으로 갈린다). `dataset_mixed` 는 이름 유일성을 요구하지
+# 않고, 이름은 `out['corpus']` 문자열로만 나가는데 학습 로깅이 그 키를 쓰지 않는다.
+# 두 코퍼스는 data_name 접두사로 구분된다: DL3DV `4K_<hash>_<seg>` vs TRUMANS `trumans_<uuid>_<seg>`.
+#
+# ═══ weight = 16.0 (TRUMANS) ════════════════════════════════════════════════════════════
+# 표본 수가 29414 : 116 (254:1) 이라 weight 1.0 = "한 epoch 에 한 바퀴" 로 두면 TRUMANS 가
+# 전체 배치의 **0.4%** 다 -> 섞은 효과를 잴 수 없는 no-op 이 된다.
+# T=2 temperature sampling (mT5/UniMax 계열의 표준 처방, p_i ∝ n_i^(1/2)) 로 목표 지분을 잡는다:
+#   sqrt(29414)=171.5, sqrt(116)=10.77 -> TRUMANS 지분 5.91%
+#   DL3DV 3676 배치 (29414/8) 에 대해 필요한 TRUMANS 배치 = 3676 * 0.0591/0.9409 = 231
+#   weight = 231*8/116 = 15.9  ->  16.0  (실제 232 배치 = 5.9%)
+# **비용을 그대로 적어 둔다**: TRUMANS 클립 하나가 epoch 당 16번, 100 epoch 이면 1600번 학습에
+# 들어간다 (DL3DV 세그먼트는 100번). 130 클립뿐인 코퍼스라 과적합이 기본 기대값이고, 그걸
+# 줄이려면 이 weight 하나만 내리면 된다.
+#
+# ═══ scale_gain 은 둘 다 1.0 ════════════════════════════════════════════════════════════
+# mix_dl3dv_sd_datadop_v1 과 같은 이유다 (2026-08-16 결정, dataset_mixed 가 da3+posed 조합에서
+# gain != 1.0 을 raise 한다): context 는 norm_scale 을 안 거치고 DA3 가 median camera distance
+# 로 재정규화하므로, gain 을 걸면 target cam_param 만 커지고 context cam token 은 불변이라
+# 대응이 코퍼스별 상수만큼 어긋난다 — 추론엔 코퍼스 라벨도 없다.
+# 실측 레벨 (mean||t||/분모): DL3DV 0.4367 / TRUMANS 0.0945 (geomean, 130 세그먼트).
+# 4.6배 차이는 기존 혼합 arm 의 SD 0.0878 / DataDoP 0.0911 과 같은 자리라 새로운 종류의 문제는
+# 아니다. 레벨 차이는 그대로 두고 학습한다 — 이 arm 이 그게 문제가 되는지를 재는 실험이다.
+#
+# vae_latent_scale 은 0.96032625 그대로 (DL3DV 캘리브레이션). ckpt 속성이라 코퍼스별로 둘 수 없다.
+exp_name: mix_dl3dv_trumans_v1
+dataset_name: mixed
+batch_size: 8
+epochs: 100
+ckpt_at_epochs: [50]
+
+pose_source: da3
+scale_mode: avg_scale
+intr_norm: rel                # vae_20260302_300 = frame-0-relative-intrinsics ckpt
+cam_dim: 64                   # = 그 ckpt 의 latent_dim
+
+geo_encoder: da3
+geo_cam_embed: null           # 카메라는 DA3 cam_enc 토큰으로만 들어간다
+geo_latent_cache_dir: null    # mixed 는 강제 null (경로가 data_name 접두사라 코퍼스 간 충돌)
+geo_posed: true
+geo_shuffle_order: false      # DA3 는 view0 를 reference 로 쓴다 -> 셔플 금지
+da3_geo_model: da3nested-giant-large
+da3_geo_input_hw: [252, 448]
+da3_geo_layers: last
+
+mix_val_interleave: true      # val 을 코퍼스 round-robin. val_max_batches=20 이라 이게 없으면
+                              #   앞 20 배치가 DL3DV 로만 채워져 TRUMANS 가 평가에서 사라진다.
+mix_check_keys: true
+
+datasets:
+  - name: dl3dv                         # 대조군(da3_7k_da3geo_frontanchor)과 동일
+    weight: 1.0
+    scale_gain: 1.0
+    override:
+      meta_csv: meta_da3_7k.csv
+      train_seg_list: /data1/cympyc1785/data/DL3DV/scenes/latentcam_da3_7k_train_seg_list.txt
+      test_seg_list: /data1/cympyc1785/data/DL3DV/scenes/latentcam_da3_7k_test_seg_list.txt
+      coverage_blacklist_path: /data1/cympyc1785/LatentCamVid/camera_generation/latentcam/data/seg_blacklist_jump_da3_7k.csv
+      avg_scale_ref: front_first_anchor  # 분모 기준점 = target 첫 카메라 s, 범위 [0,s)
+      geo_view_sampling: frustum_cover
+      geo_cover_k: 6
+      geo_cover_out_of_seg: true
+      geo_cover_before_only: true        # context 도 [0,s) 앞쪽만 (분모와 정합 + causal)
+      geo_cover_centered_at_s: true
+      geo_first_view_target_s: true
+
+  # !! 알려진 비대칭 두 가지 (조용히 지나가면 안 되는 자리라 적어 둔다):
+  #   1) context range 가 코퍼스마다 다르다. DL3DV 는 [0,s) 앞쪽만(causal)인데 TRUMANS 는
+  #      context_uniform 이라 영상 전체 [0,N) = **target 클립 이후의 클립도 본다**. TRUMANS 는
+  #      클립 사이가 시간적으로 이어져 있지 않고(각 클립이 독립 촬영) 분모도 recording 상수라
+  #      "앞쪽만" 이 의미하는 인과성이 DL3DV 와 같은 뜻이 아니다 — front_* 로 맞추면 오히려
+  #      dataset_cfg 가 경고하는 range 불일치가 생긴다(분모는 [0,s) 가 아니다).
+  #   2) 분모의 정의가 다르다. DL3DV front_first_anchor = 점군 거리, TRUMANS = recording median
+  #      의 렌더 depth 기반 avg_scale. 둘 다 "복원 가능한 scene 스케일"이지만 같은 양은 아니다.
+  - name: dl3dv                          # <- TRUMANS-Lite (같은 로더, root 만 다르다)
+    weight: 16.0
+    scale_gain: 1.0
+    override:
+      dl3dv_root: /data1/cympyc1785/data/TRUMANS-Lite/latentcam_da3
+      meta_csv: meta_trumans.csv
+      train_seg_list: /data1/cympyc1785/data/TRUMANS-Lite/latentcam_da3/seg_list_trumans_train.txt
+      test_seg_list: /data1/cympyc1785/data/TRUMANS-Lite/latentcam_da3/seg_list_trumans_test.txt
+      coverage_blacklist_path: null
+      avg_scale_ref: context_first_cam   # 디렉토리 이름만 빌린 것. 값은 recording median
+      geo_view_sampling: context_uniform
+      geo_num_views: 6
+      geo_first_view_target_s: true

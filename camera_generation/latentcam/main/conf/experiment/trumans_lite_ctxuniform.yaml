@@ -1,0 +1,74 @@
+# @package _global_
+# TRUMANS-Lite 단독 arm. DL3DV 코퍼스 로더(dataset_dl3dv)를 **그대로** 쓰고 `dl3dv_root` 만
+# TRUMANS 변환본으로 돌린다 (scripts/trumans_lite_to_dl3dv.py 가 da3 on-disk 계약을 맞춰 뒀다).
+#
+# ═══ scene = recording, segment = clip ══════════════════════════════════════════════════
+# TRUMANS Lite 뱅크의 한 클립은 49프레임 = num_frames 라 클립 하나를 scene 으로 두면 context
+# range 와 target range 가 **같아진다** -> geo_posed=true 인 DA3 cam_enc 이 target 궤적 자체의
+# 포즈 6장을 받는다 = 예측할 게 남지 않는다. 그래서 한 recording 의 클립 전부를 프레임 축으로
+# 이어 붙여 한 scene 으로 만들었다 (recording 당 14~22 클립, 686~1078 프레임).
+#   -> `context_uniform` 이 [0,N) 에서 6뷰를 뽑으면 대부분 **다른 클립**(다른 카메라, 다른 시각)이
+#      걸린다. 클립들은 같은 TRUMANS world 좌표계에 심겨 있어 sim3 정렬 잔차가 정확히 0 이다
+#      (Scene-Decoupled 의 cross-clip pairing 이 med 0.46° / p95 2.06° 어긋나는 것과 대조).
+#   누수 실측 (130 세그먼트 전수, sampler 를 그대로 돌려서 셈): 6뷰가 **항상 서로 다른 클립
+#   6개**에 떨어진다 (mean/min/max 전부 6.00). target 클립 안에 들어오는 view 는 정확히 1개이고
+#   그건 **frame s 자기 자신**이다 (`geo_first_view_target_s` 가 s 에 가장 가까운 픽을 s 로
+#   치환하기 때문. s 가 아닌 in-clip view 는 0개). s 의 포즈는 추론 시 `first_extrinsic` 으로
+#   주어지므로 leakage 가 아니다 -> **의도치 않은 누수 0**.
+#
+# ═══ 분모 (avg_scale) ═══════════════════════════════════════════════════════════════════
+# recon_and_seg/<clip>/avg_scale.json 은 **그 클립 자기 렌더 depth** 로 잰 값이라 target 에서
+# 유도된 수치다 -> 추론 시 복원 불가능하고, 같은 recording 안에서도 클립 간 1.54~2.31배 갈린다.
+#   -> 여기서 쓰는 `context_first_cam` 디렉토리에는 **recording 별 median** 을 넣었다. scene
+#      상수라 어느 context 클립에서도 같은 값이 나오고 누수가 없다. 이름은 DL3DV 의 ref 이름을
+#      빌려 쓴 것뿐이다(디렉토리 dispatch 용) — 정의는 "recording median" 이다.
+#   -> 클립 자기 값(누수)은 `avg_scale/`(= ref 'centroid') 에 따로 있다. ablation 용.
+# 실측(130 세그먼트, mean||t||/분모): geomean 0.0945 med 0.0969 p05 0.0390 p95 0.2000
+# (log10 std 0.2377). 코퍼스 레벨이 DL3DV 0.4367 의 1/4.6 이고 SD 0.0878 / DataDoP 0.0911 과
+# 거의 같은 자리다. `vae_latent_scale` 은 DL3DV 캘리브레이션 값(0.96032625)을 그대로 둔다 —
+# 이 arm 전용으로 재측정한 값이 아니므로 diffusion 입력 std 는 대조군보다 작다. 바꾸지 않는
+# 이유는 mix_dl3dv_sd_datadop_v1 과 같다 (ckpt 속성이라 코퍼스별로 둘 수 없다).
+#
+# ═══ 분할 ═══════════════════════════════════════════════════════════════════════════════
+# scene 단위 holdout: recording `2b4c9b84` (14 클립) 를 통째로 val 로 뺐다 -> train 116 / val 14.
+# random split 로 두면 같은 recording 의 인접 클립이 train/val 에 갈려 들어가 (같은 환경·배우·
+# 같은 world) val 수치가 낙관적으로 뜬다. 대신 val 이 **단일 환경 1개**라 분산이 크다 — 7 scene
+# 코퍼스의 구조적 한계이고, 뱅크가 커지면 다시 잡을 것.
+#
+# ═══ shape 규약 ═════════════════════════════════════════════════════════════════════════
+# da3_7k_da3geo_frontanchor / mix_dl3dv_trumans_v1 과 **같게** 둔다 (geo_encoder=da3 /
+# geo_posed=true / da3_geo_input_hw=[252,448] / intr_norm=rel / cam_dim=64 / num_frames=49).
+# TRUMANS intrinsics 는 클립 내 프레임 전체에서 상수다 (fx=fy=666.67, cx=480, cy=270, std 0.0)
+# -> intr_norm='rel' 이면 cam_param[9:11] = [1,1] 로 DL3DV 와 같은 자리에 놓인다.
+exp_name: trumans_lite_ctxuniform
+dl3dv_root: /data1/cympyc1785/data/TRUMANS-Lite/latentcam_da3
+meta_csv: meta_trumans.csv
+train_seg_list: /data1/cympyc1785/data/TRUMANS-Lite/latentcam_da3/seg_list_trumans_train.txt
+test_seg_list: /data1/cympyc1785/data/TRUMANS-Lite/latentcam_da3/seg_list_trumans_test.txt
+coverage_blacklist_path: null
+
+pose_source: da3
+scale_mode: avg_scale
+avg_scale_ref: context_first_cam   # 디렉토리 avg_scale_context_first_cam <- recording median
+intr_norm: rel                     # vae_20260302_300 = frame-0-relative-intrinsics ckpt
+cam_dim: 64                        # = 그 ckpt 의 latent_dim
+
+geo_encoder: da3
+geo_cam_embed: null
+geo_latent_cache_dir: null
+geo_posed: true
+geo_shuffle_order: false
+da3_geo_model: da3nested-giant-large
+da3_geo_input_hw: [252, 448]
+da3_geo_layers: last
+
+geo_view_sampling: context_uniform  # context range = 영상 전체 [0,N) = recording 전체
+geo_num_views: 6
+geo_first_view_target_s: true       # view0 = 프레임 s (= target 클립 frame0, 추론 시 주어진다)
+
+# train 116 sample / batch 8 -> epoch 당 14 배치뿐이라 epoch 수를 크게 잡는다 (600 ep ~ 8.4k step).
+# DL3DV 100-epoch arm 의 367k step 과는 비교가 안 된다 — 이 arm 은 "130 클립으로 신호가 잡히나"를
+# 재는 진단용이고, 과적합이 기본 기대값이다.
+batch_size: 8
+epochs: 600
+ckpt_at_epochs: [200, 400]

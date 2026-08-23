@@ -5,6 +5,33 @@ All notable changes to the latentcam sub-project. Follows [Keep a Changelog](htt
 ## [Unreleased]
 
 ### Added
+- **TRUMANS-Lite 를 DL3DV-da3 코퍼스로 태우는 실험 config 2종** — 코드 변경 없이
+  `dl3dv_root` + `meta_csv` 만 갈아끼워 기존 `dataset_dl3dv` 로더를 그대로 쓴다
+  (변환기는 `camera_generation/models/Planner/CinemaTraj/scripts/trumans_lite_to_dl3dv.py`,
+  gitignore 대상이라 이 리포에는 안 들어온다).
+  - `main/conf/experiment/trumans_lite_ctxuniform.yaml` — TRUMANS 단독 arm.
+    scene = recording (클립 14~22개를 프레임 축으로 이어 붙임), segment = clip.
+    클립 하나를 scene 으로 두면 context range == target range 라 `geo_posed=true` 인 DA3
+    cam_enc 이 target 궤적 자체를 받는다 — 그걸 피하려고 이어 붙였다.
+    `geo_view_sampling=context_uniform` (6뷰, `geo_first_view_target_s=true`),
+    `avg_scale_ref=context_first_cam` (디렉토리 이름만 빌린 것, 값은 **recording median**).
+    scene 단위 holdout: recording `2b4c9b84` 통째로 val -> train 116 / val 14.
+    `epochs: 600` (epoch 당 14 배치뿐).
+    누수 실측(130 세그먼트 전수): 6뷰가 **항상 서로 다른 클립 6개**에 떨어지고(mean/min/max
+    6.00), target 클립 안의 view 는 frame `s` 하나뿐이다(= `first_extrinsic`, 추론 시 주어짐).
+    s 가 아닌 in-clip view 0개 -> 의도치 않은 누수 없음.
+  - `main/conf/experiment/mix_dl3dv_trumans_v1.yaml` — DL3DV(7k) + TRUMANS 2코퍼스 혼합.
+    `dataset_name: mixed` 에 **`dl3dv` 블록 2개** (`dataset_mixed` 는 이름 유일성을 요구하지
+    않는다). DL3DV 블록은 `da3_7k_da3geo_frontanchor` 와 동일 -> 그 arm 이 대조군.
+    TRUMANS `weight: 16.0` — 표본 수가 29414:116 (254:1) 이라 weight 1.0 이면 전체 배치의
+    0.4% 로 no-op 이 된다. T=2 temperature (p_i ∝ sqrt(n_i)) 목표 지분 5.9% 를 맞춘 값이고,
+    대가는 TRUMANS 클립 하나가 epoch 당 16번 학습에 들어가는 것이다.
+    `scale_gain` 은 둘 다 1.0 (기존 혼합 arm 과 같은 이유; da3+posed 에서 raise 된다).
+  - 실측 레벨 (`mean||t||/분모`, 130 세그먼트): TRUMANS geomean **0.0945** / med 0.0969 /
+    p05 0.0390 / p95 0.2000 (log10 std 0.2377). DL3DV 0.4367 의 1/4.6 이고 SD 0.0878 /
+    DataDoP 0.0911 과 같은 자리. `vae_latent_scale` 은 0.96032625 그대로 (재측정 안 함).
+  - TRUMANS intrinsics 는 프레임 전체 상수 (fx=fy=666.67, cx=480, cy=270, std 0.0)
+    -> `intr_norm: rel` 에서 `cam_param[9:11] = [1,1]`, DL3DV 와 같은 자리.
 - **`geo_view_sampling: 'context_uniform'`** (`main/dataset_dl3dv.py`, `main/config.py`,
   `main/dataset_cfg.py`) — geo context view 를 **영상 전체 `[0, N)`** 에서 uniform 으로 뽑는
   sampler. 기존 5종(`even` / `random_inseg` / `hybrid` / `frustum_cover` / `front_uniform`) 은
@@ -65,6 +92,22 @@ All notable changes to the latentcam sub-project. Follows [Keep a Changelog](htt
   dataset 이 내보낸 `avg_scale` 을 그대로 `out_to_trajectory(scale=...)` 에 곱해 되돌린다.
   검증(paired, 30 샘플): `cam_param[:, 6:9]` 크기비 = `ns_ctrl / 3.982685` 와 1e-6 이내 일치,
   rotation(0:6)·intrinsics(9:11) 채널은 **bit-identical**, 샘플 집합 동일.
+
+### Fixed
+- **CLaTr PRDC 가 val 이 작은 arm 에서 매 eval 마다 죽던 것**
+  (`main/evaluate/eval/src/metrics/modules/prdc.py`, `ManifoldMetrics.compute`).
+  `chunk(num_splits=5)` 로 자른 조각마다 `topk(k=manifold_k+1=4)` 를 부르는데 조각이 4개보다
+  작으면 `RuntimeError: selected index k out of range` 로 죽고 **metrics.json 전체가 안 나온다**
+  (PRDC 뿐 아니라 FCD/caption 지표까지 같이 날아간다). 즉 `N >= 5*(manifold_k+1) = 20` 이
+  암묵 가정이었다 — TRUMANS-Lite 단독 arm 은 val 이 14 세그먼트뿐이라 600 epoch 내내
+  CLaTr 지표가 하나도 안 남을 참이었다.
+  - `num_splits` 를 `max(1, min(num_splits, N // (manifold_k+1)))` 로 낮춘다.
+    **N >= 20 이면 그대로 5** 라 기존 arm 은 완전히 동일하게 돈다 (삭제 0줄, 분기만 추가).
+    N=14 -> 3분할(5,5,4), N=160/3263 -> 5분할(변화 없음).
+  - `torch.chunk` 의 짧은 꼬리 조각(N=17, splits=4 -> 5,5,5,**2**)은 건너뛴다.
+  - `N < manifold_k+1` 이면 topk 에러 대신 이유를 적은 `ValueError`.
+  - 분할 수가 바뀌면 `[prdc] N=.. 이라 num_splits 5 -> 3` 를 print — 조용히 다른 분할로
+    잰 게 아님을 로그에 남긴다. !! 분할 수가 다르면 PRDC 값을 arm 간 직접 비교하면 안 된다.
 
 ### Changed
 - **`frontanchor` arm 2개에 `geo_cover_before_only: true`** (`da3_7k_da3geo_frontanchor.yaml`,

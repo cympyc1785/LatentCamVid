@@ -193,10 +193,36 @@ class ManifoldMetrics(Metric):
             dict of precision, recall, density, and coverage.
         """
 
-        real_features = dim_zero_cat(self.real_features).chunk(num_splits, dim=0)
-        fake_features = dim_zero_cat(self.fake_features).chunk(num_splits, dim=0)
+        real_all = dim_zero_cat(self.real_features)
+        fake_all = dim_zero_cat(self.fake_features)
+
+        # split 하나가 manifold_k+1 개보다 작으면 topk 가 "selected index k out of range" 로
+        # 죽고 metrics.json 자체가 안 나온다 (FCD/caption 까지 같이 날아간다). val 이 작은
+        # 코퍼스(TRUMANS-Lite: val 14 세그먼트 -> chunk(5) = 3,3,3,3,2 < k+1=4)에서만 걸린다.
+        # N >= num_splits*(manifold_k+1) 이면 아래 계산이 num_splits 를 그대로 써서 기존 arm 과
+        # 완전히 동일하다 (DL3DV val 3263 -> 5).
+        n = min(real_all.shape[0], fake_all.shape[0])
+        need = self.manifold_k + 1
+        eff_splits = max(1, min(num_splits, n // need))
+        if eff_splits != num_splits:
+            print(
+                f"[prdc] N={n} 이라 num_splits {num_splits} -> {eff_splits} "
+                f"(split 당 최소 {need} 개 필요)"
+            )
+        if n < need:
+            raise ValueError(
+                f"[prdc] 샘플이 {n} 개뿐이라 manifold_k={self.manifold_k} 로는 PRDC 를 못 잰다 "
+                f"(최소 {need} 개)."
+            )
+
+        real_features = real_all.chunk(eff_splits, dim=0)
+        fake_features = fake_all.chunk(eff_splits, dim=0)
         precision, recall, density, coverage = [], [], [], []
         for real, fake in zip(real_features, fake_features):
+            # torch.chunk 는 마지막 조각이 짧을 수 있다 (N=17, splits=4 -> 5,5,5,2).
+            # 짧은 꼬리는 버린다 — 앞 조각들이 이미 전체를 대표한다.
+            if min(real.shape[0], fake.shape[0]) < need:
+                continue
             p, r, d, c = self.compute_prdc(real, fake, nearest_k=self.manifold_k)
             precision.append(p)
             recall.append(r)

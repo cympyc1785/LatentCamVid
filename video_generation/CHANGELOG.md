@@ -7,6 +7,27 @@
 ## [Unreleased]
 
 ### Added
+- **`trumans_to_recon.py` 보행 pseudo-action 채굴 — TRUMANS 라벨에 없는 보행을 모션에서 캔다**
+  (`camera_generation/models/Planner/CinemaTraj/scripts/trumans_to_recon.py`).
+  ⚠ `.gitignore:222` 라 커밋에 안 들어간다.
+  `mine_walk_actions()` + `--walk_actions`/`--no_walk_actions` (기본 on) ·
+  `--walk_speed 0.4` · `--walk_frac 0.8` · `--walk_smooth 9` · `--walk_max 8`.
+  - **왜**: `Actions/*.txt` 9,488 라인 어휘에 보행이 **0건**이다 (stand up 960 / sit down 736 /
+    pick up · put down · write · open · close 뿐. `walk|go to|move to|approach|run|wander|navigat`
+    히트 0, `turn` 54건은 전부 microwave·oven on-off). 그런데 모션에는 수평속도 > 0.4 m/s 인
+    프레임이 **19.0 %** 있고, 49프레임 창의 80 % 이상이 보행인 구간이 blend 66편 씬에
+    **16,515개 / 625 시퀀스**, 그 중 **81 % 가 라벨 구간과 전혀 안 겹친다** (= action 사이 이동).
+    즉 라벨로 클립을 고르는 한 보행은 후보에 **들어올 수가 없었고**, 그래서 뱅크 96편이 전부
+    제자리 조작이라 subject 가 사실상 정지 앵커였다. 49프레임 순 수평이동 median 1.03 m.
+  - ⚠ **축 함정: TRUMANS SMPL-X 배열은 y-up 이다** (`human_transl` std x 0.595 / **y 0.149** /
+    z 1.101, joints 프레임당 span x 0.53 / **y 1.52** / z 0.53 = 신장). blend 씬은 z-up 이라
+    헷갈린다. 수평면은 **(x, z)** 이고 `[:, :2]` 로 재면 가장 넓은 축을 버리고 수직 bob 을 섞어
+    보행 비율이 19 % → 11 % 로 나온다 (실제로 한 번 그렇게 틀렸다). fps 도 30 이 아니라
+    **blend 실측 25** 다 (30 으로 가정하면 24.7 % 로 부풀어 나온다) → `probe_meta["fps"]` 사용.
+  - **인덱스 호환**: pseudo-action 은 목록 **뒤에** append 한다. 앞에 끼우면 `--action <i>` 가
+    밀려 시드 키 `recording|action|seed` 가 바뀌고 기존 96편이 재현이 안 된다.
+    실측 (`00add26c`): labeled 0..15 는 예전과 동일, walk 16..23 (net 1.24~0.96 m).
+  - `--list_actions` 에 `kind` 열과 walk 창의 `net`/`frac` 을 같이 찍는다.
 - **`scripts/audit_lbm_distance.py` — 원본 LBM 카메라의 거리를 미터로 재서 Lite 반경과 같은 자에 올린다**
   (`camera_generation/models/Planner/CinemaTraj/scripts/audit_lbm_distance.py`).
   LBM 출력에는 반경이 없다 — `distance_label` 과 후보 id 의 `d0`/`d5` 버킷 토큰뿐이라
@@ -345,6 +366,34 @@
     `results/20260820_lbm_lite/` 에 대조용으로 남겼다.
 
 ### Changed
+- **`trumans_scene_probe.py` 반경 격자에 1.0 m / 5.5 m 추가 — 뱅크에 medium shot 이 0건이던 걸 메운다**
+  (`camera_generation/models/Planner/CinemaTraj/scripts/trumans_scene_probe.py`).
+  ⚠ `.gitignore:222` 라 커밋에 안 들어간다.
+  `--radii` 기본값 `[1.5, 2.2, 3.0, 4.0]` → `[1.0, 1.5, 2.2, 3.0, 4.0, 5.5]`.
+  Lite 렌즈가 25 mm 고정이라 `fill = subject_h / frame_h ≈ 1.878·(subject_h/1.521) / r` 이고,
+  하한이 1.5 m 면 fill 이 1.4 를 못 넘는다 → 뱅크 96편 프레이밍 분포에서 **medium(1.75–2.60) ·
+  medium close-up · close-up 이 전부 0건**이었다 (`out/trumans_lite_bank/lite_distance.csv`).
+  - 실측 (00add26c a00/a04/a07 × 96격자, `clear`+`clearance≥0.35`+`floor_drop≥0.20` 통과율):
+    **r=1.0 75.0 / 45.8 / 53.1 %** 로 전 반경 중 **1위**다 (r=1.5 는 46.9 / 32.3 / 24.0 %).
+    사람 1 m 앞은 대개 빈 바닥이라 그렇다. fill 은 1.55 / 1.88 / 2.08 로 medium 칸을 채운다.
+  - **r=5.5 는 이 실내 3편에서 usable 0 건** (r=4.0 도 288 중 1건). full-house 실내라 5 m 는
+    항상 벽 너머다. 그래도 격자 96개 추가 비용이 ~0.9 s 뿐이라 **지우지 않고 남겼다** — 넓은
+    recording 이 있으면 저절로 쓰이고 없으면 저절로 빈다. 즉 TRUMANS 실내에서 도달 가능한
+    fill 은 **~0.5 ~ 2.1** 이고, extreme wide 는 샘플러 문제가 아니라 구조적으로 없다.
+  - 전체 파이프라인 스모크 3편 통과 (a00 `az 60 elev 25 r 1.0 hold` clear 1.00 clearance 1.011 /
+    a04 `az 240 elev 0 r 2.2` / a07 `az 255 elev 12 r 2.2`), usable 풀 125 / 91 / 84 of 576.
+  - **같이 넣은 안전장치: `subject_dist` 열 + `--min_subject_dist` (기본 0.80 m) 게이트**
+    (probe verify 패스 + `trumans_to_recon.py`). `clearance_of` 는 **사람 히트를 일부러 무시**하고
+    (사람은 장애물이 아니라 피사체) `line_of_sight` 는 사람에 맞아야 `clear=True` 라, 카메라가
+    피사체를 뚫고 들어가는 걸 검사하는 열이 **하나도 없었다**. 반경 하한이 1.5 m 이던 동안엔
+    `push_in`(`dradius −0.55`) 도 0.95 m 라 안 드러났지만 r=1.0 을 넣으면서 열린 구멍이다.
+  - ⚠ **정직한 실측: 이 게이트는 아직 한 번도 안 걸렸다.** `push_in` 6후보 재검증에서
+    r=1.0 후보 2개는 start 1.000 / 0.993 → min **0.842 / 0.859** 로 0.80 을 넘겨 PASS 했다
+    (기각 1건은 기존 `clearance` 게이트, 0.243 < 0.35). 내가 예측했던 "0.60 m 까지 들어간다"는
+    **틀렸다** — 격자 `radius` 는 흉부 기준 **3D 거리**(elev 포함)인데 `synth_source_path` 의
+    `rad = max(0.6, radius + dradius·ease)` 는 **수평 반경**이고, `--track_gain 0.6` 부분 추종이
+    거리를 더 벌린다. 0.80 은 예전 반경 집합에선 절대 안 걸리는 값이라(1.5 − 0.55 = 0.95)
+    기존 96편 재현성은 그대로고, 실효 하한 0.84 와의 여유는 0.04 m 뿐이다.
 - **`trumans_to_recon.py` 시작 pose 재시도 순서를 (반경 × 방위각) 으로 층화 — 뱅크가 1.5 m 코퍼스가 되는 걸 막는다**
   (`camera_generation/models/Planner/CinemaTraj/scripts/trumans_to_recon.py`).
   ⚠ `.gitignore:222` 라 커밋에 안 들어간다.

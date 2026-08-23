@@ -7,6 +7,23 @@
 ## [Unreleased]
 
 ### Added
+- **`scripts/audit_trumans_pkl_camera.py` — 실제 TRUMANS 카메라 2편이 보행에 어떻게 반응하는지 잰다**
+  (`camera_generation/models/Planner/CinemaTraj/scripts/audit_trumans_pkl_camera.py`).
+  ⚠ `.gitignore:222` 라 커밋에 안 들어간다.
+  `<seq>_camera_pose.pkl` 은 프레임 인덱스 → `{location, rotation}` dict 다.
+  49프레임 창을 사람 보행 비율로 갈라 재면:
+
+  | 창 | 00add26c (206 / 15창) | 0aa05d5a (143 / 11창) |
+  |---|---|---|
+  | still (보행 ≤10 %) | cam net **0.440** m, dt 0.0122 | cam net **0.548** m, dt 0.0137 |
+  | walk (보행 ≥80 %) | cam net **1.314** m, dt 0.0309 (사람 1.250 → 추종 **1.05×**) | cam net **0.588** m, dt 0.0141 (사람 1.046 → **0.56×**) |
+
+  - **그동안 인용하던 "net 0.58~0.62 m" 는 still 창이 압도적으로 많아 나온 정지 통계**였고
+    보행 구간에 적용하면 안 되는 값이었다. 실제 카메라 2대는 보행에 정반대로 반응한다 —
+    하나는 거의 1:1 추종, 하나는 사실상 무반응(walk 0.588 ≈ still 0.548).
+  - 채굴한 보행 클립 실측 net **1.194** m / dt 0.0283 은 **과한 게 아니라** 00add26c 의 추종
+    카메라를 재현한 것이다. `--track_gain 0.6` 은 두 실제 모드 사이에 앉는다. 조정 안 함.
+  - `trumans_to_recon.py` 의 docstring 표와 요약 print 를 창 종류별 기준으로 갈랐다.
 - **`trumans_to_recon.py` 보행 pseudo-action 채굴 — TRUMANS 라벨에 없는 보행을 모션에서 캔다**
   (`camera_generation/models/Planner/CinemaTraj/scripts/trumans_to_recon.py`).
   ⚠ `.gitignore:222` 라 커밋에 안 들어간다.
@@ -22,8 +39,9 @@
   - ⚠ **축 함정: TRUMANS SMPL-X 배열은 y-up 이다** (`human_transl` std x 0.595 / **y 0.149** /
     z 1.101, joints 프레임당 span x 0.53 / **y 1.52** / z 0.53 = 신장). blend 씬은 z-up 이라
     헷갈린다. 수평면은 **(x, z)** 이고 `[:, :2]` 로 재면 가장 넓은 축을 버리고 수직 bob 을 섞어
-    보행 비율이 19 % → 11 % 로 나온다 (실제로 한 번 그렇게 틀렸다). fps 도 30 이 아니라
-    **blend 실측 25** 다 (30 으로 가정하면 24.7 % 로 부풀어 나온다) → `probe_meta["fps"]` 사용.
+    보행 비율이 **19.0 % → 7.5 %** 로 절반 이하가 된다 (fps 25 동일 조건 재측정.
+    실제로 한 번 그렇게 틀렸다). fps 도 30 이 아니라 **blend 실측 25** 다 (30 으로 가정하면
+    24.7 % 로 부풀어 나온다) → `probe_meta["fps"]` 사용. 두 오차가 겹쳐 처음엔 11 % 로 봤다.
   - **인덱스 호환**: pseudo-action 은 목록 **뒤에** append 한다. 앞에 끼우면 `--action <i>` 가
     밀려 시드 키 `recording|action|seed` 가 바뀌고 기존 96편이 재현이 안 된다.
     실측 (`00add26c`): labeled 0..15 는 예전과 동일, walk 16..23 (net 1.24~0.96 m).

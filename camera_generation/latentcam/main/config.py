@@ -108,6 +108,10 @@ class Config:
     # SCVideo added the frame-0 division at data/dataset_large.py:313).
     intr_norm = 'rel'
 
+    # [new 2026-08-23] decode 시 target 첫 카메라를 given 으로 취급 (rel[0]=I 강제).
+    # False = 기존 동작. 자세한 근거는 conf/config.yaml 의 같은 키 주석 참고.
+    anchor_pred_frame0 = False
+
     # VAE — SCVideo's config_large.py setting. cam_dim MUST match the ckpt's latent_dim
     # (20260302 -> 64, 20260202_065659 -> 32) or the state_dict load hard-crashes on to_mu.
     # NOTE 0.96032625 was fit over SCVideo's MIXED corpus (DL3DV + DynamicVerse + dynpose-100k);

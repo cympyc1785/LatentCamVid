@@ -238,8 +238,10 @@ def train():
             width = width.cpu().tolist()
             height = height.tolist()
             
-            traj = out_to_trajectory(traj, scale, E0, device)
-            traj_pred = out_to_trajectory(traj_pred, scale, E0, device)
+            # anchor_pred_frame0: target 첫 카메라를 given 으로 (rel[0]=I 강제). 기본 False = 기존 동작.
+            _a0 = bool(getattr(cfg, 'anchor_pred_frame0', False))
+            traj = out_to_trajectory(traj, scale, E0, device, anchor_frame0=_a0)
+            traj_pred = out_to_trajectory(traj_pred, scale, E0, device, anchor_frame0=_a0)
             matrix_traj_ref = inverse_camera_matrix(traj)
             matrix_traj_pred = inverse_camera_matrix(traj_pred)
             matrix_traj_ref[:, :, :3, 1:3] *= -1

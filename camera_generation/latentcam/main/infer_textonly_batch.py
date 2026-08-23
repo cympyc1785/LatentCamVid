@@ -85,7 +85,9 @@ def main():
             traj_pred = vae.decode(x_t * cfg.vae_latent_scale)
 
         pred_intr = make_intrinsics(traj_pred[:, :, -2:], width, height, intrinsics).cpu().tolist()
-        pred_w2c = out_to_trajectory(traj_pred, scale, E0, DEVICE)
+        # anchor_pred_frame0: target 첫 카메라를 given 으로 (rel[0]=I 강제). 기본 False = 기존 동작.
+        pred_w2c = out_to_trajectory(traj_pred, scale, E0, DEVICE,
+                                     anchor_frame0=bool(getattr(cfg, 'anchor_pred_frame0', False)))
         m = inverse_camera_matrix(pred_w2c); m[:, :, :3, 1:3] *= -1; m = m.cpu().tolist()
         out_json = {"w": int(W), "h": int(H), "fl_x": pred_intr[0][0][0], "fl_y": pred_intr[0][1][1],
                     "cx": pred_intr[0][0][2], "cy": pred_intr[0][1][2],

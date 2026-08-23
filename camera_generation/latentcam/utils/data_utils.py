@@ -53,7 +53,8 @@ def normalize_camera_extrinsics_and_points(extrinsics, points=None, avg_scale=No
 
     return normalized_extrinsics, normalized_points, avg_scale, mask
 
-def out_to_trajectory(out, scale, e0, device=None, max_trans_norm=False, trans_repr='w2c'):
+def out_to_trajectory(out, scale, e0, device=None, max_trans_norm=False, trans_repr='w2c',
+                      anchor_frame0=False):
 
     """
     out: (B, N, 9)
@@ -65,6 +66,18 @@ def out_to_trajectory(out, scale, e0, device=None, max_trans_norm=False, trans_r
     trans_repr: out[..., 6:9] 가 담고 있는 값. dataset_dl3dv 의 cfg.trans_repr 과 반드시 일치해야 한다.
         'w2c' (기본, 기존 동작) w2c translation t -> 그대로 행렬의 [:3,3] 에 넣는다.
         'c2w'                  카메라 중심 c      -> t = -R c 로 바꿔서 넣는다.
+
+    anchor_frame0: [new 2026-08-23] target 첫 카메라를 **given** 으로 취급할지.
+        False (기본, 기존 동작) e0 를 곱하기만 한다. 즉 rel[0]=I 는 모델이 예측해야 하는 값이고,
+                                틀리면 궤적 전체가 그만큼 통째로 밀린다 (TRUMANS-Lite vls019
+                                epoch 82 실측: frame0 |Δt| median 0.1105 = GT path_len 의 0.20배,
+                                frame0 rot 1.79°).
+        True                    rel'_t = rel_t @ inv(rel_0) 로 재앵커해서 rel'[0] = I 를 **강제**한다.
+                                프레임 간 상대 운동(rel_t @ inv(rel_t')) 은 그대로 보존되고,
+                                dataset 이 cam_param 을 만드는 식(w2c_t @ inv(w2c_0)) 과 같은 꼴이다.
+        GT(cam_param) 는 이미 rel[0]=I 라 True 여도 no-op 이다 — pred 에만 실제로 효과가 있다.
+        !! intrinsics 채널(cam_param[..., 9:11]) 은 여기서 안 건드린다. intr_norm='rel' 이면
+           frame0 intr 도 [1,1] 이 given 이지만 그건 make_intrinsics 경로라 별개다.
     """
     if device is None:
         device = out.device
@@ -90,6 +103,10 @@ def out_to_trajectory(out, scale, e0, device=None, max_trans_norm=False, trans_r
     elif trans_repr != 'w2c':
         raise ValueError(f"trans_repr must be 'w2c' | 'c2w', got {trans_repr!r}")
     matrix_trajectory[:, :, :3, 3] = raw_trans
+    if anchor_frame0:
+        # rel'_t = rel_t @ inv(rel_0).  rel'[0] = I 가 되고 프레임 간 상대 운동은 보존된다.
+        matrix_trajectory = matrix_trajectory @ torch.linalg.inv(
+            matrix_trajectory[:, 0]).unsqueeze(1)
     matrix_trajectory = matrix_trajectory @ e0.unsqueeze(1)
 
     return matrix_trajectory

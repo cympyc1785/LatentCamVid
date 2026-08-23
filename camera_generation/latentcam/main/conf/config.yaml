@@ -73,6 +73,17 @@ intr_norm: rel
 # !! 디코드 경로(utils/data_utils.out_to_trajectory)에 trans_repr 인자는 있지만 DM/추론 스크립트는
 #    아직 그걸 넘기지 않는다. 'c2w' ckpt 를 DM 에 쓰려면 그 호출부부터 배선해야 한다.
 trans_repr: w2c
+# [new 2026-08-23] target 첫 카메라를 **given** 으로 취급할지 (decode 경로에서만 작동).
+#   false (기본, 기존 동작) out_to_trajectory 가 e0 를 곱하기만 한다. rel[0]=I 는 모델이
+#         예측해야 하는 값이고, 틀리면 궤적 전체가 그만큼 통째로 밀린다.
+#   true  rel'_t = rel_t @ inv(rel_0) 로 재앵커해서 rel'[0]=I 를 강제한다. 프레임 간 상대
+#         운동은 보존되고, dataset 이 cam_param 을 만드는 식(w2c_t @ inv(w2c_0)) 과 같은 꼴이다.
+# 실측 근거 (TRUMANS-Lite vls019 epoch 82, val 14 타깃 median): frame0 |Δt| 0.1105
+# (= GT path_len 의 0.20배, 최대 0.80배), frame0 rot 1.79°. 같은 잣대로 frozen VAE 왕복은
+# 0.0019 / 0.129° 라 이 오차는 diffusion 이 낸 것이다 (scripts/vae/vae_roundtrip_val.py).
+# GT(cam_param) 는 이미 rel[0]=I 라 true 여도 no-op — pred 에만 효과가 있다.
+# !! loss(loss_latent / loss_traj) 는 안 건드린다. 학습 신호는 그대로 두고 decode 만 앵커한다.
+anchor_pred_frame0: false
 # [new 2026-08-06] scene 의 pose / intrinsics / caption / avg_scale 을 어느 코퍼스에서 읽을지.
 #   'transforms' (기본, 기존 동작) <scene>/{transforms.json, prompts.json, avg_scale/}
 #   'da3'                          <scene>/da3/{pose.npz, prompts.json, avg_scale/}

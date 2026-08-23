@@ -23,8 +23,18 @@
 #   - text-only 도 안 올라가면        -> 130 클립 / 7 scene 코퍼스나 caption 라벨 쪽 문제다
 #     (val 이 recording 1개뿐이고 189-way exact match 라 표본이 없다는 쪽).
 #
+# ═══ frame0 을 given 으로 (anchor_pred_frame0) ═══════════════════════════════════════════
+# 위 frame0 |dt| 0.1105 은 **애초에 예측할 필요가 없는 값**이다. dataset 이 cam_param 을
+# rel_t = w2c_t @ inv(w2c_0) 로 만들기 때문에 GT 의 rel[0] 은 정확히 항등이고, 추론 시에도
+# target 첫 카메라는 given 이다. 그런데 out_to_trajectory 는 e0 를 곱하기만 하고 rel[0]=I 를
+# 강제하지 않아서, 모델이 낸 frame0 오차가 궤적 전체를 통째로 밀고 있었다.
+# anchor_pred_frame0: true -> decode 시 rel'_t = rel_t @ inv(rel_0). 프레임 간 상대 운동은
+# 보존되고 rel'[0]=I 가 된다. loss 는 안 건드린다 (학습 신호는 그대로, decode 만 앵커).
+#
 # ═══ vls019 대비 delta ═══════════════════════════════════════════════════════════════════
-# geo_encoder: da3 -> null.  그 외 전부 동일 (vae_latent_scale 0.19128 포함).
+#   1. geo_encoder: da3 -> null          (text-only)
+#   2. vae_latent_scale: 0.19128 -> 0.96032625  (베이스 arm am3tzbk7 과 같은 값으로 되돌림)
+#   3. anchor_pred_frame0: false -> true
 # geo_* 나머지 키는 geo_encoder=null 이면 참조되지 않지만, vls019 와 줄 단위로 대조할 수 있게
 # 남겨 둔다 (da3_7k_textonly 는 아예 지웠지만 이 arm 은 paired 비교가 목적이다).
 #
@@ -37,15 +47,18 @@
 # 어느 context 클립에서도 같고 누수가 없다. 실측(130 세그먼트, mean||t||/분모): geomean 0.0945
 # med 0.0969 p05 0.0390 p95 0.2000. DL3DV 0.4367 의 1/4.6.
 #
-# vae_latent_scale: 전체 코퍼스 130 샘플 실측 (2026-08-23, scripts/vae/vae_scale_matrix.py)
-#   ckpt              dim mode       intr  lat.std   rot      trans    intr_L1
-#   vae_20260302_300   64 avg_scale  rel   0.19128  0.00286  0.00174  0.00169
-# -> 0.19128 을 쓰면 diffusion 입력 std 가 1.0. loss_latent 를 베이스 arm(am3tzbk7, 0.96032625)
-#    과 직접 비교 금지 — latent 단위가 다르다. 비교는 decode 후 지표.
+# vae_latent_scale: **0.96032625** (사용자 지시, 2026-08-23). 베이스 arm am3tzbk7 과 같은 값이라
+#   loss_latent 를 그 arm 과 직접 비교할 수 있다.
+#   참고로 이 코퍼스의 실측 lat.std 는 다르다 (130 샘플, scripts/vae/vae_scale_matrix.py):
+#     ckpt              dim mode       intr  lat.std   rot      trans    intr_L1
+#     vae_20260302_300   64 avg_scale  rel   0.19128  0.00286  0.00174  0.00169
+#   즉 0.96032625 를 쓰면 diffusion 입력 std 는 1.0 이 아니라 0.199 다. vls019(0.19128) 가
+#   그 std 를 1.0 으로 맞춘 arm 이었고, 위에 적었듯 loss 는 내려갔지만 caption 은 안 움직였다.
 #
 # 분할: scene 단위 holdout. recording `2b4c9b84` (14 클립) 통째로 val -> train 116 / val 14.
 exp_name: trumans_lite_textonly
-vae_latent_scale: 0.19128          # 전체 코퍼스 실측 lat.std (입력 std 1.0). 위 블록 참고
+vae_latent_scale: 0.96032625       # 베이스 arm am3tzbk7 과 동일 (사용자 지시). 위 블록 참고
+anchor_pred_frame0: true           # decode 시 target 첫 카메라를 given 으로 (rel[0]=I 강제)
 dl3dv_root: /data1/cympyc1785/data/TRUMANS-Lite/latentcam_da3
 meta_csv: meta_trumans.csv
 train_seg_list: /data1/cympyc1785/data/TRUMANS-Lite/latentcam_da3/seg_list_trumans_train.txt

@@ -190,8 +190,10 @@ def train():
             print(pred_intrinsics[0][0])
             print(gt_intrinsics[0][0])
 
-            pred_traj = out_to_trajectory(out, scale, E0, device)
-            gt_traj = out_to_trajectory(traj, scale, E0, device)
+            # anchor_pred_frame0: target 첫 카메라를 given 으로 (rel[0]=I 강제). 기본 False = 기존 동작.
+            _a0 = bool(getattr(cfg, 'anchor_pred_frame0', False))
+            pred_traj = out_to_trajectory(out, scale, E0, device, anchor_frame0=_a0)
+            gt_traj = out_to_trajectory(traj, scale, E0, device, anchor_frame0=_a0)
             print("GT - GT: ", F.mse_loss(camera_vae.decode(traj_latents * cfg.vae_latent_scale), traj))
             print("after denormalize")
             print(pred_traj[0][0])

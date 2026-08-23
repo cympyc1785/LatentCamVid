@@ -5,12 +5,29 @@ All notable changes to the latentcam sub-project. Follows [Keep a Changelog](htt
 ## [Unreleased]
 
 ### Added
+- **`anchor_pred_frame0` — target 첫 카메라를 given 으로 (2026-08-23).** dataset 이 `cam_param` 을
+  `rel_t = w2c_t @ inv(w2c_0)` 로 만들어 GT `rel[0]` 은 정확히 항등이고 추론 시에도 target 첫
+  카메라는 주어지는데, `out_to_trajectory` 는 `e0` 를 곱하기만 하고 `rel[0]=I` 를 강제하지
+  않았다 → 모델이 낸 frame0 오차가 궤적 전체를 통째로 밀었다 (vls019 epoch 82 실측 median
+  frame0 |Δt| **0.1105** = GT path_len 의 0.20배, rot 1.79°; 같은 잣대로 frozen VAE 왕복은
+  0.0019 / 0.129° 라 diffusion 이 낸 오차다).
+  - `utils/data_utils.py` — `out_to_trajectory(..., anchor_frame0=False)` 인자 추가.
+    `True` 면 `rel'_t = rel_t @ inv(rel_0)` 로 재앵커한다. 프레임 간 상대 운동
+    (`rel_t @ inv(rel_t')`) 은 보존되고 GT 는 이미 `rel[0]=I` 라 no-op — pred 에만 효과가 있다.
+  - `main/conf/config.yaml` / `main/config.py` — `anchor_pred_frame0: false` (기본 = 기존 동작).
+  - decode 경로 4곳에 배선: `main/train_latent_cam_dm.py`, `main/valid_cam_acc.py`,
+    `main/infer_cam_dm.py`, `main/infer_textonly_batch.py`. loss(`loss_latent`/`loss_traj`) 는
+    안 건드린다 — 학습 신호는 그대로 두고 decode 만 앵커한다.
+  - 검증: smoke 의 test 덤프 14 타깃에서 `_transforms_pred.json[0]` vs `_transforms_ref.json[0]`
+    max |Δ| **9.54e-07** (median 2.98e-07). 직전 arm 의 같은 값은 median 0.1105 였다.
 - **TRUMANS-Lite text-only arm + caption 상한 진단 (2026-08-23).** `vae_latent_scale` 를 고쳐도
   caption 이 안 올라가는 원인을 좁힌다.
   - `main/conf/experiment/trumans_lite_textonly.yaml` — `trumans_lite_ctxuniform_vls019` 대비
-    `geo_encoder: da3 → null` **한 줄만** 다르다 (`vae_latent_scale` 0.19128 포함 나머지 동일).
-    screen train1 / GPU1 / wandb `hv21id7s`. 올라가면 da3 geo 토큰이 텍스트 신호를 덮는 것,
+    `geo_encoder: da3 → null` (text-only) + `vae_latent_scale: 0.19128 → 0.96032625`
+    (사용자 지시, 베이스 arm `am3tzbk7` 과 동일) + `anchor_pred_frame0: true`.
+    screen train1 / GPU1 / wandb `1eptj1o6`. 올라가면 da3 geo 토큰이 텍스트 신호를 덮는 것,
     안 올라가면 130 클립·val 1 recording 코퍼스 쪽 문제.
+    (첫 기동 `hv21id7s` 는 `vae_latent_scale` 0.19128 / anchor 없음 — 두 설정 모두 바뀌어 폐기.)
   - `scripts/vae/vae_roundtrip_val.py` (신규) — diffusion 을 건너뛰고 GT `cam_param` 을
     encode→decode 만 시켜 학습 val 루프와 **같은** 후처리를 태우는 "완벽한 diffusion" 상한선.
     frame0 오차 / tortuosity / `5·Δt_local` / static 축비율을 GT 와 나란히 찍는다.

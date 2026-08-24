@@ -7,6 +7,42 @@
 ## [Unreleased]
 
 ### Added
+- **`--follow_smooth` (`CinemaTraj/decode/build_poses.py`) + `--follow_smooths` 축
+  (`scripts/sample_camera_bank.py`)** — follow **위치 채널** 전용 저역통과
+  (Savitzky-Golay, polyorder 2, `mode="interp"`). 기본 `9`, `1` = 끔(= D72 원래 동작).
+  - 왜: "카메라가 흔들린다"의 원인이 `tracking` 이 아니었다. 실측 (snowboard dyn_0,
+    fauto k3) — 회전 2차차분 p95 가 소스 2.3803° 인데 plan 은 truck_left k3 0.0241 /
+    orbit_left_arc 0.0506 / truck_left k0 0.0000° 로 사실상 완벽히 매끈하다. 흔들리는 건
+    **위치**다: subject `center_smooth` 의 |jerk| p95 = 0.01728u, plan 카메라 = 0.01572u
+    = **정확히 그 0.91배(=g)**. preset 모양은 정의상 매끈하므로 100% 이 채널에서 온다
+    (z_med 1.751 · f 1185 → 프레임당 10.6 px).
+  - `track.center_smooth` 는 이미 savgol(w=11, p=3)을 거쳤지만 그건 **조준(회전)** 눈금에
+    맞춘 것이다. follow 는 그 궤적을 g 배로 **위치**에 실으므로 남은 고주파가 그대로 흔들림이
+    된다. 조준(`reference_centers`)은 raw 를 그대로 쓴다 — 조준은 subject 를 실제로 따라가야
+    맞고 문제되는 건 병진 쪽이다. gain 은 편 궤적 위에서 다시 푼다.
+  - window 9 를 고른 근거 (snowboard dyn_0, g 를 매 창마다 재해):
+
+    | win | g* | tau* | jerk p95 | px/f³ | subject 이탈 |
+    |---|---|---|---|---|---|
+    | 1 | 0.91 | 0.0932 | 0.01572 | 10.6 | 0.0000 |
+    | 9 | 0.91 | 0.0909 | 0.00357 | 2.4 | 0.0119 |
+    | 21 | 0.92 | 0.0868 | 0.00336 | 2.3 | 0.0416 |
+    | 31 | 0.92 | 0.0968 | 0.00254 | 1.7 | 0.0490 |
+
+    9 가 무릎이다 — 흔들림 4.4배 감소, τ 는 오히려 개선(0.0932→0.0909), 이탈 0.012u.
+    21 이상은 흔들림이 더 안 줄면서 이탈만 3~4배 커진다.
+  - 재확인 (`follow_smooth_bank`, dyn_0 × preset 14종 × τ0.35 × fauto × k3 × {s1,s9}):
+    s1→s9 에서 jerk p95 0.00538 → 0.00122 (s_curve 만 0.00674 → 0.00280), g* 전량 0.91
+    불변, `path_len_u` 3자리까지 동일, hole 최대 변화 0.004.
+  - `decision_fingerprint` 에는 **`follow_gain` 이 0 이 아닐 때만** 싣는다. gain 0 이면
+    offset 이 통째로 0 이라 창이 pose 를 못 바꾸는데, 무조건 실으면 D73 이전 뱅크 전량이
+    거짓으로 stale 판정된다. 같은 이유로 `sample_camera_bank` 는 gain 0 행에서 smooth 축을
+    접는다 (안 그러면 동일 변이가 창 수만큼 복제된다).
+- **`dolly_in` / `dolly_out` preset (`CinemaTraj/lbm/presets.py`)** — 광축 전후진이면서
+  `aim="traj"`, 즉 **조준을 안 한다**. 기존 dolly 계열(`straight_ease`/`push_in_arc`/
+  `pull_out_arc`)은 전부 `aim="look_at"` 이라 매 프레임 subject 를 향해 회전이 다시 서므로,
+  "track 도 look-at 교정도 없는 순수 dolly"를 만들 수단이 traj 계열(pan/truck/pedestal)에
+  없었다. 별칭 `zoom_in`/`zoom_out` 은 기존대로 `push_in_arc`/`pull_out_arc` 를 가리킨다.
 - **`--follow_gain` (`CinemaTraj/decode/build_poses.py`) + `--follow_gains` 축
   (`scripts/sample_camera_bank.py`)** — subject 변위를 카메라 **위치**에 싣는다
   (`p(f) += g·(c(f) − c(0))`). 기본 `0` = 기존 동작 (snowboard 뱅크 10변이 재생성해
@@ -693,6 +729,13 @@
     `results/20260820_lbm_lite/` 에 대조용으로 남겼다.
 
 ### Changed
+- **`render_bank_videos.py` 타일 캡션에 `g`/`s`/`k` 축을 붙인다**
+  (`camera_generation/models/Planner/CinemaTraj/scripts/render_bank_videos.py`).
+  ⚠ `.gitignore:222` 라 커밋에 안 들어간다.
+  기존 캡션은 `preset` + `anchor`/`τ`/`hole`/`path` 뿐이라 `follow_gain`·`follow_smooth`·
+  `aim_keyframes` 축으로 만든 A/B 영상에서 **어느 타일이 어느 쪽인지 눈으로 못 갈랐다**
+  (k0 vs k3 영상을 보내고서야 캡션에 `k` 가 아예 없는 걸 발견). 0 이면 안 붙이므로 그 축을
+  안 쓴 뱅크의 캡션은 예전 그대로다. `s` 는 `g` 가 0 이 아닐 때만 붙인다.
 - **`trumans_scene_probe.py` 반경 격자에 1.0 m / 5.5 m 추가 — 뱅크에 medium shot 이 0건이던 걸 메운다**
   (`camera_generation/models/Planner/CinemaTraj/scripts/trumans_scene_probe.py`).
   ⚠ `.gitignore:222` 라 커밋에 안 들어간다.

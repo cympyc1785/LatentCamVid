@@ -31,12 +31,39 @@
     `max_f` 라 단봉이 보장되지 않는다 (subject 가 방향을 꺾으면 국소 최소가 둘 이상).
   - g 는 영상마다 풀어야 한다. parkour/truck-pose/trumans-bedroom 은 `g*≈0` 이라
     저절로 기존 동작으로 돌아간다 (소스가 회전으로만 따라갔다 — 따라가면 오히려 나빠진다).
-  - `solve_follow_gain(min_benefit=0.20)` **정적 anchor 방어**. 정적 노드도 `center_smooth` 가
-    OBB fit 노이즈로 떤다 (snowboard `stat_0` 0.024u vs 동적 0.44u). 그 떨림에도 argmin 은
-    걸려서, 가드가 없으면 격자 끝(1.5)까지 밀려가 **분할 노이즈를 1.5배 증폭한 흔들리는 카메라**를
-    만든다 — 그러고도 τ 는 1.9441 → 1.7798 (8.5%) 밖에 안 줄어 어차피 `tau_saturated` 다.
-    τ 가 `min_benefit` 만큼도 안 줄면 `0` 을 돌려 기존 동작으로 되돌린다. 가드 적용 후
-    snowboard 뱅크의 `follow 1.500` 행이 사라졌고 selected 는 366 으로 동일.
+  - `solve_follow_gain` 가드 **2단**. `moving`(1차) → `min_benefit=0.20`(2차). `auto` 에만 걸리고
+    명시적 `--follow_gains 1` 같은 요청은 그대로 통과한다.
+    - `min_benefit` 은 **크기 가드**다. 정적 노드도 `center_smooth` 가 OBB fit 노이즈로 떨고
+      (snowboard `stat_0` 0.024u vs 동적 0.44u) 그 떨림에도 argmin 은 걸려서, 가드가 없으면
+      격자 끝까지 밀려가 **분할 노이즈를 증폭한 흔들리는 카메라**를 만든다 — 그러고도 τ 는
+      1.9441 → 1.7798 (8.5%) 밖에 안 줄어 어차피 `tau_saturated` 다.
+    - 그런데 크기만으로는 못 막는다. 카메라가 **큰 평면을 훑으면 보이는 부분이 옮겨가** OBB
+      중심이 벽을 따라 미끄러진다: truck-pose `stat_0`(graffiti, 벽) wobble 0.535u 로 τ 를
+      26.6% 깎아 `min_benefit` 을 통과했고, fashion-walk `stat_9`(tree) 는 path_len 13.602u /
+      drift 4.692u 다 (둘 다 정적 물체). 새던 곳: parkour `stat_2/3/5/8` 240행 + truck-pose
+      `stat_0` 60행. 그래서 `node["moving"]` 플래그로 자르는 1차 가드를 앞에 뒀다 —
+      tracking shot 은 정의상 *움직이는* subject 를 따라가는 것이다.
+  - `solve_follow_gain(hi)` 를 1.5 → **2.5** (steps 151 → 251). 1.5 는 실측에서 **상한이
+    물렸다**: fashion-walk dyn_0 g*=1.96 / dyn_1 g*=1.88 / dyn_2 g*=2.05 라 1.5 에서 잘려
+    τ 가 0.165/0.110/0.233 에 멈췄고 (진짜 최소 0.135/0.073/0.206), dyn_1 은 τ*=0.10 칸을
+    그것 때문에 놓쳤다. g*≤1.13 인 snowboard/snow-bike/funeral-procession 엔 no-op.
+  - 두 수정 후 재생성(`--bank_dir follow_bank2 --follow_gains 0 auto --aim_keyframes 0 3`):
+
+    | video | nonzero | static nonzero | g* | dropped@g>0 |
+    |---|---|---|---|---|
+    | truck-pose | 60 → **0** | 60 → **0** | 1.50 → — | 84 → **0** |
+    | parkour | 356 → 116 | 240 → **0** | 0.04~0.47 → 0.47 | 364 → **28** |
+    | fashion-walk | 232 → **260** | 0 → 0 | 1.50 → **1.88~1.96** | 56 → **28** |
+    | snowboard | — | 4 → 0 (explicit g=1 행) | **0.91 유지** | — → **0** |
+
+    parkour 는 selected 가 644 → 532 로 줄었다. 정적 anchor 행이 g=0 으로 돌아가면서
+    `tau_saturated`(src_self_tau 0.745) 로 떨어진 것 — 애초에 성립 안 하던 변이다.
+  - CameraBench 갈래 실측 7편 (`aim_keyframes 0 3`, `trackings lock`): snowboard side 864 /
+    snow-bike tail 288 / funeral-procession lead 664 + side 144 / fashion-walk tail 116 +
+    side 116 / parkour side 236 + tail 60 + lead 60 / truck-pose 0 / couple-rocks 0.
+    **`aerial-tracking` 은 0건** — `start_mode=source_frame0` 이 frame0 을 소스 카메라에
+    묶으므로 elev ≥ 45° 가 구조적으로 안 나온다. couple-rocks 0건은 정상 (subject 이동
+    0.126u, τ 절감 0.4% → `min_benefit` 가드).
 - **`--aim_keyframes` / `--keyframe_aim` / `--keyframe_ease`
   (`CinemaTraj/decode/build_poses.py` + `scripts/sample_camera_bank.py`)** — 조준을 매 프레임이
   아니라 **sparse keyframe** 에서만 걸고 사이는 SO(3) 측지선으로 잇는다. 기본 `0` = 기존 동작.

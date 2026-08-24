@@ -729,6 +729,28 @@
     `results/20260820_lbm_lite/` 에 대조용으로 남겼다.
 
 ### Changed
+- **`viser_cloud.py` 에 motion 브라우저 (`--banks` / `--no_cloud`) — 슬라이더로 궤적을 갈아끼운다**
+  (`camera_generation/models/Planner/CinemaTraj/scripts/viser_cloud.py`).
+  ⚠ `.gitignore:222` 라 커밋에 안 들어간다.
+  기존 `--bank`/`--variant` 단일 고정 경로는 그대로 (`--banks` 를 비우면 예전 동작).
+  - 왜: "카메라가 떨린다"를 2D 렌더로는 원인을 못 가른다 — 렌더가 떠는 경로가 셋이다.
+    ① plan 위치 고주파(`follow_gain` × subject track jitter), ② 조준 회전, ③ **점군 자체**
+    (프레임마다 depth 가 달라 정적 배경이 숨쉰다). 3D 에서 궤적 선을 직접 보면 ①/②는 선이
+    지그재그로 보이고, 선이 매끈한데 렌더가 떨면 남는 건 ③뿐이다.
+  - 경로는 `add_line_segments` **생꺾은선**이다. `add_spline_catmull_rom` 은 지금 보려는 그
+    jitter 를 그리는 단계에서 없애 버린다.
+  - 같이 그린다: 소스 경로(회색) · plan 경로(주황) · **subject track**(초록). track 은
+    `scene_graph.json` 의 `track.center_smooth` 를 `T_wg` 로 world 에 올린 것 — `follow_gain` 의
+    입력이라 여기가 떨면 카메라가 정확히 g 배로 떤다.
+  - GUI `motion` 폴더: 슬라이더 + 드롭다운(서로 갱신, 재진입 가드) + 읽기전용 요약. 요약에
+    `jerk p95` 를 **plan / source / subj_track 세 개 나란히** 적는다 — plan 값만으로는 크기를
+    판단할 수 없다. snowboard 실측 (px/frame³, `|Δ³p|/z_med·fx`): source 86.22 ·
+    subj_track 11.69 · plan `s1` 10.64 → `s9` 2.42.
+  - `--no_cloud` 는 점군을 아예 안 꺼낸다 (npz lazy). snowboard 43.8M 점 로딩이 수 분이라
+    궤적만 볼 때는 즉시 뜬다.
+  - 여러 뱅크를 합칠 때 라벨에 뱅크 이름을 접두한다 — 서로 다른 뱅크에 같은 `variant_id` 가
+    흔하다(같은 preset·τ 를 축만 바꿔 되풀기 때문). `bank.json` 이 없는 옛 뱅크도 열린다
+    (`anchor_id` 는 `poses.npz` 에서 받는다).
 - **`render_bank_videos.py` 타일 캡션에 `g`/`s`/`k` 축을 붙인다**
   (`camera_generation/models/Planner/CinemaTraj/scripts/render_bank_videos.py`).
   ⚠ `.gitignore:222` 라 커밋에 안 들어간다.

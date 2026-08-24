@@ -748,6 +748,9 @@
     subj_track 11.69 · plan `s1` 10.64 → `s9` 2.42.
   - `--no_cloud` 는 점군을 아예 안 꺼낸다 (npz lazy). snowboard 43.8M 점 로딩이 수 분이라
     궤적만 볼 때는 즉시 뜬다.
+  - `--variant` 이 **부분문자열 AND** 로 바뀌었다 (`--variant s9 k3`). 하나만 주면 예전
+    단일 필터와 동일. 축이 5개(preset·τ·follow·smooth·keyframe)라 한 축만 잡아서는 목록이
+    안 줄어든다 — 32개 중 `s9`+`k3` 만 남기면 preset 14개가 된다.
   - 여러 뱅크를 합칠 때 라벨에 뱅크 이름을 접두한다 — 서로 다른 뱅크에 같은 `variant_id` 가
     흔하다(같은 preset·τ 를 축만 바꿔 되풀기 때문). `bank.json` 이 없는 옛 뱅크도 열린다
     (`anchor_id` 는 `poses.npz` 에서 받는다).

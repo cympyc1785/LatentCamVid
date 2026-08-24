@@ -7,6 +7,45 @@
 ## [Unreleased]
 
 ### Added
+- **`CinemaTraj/scripts/lbm_camera_dump_startup.py`** — LBM 이 **실제로 렌더한** per-frame 카메라를
+  받아 적는 Blender startup 훅. `trumans_frame_shift_startup.py` 와 같은
+  `BLENDER_USER_SCRIPTS/startup/` 에 산다. **LBM 코드 0줄 수정**이고, `LBM_CAMERA_DUMP_DIR` 이
+  비면 아무 것도 안 한다 (= 기존 동작과 바이트 동일).
+  - **왜 훅인가.** camera package 의 `trajectory_keyframes` 는 3~5개뿐이고 그 사이를 Blender 가
+    채운다 — `blender_render_worker.py:475` 의 slerp 재분할, `:537` 의 preset lens 램프,
+    `video_runtime.py:417` 의 fcurve easing. 게다가 가시성 검증이 실패하면 `:1094` 가
+    motion_scale 0.75/0.5/0.35/0.2 로 궤적을 **통째로 갈아끼운다** — 즉 키프레임이 렌더된
+    카메라라는 보장 자체가 없다. numpy 로 다시 보간하면 LBM 이 아니라 그 근사치를 평가하게 된다.
+  - **`render_pre` 는 못 쓴다 (실측).** 처음엔 프레임마다 발화하는 `render_pre` 에서
+    `camera.matrix_world` 를 읽었는데 w01 110프레임이 **전량 같은 값**으로 나왔다. Blender 4.5.9
+    최소 재현(키 3개로 x 를 0→2): `render_pre` 의 `matrix_world` 도 `evaluated_get(depsgraph)` 도
+    세 프레임 모두 2.0. `bpy.ops.render.render(animation=True)` 가 depsgraph **사본** 위에서
+    애니메이션을 평가하므로 원본 datablock 은 마지막 `keyframe_insert` 값에 멈춰 있다.
+    fcurve 직접 `evaluate()` 도 기각 — Blender 4.4+ slotted action 에서 object 와 camera-data 가
+    한 action 을 공유해 `action.fcurves` 가 object 슬롯만 돌려주고 `lens` 가 통째로 빠진다.
+  - 그래서 **`render_complete`** 에서 `frame_start..frame_end` 를 `frame_set` 으로 되짚어 읽는다
+    (animation 렌더당 1회 발화; `render_post` 는 프레임마다). 같은 재현 실험에서 이 경로만
+    x=0/1/2, lens=24/25/26 을 정확히 돌려줬다. `frame_current` 는 읽기 전후로 저장·복원한다.
+  - 산출물 `<dir>/cam_<pid>.jsonl` — 프레임당 한 줄로 `matrix_world`(Blender GL 그대로) ·
+    `lens_mm` · `sensor_*` · `res` · `filepath`. **규약 변환은 훅에서 안 한다** (읽는 쪽 한 군데로).
+  - 실측 (w01): 110줄, 씬 프레임 1..110, 이동량 **0.323076 m** — camera package 의
+    `trajectory_plan.safety_report.travel_distance` 와 소수점까지 일치.
+- **`CinemaTraj/scripts/lbm_camera_to_poses.py`** — 위 덤프 → `trumans_recon` 의
+  `poses_a<NN>.npz` 규약(`cam_c2w` (N,4,4) OpenCV + `aim` (N,3), TRUMANS Blender world metre).
+  이게 있어야 LBM 카메라를 **Lite 뱅크와 같은 눈금**(`audit_lite_framing.py`)으로 잰다.
+  - 규약 변환 `c2w_cv = c2w_gl @ diag(1,-1,-1,1)` — `trumans_gt_render.py:64 GL2CV` 와 같은 식.
+    **재앵커는 안 한다** (`trumans_to_recon.convert()` 가 depth 와 짝을 맞춘 뒤 하류에서 한다).
+  - 프레임 수 정합: LBM 은 `target_frame_count`(movement 종류가 정하는 고정표)만큼 렌더하므로
+    창 길이와 무관하다 — w01 은 19프레임 창에 110프레임. Lite 는 항상 49. **보간 없이 인덱스만**
+    `np.rint(np.linspace(0, N-1, 49))` 로 고른다. 고정 step 은 꼬리를 잘라먹어(w01 이 0..96 만
+    남아 0.323 → 0.284 m, 88%) 기각했다. 보간하면 LBM 의 easing 이 뭉개져 jerk 지표가 실제보다
+    매끄럽게 나온다.
+  - 시간축 `trumans_frame = scene_frame − TRUMANS_FRAME_OFFSET` (오프셋은 demo root 의
+    `_window.json`). w01 은 씬 1..110 → TRUMANS **51..160** — 창(51..69)을 91프레임 넘어간다.
+  - **회전 규약 검증** (w01, 49프레임): OpenCV c2w col2(forward)가 camera package 의 `target`
+    을 향하는 각도 mean 0.232° / max 0.364°, col0·col1 은 각각 89.79° / 90.10°,
+    `det(R)` 0.999999555..1.000000637, Blender +Z 기준 roll mean 0.011° / max 0.016°.
+    이동량 0.323 m 은 `travel_distance` 와 일치.
 - **`CinemaTraj/scripts/trumans_frame_shift_startup.py`** — LBM 이 띄우는 모든 Blender 프로세스에서
   TRUMANS 애니메이션을 메모리에서만 앞으로 당기는 startup 훅. `BLENDER_USER_SCRIPTS=<dir>` 의
   `<dir>/startup/*.py` 가 기동 시 자동 import 되고, 거기서 건 `@persistent load_post` 핸들러가

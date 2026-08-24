@@ -7,6 +7,68 @@
 ## [Unreleased]
 
 ### Added
+- **`--follow_gain` (`CinemaTraj/decode/build_poses.py`) + `--follow_gains` 축
+  (`scripts/sample_camera_bank.py`)** — subject 변위를 카메라 **위치**에 싣는다
+  (`p(f) += g·(c(f) − c(0))`). 기본 `0` = 기존 동작 (snowboard 뱅크 10변이 재생성해
+  `max|diff| = 0.000e+00` 확인). `"auto"` 면 τ 를 최소로 만드는 g 를 풀어서 쓴다.
+  - 왜: τ = |p_plan(f) − p_src(f)| / z_med 는 **움직이는 소스 카메라 기준**이라, 소스가
+    subject 를 따라간 영상에서는 plan 카메라가 frame0 에 가만히 있는 것만으로 예산을 넘긴다.
+    snowboard 는 τ_start 1.9441 (예산 0.20 의 9.7배) 이라 뱅크 360 변이 중 **350 이
+    `dropped_saturated`**, 남은 10 은 `STATIC_PRESETS` 예외뿐 = 뱅크 전체가 정지 카메라
+    복제본이었다. 실측 53편 중 `src_self_tau > 0.20` 이 9편 (snowboard 1.944 /
+    snow-bike 1.377 / jogging-woman 0.961 / parkour 0.745 / truck-pose 0.589 /
+    fashion-walk 0.491 / trumans-bedroom 0.467 / couple-rocks 0.277 /
+    funeral-procession 0.227).
+  - 기존 `tracking`(=`reference_centers`) 과 다른 손잡이다. 저건 **조준점**만 옮겨서
+    CameraBench 분류로 pan-/tilt-tracking(회전만)이고, 이건 병진이라 시차가 생긴다 —
+    tail-/lead-/side-/aerial-tracking 이 그것이다. `info["follow"]["kind"]` 가
+    ∠(카메라→subject, subject 속도) 와 고도로 갈래를 **측정**해서 붙인다 (고르는 게 아니다 —
+    frame0 이 소스 카메라에 묶여 있어 카메라가 어느 쪽에 서는지는 소스가 이미 정해 놨다).
+  - 적용 순서가 중요하다: follow 는 `fit_tau` **앞**이다. 나중에 더하면 `fit_tau` 가 맞춰 놓은
+    τ 가 그만큼 빗나간다. 구현은 소스 위치에서 offset 을 빼서 넘기는 항등
+    (`|p_shape + off − p_src| = |p_shape − (p_src − off)|`) 이라 `fit_tau` 를 안 고쳤다.
+  - `solve_follow_gain` 은 이분법이 아니라 **격자 탐색**(0..1.5, 151점)이다. 목적함수가
+    `max_f` 라 단봉이 보장되지 않는다 (subject 가 방향을 꺾으면 국소 최소가 둘 이상).
+  - g 는 영상마다 풀어야 한다. parkour/truck-pose/trumans-bedroom 은 `g*≈0` 이라
+    저절로 기존 동작으로 돌아간다 (소스가 회전으로만 따라갔다 — 따라가면 오히려 나빠진다).
+  - `solve_follow_gain(min_benefit=0.20)` **정적 anchor 방어**. 정적 노드도 `center_smooth` 가
+    OBB fit 노이즈로 떤다 (snowboard `stat_0` 0.024u vs 동적 0.44u). 그 떨림에도 argmin 은
+    걸려서, 가드가 없으면 격자 끝(1.5)까지 밀려가 **분할 노이즈를 1.5배 증폭한 흔들리는 카메라**를
+    만든다 — 그러고도 τ 는 1.9441 → 1.7798 (8.5%) 밖에 안 줄어 어차피 `tau_saturated` 다.
+    τ 가 `min_benefit` 만큼도 안 줄면 `0` 을 돌려 기존 동작으로 되돌린다. 가드 적용 후
+    snowboard 뱅크의 `follow 1.500` 행이 사라졌고 selected 는 366 으로 동일.
+- **`--aim_keyframes` / `--keyframe_aim` / `--keyframe_ease`
+  (`CinemaTraj/decode/build_poses.py` + `scripts/sample_camera_bank.py`)** — 조준을 매 프레임이
+  아니라 **sparse keyframe** 에서만 걸고 사이는 SO(3) 측지선으로 잇는다. 기본 `0` = 기존 동작.
+  - keyframe 은 `linspace(0, F-1, N)`. keyframe 0 은 **소스 frame0 회전 그대로**(첫 프레임
+    일치 유지), k>0 은 `look_at(anchor + bias)`. 위치는 안 건드리므로 τ 가 변하지 않는다.
+  - `keyframe_aim`: `target` / `preset_rel` / `auto`(look_at preset → target, traj preset →
+    preset_rel). `keyframe_ease`: `smoothstep` / `linear`.
+  - 진단으로 `turn_deg`(frame0 → keyframe 1) 와 `aim_err`(max/med/frame0) 를 찍는다 —
+    렌더 없이 볼 수 있는 유일한 조준 눈금이라 half-hfov 와 비교하면 된다.
+  - `--aim_keyframes` 가 **뱅크 축**이 됐다 (`nargs="*"`, 기본 `[0]` = 기존 동작). 변이 이름에
+    `__k<N>` 이 붙고 CSV 에 `aim_keyframes` / `keyframe_turn_deg` / `keyframe_aim_err_deg`
+    3열, `bank.json` 의 `axes` 에 `aim_keyframes` 가 추가된다.
+  - snowboard 880변이 실측(`--follow_gains auto --aim_keyframes 0 3 5 9 --trackings lock`):
+    `vang` 이 k 전 구간 33.2° 로 동일 = **위치를 안 건드렸다는 증거**. 효과는 preset 의
+    `aim` 계열로 갈린다 — `aim="traj"`(pan/truck/pedestal/static_hold_locked)는 k0 에서
+    inFrame 0.51 (재조준이 없어 subject 가 절반은 화면 밖) → k3 에서 0.87 로 **프레임아웃을
+    고치고**, `aim="look_at"` 은 k0 hole 0.249 → k3 0.173 으로 **hole 을 깎는다**(매 프레임
+    경직 조준을 푸는 쪽). k3 가 양쪽 다 최적 (hole 0.168 vs k5/k9 0.184).
+    `aim_err` 13~18° 는 half-vfov 16.7° 와 같은 자리라 inFrame 이 1.00 이 아니라 0.90 인 이유다.
+- **`--bank_dir` (`CinemaTraj/scripts/sample_camera_bank.py`)** — 뱅크 출력 폴더. 기본 `bank`
+  = 기존 경로. 이미 돌려둔 뱅크를 덮어쓰지 않고 축을 바꿔 돌리기 위한 것.
+- **`CinemaTraj/scripts/viser_cloud.py`** — `lbm/cloud.py` 의 4D point cloud (`cloud.npz`) 를
+  viser 로 띄운다. 정적 점(`visible.sum(1) > 1`)은 통째로, 동적 점(`== 1`)은 프레임 슬라이더로
+  갈아끼운다 — 섞어 띄우면 움직이는 물체가 49겹으로 번져서 아무것도 안 보인다.
+  - 왜: 게이트·hole·τ 는 전부 `render_frame` 의 2D 렌더에서 나오는데, 그것만 봐서는
+    "카메라가 이상한가 / 점군이 이상한가"를 못 가른다. 3D 로 띄우면 깊이 shell 이 찢어졌는지,
+    plan 카메라가 shell 안쪽(=벽 속)에 들어갔는지가 눈으로 갈린다.
+  - 규약의 단일 출처는 `latentcam/scripts/viewer/viser_val_cameras.py` — `add_frustums`/`_GL2CV`
+    를 재구현하지 않고 `sys.path.insert` 로 가져온다. cloud world 는 OpenCV 라 `--up` 기본이 `-y`.
+  - `--max_static` (기본 1.5M) / `--max_dyn_per_frame` (60k) 로 브라우저 전송량을 깎는다.
+    snowboard 는 전체 43.8M (정적 37.3M / 동적 6.5M) 이라 안 깎으면 브라우저가 죽는다.
+  - `--bank`/`--variant` 로 뱅크 `poses.npz` 의 plan 카메라를 주황 프러스텀으로 겹쳐 볼 수 있다.
 - **`--temporal_edges` (`CinemaTraj/scripts/build_scene_graph.py` + `scene_graph/relations.py`)** —
   엣지에 프레임별 거리를 싣는다. 기본 off = 기존 시간 불변 엣지 그대로 (JSON 비트 동일 확인).
   - 왜: 노드는 원래부터 동적이었지만(`track.center_smooth` (F,3), `obb.node_obb_at`) 엣지는

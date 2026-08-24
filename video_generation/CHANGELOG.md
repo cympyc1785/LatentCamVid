@@ -7,6 +7,28 @@
 ## [Unreleased]
 
 ### Added
+- **`CinemaTraj/scripts/bank_to_vista4d_cams.py`** — 뱅크 변이를 Vista4D eval 카메라 npz
+  (`eval_data/cameras/<video>/<tag>.npz`) 로 직접 내보낸다. `tools/recammaster/vista4d_prepare.py`
+  를 안 거치는 이유: 저건 canonical(rmax=1) 을 받아 `|t|max = g*S` 로 다시 키우므로 τ 사다리로
+  맞춰 놓은 이동량이 `g` 로 덮인다. CinemaTraj 의 point cloud 가 곧 Vista4D recon 이라
+  (`cloud.npz` `meta_cam_c2w` vs `recon_and_seg/cameras.npz` maxdiff 0.0) `poses.npz['cam_c2w']`
+  는 이미 recon world 절대 pose·절대 미터다.
+  - **intrinsic zoom 이 살아서 넘어간다.** `render_eval.py` 가 `intrinsics_tgt` 를 (N,4)
+    프레임별로 받으므로 `fx[f] = fx_base * focal_scale[f]` 를 K 에 구워 넣으면 Vista4D 가 그대로
+    소비한다 (canonical 경로엔 intrinsics 채널이 없어 `zoom_dropped` 되던 것과 대비).
+    실측 `zoom_out_pan_right`: fx 1184.99 → 789.99.
+  - `fx_base` 는 `bank.json` **최상위** `fixed_focal` 키로 분기 (frame0 고정 / 프레임별).
+    `bank['fixed']['fixed_focal']` 로 읽으면 항상 False 가 되어 DA3 드리프트(+5.5%)가 같이 실린다.
+  - frame0 검증은 **위치만** assert 한다. `aim="look_at"` preset 은 frame0 부터 subject 를 보므로
+    회전이 소스와 다른 게 정상이다 (`orbit_left_pedestal_up` 실측 6.21°) — 표에 `rot@f0` 열로 보고.
+  - `cam_c2w_fsff`/`intrinsics_fsff` 도 같은 값으로 같이 쓴다 (`utils/media.py:161`
+    `load_cameras` 가 `--force_same_first_frame` 일 때 그 키를 찾고, 없으면 KeyError).
+- **`CinemaTraj/scripts/lbm_render_reel.py`** — 원본 LBM 실행분의 Blender 렌더 프레임
+  (`<run>/renders/<shot>/<cam>/frames/frame_%04d.png`) 을 shot 별 mp4 + 라벨 릴로 잇는다.
+  `clips/<shot>/<cam>/clip.mp4` 를 안 쓰는 이유는 그게 1프레임이기 때문 (TRUMANS `.blend` 의
+  `frame_step=2` → 홀수 프레임만 렌더 → `encode_frames()` 의 `-i frame_%04d.png` 가 첫 구멍에서
+  멈춘다). 프레임 번호 간격을 median 으로 재서 stride 를 표에 찍는다 — stride 2 면 `--fps 12.5`
+  가 의도된 속도다. 라벨은 `trajectory_plan.json` 의 preset · travel_distance · visibility guard.
 - **합성 preset 2종 + per-frame intrinsic zoom (`CinemaTraj/lbm/presets.py`,
   `decode/build_poses.py`, `scripts/{sample_camera_bank,render_bank_videos}.py`)** —
   지금까지 preset 은 전부 단일 축이라 "두 동작을 **동시에**" 하는 샷을 만들 수 없었다.

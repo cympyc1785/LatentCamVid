@@ -6,7 +6,107 @@
 
 ## [Unreleased]
 
+### Added
+- **`--temporal_edges` (`CinemaTraj/scripts/build_scene_graph.py` + `scene_graph/relations.py`)** —
+  엣지에 프레임별 거리를 싣는다. 기본 off = 기존 시간 불변 엣지 그대로 (JSON 비트 동일 확인).
+  - 왜: 노드는 원래부터 동적이었지만(`track.center_smooth` (F,3), `obb.node_obb_at`) 엣지는
+    `dist_u` 스칼라 하나뿐이었고 그것도 **각 노드의 ref 프레임**(`frames[0]`) 기준이라
+    ① 서로 다른 시각의 두 위치 사이 거리를 재고 ② **도중에만 가까워지는 쌍이 엣지로 안 올라온다**.
+  - 새 필드: 엣지에 `dist_u_t` (F,) / `dist_u_min` / `dist_u_max` / `near_frac` /
+    `near_intervals` / `observed_intervals` / `observed_frames` / `near_radius_u` / `near_at_ref`,
+    노드에 `supported_by_t` / `against_wall_t` (F,). `dist_u` 의 의미는 안 바꿨다
+    (하류 `lbm/overlay.py:151` 이 읽는다) — "가장 가까웠던 거리"는 `dist_u_min` 이 나른다.
+  - 판정은 두 노드가 **둘 다 관측된 프레임**으로 마스킹한다. `center_smooth` 는 미관측 구간까지
+    채워져 있어서(`smooth_centers`) 마스크 없이 재면 사라진 노드의 외삽 위치로
+    "가까워졌다"를 만들어낸다.
+  - `scene_graph/schema.py:assert_invariants` 에 시간축 길이 == `num_frames` assert 추가.
+    짧으면 IndexError 가 아니라 하류가 조용히 엉뚱한 프레임을 읽는다.
+  - `lbm/overlay.py` NEIGHBORS 블록이 temporal 엣지면 근접 구간(`frames s-t`)까지 VLM 에 준다.
+    `dist_u` 만으론 스쳐 지나간 이웃과 내내 붙어 있던 이웃이 구분되지 않는다.
+- **`CinemaTraj/scripts/prep_clip_49.py`** — 임의 mp4 → Lite 규약 49프레임 클립.
+  `recon_and_seg_single.py` 는 항상 **center-slice** 하므로(`utils/media.py:233
+  slice_center_frames`) 30fps 소스를 그대로 먹이면 49프레임 = 1.6초로 잘려 피사체가 거의
+  안 움직이고, 뱅크가 쓰는 `frame_step 3`(10fps) 구간과도 어긋난다. `--stride` 로 먼저
+  솎아 넘긴다 (`--stride 0` 또는 프레임 부족 시 전 구간 균등으로 폴백).
+- **`CinemaTraj/scripts/make_lite_previews.py`** — recon_and_seg 1편 → `seg_overlay.mp4`
+  (dynamic 따뜻한 색 / static 차가운 색 + OBB 2D bbox + 라벨) + `depth.mp4`
+  (`depths_to_disparity_video`, sky 제외 정규화). `recon_and_seg_single.py --save_vis` 의
+  2×2 격자는 타일이 640×360 으로 줄고 **정적 인스턴스(`seg_instances_static/`)가 아예
+  안 들어가서** 사람이 검수할 수 없다.
+- **`--hold_fallback` (`trumans_to_recon.py` + `trumans_lite_bank.py`)** — `hold`(전 필드 0)
+  preset 을 **움직이는 preset 이 전부 떨어졌을 때만** 채택한다. 기본 off = 기존 동작.
+  - 왜: `SOURCE_PRESETS["hold"]` 은 이동이 0 이라 **절대 충돌하지 않아** 항상 verify 를 통과한다.
+    선택은 `chosen = passed[0]` 이라, 방이 좁아 움직이는 preset 이 줄줄이 떨어지면 hold 이
+    자동 당첨된다. 로그에는 preset 이름이 남는데 실제 클립은 **정지 카메라**다
+    (`lbm-preset-names-dont-match-motion` 과 같은 종류의 실패).
+  - 실측: stride3 ×3 뱅크에서 hold 이 ok 의 **35%** (arm A 22/63, arm B 22/62).
+    frame_step 1 뱅크는 20/130 = 15% 였다.
+  - preset 목록 재정렬이 아니라 선택 단계에서 거르는 이유: **RNG 추첨 순서를 안 건드려야**
+    `--no_hold_fallback` 이 기존 130클립 뱅크를 비트 동일하게 재현한다.
+- **`--blender_retries` (기본 1)** — Blender 가 **시그널로** 죽었을 때(rc<0, traceback 없음)만
+  20 s -> 60 s 쉬었다 재시도. 0 이면 기존 동작. 근거는 `FIX.log` 2026-08-24 항목.
+- **`trumans_lite_bank.py --min_subject_dist`** — 지금껏 뱅크가 이 게이트를 전달하지 않아
+  `trumans_to_recon.py` 기본값 0.80 에 고정돼 있었다. 기본값이면 인자를 안 넘겨 기존 뱅크와
+  명령이 비트 동일하다 (`MIN_SUBJECT_DIST_DEFAULT` 로 두 파일의 기본값을 묶어 놨다).
+  - stride3 후보 810개 집계: **단독 탈락 사유 1위가 이 게이트**(120개). `min_clearance` 는
+    위반 빈도는 1위(75%)지만 단독 사유로는 97개다. 즉 "가장 자주 걸리는 게이트"와
+    "그것만 풀면 통과하는 게이트"가 다르다 — 앞의 54후보 표는 최선 후보를
+    `(clear_frac, min_clearance)` 로만 골라서 이 축이 안 보였다.
+  - job 단위 회수 곡선(arm B, 45 job): `>=0.80` 10 / `>=0.70` 14 / `>=0.60` 20 /
+    `>=0.40` 22 에서 포화. **22 job 은 다른 두 게이트조차 통과한 후보가 0** 이라
+    문턱으로는 못 살린다 (방 기하 문제).
+- 뱅크 manifest(`trumans_lite_bank_v1`) 에 `max_tries` / `hold_fallback` /
+  `blender_retries` / `min_subject_dist` 기록 — 전부 뱅크의 preset 분포를 바꾸는데
+  지금껏 manifest 에 안 남아 있었다.
+
 ### Fixed
+- **`aim="traj"` preset(pan/truck/pedestal/static_hold_locked)이 anchor 를 안 보던 문제** —
+  `decode/build_poses.py` 에 `--traj_basis {source,subject}` 추가 (기본 `source` = **기존 동작
+  비트 동일**, camel 40변이 재현 오차 0.000e+00). `fit_hole_ladder.py --traj_basis`,
+  `emit_bank.py`(뱅크 `fixed.traj_basis`, 예전 뱅크는 `source` 로 폴백)까지 배선.
+  ⚠ `.gitignore:222` 라 커밋에 안 들어간다.
+  - 원인: preset 모양을 **소스 frame0 회전** 위에 얹는데, `aim="traj"` 계열은 매 프레임 조준을
+    다시 안 세운다. 소스 광축이 anchor 를 향하고 있지 않으면 끝까지 anchor 를 안 본다.
+  - 실측(camel, anchor OBB center 를 소스 frame0 에 투영, half-hfov 14.4°):
+    `dyn_0` (u/W,v/H)=(0.499,0.529) off-axis 0.47° / `dyn_1` (0.350,0.357) 4.97° /
+    `stat_0` (0.758,0.430) 7.61° / `stat_1` (0.139,0.369) 10.68° /
+    **`stat_2` (0.156,−0.004) 12.86°** — 이미 화면 테두리다.
+  - 결과 `subject_in_frame` (280변이, `hole_bank_f0share`): `aim=look_at` 160변이 평균 0.9788,
+    `aim=traj` 120변이 평균 **0.6148**, 그중 20변이는 49프레임 내내 subject 0픽셀
+    (`subject_area_med`=0). preset별 `pan_right` 0.435 (8/20이 0픽셀), `truck_right` 0.538,
+    `truck_left` 0.612, `pan_left` 0.635, `pedestal_up` 0.669, `pedestal_down` 0.800.
+  - `--traj_basis subject` 는 LBM 방식이다 — LBM Cinematographer 는 후보를 렌더해 구도가 맞는
+    pose 를 고른 뒤 그 위에서 VideoEngineer preset 을 돌린다 (preset 모양이 아니라 **기준 회전**을
+    고친다). frame0 은 `aim_anchor` smoothstep 이 그대로 되돌리므로 소스 카메라와 여전히 동일.
+    τ 는 world 이동량이라 `fit_tau` 도 새 기준 위에서 다시 푼다.
+  - ⚠ **`subject` 는 실측에서 더 나빴다. 기본값을 `source` 로 둔 이유가 이것이다.**
+    camel 280변이 전량 재적합 (`out/camel/hole_bank_f0share_tb/`):
+
+    | aim | traj_basis | in_frame 평균 | <1.0 | 0px | hole 중앙값 |
+    |---|---|---|---|---|---|
+    | traj (120) | source | 0.6148 | 73 | 15 | 0.2549 |
+    | traj (120) | subject | 0.6308 | 84 | **34** | **0.4506** |
+    | look_at (160) | source | 0.9788 | 34 | 0 | 0.2711 |
+    | look_at (160) | subject | 0.9817 | 34 | 0 | 0.2914 |
+
+    변이 단위로는 in_frame 좋아진 30 / 나빠진 **42** / 동일 208
+    (`stat_1__truck_left__hole0.5` 1.000→0.231, `stat_2__pedestal_up__hole0.5` 0.846→0.154,
+    `stat_1__pan_left__hole0.35` 1.000→0.462). anchor 별로는 **frame0 투영이 이미 화면 밖인
+    `stat_2`(v/H=−0.004) 하나만** 좋아졌고 (in_frame 0.103→0.455) 그 대가가 hole 0.256→0.759 다.
+  - 왜 나빠지나: camel hfov 가 28.8° 다. 기준 회전을 off-axis anchor 쪽으로 돌리는 순간 소스
+    시야와의 frustum 겹침이 깨져 hole 이 터지고, 사다리가 훨씬 낮은 강도에서 멈춘다. LBM 은
+    Blender 완전 씬이라 hole 개념이 없어 시작 pose 를 자유롭게 옮길 수 있지만, frame0 이 소스에
+    못 박힌 우리 설정에서는 회전만 돌려도 겹침이 즉시 손해다.
+  - 비교 영상 `out/camel/traj_basis_cmp.mp4` (같은 6변이, 위 `source` / 아래 `subject`).
+  - 판정 대기: (A) `fit_hole_ladder.py over()` 에 `subject_in_frame` 게이트 추가
+    (`pan_*` 은 hole 이 사다리 전 칸에서 평평해 지금 binding constraint 가 아예 없다) /
+    (B) frame0 투영이 화면 밖·가장자리인 anchor 제외 (`--min_frame0_margin`) / (C) 현행 유지.
+- **`trumans_lite_bank.py --dry_run` 이 기존 뱅크 `bank_manifest.json` 을 덮어쓰던 문제** —
+  dry run 이면 `bank_manifest_dry_run.json` 으로 쓴다.
+  ⚠ `.gitignore:222` 라 커밋에 안 들어간다.
+  - 계획 확인 한 번에 7편 133행 집계(ok 34 + skip_done 96 + fail 3, wall 58.8 min)가 19행
+    dry_run 으로 교체됐다. 클립 데이터와 work 의 per-action manifest 는 멀쩡해 130행으로
+    재구성했지만, 실행이 성공으로 끝나 로그에는 아무 표시가 안 남는 종류다. `FIX.log` 참조.
 - **보행 채굴이 7편 중 5편에서 0건이던 원인 = fps** — `trumans_to_recon.py` 에 `--motion_fps`
   (기본 **30**, `0` 이면 예전처럼 blend fps) 추가.
   ⚠ `.gitignore:222` 라 커밋에 안 들어간다.

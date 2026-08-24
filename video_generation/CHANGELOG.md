@@ -7,6 +7,15 @@
 ## [Unreleased]
 
 ### Added
+- **`scripts/video_grid.py`** — mp4 들을 라벨 붙여 임의 R×C 격자로 붙인다. 행 라벨(왼쪽 세로 띠)
+  + 열 라벨(위 가로 띠)을 따로 받는다. `tools/recammaster/halfsplit_compare_grid.py` 를 안 쓰는
+  이유는 저게 `<src>_<model>_<cam_src>.mp4` 라는 고정 파일명 규칙에 묶여 있어서 임의 경로 조합엔
+  못 쓰기 때문. 기본 배치는 "위=depth warp / 아래=생성" — 출력만 보면 hole 이 warp 탓인지 생성
+  탓인지 못 가른다.
+  - 세로 라벨 띠는 가로로 그린 뒤 `rotate(90, expand=True)` 하므로 `width`/`height` 는 **회전 전**
+    기준이다 (전치를 미리 해두면 이중으로 뒤집혀 concat 이 터진다).
+  - libx264+yuv420p 는 짝수 해상도만 받는데 띠 두께가 폰트 크기에서 나와 홀수가 흔하다 →
+    오른쪽/아래 1px 패딩. 없으면 ffmpeg 이 broken pipe 로 죽는다.
 - **`CinemaTraj/scripts/bank_to_vista4d_cams.py`** — 뱅크 변이를 Vista4D eval 카메라 npz
   (`eval_data/cameras/<video>/<tag>.npz`) 로 직접 내보낸다. `tools/recammaster/vista4d_prepare.py`
   를 안 거치는 이유: 저건 canonical(rmax=1) 을 받아 `|t|max = g*S` 로 다시 키우므로 τ 사다리로
@@ -307,6 +316,19 @@
   지금껏 manifest 에 안 남아 있었다.
 
 ### Fixed
+- **원본 LBM 의 VLM board 선정 + micro-adjust 루프가 TRUMANS 에서 통째로 안 돌던 문제**
+  (`Look-Before-Move/Cinematographer/cinematographer_quality_worker.py` `render_preview`) —
+  이 함수만 `scene.render.image_settings.file_format` 을 안 고정해서, TRUMANS `.blend` 가
+  들고 온 애니메이션 출력 포맷이 새어 들어가 `bpy.ops.render.render(write_still=True)` 가
+  후보 프리뷰 전량 `"Cannot write a single file with an animation format selected"` 로 실패했다.
+  → `phase1` 3채널이 `no_rendered_previews` 로 떨어지고 board VLM 호출 0회, 기하 점수 1위
+  seed 로 조용히 폴백(rc=0). 릴 6 shot 이 전부 `push_in_arc`/travel 0.000 이던 원인.
+  snapshot 에 `file_format` 을 넣고 `"PNG"` 고정 + `finally` 원복. **env gate 없음** — 나머지
+  렌더 진입점 3곳(`director_scene_context_builder.py:588`,
+  `cinematographer_preview_worker.py:330`, `blender_render_worker.py:1154`)이 이미 무조건 PNG 라
+  옵션이 아니라 규약 복구다. 검증: `trumans_00add26c_fx` 재실행 shot 2개에서 후보 프리뷰
+  55장, `preview_error` 0건. 상세는 `FIX.log` 2026-08-25.
+  ⚠ `.gitignore:222` 라 커밋에 안 들어간다.
 - **`aim="traj"` preset(pan/truck/pedestal/static_hold_locked)이 anchor 를 안 보던 문제** —
   `decode/build_poses.py` 에 `--traj_basis {source,subject}` 추가 (기본 `source` = **기존 동작
   비트 동일**, camel 40변이 재현 오차 0.000e+00). `fit_hole_ladder.py --traj_basis`,

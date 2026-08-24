@@ -7,6 +7,41 @@
 ## [Unreleased]
 
 ### Added
+- **`CinemaTraj/scripts/trumans_frame_shift_startup.py`** — LBM 이 띄우는 모든 Blender 프로세스에서
+  TRUMANS 애니메이션을 메모리에서만 앞으로 당기는 startup 훅. `BLENDER_USER_SCRIPTS=<dir>` 의
+  `<dir>/startup/*.py` 가 기동 시 자동 import 되고, 거기서 건 `@persistent load_post` 핸들러가
+  CLI 로 지정한 `.blend` 로드 **직후** 발화하는 것을 이용한다 (빈 startup 파일에도 한 번
+  발화하므로 `bpy.data.filepath` 로 거른다). **LBM 코드 0줄 수정.**
+  - **왜 필요한가.** `VideoEngineer/blender_render_worker.py:1141-1142` 가 `scene.frame_start = 1;
+    scene.frame_end = frame_count` 로 무조건 덮어쓴다. TRUMANS take 는 2077 프레임짜리 단일
+    `.blend` 라, 어느 shot 을 만들든 **항상 take 의 첫 1.5 초만** 렌더됐다 (15 shot 전부 같은 구간).
+    `Actions/<seq>.txt` 의 `(start, end)` 창이 통째로 버려지던 것.
+  - 창마다 `.blend` 를 복사하면 1.66 GB × 15 창 × 7 편 ≈ 170 GB 라 디스크로는 못 푼다. LBM 은
+    `.blend` 를 저장하지 않으므로 이 변형은 프로세스 안에서만 살고 원본 파일은 그대로다.
+  - `TRUMANS_FRAME_OFFSET` (키프레임에 더할 값, 창 시작 `s` → `1-s`) / `TRUMANS_FRAME_COUNT`
+    (선택, `scene.frame_end` 진단용) 두 env 로 제어. offset 0 이면 아무 것도 안 한다.
+  - assign 된 action 만 훑는다 — TRUMANS blend 은 미사용 take 가 254개고 실제 쓰이는 건 9개.
+    fcurve 는 `foreach_get/set` 로 배열째 옮긴다 (`zzy3` 하나가 405 fcurve × 2077 키).
+  - 실측: 훅 비용 +0.7 s/Blender 기동 (3.176 → 3.867 s). `rigid_01_root_book_right_01` 의 world
+    translation 이 offset −50 에서 씬 프레임 1/10/19 = 원본 51/60/69 와 완전 일치.
+- **`trumans_to_lbm_demo.py --split_windows` / `--semantic_assets` / `--name_subject`
+  (+`--subject_phrase`)** — 셋 다 기본 off 라 기존 호출은 바이트 동일한 demo root 를 낸다.
+  - `--split_windows`: storyboard shot 을 frame 창 단위로 쪼개 **창마다 demo root 하나**를 만든다
+    (`<uuid>__w01_f0051_0069/`). 창 정보는 `_window.json` (`trumans_window_v1`) 에 싣고, 창별
+    `TRUMANS_FRAME_OFFSET` 을 export 해 4단계를 도는 `<uuid>__run_windows.sh` 와 startup 훅을
+    복사한 `_frame_shift/startup/` 을 같이 뱉는다. layout worker 는 창 시작 프레임에서 돌린다
+    (소품이 take 내내 움직인다). 1 root = 1 shot 이므로 `movement_term_target` 도 창마다 산다.
+  - `--semantic_assets`: asset `description` 을 `"<id> in the scene"` 대신 실제 의미
+    (`book_right_01` → `the book on the right`, 캐릭터 → `the person, an adult human character`)
+    로 채운다. `director_stage.asset_alias_tokens:752-778` 이 description 토큰 중 `len>3` 인
+    것만 alias 로 쓰므로, placeholder 로는 `zzy3` 가 **어떤 alias 도 못 갖는다** — `infer_focus_ids`
+    가 사람 대신 소품을 골랐던 직접 원인.
+  - `--name_subject`: 액션 문장 주어를 명시 (`"Pick up the book"` → `"The person picks up the
+    book"`). 3인칭 변화는 규칙 + 불규칙 4개 테이블.
+  - 실측 (`00add26c-…`, 16창): `infer_focus_ids` 가 **16/16 `['zzy3']`** 반환. 이전 x15 는
+    `book_right_01` ×8 / `book_left_01` ×5 / `oven_base_01` ×2, `zzy3` primary **0/15**.
+    16창 중 15창은 `human_primary_requested=False` 이므로 `repair_human_primary_focus` 우회로가
+    아니라 정상 스코어링 경로로 고쳐진 것.
 - **`scripts/video_grid.py`** — mp4 들을 라벨 붙여 임의 R×C 격자로 붙인다. 행 라벨(왼쪽 세로 띠)
   + 열 라벨(위 가로 띠)을 따로 받는다. `tools/recammaster/halfsplit_compare_grid.py` 를 안 쓰는
   이유는 저게 `<src>_<model>_<cam_src>.mp4` 라는 고정 파일명 규칙에 묶여 있어서 임의 경로 조합엔

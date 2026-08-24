@@ -7,6 +7,44 @@
 ## [Unreleased]
 
 ### Added
+- **`--fixed_focal` (`CinemaTraj/lbm/render.py`, `scripts/render_bank_videos.py`)** —
+  `CloudRenderer` 가 쓰는 소스 K 를 frame0 값으로 전 프레임 고정한다
+  (`K_src = np.repeat(K_src[:1], F, axis=0)`). 기본 off = 기존 동작(프레임별 K) 그대로.
+  **실측 결과는 음성이다 — 채택하지 않는다.** 옵션은 진단용으로만 남긴다.
+  - 동기: `cloud.npz` 의 `meta_K` 는 `(49,3,3)` 이고 상수가 아니다. snowboard 에서
+    `fx=fy` 가 1184.992 → 1262.462 (**+6.99%**), `cx,cy` 는 640/360 으로 정확히 상수.
+    화면 가장자리 환산(`Δfx/fx · W/2`)으로 프레임당 p95 **11.18 px**, savgol(w15,p2)
+    detrend 후 고주파 p95 **6.59 px** — `--follow_smooth 9` 를 건 뒤 남는 최대 고주파 항이
+    이것이었다 (plan 위치 s9 의 HF p95 는 3.69 px).
+  - 흔들림 측정 (좌우 가장자리 12% 띠, 프레임간 `mean|I_t − I_{t−1}|`; subject 가 중앙이라
+    이 띠는 정지 배경이다):
+
+    | 변이 | 프레임별 K 평균/p95 | frame0 K 평균/p95 |
+    |---|---|---|
+    | `truck_left` | 14.14 / 23.03 | 14.04 / 23.15 |
+    | `pull_out_arc` | 13.15 / 17.11 | 12.70 / 16.55 |
+
+    **≤3% 변화 — 렌더 시점에 K 를 고정해도 흔들림이 안 줄어든다.** `hole` 값은 두 모드가
+    바이트 단위로 동일했다(hole 은 기하가 정한다).
+  - 반대로 렌더러 자기 일관성은 **깨진다**. `python -m lbm.render --video snowboard
+    --self_check`:
+
+    | 프레임 | 0 | 12 | 24 | 36 | 48 |
+    |---|---|---|---|---|---|
+    | reproj_px 기존 | 0.0003 | 0.0003 | 0.0004 | 0.0004 | 0.0005 |
+    | reproj_px fixK | 0.0003 | 8.2743 | 29.9182 | 43.6588 | 38.0215 |
+    | PSNR_ntp 기존 | 28.89 | 28.29 | 32.79 | 30.05 | 27.21 |
+    | PSNR_ntp fixK | 28.89 | 19.07 | 19.54 | 15.52 | 15.47 |
+
+    기존 PASS, fixK 는 [12,24,36,48] 에서 FAIL. 음성 대조군(y축 반전 c2w) 719.0 px 로
+    두 실행 모두 검사 자체는 유효했다.
+  - 이유: 4D 점군을 **프레임별 K 로 unproject** 했으므로 focal 흔들림이 world 점 좌표에
+    이미 구워져 있고, `temporal_persistence` 가 49프레임 출신 점을 섞는다. 렌더 시점의 K
+    선택으로는 기하에 들어간 흔들림을 뺄 수 없고 화각만 어긋난다. 없애려면 recon 을
+    공유 intrinsics 로 다시 돌려야 하는데 `Vista4D/utils/recon_and_seg/recon_da3.py:44`
+    (`intrinsics = K_to_intrinsics(prediction.intrinsics)`) 에 그런 옵션이 없다.
+  - 산출물: `results/20260824_snowboard_fixfocal/{truck_left_K_ab.mp4,
+    pull_out_arc_K_ab.mp4, preset_k3_smooth_fixfocal.mp4}`.
 - **`--follow_smooth` (`CinemaTraj/decode/build_poses.py`) + `--follow_smooths` 축
   (`scripts/sample_camera_bank.py`)** — follow **위치 채널** 전용 저역통과
   (Savitzky-Golay, polyorder 2, `mode="interp"`). 기본 `9`, `1` = 끔(= D72 원래 동작).

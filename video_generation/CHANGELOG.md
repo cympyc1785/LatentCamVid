@@ -7,6 +7,46 @@
 ## [Unreleased]
 
 ### Added
+- **합성 preset 2종 + per-frame intrinsic zoom (`CinemaTraj/lbm/presets.py`,
+  `decode/build_poses.py`, `scripts/{sample_camera_bank,render_bank_videos}.py`)** —
+  지금까지 preset 은 전부 단일 축이라 "두 동작을 **동시에**" 하는 샷을 만들 수 없었다.
+  - `zoom_out_pan_right` — `aim="traj"` (조준 없음) + pan right + **intrinsic** zoom out.
+    이동이 0 이라 `ROTATION_ONLY_PRESETS` 에 넣는다.
+  - `orbit_left_pedestal_up` — `true_orbit` + `pedestal` 동시. `aim="look_at"` 이라
+    `tracking="world"` 를 주면 **frame 0 subject 중심**을 계속 본다.
+  - `PRESET_ZOOM_END` + `focal_track(name, n, speed)` — preset → 프레임별 focal 배율
+    `(n,)`, `[0]=1.0`. **로그 선형**이다 (hfov = `atan(W/2f)` 라 f 를 선형으로 흔들면 화각
+    변화가 앞뒤로 안 고르다). `_resample` 로 궤적과 같은 인덱스 규칙을 쓴다.
+  - focal 은 SE(3) 밖이라 `cam_c2w` 로 못 나른다 → `poses.npz` 에 `focal_scale (V,n)` 키를
+    추가하고, `render_bank_videos.py` / `measure_trajectory` 가 `K_src[f]` 의 `fx,fy` 만
+    배율해 넘긴다 (`cx,cy` 는 그대로 — zoom 은 주점을 안 옮긴다). 옛 뱅크엔 이 키가 없어
+    소비자는 전부 optional 처리 = 기존 동작 그대로.
+  - **zoom 을 hole 측정에도 반영해야 한다.** 안 넣으면 조용히 낮게 찍힌다 — 실측 snowboard
+    `zoom_out_pan_right` frame 48 valid `0.538 → 0.374`, 뱅크 `hole_fraction` `0.176 → 0.295`
+    (`subject_in_frame` 은 `0.80 → 1.00`, 화각이 넓어져 피사체가 안 나간다).
+  - `emit_model_cams.py` 엔 intrinsics 채널이 없으므로 zoom 은 **검증 렌더러만** 소비한다
+    (`emit.py` 의 `zoom_dropped`). 하류 6개 모델에는 안 실린다.
+- **`--fixed_focal` (`scripts/sample_camera_bank.py`)** — 이미 `render_bank_videos.py` /
+  `lbm/render.py` 에만 있던 플래그를 샘플러에도 뚫는다 (기본 off = 기존 동작). DA3 는 프레임마다
+  focal 을 다시 추정해 정지 카메라에서도 드리프트하므로, 켜지 않으면 **의도한 zoom 과 추정
+  드리프트가 섞여** 화각 변화를 못 가른다. `PRESET_ZOOM_END` 배율은 이 고정된 `K_src[0]` 위에
+  곱해진다. 렌더 때 같은 값을 줘야 hole 측정과 영상이 안 어긋나므로 `bank.json.fixed_focal`
+  에 기록한다. 고정 시 hole `0.295 → 0.315` (zoom), `0.192 → 0.202` (orbit).
+- **`--pan_deg` / `--no_fit_tau` (`scripts/sample_camera_bank.py`)** — "정확히 45°" 처럼
+  각도가 요구사항일 때 쓴다. `fit_tau` 는 SE(3) 로그를 통째로 스케일해 τ 예산에 맞추므로
+  **회전까지 같이 깎아** 요청한 각도를 지킬 방법이 없었다. `--no_fit_tau` 면 scale 1.0 으로
+  preset 정의 각도가 그대로 나가고 τ 는 결과값이 된다 (예산을 안 지킨다). `--pan_deg` 는
+  사다리 매핑을 무시하고 각도를 직접 준다. 둘 다 기본값은 기존 동작
+  (`fit_tau=True`, `pan_deg=0`). `bank.json` `fit_tau` / `shape.pan_deg`, `bank.csv`
+  `focal_end` / `fit_tau` 열에 기록.
+  - 실측 (snowboard dyn_0, `--no_fit_tau`, `tracking=world`, τ 는 결과값):
+    | preset | 광축 회전 | ‖t‖max | focal_end | tau_max | hole | inFrame |
+    |---|---|---|---|---|---|---|
+    | `zoom_out_pan_right` | 45.00° | 0.0000 | 0.6667 | 1.9441 | 0.295 | 1.00 |
+    | `orbit_left_pedestal_up` | 46.05° | 0.6807 | 1.0 | 2.1556 | 0.192 | 0.20 |
+    orbit 쪽 46.05° 는 45° orbit 방위각 + pedestal 이 얹은 pitch 의 합이다.
+    `inFrame 0.20` 은 버그가 아니라 `tracking="world"` 의 정의다 — frame 0 위치를 계속
+    보므로 움직이는 subject 는 프레임을 벗어난다.
 - **`pull_out_arc_left` / `push_in_arc_right` preset (`CinemaTraj/lbm/presets.py`)** —
   기존 `push_in_arc` 는 `arc(+sweep/2)`(카메라가 왼쪽), `pull_out_arc` 는 `arc(-sweep/2)`
   (오른쪽) 로 **한 방향씩만** 있어서 "뒤로 빠지면서 왼쪽으로 도는" 샷을 만들 수 없었다.

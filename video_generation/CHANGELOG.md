@@ -7,6 +7,28 @@
 ## [Unreleased]
 
 ### Added
+- **`pull_out_arc_left` / `push_in_arc_right` preset (`CinemaTraj/lbm/presets.py`)** —
+  기존 `push_in_arc` 는 `arc(+sweep/2)`(카메라가 왼쪽), `pull_out_arc` 는 `arc(-sweep/2)`
+  (오른쪽) 로 **한 방향씩만** 있어서 "뒤로 빠지면서 왼쪽으로 도는" 샷을 만들 수 없었다.
+  부호를 뒤집은 짝을 채워 2×2 를 완성한다. 별칭·기존 preset 동작은 그대로.
+- **`--sweep_deg` (`scripts/sample_camera_bank.py`)** — orbit/arc sweep 상한을
+  `DEFAULT_SHAPE["sweep_deg"]`(45°) 대신 직접 준다. 0 = 기존 동작. `bank.json`
+  `shape.sweep_deg` 에 기록.
+  - **`true_orbit` 계열엔 거의 안 먹는다.** `fit_tau` 가 SE(3) 로그를 통째로 스케일하는데
+    순수 나선에서는 sweep 과 scale 이 상쇄된다. 실측 (snowboard dyn_0, lock·fauto·s9·k3,
+    `view_angle_max_deg`):
+
+    | preset | τ | sweep 45 | sweep 135 |
+    |---|---|---|---|
+    | `orbit_left_arc` | 0.35 | 30.9 | 30.4 |
+    | `orbit_left_arc` | 0.60 | 53.5 | 53.5 |
+    | `orbit_left_arc` | 1.00 | 139.4 | 176.7 |
+    | `pull_out_arc_left` | 0.35 | 22.8 | 28.4 |
+    | `pull_out_arc_left` | 0.60 | 34.8 | 46.2 |
+    | `pull_out_arc_left` | 1.00 | 55.7 | 80.9 |
+
+    `arc + dolly` 합성 preset 은 두 성분 비가 바뀌므로 실제로 먹는다. **orbit 을 더 돌리는
+    손잡이는 τ 다** — τ0.35→0.60 에서 30.9→53.5°, 대신 hole 0.117→0.221.
 - **`--fixed_focal` (`CinemaTraj/lbm/render.py`, `scripts/render_bank_videos.py`)** —
   `CloudRenderer` 가 쓰는 소스 K 를 frame0 값으로 전 프레임 고정한다
   (`K_src = np.repeat(K_src[:1], F, axis=0)`). 기본 off = 기존 동작(프레임별 K) 그대로.

@@ -7,6 +7,58 @@
 ## [Unreleased]
 
 ### Added
+- **`CinemaTraj/scripts/vista_lbm_to_poses.py`** — Vista 씬에 돌린 **원본 LBM** 의 카메라 덤프를
+  Lite `verify.py` 가 그대로 읽는 평가 폴더로 바꾼다. 이게 있어야 LBM 과 Lite 를 **같은 지표표**
+  (hole_fraction / subject_in_frame / tau_max / ...)로 잰다.
+  - 변환은 `_vista.json` 의 역이다. `T_wg` 에는 **스케일 `S_da3` 가 박혀 있어** (`R@R.T = S²·I`)
+    회전과 위치를 한 4×4 로 같이 곱하면 `det(R)=S³` 가 된다 — 나눠서 건다:
+    `R_world = (T_wg[:3,:3]/S) @ R_blender_gl @ diag(1,-1,-1)`,
+    `p_world = T_wg[:3,:3] @ (p_blender/u_meters) + T_wg[:3,3]`.
+  - 프레임 수는 `lbm_camera_to_poses.subsample` 로 **보간 없이 index 만** 솎는다 (camel 106,
+    avocado-slice 110 → 49). 보간하면 LBM 의 fcurve easing 이 뭉개져 jerk 지표가 실제보다 매끄럽다.
+  - `scene_graph.json`/`cloud.npz` 는 Lite 산출물을 symlink — **같은 점군으로 재야 비교가 된다.**
+  - `decision.json` 의 `source` 는 `lbm_original`, `start_mode` 는 `board` (LBM 은 소스 frame0
+    카메라를 앵커하지 않는다). `info["tau"]["target_tau"]=None` — LBM 엔 τ 이분법 단계가 없다.
+- **`CinemaTraj/scripts/vista_to_lbm_demo.py` + `vista_blend_worker.py` + `vista_blend_check.py`**
+  — Vista4D 점군(`out/<scene>/{cloud.npz,scene_graph.json}`) → **원본 LBM demo root**
+  (`vista_lbm_demo_v1`). **LBM 코드 0줄 수정** (사용자 확정 방식).
+  - **점군이 아니라 삼각형 메시를 굽는 이유.** LBM 의 가림 판정 `occlusion_check`
+    (`Cinematographer/cinematographer_quality_worker.py:2451-2502`)가 45개 표본점에 대한
+    **dense `scene.ray_cast`** 다. 면이 없는 지오메트리에는 `hit=False` → `occluded=0` →
+    `occlusion_ratio=0.0` → `severely_occluded=False` 가 되어 게이트가 **막는 게 아니라 조용히
+    꺼진다**(로그 무기록). 그래서 depth 격자를 삼각분할해 진짜 면을 만든다.
+  - **노드별로 오브젝트를 쪼개는 이유.** 레이가 focus 오브젝트에 맞으면 가림으로 안 센다.
+    배경 한 덩어리에 subject 표면이 섞이면 카메라→subject 레이가 "배경"에 맞아 가림 100% 가 된다.
+    격자 버텍스를 노드 OBB 소속으로 나눠 `dyn_0`/`stat_2`/`background` 로 굽는다 (동적 노드를 먼저
+    시험해 겹침에서 이기게). 세 버텍스가 **전부 같은 소속**인 면만 남긴다.
+  - 동적 노드는 `grid_frames[0]` 지오메트리만 쓰고 scene graph `track` 으로 키프레임을 굽는다.
+    다른 프레임의 동적 점을 배경에 넣으면 움직이는 물체가 **49프레임짜리 정지 잔상 벽**이 된다.
+  - `--subject_height_m`(기본 1.8) 로 `u_meters` 자동 도출. G 프레임은 무차원인데 LBM 의 near clip
+    · "너무 가깝다" · 궤적 크기 기본값이 전부 **미터 스케일 상수**라, 0.13 u 짜리 camel 을 찻잔으로
+    취급한다. camel `u_meters=14.7104`, avocado-slice `9.9981`.
+  - `_vista.json` 은 **역변환 사이드카** — `u = blender / u_meters`, `world = T_wg @ [u,1]` 로
+    LBM 이 낸 Blender 카메라를 소스 world 로 되돌린다.
+  - **Blender 버텍스 컬러 3연속 함정** (전부 실측): ① `BYTE_COLOR` 어트리뷰트는 그걸 읽는
+    머티리얼이 없으면 평평한 회색으로 렌더된다 → Attribute("Col")→Emission 머티리얼 추가
+    (점군 색은 이미 조명이 구워진 값이라 diffuse+SUN 이면 그림자가 두 번 들어간다).
+    ② Blender 4.5 기본 view transform 이 **AgX** 라 emission 을 들어올려 탈색시킨다 →
+    `view_transform="Standard"`, `look="None"`. ③ `attr.data.foreach_set("color", …)` 는
+    **linear** 를 받는다 → sRGB 바이트를 역감마 안 걸면 렌더가 이중 인코딩돼 들뜬다.
+  - `vista_blend_check.py` 는 (1) 소스 카메라 재렌더 (2) LBM 과 **같은 `scene.ray_cast`** 적중률
+    (3) 오브젝트/면수/애니 표를 한 번에 낸다. 실측 **camel 14/15, avocado-slice 24/27** 적중 —
+    미스도 의미상 옳다 (앞의 camel 이 뒤의 camel 을 실제로 가린다).
+
+### Fixed
+- **`vista_to_lbm_demo.py` subject 선택** — `moving` → **`dyn_*` 노드** → 전체 순으로 본다
+  (`--no_subject_prefer_dyn` 로 예전 동작). `moving` 은 이동량 임계를 넘은 것만 True 라 사람이
+  제자리에서 작업하는 씬(avocado-slice)은 전 노드가 False 가 되고, 그때 "화면 면적 최대"로
+  떨어지면 **테이블 상판**(두께 0.026 u)이 subject 로 뽑혀 `u_meters` 가 70 이 되고 씬이
+  **404 m** 로 부풀었다 (실측). 고친 뒤 `dyn_0` woman, `u_meters=9.9981`.
+- **`vista_to_lbm_demo.py --ffmpeg_path` 기본값** `/usr/bin` → `/data1/cympyc1785/tools/bin`
+  (형제 어댑터와 동일). `/usr/bin` 에는 ffmpeg 이 없어서 `VideoEngineer/video_stage.py:97` 의
+  `shutil.which("ffmpeg") or r"C:\ffmpeg\bin\ffmpeg.exe"` 가 **윈도우 경로로 떨어져**
+  `FileNotFoundError` 로 죽었다 (camel 1차 실행, Director/Cinematographer 는 통과한 뒤였다).
+
 - **`CinemaTraj/scripts/lbm_camera_dump_startup.py`** — LBM 이 **실제로 렌더한** per-frame 카메라를
   받아 적는 Blender startup 훅. `trumans_frame_shift_startup.py` 와 같은
   `BLENDER_USER_SCRIPTS/startup/` 에 산다. **LBM 코드 0줄 수정**이고, `LBM_CAMERA_DUMP_DIR` 이

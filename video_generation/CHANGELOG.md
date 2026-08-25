@@ -19,7 +19,7 @@
     "두 CSV 에 공통 action 이 없다".
   - `compare_lbm_vs_lite.py --out` 은 **디렉토리**이고 파일명이 `lbm_vs_lite.csv` 로 고정이라,
     3단/4단이 같은 디렉토리를 쓰면 **4단이 3단을 덮어쓴다**. `vs_lite/` `vs_rule/` 로 분리.
-- **`CinemaTraj/LBM_DEFECTS.md`** — 원본 LBM 을 TRUMANS/Vista4D 에 돌리며 실측한 결함 `LO1..LO8`.
+- **`CinemaTraj/LBM_DEFECTS.md`** — 원본 LBM 을 TRUMANS/Vista4D 에 돌리며 실측한 결함 `LO1..LO10`.
   **`DECISIONS.md` 와 분리한 이유**: 거기 `D1..D70` 은 LBM-**Lite** 설계 결정이라 번호가 겹친다.
   접두사를 `LO`(LBM Original) 로 뒀다.
   - LO1~LO5 해결(어댑터 / runner 기본값), LO6 은 사용자 지시로 유지, **LO7·LO8 미해결**.
@@ -30,6 +30,16 @@
     창을 병렬로 돌리면 창 A 의 카메라가 창 B 의 렌더로 들어간다(우리는 순차라 안 밟음).
   - 하단에 스톡 대비 실행 설정 4종(`MOVEMENT_VOCAB=extended`, `TRAJECTORY_SCALE=5`,
     `SINGLE_SCENE_FALLBACK=1`, `--camera-quality quality`)과 되돌릴 수 있는지 표로 기록.
+
+### Fixed
+- **`CinemaTraj/LBM_DEFECTS.md`** — "Vista4D 실행은 **LBM 코드 0줄 수정**" 이라고 적혀 있던
+  줄을 정정. `git diff --stat` 실측으로 원본 리포는 **4파일 151+/9−** 수정된 상태다
+  (`cinematographer_quality_worker.py` +30 / `cinematographer_stage.py` +75−9 /
+  `director_stage.py` +29 / `blender_render_worker.py` +26). 파일별 변경 지점과 env 게이트를
+  표로 추가하고, **env 게이트가 없는 유일한 변경**인 `render_preview` 의 `file_format="PNG"`
+  강제를 `LO9`, `.blend` 의 `frame_step=2` 누출을 `LO10` 으로 결함 표에 올렸다.
+  LO9 를 안 고치면 채널 board 가 0장이 되어 **VLM 선정·micro-adjust 루프가 통째로 건너뛰어지고**
+  기하 점수 1위로 조용히 폴백한다.
 - **`CinemaTraj/scripts/vista_lbm_to_poses.py`** — Vista 씬에 돌린 **원본 LBM** 의 카메라 덤프를
   Lite `verify.py` 가 그대로 읽는 평가 폴더로 바꾼다. 이게 있어야 LBM 과 Lite 를 **같은 지표표**
   (hole_fraction / subject_in_frame / tau_max / ...)로 잰다.

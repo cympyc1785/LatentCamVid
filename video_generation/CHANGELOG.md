@@ -46,6 +46,26 @@
     을 향하는 각도 mean 0.232° / max 0.364°, col0·col1 은 각각 89.79° / 90.10°,
     `det(R)` 0.999999555..1.000000637, Blender +Z 기준 roll mean 0.011° / max 0.016°.
     이동량 0.323 m 은 `travel_distance` 와 일치.
+- **`CinemaTraj/scripts/trumans_to_recon.py --poses_override`** (기본 `""` = 기존 동작 그대로) —
+  카메라를 합성하지 않고 **밖에서 받는다** (`lbm_camera_to_poses.py` 산출 npz). 궤적 합성(2단계)과
+  검증 probe(3단계)를 건너뛰고 GT 렌더 + `recon_and_seg` 변환만 돈다. LBM 카메라를 Lite 뱅크와
+  **같은 눈금**(`audit_lite_framing.py`)으로 재기 위한 경로.
+  - **검증 probe 를 일부러 건너뛴다.** 그건 "우리가 세운 후보가 벽을 뚫나"를 보는 필터라
+    평가 대상(LBM 카메라)에 걸면 베이스라인을 우리 기준으로 걸러버린다. 벽 통과 여부는 하류 감사가 잰다.
+  - **프레임 격자를 원본 창 안으로 클램프하지 않는다.** LBM 이 창 밖까지 렌더한 것 자체가 결함(D6)
+    이고, 잘라내면 그 결함이 평가에서 사라진다. `start,end` 는 npz `trumans_frames` 의 양 끝.
+  - npz 의 `lens` 를 `poses_a<NN>.npz` 에 `lens_mm` 으로 실어 보낸다 — LBM 은 24 mm 인데
+    `trumans_gt_render.py --lens` 기본값은 25 mm 라, 안 실으면 화각이 4% 넓게 렌더돼서 프레이밍
+    지표가 통째로 어긋난다.
+  - manifest 에 `kind:"lbm_render_dump"` / `poses_override` / `frame_list` 를 기록한다.
+- **`CinemaTraj/scripts/{trumans_gt_render,trumans_scene_probe}.py --frame_list`**
+  (기본 `[]` = `--frames start end [step]` 격자 그대로, 바이트 동일) — **간격이 균일하지 않은**
+  프레임 집합을 그대로 렌더/샘플한다. LBM 은 창 길이와 무관한 `target_frame_count` 만큼 렌더하므로
+  (w01: 19프레임 창 → 110프레임) 그걸 49로 솎으면 step 이 1..3 으로 섞인다.
+  - `trumans_scene_probe.py` 는 샘플 격자를 **목록 하나**로 못 박고 `track` 색인을 그 목록의
+    위치로 바꿨다 — `(frame - start) // step` 산술은 균일 격자에서만 맞다. anchor 도 격자 위로
+    스냅한다 (안 그러면 `track[...]` 이 그 프레임이 아닌 이웃을 집는다). 균일 경로는 예전
+    `round` 의 banker's rounding 까지 그대로 보존.
 - **`CinemaTraj/scripts/trumans_frame_shift_startup.py`** — LBM 이 띄우는 모든 Blender 프로세스에서
   TRUMANS 애니메이션을 메모리에서만 앞으로 당기는 startup 훅. `BLENDER_USER_SCRIPTS=<dir>` 의
   `<dir>/startup/*.py` 가 기동 시 자동 import 되고, 거기서 건 `@persistent load_post` 핸들러가

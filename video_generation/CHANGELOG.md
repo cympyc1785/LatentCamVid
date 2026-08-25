@@ -7,6 +7,18 @@
 ## [Unreleased]
 
 ### Added
+- **`CinemaTraj/out/lbm_demos_wn/_camdump/eval_lbm_arm.sh`** — narrative arm 평가 4단
+  (뱅크 매니페스트 → 프레이밍 감사 → Lite 대비 → rule arm 대비). 배선 함정 4개를 헤더 주석에
+  전부 실측으로 적어뒀다 — 넷 다 조용히 죽거나 조용히 덮어쓴다:
+  - `--work` 의 의미가 **1단과 2단에서 다르다**. 1단 `build_lbm_bank_manifest.py` 는
+    `<work>/manifest_a*.json` 을 glob(→ recording 디렉토리), 2단 `audit_lite_framing.py` 는
+    `<work>/<recording>/probe_a*.json`(→ 그 위 root). 섞으면 1단이 "manifest_a*.json 이 없다".
+  - narrative GT 렌더가 rule arm(TRUMANS-Lite) 과 **다른 root**(`Vista4D-Eval-Data`) 로 나갔다.
+    `--eval_data` 를 안 넘기면 전 clip 이 `SKIP (probe/poses/scene 누락)` 뒤 빈 CSV → `IndexError`.
+  - CSV 의 `recording` 열은 **짧은 접두사**(`00add26c`)다. 전체 uuid 를 주면 매칭 0행 →
+    "두 CSV 에 공통 action 이 없다".
+  - `compare_lbm_vs_lite.py --out` 은 **디렉토리**이고 파일명이 `lbm_vs_lite.csv` 로 고정이라,
+    3단/4단이 같은 디렉토리를 쓰면 **4단이 3단을 덮어쓴다**. `vs_lite/` `vs_rule/` 로 분리.
 - **`CinemaTraj/LBM_DEFECTS.md`** — 원본 LBM 을 TRUMANS/Vista4D 에 돌리며 실측한 결함 `LO1..LO8`.
   **`DECISIONS.md` 와 분리한 이유**: 거기 `D1..D70` 은 LBM-**Lite** 설계 결정이라 번호가 겹친다.
   접두사를 `LO`(LBM Original) 로 뒀다.

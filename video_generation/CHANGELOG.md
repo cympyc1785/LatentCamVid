@@ -66,6 +66,35 @@
     위치로 바꿨다 — `(frame - start) // step` 산술은 균일 격자에서만 맞다. anchor 도 격자 위로
     스냅한다 (안 그러면 `track[...]` 이 그 프레임이 아닌 이웃을 집는다). 균일 경로는 예전
     `round` 의 banker's rounding 까지 그대로 보존.
+- **`CinemaTraj/scripts/trumans_vlm_action_tag.py`** — TRUMANS 창별 **VLM action tagging**.
+  `Actions/<seq>.txt` 의 창 경계로 `video_render/<seq>.pkl.mp4` 를 잘라 contact sheet 를 만들고
+  Qwen3-VL 에게 서술을 받는다. 산출 `<out>/<sequence>_actions_vlm.json`
+  (`trumans_vlm_actions_v1`) + `trace/` + `sheets/`. 규칙 라벨은 **동작 라벨이지 shot 서술이
+  아니라서** Director 가 읽을 공간 정보(어느 방, 어느 소품, 어느 방향)가 비어 있다.
+  - **타일은 native 648 px 2행**으로 붙인다. 320 px 로 줄였더니 `Pick up the book` 창을
+    "presses a button on a remote control" 로 읽었다 — 씬(소파·거실·커피테이블)은 맞고 손에 든
+    작은 물체만 틀렸다. 원본 폭으로 올리자 book / coffee table / sofa / floor lamp 를 정확히 집었다.
+  - **카메라 어휘 금지가 이 프롬프트의 핵심 제약이다.** 이 서술은 **카메라를 고르는 쪽의 입력**으로
+    들어가는데, 초안이 3/3 창에서 "turns to face the camera" / "with the camera positioned to
+    capture the full action" 처럼 아직 존재하지도 않는 카메라를 기준으로 방향을 적었다. system
+    프롬프트 금지 + `validate()` 블록리스트(`camera/shot/take/frame/screen left/...`)로 **재질의**
+    시킨다 — 사후 문자열 치환이 아니라 재질의인 이유는 방향 표현 자체가 카메라 상대라서다.
+    16창 재실행 결과 위반 0건, repair 1회, 27.7 s.
+  - 프레임은 `CAP_PROP_POS_FRAMES` 로 seek 하지 않고 **순차로** 읽는다 (B-frame 드리프트).
+- **`CinemaTraj/scripts/trumans_to_lbm_demo.py --narrative_json`** (기본 `""` = 기존대로
+  `Actions/<seq>.txt` 규칙 라벨) — 위 VLM 서술로 `shot_description` 만 갈아끼운다. 창 경계 ·
+  movement term 수열 · 프레임 오프셋은 그대로라 **두 팔이 정확히 한 입력만 다르다** (실측: 창 16개
+  동일, preset 수열 동일, `run_windows.sh` 주석 제외 구조 동일). `sequence` 불일치는 assert 로
+  막는다 — 다른 take 의 서술을 물리면 창 번호는 맞는데 내용이 딴 씬이라 조용히 통과한다.
+  VLM 서술은 이미 "A person ..." 으로 시작하므로 `--name_subject` 를 안 태운다.
+- **`CinemaTraj/scripts/build_lbm_bank_manifest.py`** — `--poses_override` 로 렌더한 LBM arm clip
+  들을 `trumans_bank_v1` manifest 로 묶어 `audit_lite_framing.py` 가 **감사 코드 수정 없이** 읽게
+  한다. Lite 뱅크는 드라이버가 manifest 를 같이 뱉지만 LBM arm 은 `trumans_to_recon.py` 를 창마다
+  직접 부르는 경로라 manifest 가 없다. 접미사 키는 `action.id`(1-based)가 아니라 **`action_index`**
+  다 — 파일 이름(`probe_a<NN>.json`)을 만든 게 그 값이다.
+- **`CinemaTraj/scripts/compare_lbm_vs_lite.py`** — 두 팔의 `lite_framing.csv` 를 action 으로 붙여
+  `<out>/lbm_vs_lite.csv` + 요약표. LBM arm 은 8창뿐이라 **교집합만** 비교한다 (없는 쪽을 0 으로
+  채우면 없는 게 나쁜 점수로 읽힌다).
 - **`CinemaTraj/scripts/trumans_frame_shift_startup.py`** — LBM 이 띄우는 모든 Blender 프로세스에서
   TRUMANS 애니메이션을 메모리에서만 앞으로 당기는 startup 훅. `BLENDER_USER_SCRIPTS=<dir>` 의
   `<dir>/startup/*.py` 가 기동 시 자동 import 되고, 거기서 건 `@persistent load_post` 핸들러가
@@ -410,6 +439,21 @@
   지금껏 manifest 에 안 남아 있었다.
 
 ### Fixed
+- **`trumans_to_lbm_demo.py --movement_vocab crane` 이 확장 어휘를 조용히 꺼뜨리던 문제** —
+  생성한 `run_windows.sh` 가 `export STORYBLENDER_MOVEMENT_VOCAB=crane` 을 그대로 내보냈는데,
+  LBM 쪽은 `== "extended"` **정확 일치**로만 분기를 켠다 (`Director/director_stage.py:980`,
+  `Cinematographer/cinematographer_stage.py:60`). `crane` 이면 crane/orbit/pedestal 문구가 전부
+  fallback `static` 으로 떨어지는데 **로그에 아무 경고도 안 남는다**. base 가 아니면 무조건
+  `extended` 를 내보내도록 고쳤다 (crane 은 demo 생성 쪽 목록 확장일 뿐이다).
+- **`--narrative_json` 서술 뒤에 movement term 을 붙일 때 마침표가 겹치던 문제** — movement term
+  구절은 `", and the camera ..."` 로 시작한다. 규칙 라벨은 문장부호 없이 끝나지만 VLM 서술은
+  마침표로 끝나 `"...throughout the action., and the camera"` 가 됐다. Director 가 읽는 건 이
+  문자열 하나뿐이라 끝 마침표만 떼고 붙인다.
+- **`compare_lbm_vs_lite.py` 가 다른 recording 의 clip 과 비교하던 문제** — Lite 뱅크
+  `lite_framing.csv` 는 recording 7편이 한 파일에 들어 있는데 `action` 만 키로 읽어서 같은 action
+  번호끼리 덮어썼다. 두 열 다 그럴듯한 숫자라 조용히 지나간다 — 실측으로 action 0 이 00add26c
+  의 0.9636 이 아니라 다른 편의 0.9952 로 찍혔다. `--recording` 필터(비면 LBM CSV 에서 자동 추출)
+  + action 중복 assert 를 넣었다.
 - **원본 LBM 의 VLM board 선정 + micro-adjust 루프가 TRUMANS 에서 통째로 안 돌던 문제**
   (`Look-Before-Move/Cinematographer/cinematographer_quality_worker.py` `render_preview`) —
   이 함수만 `scene.render.image_settings.file_format` 을 안 고정해서, TRUMANS `.blend` 가

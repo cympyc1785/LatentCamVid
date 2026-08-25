@@ -7,6 +7,24 @@
 ## [Unreleased]
 
 ### Added
+- **`CinemaTraj/scripts/trumans_vlm_action_tag.py --include_gaps`** (기본 `--no_include_gaps` =
+  기존과 바이트 동일) — `Actions/<seq>.txt` **밖** 구간까지 창으로 만들어 태깅한다. 새 함수
+  `build_windows()` 가 action 창 사이의 빈 구간을 `--gap_min_frames 15` 이상일 때만 취하고
+  `--gap_max_frames 120` 으로 쪼갠 뒤 **시간순**으로 번호를 다시 매긴다. 산출물 파일명은
+  `_full` 접미사(`<seq>_actions_vlm_full.json`, `sheets_full/`)라 기존 narrative arm 산출물을
+  덮어쓰지 않는다.
+  - **왜 필요했나 (실측, `2023-01-17@00-55-00`)**: 태그 구간은 746/2077 프레임 = **35.9%** 뿐이다.
+    나머지 1331 프레임을 "static + walking" 두 라벨로 덮을 수 있는지 재봤더니 안 된다 —
+    walk(≥0.30 m/s) 627 · turn_in_place(≥25°/s) 143 · pose_change(≥0.6 rad/s) 424 · still 137.
+    임계를 가장 관대하게 잡아도 262~535 프레임이 두 라벨 밖이고, 미태그 구간의 `body_pose`
+    변화율 중앙값 **2.231 rad/s** 가 태그된 `Write with the left hand`(0.701) 보다 크다.
+    조용한 구간이 아니라 **라벨만 없는 구간**이다.
+  - 창 37개(action 16 / gap 21), 커버리지 **2056/2077 = 99.0%**, 겹침 0. 버린 21프레임은
+    f70–80(11f) · f764–773(10f) 로 둘 다 15프레임 미만.
+  - gap 창에는 `GAP_SUFFIX` 를 프롬프트에 덧붙인다 — 원 프롬프트의 "하나의 연속된 동작" 전제가
+    이동·전환 구간에서 깨져서, 어디서 어디로 걸어가는지를 명시적으로 물어야 한다.
+  - 요약표에 `windows N / N (action / gap)` 과 `coverage` 행을 추가했다. 이전 분모가
+    `len(actions)` 라 `37 / 16` 으로 찍혔다.
 - **`CinemaTraj/out/lbm_demos_wn/_camdump/eval_lbm_arm.sh`** — narrative arm 평가 4단
   (뱅크 매니페스트 → 프레이밍 감사 → Lite 대비 → rule arm 대비). 배선 함정 4개를 헤더 주석에
   전부 실측으로 적어뒀다 — 넷 다 조용히 죽거나 조용히 덮어쓴다:
@@ -32,6 +50,31 @@
     `SINGLE_SCENE_FALLBACK=1`, `--camera-quality quality`)과 되돌릴 수 있는지 표로 기록.
 
 ### Fixed
+- **`CinemaTraj/lbm/vlm.py` `chat_json(echo_previous=..., repair_hint=...)`** — 재질의가 **통째로
+  무효**였던 걸 고쳤다. 기본값 `echo_previous=True` 는 기존 동작 그대로라 `loop.py` 는 안 바뀐다.
+  - 증상: TRUMANS 37창 태깅에서 3창(w15/w18/w33)이 4턴 내내 `forbidden filming vocabulary:
+    ['camera']` 로 반려됐는데, 응답이 **바이트 단위로 동일**했다 (`completion_tokens`
+    137/158/116 불변).
+  - 원인: 재질의 프롬프트에 `## PREVIOUS_RESPONSE` 로 **자기 답을 다시 보여주면 그대로 베낀다**.
+    같은 이미지로 3변형을 1턴씩 돌린 실측:
+
+    | 변형 | w15 | w18 | w33 |
+    |---|---|---|---|
+    | base | pass | 위반 | 위반 |
+    | +prev (t=0.1, 기존) | pass | 위반, identical=True | 위반, identical=True |
+    | −prev (t=0.1) | pass | **pass** | **pass** |
+    | +prev (t=0.7) | pass | 위반, identical=True | pass |
+
+    t=0.7 에서도 바이트 동일이 나오므로 **샘플링 문제가 아니다**. 그래서 temperature 는 여전히
+    안 올린다.
+  - `echo_previous=False` 면 자기 답을 빼고 위반 목록 + `repair_hint` 만 준다. 단 **JSON 파싱
+    실패일 때는 깨진 원문 자체가 고칠 대상**이라 `echo_previous` 와 무관하게 보여준다.
+  - `trumans_vlm_action_tag.py` 는 `echo_previous=False` + `REPAIR_HINT` 로 부른다. `REPAIR_HINT`
+    는 처음에 `body_facing` 만 다뤘는데 그러자 위반이 `location`("the left side of the frame")
+    과 `action`("turns to face the camera") 으로 옮겨갔다 — 필드 하나를 막으면 옆 필드로 샌다.
+    지금은 네 필드 전부에 대해 **금지 표현 → 대체 표현** 쌍을 준다 (`frame` 이 금지어라는 걸
+    명시하는 게 특히 중요하다. 모델은 이걸 촬영 용어로 인식하지 않는다).
+  - 37창 재실행 실측: fallback **3 → 2 → 0**, repairs 13 → 15 → **4**, 77.6 → 73.5 → **65.2 s**.
 - **`CinemaTraj/decode/build_poses.py`** — `decision_fingerprint()` 의 `follow_gain` 기본값을
   `0.0`(float) → `"0"`(str). 지문은 `str(follow_gain)` 을 그대로 넣는데 `build_poses` 의
   argparse 기본값(:761)은 문자열 `"0"` 이라, `decision.json` 에 `follow_gain` 키가 없으면

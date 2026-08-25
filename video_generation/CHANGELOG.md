@@ -25,6 +25,54 @@
     이동·전환 구간에서 깨져서, 어디서 어디로 걸어가는지를 명시적으로 물어야 한다.
   - 요약표에 `windows N / N (action / gap)` 과 `coverage` 행을 추가했다. 이전 분모가
     `len(actions)` 라 `37 / 16` 으로 찍혔다.
+- **`CinemaTraj/scripts/trumans_vlm_action_tag.py` 씬 접지 3종** — `--scene_objects` /
+  `--object_motion` / `--rule_hint`, 셋 다 기본 off 라 안 켜면 기존 실행과 바이트 동일.
+  narrative arm(VLM 서술)과 rule arm(`Actions/<seq>.txt`) 의 간극을 줄인다.
+  - **왜**: 접지 없는 실행에서 VLM 이 **씬에 없는 물체를 지어냈다**. rule 이 `Open/Close the
+    oven` 인 4창(w21/w23/w34/w36)을 cabinet / monitor / computer / cabinet 으로 읽었다.
+    TRUMANS 는 이걸 검증할 근거를 자기 안에 갖고 있다 —
+    `Recordings_blend/<rec>/obj_list.txt` 가 그 녹화의 상호작용 가능 물체 전량,
+    `Object_all/Object_pose/<seq>.npy` 가 그 물체들의 프레임별 pose 다. 실측하니 네 창 모두
+    `oven_door_01` 이 0.218~0.323 m / 33.1~49.7° 움직인다. **rule 이 맞고 VLM 이 틀렸다.**
+  - `--scene_objects`: `obj_list.txt` → `## SCENE OBJECTS` 블록으로 **있는 물체**(cup, oven,
+    oven door, book, pen, chair, vase, whiteboard)와 **이 방에 없는 물체**(bottle, cabinet,
+    drawer, fridge, handbag, keyboard, laptop, microwave, monitor, mouse, phone)를 둘 다 못
+    박고, `validate()` 에도 유령-물체 검사로 건다. 없는 물체 목록은 `Object_all/Object_mesh`
+    46종 어휘에서 씬 물체를 **토큰 단위로** 뺀 것 — 첫 토큰만 빼면 `oven door` 의 `door` 가
+    남아 정답을 반려한다. 검사는 부분문자열이 아니라 단어 경계(`\bcups?\b`) — "cup"이
+    "cupboard"에, "pen"이 "open"에 걸린다.
+  - `--object_motion`: `Object_pose` 로 창 안에서 실제로 움직인 물체를 `## OBJECTS THAT MOVE`
+    로 준다. 회전은 **euler ptp 가 아니라 회전행렬 geodesic**(창 첫 프레임 기준) 이다 —
+    euler ptp 는 wrap 때문에 dL 0.005 m 인 **정지 물체에서 33°** 를 뱉어 임계로 못 쓴다.
+    geodesic 이면 노이즈 바닥 ≤ 6.9° / ≤ 0.015 m, 진짜 상호작용 ≥ 12.7° / ≥ 0.084 m 라
+    임계 `--move_meters 0.05` / `--move_degrees 12.0` 이 깨끗하게 가른다.
+  - `--rule_hint`: action 창엔 자기 rule 라벨을, gap 창엔 **앞뒤 action 라벨 + 프레임 거리**를
+    `## LABELLED ACTION` / `## NEIGHBOURING LABELLED ACTIONS` 로 준다. 나머지 둘과 **별도
+    플래그로 뺀 이유**: 이건 시뮬레이션 GT 가 아니라 rule arm 자체라, 켜면 두 arm 의 독립성이
+    줄어든다(아래 실측).
+  - `--recording`(비우면 `scene_flag`→`scene_list` 로 역산) / `--suffix` 추가. 접지를 켜면
+    산출물이 `_g` 접미사(`<seq>_actions_vlm_full_g.json`, `trace_full_g/`)로 갈리고
+    **sheet 는 `sheets_full/` 를 재사용**한다 — 두 arm 이 정확히 프롬프트 텍스트 하나만 달라진다.
+  - `grounding` 블록(recording / objects / absent_objects / 임계)과 창별 `moved_objects` 를
+    산출물에 같이 싣는다.
+  - **실측(37창, `2023-01-17@00-55-00`)**:
+
+    | | 유령 물체 언급 창 | fallback | repairs | 초 |
+    |---|---|---|---|---|
+    | 접지 없음 | **6 / 37** (w19·w21·w22·w23·w26·w36) | 0 | 4 | 65.1 |
+    | 접지 3종 | 0 / 37 | 1 | 5 | 63.3 |
+    | 접지 3종 + `hint_first` | **0 / 37** | **0** | **4** | **62.1** |
+
+    oven 4창: `pulls a long, thin object from a black cabinet` → `opens the oven door with
+    their left hand`. gap 창도 `Object_pose` 를 따라간다 — w22 `holding a long object and
+    looking at a screen` → `reaches out ... to open the oven door`(oven door 0.08 m/13°),
+    w30 `picks up a pen` → `picks up a cup`(cup 0.53 m/29°), w10/w12 는 pen + whiteboard 를
+    이름으로 부른다.
+  - **`--rule_hint` 의 대가**: action 창 16개에서 rule 내용어가 서술에 포함된 비율 중앙값이
+    **0.00 → 0.50**. 서술이 rule 의 재기술 쪽으로 수렴한다. rule 을 GT 로 쓰고 서술은
+    공간 디테일만 얻을 거면 켜고, 두 arm 을 독립 신호로 쓸 거면 `--scene_objects
+    --object_motion` 만 켜는 게 맞다 (유령 물체 6창은 이 둘만으로도 잡히는지는 미측정 —
+    둘 다 시뮬레이션 GT 라 rule 텍스트를 안 본다).
 - **`CinemaTraj/out/lbm_demos_wn/_camdump/eval_lbm_arm.sh`** — narrative arm 평가 4단
   (뱅크 매니페스트 → 프레이밍 감사 → Lite 대비 → rule arm 대비). 배선 함정 4개를 헤더 주석에
   전부 실측으로 적어뒀다 — 넷 다 조용히 죽거나 조용히 덮어쓴다:
@@ -75,6 +123,14 @@
     지금은 네 필드 전부에 대해 **금지 표현 → 대체 표현** 쌍을 준다 (`frame` 이 금지어라는 걸
     명시하는 게 특히 중요하다. 모델은 이걸 촬영 용어로 인식하지 않는다).
   - 37창 재실행 실측: fallback **3 → 2 → 0**, repairs 13 → 15 → **4**, 77.6 → 73.5 → **65.2 s**.
+- **`CinemaTraj/lbm/vlm.py` `chat_json(hint_first=...)`** — 기본값 `False` = 기존 동작
+  (`loop.py` 불변). `True` 면 `## VALIDATION_ERRORS` + `repair_hint` 를 원 프롬프트 **뒤가
+  아니라 앞**에 놓는다.
+  - 증상: 씬 접지 3종을 켜자 원 프롬프트가 ~600 토큰 길어졌고, **접지 없이는 통과했던 w18** 이
+    4턴 내내 같은 `body_facing: "...facing away from the camera..."` 위반을 반복하며 fallback
+    으로 떨어졌다. `shot_description` 은 깨끗했으니 힌트를 못 본 게 아니라 **묻힌** 것이다.
+  - `trumans_vlm_action_tag.py` 가 `hint_first=True` 로 부른다. 재실행: w18 은 repairs 1 로
+    통과, 접지 실행의 fallback **1 → 0**, repairs 5 → 4, 63.3 → 62.1 s.
 - **`CinemaTraj/decode/build_poses.py`** — `decision_fingerprint()` 의 `follow_gain` 기본값을
   `0.0`(float) → `"0"`(str). 지문은 `str(follow_gain)` 을 그대로 넣는데 `build_poses` 의
   argparse 기본값(:761)은 문자열 `"0"` 이라, `decision.json` 에 `follow_gain` 키가 없으면

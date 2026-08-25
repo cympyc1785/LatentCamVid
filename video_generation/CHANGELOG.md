@@ -19,7 +19,7 @@
     "두 CSV 에 공통 action 이 없다".
   - `compare_lbm_vs_lite.py --out` 은 **디렉토리**이고 파일명이 `lbm_vs_lite.csv` 로 고정이라,
     3단/4단이 같은 디렉토리를 쓰면 **4단이 3단을 덮어쓴다**. `vs_lite/` `vs_rule/` 로 분리.
-- **`CinemaTraj/LBM_DEFECTS.md`** — 원본 LBM 을 TRUMANS/Vista4D 에 돌리며 실측한 결함 `LO1..LO10`.
+- **`CinemaTraj/LBM_DEFECTS.md`** — 원본 LBM 을 TRUMANS/Vista4D 에 돌리며 실측한 결함 `LO1..LO11`.
   **`DECISIONS.md` 와 분리한 이유**: 거기 `D1..D70` 은 LBM-**Lite** 설계 결정이라 번호가 겹친다.
   접두사를 `LO`(LBM Original) 로 뒀다.
   - LO1~LO5 해결(어댑터 / runner 기본값), LO6 은 사용자 지시로 유지, **LO7·LO8 미해결**.
@@ -46,6 +46,15 @@
   강제를 `LO9`, `.blend` 의 `frame_step=2` 누출을 `LO10` 으로 결함 표에 올렸다.
   LO9 를 안 고치면 채널 board 가 0장이 되어 **VLM 선정·micro-adjust 루프가 통째로 건너뛰어지고**
   기하 점수 1위로 조용히 폴백한다.
+  - **`LO11` 추가 (미해결, 진단만)** — Phase-1 채널 VLM 필터가 **TRUMANS 30/30, Vista 3+3/6
+    전량 FAIL** 이고 OK 가 한 번도 없다. 원인은 `cinematographer_quality_worker.py:2983
+    build_board` 의 `if Image is None: return ""` — 이 워커가 도는 **Blender 번들
+    python 3.11 에 PIL 이 없다**(실측). `board_path=""` → `cinematographer_stage.py:3716` 이
+    `board_image_missing` 으로 빠지는데, 반환값이 `survivors = rendered` 라 후보가 **하나도
+    안 걸러진 채** Phase-2 로 넘어가고 파이프라인은 `success: true` 로 끝난다. `:4970` 이
+    `error` 를 안 찍어 로그에는 `FAIL` 세 글자만 남는다. 잃는 것은 Phase-1 프롬프트의
+    **facing rule**(뒤통수 샷 기각) 과 구도·가림 기각. LO9(PNG 강제)와는 **다른 원인**이라
+    LO9 를 고쳐도 Phase-1 은 여전히 안 돈다.
 - **`CinemaTraj/scripts/vista_lbm_to_poses.py`** — Vista 씬에 돌린 **원본 LBM** 의 카메라 덤프를
   Lite `verify.py` 가 그대로 읽는 평가 폴더로 바꾼다. 이게 있어야 LBM 과 Lite 를 **같은 지표표**
   (hole_fraction / subject_in_frame / tau_max / ...)로 잰다.

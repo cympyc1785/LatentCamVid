@@ -32,6 +32,12 @@
     `SINGLE_SCENE_FALLBACK=1`, `--camera-quality quality`)과 되돌릴 수 있는지 표로 기록.
 
 ### Fixed
+- **`CinemaTraj/decode/build_poses.py`** — `decision_fingerprint()` 의 `follow_gain` 기본값을
+  `0.0`(float) → `"0"`(str). 지문은 `str(follow_gain)` 을 그대로 넣는데 `build_poses` 의
+  argparse 기본값(:761)은 문자열 `"0"` 이라, `decision.json` 에 `follow_gain` 키가 없으면
+  (= 보통) decode 는 `"0"`, `emit.py:166` 은 `"0.0"` 을 지문에 넣어 **손대지도 않은
+  `poses.npz` 를 stale 로 오판**하고 emit 이 rc=1 로 죽었다 (camel 실측). 기존 뱅크의 저장
+  지문이 `"0"` 이므로 이 방향으로 맞춰야 재생성이 필요 없다.
 - **`CinemaTraj/LBM_DEFECTS.md`** — "Vista4D 실행은 **LBM 코드 0줄 수정**" 이라고 적혀 있던
   줄을 정정. `git diff --stat` 실측으로 원본 리포는 **4파일 151+/9−** 수정된 상태다
   (`cinematographer_quality_worker.py` +30 / `cinematographer_stage.py` +75−9 /

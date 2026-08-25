@@ -7,6 +7,104 @@
 ## [Unreleased]
 
 ### Added
+- **`CinemaTraj/scripts/retime_camera_handoff.py`** — LBM Cinematographer 의 `camera_handoff_v1.json`
+  을 chunk 프레임 수(49)에 맞춰 다시 매긴다. 기본 `--dry_run`, 고칠 땐 `--no_dry_run` (원본은
+  `.bak`). 멱등 — 여러 번 돌려도 결과가 같다.
+  - **왜**: Cinematographer 의 `refresh_camera_trajectory`
+    (`cinematographer_stage.py:2820-2828`) 가 duration 을 **preset 에서** 다시 계산하고 Director 의
+    `duration_target_seconds` 를 버린다. TRUMANS 49프레임 chunk 3개 실측에서
+    `target_frame_count` 가 **110 / 80 / 95** 로 나왔다 (Director 값 65 / 45 / 65 도 아니다).
+  - 그 값이 Stage 3 로 그대로 간다 (`VideoEngineer/blender_render_worker.py:1030`). 그리고 워커가
+    렌더 직전에 `scene.frame_start = 1; scene.frame_end = frame_count` (`:1141-1142`) 로 frame
+    shift 훅의 `scene.frame_end = 49` (`_frame_shift/startup/trumans_frame_shift_startup.py:101`)
+    를 **덮어쓴다** — 훅은 Blender 기동 시 한 번 돌고 워커는 그 뒤에 세팅하므로 워커가 이긴다.
+    결과적으로 w01 은 chunk 49프레임 + **다음 chunk 영역 61프레임**을 이어서 렌더한다. 클램프도
+    루프도 아니고 chunk 밖 애니메이션이 그냥 섞인다.
+  - **`target_frame_count` 만 고치면 안 된다**: 궤적 keyframe 이 절대 프레임 인덱스로 박혀 있다
+    (`trajectory_plan.keyframes[].frame` = 1 / 56 / 110). frame_count 만 49 로 낮추면
+    `_build_plan_from_explicit_trajectory` 의 `frame_number = max(1, min(frame_number, frame_count))`
+    가 1 / 49 / 49 로 클램프해서 **궤적 앞 절반만 재생하고 나머지는 정지**한다.
+  - 다시 매기는 것: `target_frame_count` / `target_duration_seconds` /
+    `trajectory_keyframes[].frame` (0-based, 정규화 `t` 동봉 → `round(t·48)`) /
+    `trajectory_plan.keyframes[].frame` (1-based, plan span 으로 정규화 → `round(t·48)+1`) /
+    `trajectory_plan.{start_frame,end_frame,duration_seconds}` /
+    `trajectory_plan.safety_report.duration_seconds` / `trajectory_safety_report.duration_seconds`.
+    카메라가 `/shots[i]/cameras[j]` 와 `/cameras[k]` 두 군데에 **복사본**으로 있어 둘 다 훑는다.
+  - **안 건드리는 것**: `shot_contract.motion_contract.{start_frame,end_frame}` 은 Director 계약
+    프레임 공간이고 VideoEngineer 가 안 읽는다 (`grep motion_contract VideoEngineer/*.py` → 0건).
+    Cinematographer 내부 중간산출물인 `camera_handoff_{preview,quality}_input_v1.json` 도 하류가
+    안 읽으므로 원본 대조용으로 남긴다.
+  - **궤적을 자르지 않고 시간을 압축한 이유**: 자르면(원래 속도 유지, 49프레임에서 끊기)
+    `orbit_right_arc` 이 sweep 의 45% 만 돌고 끝나 preset 을 고른 이유가 사라진다. 압축은 authored
+    구도를 통째로 유지하고 속도만 `old_fc/new_fc` 배 빨라지는데, 실측상 문제될 수준이 아니다:
+
+    | run | preset | frames | travel | m/s before | m/s after |
+    |---|---|---|---|---|---|
+    | `w01_f0000_0048` | orbit_right_arc | 110 → 49 | 0.231 m | 0.053 | 0.118 |
+    | `w22_f0504_0552` | push_in_arc | 80 → 49 | 0.160 m | 0.050 | 0.082 |
+    | `w39_f0912_0960` | pedestal_up | 95 → 49 | 0.351 m | 0.092 | 0.179 |
+
+    사람 보행이 ~1.4 m/s 다. 요약표에 `m/s after` 열이 매번 찍히므로 전량에서 튀는 chunk 를 바로
+    본다. `_smooth_executable_keyframes` 의 travel limit 은 거리 기준이라 프레임 수와 무관하다.
+  - keyframe 수가 프레임 수보다 많아 인덱스가 뭉치면 요약표에 `!! keyframe 뭉침` 으로 찍는다
+    (실측 3 chunk 는 keyframe 2~3개라 0건).
+- **`CinemaTraj/scripts/sanitize_director_focus.py`** — LBM Director 산출물의 focus id 목록에서
+  **유령 asset** 을 뺀다. 기본 `--dry_run`, 고칠 땐 `--no_dry_run` (원본은 `.bak`).
+  - **왜**: Director 는 렌더 이미지를 보고 `focus_ids` 를 쓰는데 그게 `asset_index` 안에 있는지
+    **아무도 검사하지 않는다**. TRUMANS 86 chunk 실측에서 `sofa`(12) `coffee_table`(10)
+    `chair`(7) `table`(6) 등 없는 id 가 **59회** 섞였다 (28 shot, 전부 secondary —
+    primary 는 86/86 `zzy3`).
+  - 대부분은 무해하다. Cinematographer 의 `_find_object`
+    (`cinematographer_preview_worker.py:103-123`) 가 blend 오브젝트 이름 완전일치 / `<id>.` /
+    `<id>_` 접두사로만 찾고 못 찾으면 `continue` 한다. 432 오브젝트에 대조하니 51/59 는 해석
+    자체가 안 되고, 6/59 는 의도한 asset 으로 붙는다 (`book`→`book_left_01`,
+    `whiteboard`→`whiteboard_01`, `oven_door`→`oven_door_01`).
+  - **유해한 건 3개**: `window`(w19·w38) 과 `floor`(w39) — asset 이 아닌데 blend 에는 실제로
+    있어서 focus AABB 에 그대로 합쳐진다. 실측 (00add26c w01 blend):
+
+    | focus | extent | maxdim |
+    |---|---|---|
+    | `zzy3` | (0.84, 1.76, 2.22) | 2.22 m |
+    | `zzy3 + window` | (3.52, 1.76, 3.29) | 3.52 m (×1.6) |
+    | `zzy3 + floor` | (1.88, 6.61, 2.22) | **6.61 m (×3.0)** |
+
+    카메라가 그만큼 물러나 사람이 작아진다 — 실패가 아니라 **조용히 나빠지는** 종류라 로그에
+    안 남는다.
+  - 판정 규칙(`is_ghost`): asset_index 에 있으면 둔다 / blend 에서 해석 안 되면 둔다(무해) /
+    해석되는데 그 이름이 asset id 를 부분문자열로도 안 가지면 **뺀다**. 마지막 예외가 없으면
+    770개를 빼는데 그중 560개가 제대로 붙은 book/whiteboard/oven_door 다.
+  - 스칼라 `primary_focus_id` 는 **안 지운다** (비우면 하류가 primary 없이 돈다). 세어서
+    요약표에 `!! 스칼라 primary` 로 찍고 사람에게 넘긴다 — 86 chunk 실측에서는 0건.
+  - 적용 결과: `trumans_c49_w{19,38,39}` 의 4파일씩 총 **12파일**, `window` 140 + `floor` 70 =
+    **210개** 제거. 키는 `focus_ids` / `secondary_focus_ids` / `start_focus_ids` /
+    `contract_focus_ids` 4종에 걸쳐 있다 (`blocking_plans_v1` / `contract_blocking_plans_v1` /
+    `director_handoff_v1` / `shot_contracts_v1`).
+- **`CinemaTraj/scripts/trumans_to_lbm_demo.py --chunk_mode slide`** (기본 `window` = 기존과
+  바이트 동일) — 창 경계를 무시하고 영상 전체를 `--chunk_frames 49` 창으로
+  `--chunk_stride 24` 씩 훑어 고정 길이 chunk 를 만든다. 새 함수 `build_chunks()` /
+  `chunk_narrative()` / `strip_subject()` / `rewrite_subject()`.
+  - **왜 필요했나 (실측, `2023-01-17@00-55-00`)**: LBM-Lite 는 클립 길이가 **49프레임 고정**
+    (`lbm/presets.py:51 NUM_FRAMES = 49`, 하류 emit 도 21-pose 고정) 인데 VLM action tagging 이
+    낸 창 37개의 길이는 min 17 / med 43 / max 233 이라 **21개가 49를 못 채운다**. 창 경계 안에서만
+    자르면 클립 24개만 남고 창 21개(그중 action 14개, 오븐 여닫는 w21/w23 포함)가 통째로 빠진다.
+  - chunk 서술 조립: 겹치는 창들을 **시간순**으로 잇되, 겹침이 가장 큰 창만
+    `shot_description`(위치·자세 포함) 을 쓰고 나머지는 `action`(행위만) 을 쓴다. 둘 다
+    `shot_description` 으로 이으면 같은 행동이 두 번 묘사된다 — c02 가 "picks up a book" 을 두
+    절에 걸쳐 반복해 책을 두 번 집는 것처럼 읽혔다. 서술 길이 중앙값 216 → **164자**.
+  - `--chunk_min_overlap 8`: chunk 에 8프레임 미만 걸치는 창은 서술에서 뺀다 (전 chunk 통틀어
+    21회). 화면에 거의 안 나오는 행동이 카메라 focus 를 끌어가는 것을 막는다.
+  - 마지막 chunk 는 잘라내지 않고 **당겨서** `end == total-1` 로 맞춘다 (49프레임보다 짧으면
+    LBM-Lite 가 못 먹는다).
+  - 실측: 2077프레임 → **chunk 86개**, chunk 당 창 min 1 / med 2 / max 3, 창 커버리지
+    **37/37**(빠진 창 0), 구성 gap-only 36 · action+gap 36 · action-only 14,
+    서로 다른 서술 62/86.
+- **`CinemaTraj/scripts/trumans_to_lbm_demo.py --narrative_subject`** (기본 off) — VLM 서술의
+  **주어만** `--subject_phrase` 로 갈아끼운다.
+  - **왜**: LBM 의 shot focus 는 asset alias 문자열 점수로 정해지는데 캐릭터 alias 는
+    description 토큰 중 **len > 3** 만 남는다 (`director_stage.asset_alias_tokens:761-765`).
+    인물 접지를 켠 VLM 서술은 "The man ..." 으로 시작하는데 `man` 은 세 글자라 **alias 가 될 수
+    없다** — 사람이 alias 를 하나도 못 맞히고 소품이 focus 를 가져간다 (Task #88 의 D2/D3 재발).
+    나머지 대명사(he/his)는 점수에 안 쓰이므로 그대로 둔다.
 - **`CinemaTraj/scripts/trumans_vlm_action_tag.py --include_gaps`** (기본 `--no_include_gaps` =
   기존과 바이트 동일) — `Actions/<seq>.txt` **밖** 구간까지 창으로 만들어 태깅한다. 새 함수
   `build_windows()` 가 action 창 사이의 빈 구간을 `--gap_min_frames 15` 이상일 때만 취하고
@@ -128,6 +226,19 @@
     `SINGLE_SCENE_FALLBACK=1`, `--camera-quality quality`)과 되돌릴 수 있는지 표로 기록.
 
 ### Fixed
+- **`CinemaTraj/scripts/trumans_to_lbm_demo.py --out` 을 `path.abspath()` 로 못 박았다** —
+  상대경로로 넘기면 생성된 demo root 가 **조용히 빗나간다**.
+  - 증상: `--out out/lbm_demos_c49` 로 만든 `_window.json` 의 `env.BLENDER_USER_SCRIPTS` 와
+    `*__run_windows.sh` 의 `--demo-root` / `export BLENDER_USER_SCRIPTS` 가 전부 상대경로로 찍혔다.
+  - 원인: LBM 은 `Path(args.demo_root).resolve()` (`Engine/run_full_pipeline.py:226`) 를 자기
+    cwd(`Look-Before-Move/`) 기준으로 푼다. `--demo-root` 는 없는 경로라 바로 죽지만,
+    `BLENDER_USER_SCRIPTS` 는 **에러 없이** 안 걸려서 frame shift 훅이 붙지 않고 창 전체가
+    프레임 1부터 렌더된다 — 실패 신호가 아예 안 난다.
+  - 이미 만든 파일 87개는 재실행(9분) 대신 `sed -i` in-place 치환으로 고치고 검증했다.
+- **`CinemaTraj/scripts/trumans_to_lbm_demo.py` narrative 로딩에 `action_index is not None`
+  필터 추가** — `--include_gaps` 로 만든 `_full*` JSON 은 gap 창의 `action_index` 가 `null` 이라
+  기존 `{int(e["action_index"]): e for e in ...}` 가 `TypeError` 로 터진다. action-only JSON 에
+  대해서는 동작이 바뀌지 않는다.
 - **`CinemaTraj/lbm/vlm.py` `chat_json(echo_previous=..., repair_hint=...)`** — 재질의가 **통째로
   무효**였던 걸 고쳤다. 기본값 `echo_previous=True` 는 기존 동작 그대로라 `loop.py` 는 안 바뀐다.
   - 증상: TRUMANS 37창 태깅에서 3창(w15/w18/w33)이 4턴 내내 `forbidden filming vocabulary:

@@ -73,6 +73,36 @@
     공간 디테일만 얻을 거면 켜고, 두 arm 을 독립 신호로 쓸 거면 `--scene_objects
     --object_motion` 만 켜는 게 맞다 (유령 물체 6창은 이 둘만으로도 잡히는지는 미측정 —
     둘 다 시뮬레이션 GT 라 rule 텍스트를 안 본다).
+- **`CinemaTraj/scripts/trumans_vlm_action_tag.py` 인물 접지** — `--person_probe`(시퀀스당 VLM
+  1턴 추가) / `--person man|woman|person`(수동 override, probe 를 건너뛴다). 둘 다 기본 off.
+  - **왜**: 창마다 대명사가 제멋대로였다. 접지 3종 실행 37창 실측 — `their/they` 20창,
+    **`his/he` 2창**(w15·w16), `she/her` 0창, 나머지는 대명사 없이 "The person". 같은 시퀀스
+    같은 사람인데 두 창만 남성 대명사다. 프롬프트가 성별을 안 주니 **창마다 따로 추측**한다.
+  - **GT 는 없다** (2026-08-25 확인). `smplx_result/<seq>_smplx_results.pkl` 에 `gender` 키가
+    있긴 한데 **569개 전량이 빈 문자열**이고 `betas` 도 `(0,)` 로 비어 있다. 루트 `betas.npy` 는
+    코퍼스 전체에 body shape 5종뿐이고 성별 라벨이 아니다. `trumans_utils` 가 SMPL-X **male**
+    메시로 렌더하긴 하지만(`joints_to_smplx.py:34`, `load_smplx_animatioin_clear.py:186`)
+    그게 우리가 쓰는 `video_render` 를 만든 경로라는 보장이 없다.
+  - 그래서 **시퀀스당 한 번만** 묻고 그 답을 전 창에 못 박는다. 창마다 묻는 것보다 정확해서가
+    아니라 **일관되기 때문**이다 — 틀려도 37창이 같이 틀려야 하류에서 한 번에 고칠 수 있다.
+  - probe 프레임 선택에 `smplx_result_in_cam` 의 `transl[:,2]`(카메라 좌표 z)를 쓴다. |z| 가
+    작을수록 사람이 크게 찍힌다. |z| < 0.8 m 는 버린다 — 실측 18프레임이 여기 걸리는데 몸
+    일부만 화면을 채운다. 서로 100프레임 이상 떨어뜨려 4장(같은 그림 4장이 되는 걸 막는다).
+    이 sheet 만 타일 폭 2배 + gamma ≥ 1.6 으로 뽑는다(창 sheet 648 px 에서 사람은 100 px 남짓).
+    `smplx_result_in_cam` 이 없으면 균등 샘플로 내려간다.
+  - `{"gender":"man|woman|unclear","hair","clothing","evidence","confidence"}` 를 받고,
+    `unclear` 거나 `confidence < --person_min_conf`(기본 0.6)면 지금까지의 `they/their` 로 간다.
+  - `## PERSON` 블록으로 호칭·대명사·`shot_description` 첫 단어를 지정하고, **`validate()` 가
+    반대 성별 대명사를 반려**한다 (부탁만으로는 안 지켜진다). 단어 경계로 찾는다 — `he` 가
+    `the`/`she` 에, `his` 가 `this` 에 걸린다.
+  - 산출물에 `person{resolved,source,pronouns,probe,probe_frames,probe_sheet,min_confidence}`
+    를 싣고 접미사에 `p` 를 붙인다(`_full_gp`). probe 원답과 실제 적용값을 따로 남기는 이유는
+    confidence 임계 미만일 때 둘이 갈리기 때문이다.
+  - **실측(`2023-01-17@00-55-00`)**: probe → `man` conf 0.95 ("short brown hair, blue and
+    white hooded vest, blue jeans"). 육안 확인 — f1878 타일에 수염·짧은 머리가 보인다.
+    **probe 가 맞다.** 결과: he/his **34창**, she/her 0창, they/their 0창,
+    `shot_description` 이 `The man` 으로 시작 **37/37**. fallback 0, repairs 4 → 6, 62.1 →
+    68.9 s (probe 1턴 + 대명사 반려 재질의 2턴).
 - **`CinemaTraj/out/lbm_demos_wn/_camdump/eval_lbm_arm.sh`** — narrative arm 평가 4단
   (뱅크 매니페스트 → 프레이밍 감사 → Lite 대비 → rule arm 대비). 배선 함정 4개를 헤더 주석에
   전부 실측으로 적어뒀다 — 넷 다 조용히 죽거나 조용히 덮어쓴다:

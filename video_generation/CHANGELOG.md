@@ -30,6 +30,15 @@
     ③ `--follow_gains`(카메라 **위치**가 따라가나 = CameraBench tail/lead/side/aerial-tracking,
     기본 `0` = no-track). `auto` gain 의 두 가드(`node["moving"]`, `min_benefit`)와
     `--follow_smooths` 의 역할도 같이.
+  - **"이동·회전량은 어디서 제한되나 — 4층" 절** 추가. L1 `DEFAULT_SHAPE`(이동은 subject 거리
+    비율 `0.35r`, 회전은 절대 각도; `crane` tilt 는 인자가 아니라 `atan(dist/radius)` 유도값) →
+    L2 `sweep = min(sweep_deg, 0.8·obs_az_span)` (arc/orbit 만) → L3 `fit_tau` 이분법 →
+    L4 사후 게이트(G1~G6 + `approach_profile`, 크기를 줄이는 게 아니라 변이를 버린다).
+    L3 를 preset 6종 × τ 2단으로 실측해 표로: **같은 τ 예산이면 이동량은 primitive 무관하게
+    같고(≈τ·z_med) 회전량만 다르다** (τ0.10 에서 `orbit_left_arc` 9.14° / `rise_reveal` 9.04° /
+    `push_in_arc` 7.73° / `truck`·`dolly` 0°). `pan` 계열은 이동 0 이라 L3 가 아예 안 걸리고
+    항상 `s=max_scale=4.0` → 80° 고정이라는 것과, `true_orbit` 은 순수 나선이라 sweep 손잡이가
+    상쇄돼 안 먹는다는 것(sweep 45 vs 135 둘 다 53.5°)을 명시.
 - **`tools/recammaster/run_grid.py --builtin`** — manifest 대신 ReCamMaster **저자 preset
   10종**(`example_test_data/cameras/camera_extrinsics.json` 의 `cam01`..`cam10`)을 돈다.
   entry tag 는 `builtin_cam01_pan_right` … `builtin_cam10_arc_right`.

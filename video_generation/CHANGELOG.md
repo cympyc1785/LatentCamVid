@@ -39,6 +39,12 @@
     `push_in_arc` 7.73° / `truck`·`dolly` 0°). `pan` 계열은 이동 0 이라 L3 가 아예 안 걸리고
     항상 `s=max_scale=4.0` → 80° 고정이라는 것과, `true_orbit` 은 순수 나선이라 sweep 손잡이가
     상쇄돼 안 먹는다는 것(sweep 45 vs 135 둘 다 53.5°)을 명시.
+  - **"이동 방향은 어디서 정해지나 — `--traj_basis`" 절** 추가. `aim="look_at"` 은 고개만
+    돌리고 병진은 기준 회전의 +Z 라, 기본값 `traj_basis=source` 에서는 `straight_ease` 가
+    anchor 를 향하지 않는다. camel 5노드 실측(이동 방향과 anchor 방향 사이 각, `target_tau 0.2`):
+    source 0.47 / 4.97 / 7.61 / 10.68 / **12.94°**(half-hfov 14.4° 의 테두리) vs
+    subject **전부 0.00°**. 기준은 frame 0 에 한 번 고정되므로 "매 프레임 현재 subject 를 향해
+    전진" 모드는 없고, 계속 따라가게 하려면 `--follow_gains` 를 같이 켜야 한다는 것도 명시.
 - **`tools/recammaster/run_grid.py --builtin`** — manifest 대신 ReCamMaster **저자 preset
   10종**(`example_test_data/cameras/camera_extrinsics.json` 의 `cam01`..`cam10`)을 돈다.
   entry tag 는 `builtin_cam01_pan_right` … `builtin_cam10_arc_right`.

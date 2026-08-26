@@ -23,6 +23,13 @@
     핵심 함정 하나를 명시: `aim="look_at"` 이면 디코더가 매 프레임 조준을 다시 세워
     **겹친 회전이 버려진다**(`build_poses.py:12`) — `rise_reveal` 은 디코드 후 `pedestal_up` 과
     위치가 같고 조준만 다르다. 되살리려면 `--aim_keyframes ≥2 --keyframe_aim preset_rel`.
+  - **preset 별 look-at target ON/OFF 열**(ON 12종 / OFF 11종)과 **"조준 3축" 절** 추가.
+    `--trackings` 에 `none` 이 없다는 것과, 그래서 track/no-track 이 세 손잡이로 갈린다는 것을
+    명시: ① `aim`(preset 고정, 조준 자체의 ON/OFF) ② `--trackings`(조준점이 subject 를 얼마나
+    따라가나, `TRACKING_GAIN` world 0.0 / drift 0.6 / lock 1.0, `aim=traj` 면 무시)
+    ③ `--follow_gains`(카메라 **위치**가 따라가나 = CameraBench tail/lead/side/aerial-tracking,
+    기본 `0` = no-track). `auto` gain 의 두 가드(`node["moving"]`, `min_benefit`)와
+    `--follow_smooths` 의 역할도 같이.
 - **`tools/recammaster/run_grid.py --builtin`** — manifest 대신 ReCamMaster **저자 preset
   10종**(`example_test_data/cameras/camera_extrinsics.json` 의 `cam01`..`cam10`)을 돈다.
   entry tag 는 `builtin_cam01_pan_right` … `builtin_cam10_arc_right`.

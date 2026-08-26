@@ -110,6 +110,34 @@
       (프레임 3장 → 1장).
     - **대가**: `occluded`/`clearance` 를 한 프레임에서만 본다. anchor 에선 안 가렸는데 창
       중간에 기둥 뒤로 들어가는 후보를 못 거른다. 창 전체 보장이 필요하면 `window` 로 둘 것.
+  - **`--render_select crop|diverse`** — `--max_render` 로 자를 때 무엇을 남길지. `crop` 이
+    기존 동작(`crop_keep` 내림차순 → `center_offset`)이고 `diverse` 는 `(shot, camera_angle)`
+    셀 라운드로빈이다 (셀 **안에서는** 기존 기준 그대로). board.json 최상위에 `render_select` 를
+    남긴다 — 하류가 렌더분으로 태그 분포를 재면 이 값에 따라 답이 3배씩 달라진다.
+    - **`crop` 정렬은 shot/angle 을 구조적으로 편향시킨다.** `crop_keep` 은 "몸이 프레임에 얼마나
+      들어왔나"라서 **반경이 크면 다 들어오고 고도가 높으면 내려다봐서 더 들어온다** — 즉 멀고
+      높은 칸이 항상 1등이다. 가까운 r 1.1 칸은 잘려서 컷 아래로 밀린다.
+    - 실측 (blend `00add26c…`, 14 chunk 전량 = 겹치지 않는 stride 145, `start`+`anchor`,
+      lens 18, `--min_clearance 0.3 --min_crop_keep 0.5`, 통과 574/2688 → 렌더 12×14=168):
+
+      | 태그 | 통과 574 | `crop` 168 | `diverse` 168 |
+      |---|---|---|---|
+      | `full` | 20.7% | **60.7%** | 22.6% |
+      | `medium_full` | 33.8% | 36.9% | 35.1% |
+      | `medium` | 33.8% | **2.4%** | 31.5% |
+      | `medium_close` | 11.7% | **0.0% (0/67)** | 10.7% |
+      | `low_angle` | 5.2% | 1.2% | 8.9% |
+      | `slight_low` | 21.1% | **3.6%** | 23.8% |
+      | `eye_level` | 35.0% | 26.2% | 32.1% |
+      | `slight_high` | 30.8% | **50.6%** | 26.8% |
+      | `high_angle` | 7.8% | **18.5%** | 8.3% |
+
+      chunk 당 고유 `(shot, camera_angle)` 셀 수 **4.2 → 10.6** (12장 중). `facing` 은 두 방식
+      모두 통과분과 5%p 안쪽으로 붙는다 — 편향은 **거리·고도 축에만** 걸린다.
+    - 통과가 많은 chunk 일수록 심하다. c00(통과 52장)은 `crop` 에서 12장이 전부 `full` 이고
+      el45/r2.0 이 5장 — 방위각만 다른 사실상 같은 그림이었다. 통과가 적은 c08(16장)에서만
+      `medium`/`low_angle` 이 섞였는데, 그건 골라진 게 아니라 후보가 없어서 어쩔 수 없던 것.
+    - 렌더 비용은 동일하다 (14 chunk 전량 195.9 s vs 195.8 s).
 - **`CinemaTraj/scripts/board_contact_sheet.py`** — `board.json` + 렌더 → chunk 별 contact sheet.
   `lbm/overlay.py` 의 `contact_sheet`/`label_tile` 재사용. `--sort_by crop|shot|facing`,
   기본은 crop_keep 오름차순 — 게이트 임계를 숫자로 주장하지 말고 **보고** 정하기 위한 배치다.

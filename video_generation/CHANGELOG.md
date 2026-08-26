@@ -7,6 +7,14 @@
 ## [Unreleased]
 
 ### Fixed
+- **`CinemaTraj/scripts/vista4d_bank_to_dl3dv.py` — 사다리 붕괴 중복 변이를 걸러낸다
+  (2026-08-27).** hole 사다리 4단은 게이트(obb/ground/approach/elev/shape/collision)가 물리면
+  같은 knob 에서 멈춰 **4단이 같은 궤적**이 된다. k6 뱅크 47편 실측에서 15624 변이 중
+  **7804(50%)** 가 중복이었고 그중 99.4% 는 pose 배열이 비트 단위로 동일했다 (나머지도 위치 차
+  ≤ 0.025 u). 그대로 내보내면 학습이 같은 (pose, text) 쌍을 두 번 보고, 게이트가 잘 물리는 좁은
+  씬이 그만큼 과대표집된다. 판정은 `path_len` 같은 대리값이 아니라 **pose 배열 자체**로 해서
+  임계값을 없앴고, 남기는 건 사다리 아랫단이다. 요약표에 `dup` 열과 총계를 찍어 개수가 조용히
+  줄지 않게 했다. `--no_dedup` 으로 예전처럼 전량 내보낸다.
 - **`CinemaTraj/scripts/trumans_lite_bank.py` — 열거 실패 recording 을 건너뛴다 (2026-08-27).**
   `list_actions` 는 recording 당 Blender 를 여러 번 띄워 63편이면 ~1시간인데, `assert` 하나가
   터지면 그때까지의 열거를 통째로 버리고 뱅크가 **0편**으로 끝났다 (`a2e8ba09` 가

@@ -7,6 +7,24 @@
 ## [Unreleased]
 
 ### Added
+- **`tools/recammaster/run_grid.py --builtin`** — manifest 대신 ReCamMaster **저자 preset
+  10종**(`example_test_data/cameras/camera_extrinsics.json` 의 `cam01`..`cam10`)을 돈다.
+  entry tag 는 `builtin_cam01_pan_right` … `builtin_cam10_arc_right`.
+  - 카메라 JSON 은 저자 것 하나를 10 entry 가 공유하고 **무엇을 쓸지는 `--cam_type` 이**
+    고른다. 그래서 하드코딩이던 `'--cam_type', '1'` 을 모듈 전역 `RCM_CAM_TYPE` 로 빼고,
+    `main()` 이 entry 마다 builder **호출 직전에** 덮어쓴다. `--builtin` 없이 쓰면 값이
+    계속 1 이라 기존 동작과 동일하다.
+  - `--model recammaster` 가 아니면 즉시 종료한다 — preset 을 고르는 손잡이가 그 러너에만 있다.
+- **`tools/recammaster/make_81f_source.py`** — 49프레임 소스를 **최근접 프레임 반복**으로 81
+  프레임으로 늘린다. `inference_recammaster.py:127` 이 `assert num_frames == 81` 이고 그 앞
+  `load_frames_using_imageio` 는 짧으면 조용히 `None` 을 돌려주는데(→ `is not a valid video`),
+  Vista4D `media/single/*.mp4` 는 전부 49프레임이라 그대로는 한 편도 못 돌린다.
+  - 보간(`minterpolate`)을 안 쓴다: warping artifact 가 **소스에** 섞이면 출력의 결함이 소스
+    탓인지 모델 탓인지 못 가른다. 대신 모션이 49/81 = **0.605배로 느려진다** — 프레임 반복
+    분포와 index map 을 `<out>_stretch.json` 에 남긴다 (snowboard: 1회 17장 / 2회 32장).
+- **`run_grid.py` 소스 `snowboard81`** — 위로 늘린 Vista4D snowboard. stem 을 `snowboard` 로
+  안 지은 건 49프레임 원본과 섞이면 결과가 0.605배 느린 소스로 만든 것인지 안 보이기 때문.
+  캡션은 `results/20260824_snowboard_2x4/meta_2x4.csv`(DAVIS 유래) 그대로.
 - **`CinemaTraj/scripts/trumans_first_pose_board.py`** — TRUMANS `.blend` 위에서 chunk 마다
   first-pose 후보 격자를 돌리는 headless Blender 워커. **VLM 없이** 게이트(가림 / clearance /
   씬 AABB·바닥 / 프레이밍 / 근접 하한)만 걸고 통과분의 카메라 파라미터 + 렌더 PNG 를

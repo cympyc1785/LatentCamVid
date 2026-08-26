@@ -33,6 +33,23 @@
     `motion_speed_policy` 는 `speed_limited: false` 라 **이 경로는 거기 안 찍힌다**.
     camdump 는 최종 plan 과 frame 1/25/49 전부 `Δloc 0.0000 / Δang 0.000°` 로 일치 —
     렌더는 정직하고 갈아치운 것은 plan 단계다.
+  - **`--ladder` 모드 추가** — preset 8종 대신 **같은 원호를 크기만** 0.23→2.0 m 로 올린 8칸 +
+    preset 경로에서 `end_transform` 만 ×8 로 민 대조군 1칸. 이동량 천장을 직접 잰다.
+    `preset_render_report.py` 에 `req_m`/`cap_m`/`guard` 열을 붙여 요청 대비 실제를 나란히 낸다.
+  - **실측 — 실효 상한은 1.05 m (= cap 1.4 × guard 0.75)**: 요청 0.23/0.4/0.6/0.8/1.0/1.2/1.4 m 가
+    전부 **정확히 0.75배**(0.1725/0.300/0.450/0.600/0.750/0.900/1.050)로 나왔다. 요청 2.0 m 는
+    먼저 travel limit 1.4 로 잘리고 다시 0.75 가 곱해져 **1.4 m 요청과 같은 1.050 m** 로 수렴한다.
+    가드는 크기와 무관하게 **최소 칸(0.23 m)에도 똑같이 0.75 로 걸렸다** — 즉 이 가드는 "너무 크다"가
+    아니라 우리 orbit keyframe 의 조준 자체를 실패로 본다. preset 경로 arm 은 9개 중 한 번도 안 걸렸다.
+  - **preset 경로 대조군**: `straight_ease` + `end_transform ×8`(요청 1.851 m)은 가드 없이
+    travel limit 0.95 에 정확히 물려 net **0.9500 m**. 회전 35.47°, 기준 대비 픽셀 `mean|Δ|`
+    35.4/255 로 사다리 전 칸보다 화면이 크게 바뀐다.
+  - **정리 — 이동량을 정하는 것 3개**: ① 크기 입력은 `end_transform.location`(preset 경로) 또는
+    `trajectory_plan.keyframes`(직접 경로) ② `_trajectory_travel_limit:304` 의 **preset 이름별 상한**
+    (pan/static 0.0, pedestal 0.35, reveal 0.42, orbit 0.8, s_curve/push/pull 0.85,
+    straight_ease 0.95, truck 1.05, 미등록 이름 1.4; closeup 이면 `min(limit, 0.25)`)
+    ③ 가시성 가드 0.75/0.5/0.35/0.2. **preset 이름은 늘리지 못하고 자르기만 한다.**
+    1.05 m 를 넘기려면 LBM 수정이 필요하다 (limit dict 의 기본값 1.4 또는 가드 사다리).
   - **실행에 필요한 env 2개** (원본 manifest 의 command 에는 안 적혀 있다):
     `LBM_SINGLE_SCENE_FALLBACK=1` (TRUMANS `.blend` 씬 이름이 `Scene` 이라 `_resolve_scene:67` 의
     `Scene_1_Shot_1` 후보에 안 걸린다 → 전 arm `scene_not_found_for_scene_1_shot_1`) 과

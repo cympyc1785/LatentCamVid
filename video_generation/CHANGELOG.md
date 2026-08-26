@@ -7,6 +7,174 @@
 ## [Unreleased]
 
 ### Added
+- **`CinemaTraj/scripts/preset_render_demo.py` + `preset_render_report.py`** — LBM trajectory
+  preset 이 **실제 렌더를 얼마나 바꾸는가**를 재는 통제 실험 한 쌍.
+  - **왜 통제 실험이 필요한가**: 기존 변종 렌더(`expand_preset_variants.py`)는 `--vary_end` 로
+    **끝점도 같이 갈랐다**. 클립이 달라 보여도 preset 때문인지 끝점 때문인지 못 가른다.
+    `preset_render_demo.py` 는 `start_transform`/`end_transform`/`focus`/`lens` 를 전 arm
+    공통으로 못박고 `trajectory_plan.preset_name` **하나만** 바꾼 8 arm 을 만든다.
+  - 9번째 arm 은 preset 대신 우리가 만든 **49개 keyframe** 을 `trajectory_plan.keyframes` 에
+    직접 싣는다 (`preset_name: "keyframed_external"` — `_trajectory_travel_limit` 이 모르는
+    이름에 상한 1.4 m 를 준다). LBM 수정 0줄.
+  - `preset_render_report.py` 는 camdump(`lbm_camera_dump_startup.py`)의 `matrix_world` 로
+    arm 별 net/path/회전과 기준 arm 대비 `Δloc_max`/`Δang_max`, 프레임 픽셀 `mean|Δ|` 를 낸다.
+    3×3 타일 영상(`imageio` + libx264)도 같이.
+  - **실측 (`trumans_c49_w01_f0000_0048` cam1, 49프레임, EEVEE 960×540)**: preset 8종의
+    net 변위 0.0000~0.2314 m — `pan_left`/`pan_right` 는 **정확히 0.0000**(travel limit 0.0),
+    `orbit_left_arc` 0.0260. 기준(`straight_ease`) 대비 `Δloc_max` 0.068~0.203 m,
+    픽셀 `mean|Δ|` 14.5~20.2 / 255. **preset 이 렌더를 바꾸긴 한다** — 다만 8종 전부가 서로
+    같은 크기(0.07~0.20 m)로만 갈리고, 이름이 뜻하는 모양과는 무관하다.
+    `build_trajectory_plan:248-249` 가 orbit 을 **±1.2°/±2.2°** 로 얹기 때문.
+  - **새 실측 — 가시성 가드가 우리 keyframe 을 갈아치운다**: 49 keyframe arm 은 keyframe
+    개수(49)와 rotation 은 살아남았지만 이동량이 **정확히 0.75배**로 줄었다
+    (입력 net 1.0076 → 렌더 0.7557 m). 범인은 travel limit 이 아니라
+    `blender_render_worker.py:1094` 의 `motion_scale` 사다리로,
+    `safety_report.visibility_guard_motion_scale = 0.75` 에만 남는다.
+    `motion_speed_policy` 는 `speed_limited: false` 라 **이 경로는 거기 안 찍힌다**.
+    camdump 는 최종 plan 과 frame 1/25/49 전부 `Δloc 0.0000 / Δang 0.000°` 로 일치 —
+    렌더는 정직하고 갈아치운 것은 plan 단계다.
+  - **실행에 필요한 env 2개** (원본 manifest 의 command 에는 안 적혀 있다):
+    `LBM_SINGLE_SCENE_FALLBACK=1` (TRUMANS `.blend` 씬 이름이 `Scene` 이라 `_resolve_scene:67` 의
+    `Scene_1_Shot_1` 후보에 안 걸린다 → 전 arm `scene_not_found_for_scene_1_shot_1`) 과
+    `PYTHONPATH=VideoEngineer` (worker 가 `video_runtime` 을 형제 모듈로 import).
+- **`CinemaTraj/scripts/repair_recon_poses.py`** — work dir 의 `poses_aNN.npz` 를 배포본
+  `cameras.npz` 에서 되돌린다. **기본은 읽기 전용**이고 `--apply` 를 붙여야 쓴다. 손상본은
+  지우지 않고 `poses_aNN.npz.overwritten` 으로 남기며, 백업이 이미 있으면 덮지 않는다
+  (두 번 돌려도 최초 원본이 살아남는다).
+  - **왜**: `trumans_lite_bank.py:208-210` 이 `--work` 를 `--video_suffix` 가 있을 때만 하위
+    `trumans_to_recon.py` 로 넘긴다. suffix 없이 다른 `--work` 를 주면 그 인자는 **조용히 무시되고**
+    하위가 제 기본값(`out/trumans_recon`)에 쓴다. 18 mm 렌즈 파일럿이 정확히 이 사고로 25 mm
+    work dir 의 `00add26c` a00 을 덮어썼다.
+  - **비교는 앵커를 벗기고 한다**: 배포본은 재앵커된 것(`frame0 = I`)이고 work 의 poses 는 재앵커
+    전 Blender world 라(`audit_lite_framing.py:222`) raw 끼리 비교하면 **전량이 어긋난 것처럼 보인다**.
+    `inv(work[0]) @ work` 로 벗겨서 비교해야 한다. 뱅크 130 클립 스캔 결과 **DRIFT 1 / ok 129**
+    (어긋난 편 0.759568, 나머지 전부 0.000000) — 피해는 1 클립에 갇혀 있었다.
+  - **앵커 재구성**: 배포본이 앵커를 이미 벗겨버려 거기엔 없다. 무사한 `manifest_aNN.json` 의
+    `candidate.position` + probe 에서 되짚은 `aim[0]` 으로 `look_at_c2w` 를 다시 세운다.
+    npz 의 `aim` 은 못 쓴다 — 손상 실행이 같이 덮었고 그 사이 `--aim_bias` 기본값이 0.0 → 0.20,
+    `anchor_origin` 기본이 `chest` → `obb_center` 로 바뀌었다. 그 `aim` 으로 앵커를 세우면
+    `obb_area` 가 2.8% 어긋난다 (0.4996 → 0.4857).
+  - **원본 aim 규약을 역산**: 온전한 클립 a01~a05 에서 `aim` 을 0.0000 으로 재현하는 조합은
+    `chest`(=`body_points[0]`) / `smooth_window 11` / `aim_bias 0.0` 뿐이다
+    (`--aim_base` / `--aim_smooth_window` / `--aim_bias` 로 노출). `human_track` 은 코드가 바뀌어도
+    비트 단위로 같아서(probe 재실행 diff `0.000e+00` 실측) 이 재구성이 정확하다 —
+    `look_at_c2w(재구성 aim[0])` 가 `work[0]` 을 **≤3.3e-16** 으로 재현한다.
+  - `--force` 는 앵커만 틀린 복구본을 다시 덮어쓰기 위한 것이다. 비교량 `delta` 는 **상대** pose 만
+    보므로 앵커가 틀려도 `ok` 로 나온다.
+  - **검증**: 고친 앵커로 감사를 다시 돌리면 뱅크 저장 행과 **비트 단위로 일치**한다
+    (`framing 0.9636 / crop 0.8119 / occl 0.9636 / obb_area 0.4996`). 대조군으로 손 안 댄
+    a01·a02 를 재감사해 저장 행이 그대로 재현되는 것도 확인했다 (감사가 결정론적이라는 근거).
+
+- **TRUMANS Lite 뱅크에 `--lens` passthrough** (`CinemaTraj/scripts/trumans_lite_bank.py`)
+  — `clip_flags()` 가 `trumans_to_recon.py --lens` 로 넘긴다. **기본 25.0 은 기존 뱅크와 동일**이라
+  값을 안 주면 기존 경로가 그대로 돈다.
+  - **왜**: 기존 뱅크 130 클립의 framing 이 깨져 있다 — `person_fill_v`(사람 키/프레임 높이)
+    p50 1.119, **96 클립 중 62 편이 >1.0 = 사람이 잘린다**. `crop_mean` p50 0.786,
+    95 편 중 82 편이 <0.9.
+  - **원인은 반경**: 반경 분포가 `{1.0:2, 1.5:87, 2.2:25, 3.0:10, 4.0:6}` = **68.5% 가 1.5 m**.
+    `--radius_strata`(기본 on)가 채택률을 76% → 68.5% 로 낮췄을 뿐 못 고쳤다. 격자 통과율이
+    반경에 따라 급락하기 때문이다 (1.5 m 50.3% / 2.2 m 23.2% / 3.0 m 8.4% / 4.0 m 2.3%).
+  - **그런데 반경은 손잡이가 아니다**: 통과율은 clearance 가 정한 물리적 한계이고, 반경을 밀면
+    가림이 같이 죽는다 — `occl_keep` p50 1.5 m 0.983 / 2.2 m 0.913 / 3.0 m 0.892 / **4.0 m 0.625**.
+  - **렌즈는 clearance 를 안 건드린다**. `crop_keep` 은 OBB 코너 투영 + 이미지 클리핑뿐이라
+    순수 기하라서, K 의 fx·fy 만 스케일해 **렌더 없이** 130 클립 전량을 실측했다:
+
+    | lens | crop p50 | crop<0.9 | fill p50 | fill>1.0 | OBB 면적비 p50 |
+    |---|---|---|---|---|---|
+    | 25 mm (현재) | 0.777 | 110/130 | 1.339 | 108/130 | 0.478 |
+    | 22 mm | 0.840 | 84/130 | 1.179 | 96/130 | 0.370 |
+    | 20 mm | 0.884 | 71/130 | 1.071 | 85/130 | 0.306 |
+    | **18 mm** | **0.932** | **46/130** | **0.964** | **58/130** | **0.248** |
+    | 16 mm | 0.976 | 30/130 | 0.857 | 34/130 | 0.196 |
+    | 14 mm | 0.998 | 22/130 | 0.750 | 21/130 | 0.150 |
+
+    지배적인 r=1.5 버킷(87 편)의 `crop_keep` p50 이 25mm 0.750 → 18mm 0.911 → 16mm 0.956.
+  - **아직 안 잰 것**: `occl_keep` 은 렌더된 depth 가 필요해서(25 mm 화각 밖은 렌더가 없다) 이
+    스윕으로 못 센다. 화각이 넓어지면 전에 잘려 있던 다리·팔이 프레임에 들어오는데 그 부분이
+    가구에 가려질 수 있다. 고른 렌즈로 부분집합을 **실제 재렌더**해서 확인해야 한다.
+
+- **LBM Cinematographer 후보 방위 스윕** (`Look-Before-Move/Cinematographer/cinematographer_quality_worker.py`)
+  — 환경변수 `LBM_CAND_AZIMUTH_SWEEP=1` 로만 켜지고, **끄면 기존 경로가 그대로 돈다**.
+  - **왜**: 기본 후보 격자는 방위가 한 곳에 몰려 있다. `direction_seeds` (`generate_candidates`)
+    는 8방향 × **반경 1개 × 높이 1개** = 8개뿐이고, `preset_transforms` 의 Monte Carlo 50개는
+    반경(0.5~2.5배)·고도(−0.3~0.6)·lens 를 훑지만 **방위가 `requested_direction(camera)` 하나로
+    고정**돼 있다. 즉 depth-0 seed 약 58개 중 50개가 Director 가 요청한 단일 방위 위에 놓인다.
+    확장 BFS 도 부모를 **전역 `final_score`** 로 골라 그 방위를 더 파고든다.
+  - **켜면 바뀌는 것**: ① `direction_seeds` 를 8방향 × `LBM_CAND_RADII` × `LBM_CAND_ELEVATIONS`
+    격자로 (기본 `0.7,1.0,1.6` × `0.0,0.35,0.8` = 8→72; `(1.0, 0.0)` 조합이 기존 seed 와 동일 pose 라
+    격자가 기존을 포함한다) ② MC seed 의 방위를 8방향에 고르게 분배 (개수 `LBM_CAND_MC_SAMPLES`
+    기본 50 그대로 — 렌더 비용 증가 없음) ③ 확장 BFS 부모를 방위별 round-robin 으로 선택
+    (부모 개수 동일) ④ MC 샘플러에 `LBM_CAND_SEED` (기본 0) 을 박는다.
+    `LBM_CAND_DIRECTION_GATE=soft` 는 별도 플래그로, 요청 방위와 그 이웃만 통과시키는 하드 게이트
+    (`candidate_eligible` + `score_candidate` 의 0.05 상한)를 빼고 점수항(가중치 0.04)만 남긴다.
+  - **원래 후보 풀이 실행마다 달랐다** (`preset_transforms` 가 모듈 전역 `random` 을 시드 없이 사용).
+    w09 chunk 를 플래그 없이 5회 반복한 실측 — 같은 입력, 같은 코드:
+
+    | 실행 | 카메라 | raw | eligible | retained | 최고 final |
+    |---|---|---|---|---|---|
+    | 전량실행 원본 | **0** | 1184 | 0 | 0 | 0.000 |
+    | 반복 2 | 1 | 1204 | 310 | 20 | 0.468 |
+    | 반복 3 | 1 | 1200 | 302 | 12 | 0.474 |
+    | 반복 4 | 1 | 1193 | 393 | 20 | 0.662 |
+    | 반복 5 | **0** | 1194 | 0 | 0 | 0.000 |
+
+    eligible 이 0 아니면 300+ 로 갈리는 **양봉 분포**다. depth-0 seed 는 전부 벽에 막혀 있고,
+    MC 50 draw 중 하나가 우연히 뚫린 자리에 떨어지면 그 하나에서 16연산 × 5 depth 확장이
+    수백 개를 낳는다. 안 떨어지면 1190개가 통째로 기각된다. 앞서 "37 chunk 중 12개(32%)가
+    카메라 0대"로 기록한 수치는 **그 chunk 들의 성질이 아니라 draw 1회의 결과**다.
+  - 스윕(시드 고정)은 3회 반복 모두 동일했다 — `raw 1329 / eligible 32 / retained 9 /
+    최고 final 0.584`, 선택 후보까지 같음. `soft` 게이트는 w09 에서 차이가 없었다
+    (선택된 `front_right` 가 요청 방위의 이웃이라 하드 게이트에 애초에 안 걸린다).
+  - **비용과 대가**: 실행 시간 61 s → 63 s (chunk 당), raw 후보 ~1190 → ~1330 (+12%).
+    다만 방위를 넓히면 한 방위당 확장 깊이가 얕아져 **eligible/retained 는 줄어든다**
+    (w09 300+/20 → 32/9, w01 564/20 → 219/20). w01 은 최고 final 이 0.678 → 0.657 로 소폭 하락.
+    전 chunk 수율 분포는 측정 중.
+- **`CinemaTraj/scripts/expand_preset_variants.py`** — LBM Cinematographer 카메라 1대를
+  **원본 + 변형 N대**로 불려 chunk 당 여러 궤적이 나오게 한다. 기본 `--dry_run`, 고칠 땐
+  `--no_dry_run` (원본은 `.variants.bak`). `preset_variant_source` 로 재확장을 막아 멱등.
+  **`retime_camera_handoff.py` 다음에** 돌린다 — 복제본이 원본의 `target_frame_count` 를 물려받는다.
+  - **왜**: Director 가 chunk 당 `camera_count: 1` 을 내고 Cinematographer 의 VLM 이 preset 하나만
+    고른다. 궤적 데이터셋으로 쓰려면 같은 chunk 에서 여러 궤적이 나와야 한다.
+  - **어떻게 LBM 자신의 궤적 합성기를 다시 부르나**: `_build_plan_from_explicit_trajectory`
+    (`VideoEngineer/blender_render_worker.py:922-`) 는 `trajectory_plan.keyframes` 가 **비어 있으면**
+    `build_trajectory_plan(..., preset_override=preset_name)` 을 불러 preset 모양대로 keyframe 을
+    직접 만든다. 복제본에 `{"preset_name": <preset>, "keyframes": []}` 만 심으면 궤적 계산은 LBM
+    코드가 한다. 원본 카메라는 VLM keyframe 을 그대로 들고 있어 손대지 않는다.
+  - **preset pool 이 17개가 아니라 8개인 이유**: `video_runtime.PRESET_NAMES` 는 17개인데
+    `build_trajectory_plan` (`video_runtime.py:244-296`) 이 이름을 실제로 분기하는 건 orbit 2 /
+    pedestal 2 (`rise_reveal`·`drop_reveal` 은 같은 branch) / pan 2 / `s_curve` / static 3 뿐이다.
+    `straight_ease` `push_in_arc` `pull_out_arc` `truck_left` `truck_right` **5개는 branch 가 없어**
+    전부 기본 lerp 로 떨어진다 — 이름만 다르고 궤적이 같다. `_trajectory_travel_limit`
+    (`blender_render_worker.py:310-323`) 이 preset 별로 0.35~1.05 로 다르지만 `original_travel >
+    limit` 일 때만 깎는데 실측 travel 이 median 0.223 m 라 대부분 안 걸린다. static 3종은 기본
+    제외(`--include_static`) — 이름만 보고 뽑으면 조용히 정지 클립이 섞인다.
+  - **`--vary_end` (기본 on) — preset 만 바꾸면 변형끼리 궤적이 거의 같다.** preset 섭동이 모든
+    변형이 공유하는 `start→end` lerp 보다 한 자릿수 작다 (25 chunk 실측):
+
+    | 요소 | 크기 |
+    |---|---|
+    | 공유 lerp travel | median **0.223 m** (max 0.805) |
+    | `orbit_*_arc` | mid **1.2°**, end **2.2°** |
+    | `pedestal_up/down` | `_damped_extent(focus_extent.z, 0.05, 0.035, 0.1)` = **3.5~10 cm** |
+    | `s_curve` 횡방향 | `scale 0.015, min 0.025, max 0.05` = **2.5~5 cm** |
+    | `pan_left/right` | **위치 고정** (`_smooth_executable_keyframes:328-366`), 회전만 |
+
+    진짜 손잡이는 끝점이고 그건 이미 handoff 안에 있다 — `top_candidates` 는 LBM 자신의
+    가시성·프레이밍 스코어를 통과한 pose 10~20개로, start 에서 median 0.44 m / 최대 0.90 m 떨어져
+    있고 방향 최대각 median 133°. `end_transform` 은 `blender_render_worker.py:274` 가 그대로 읽어
+    `build_trajectory_plan` 에 넘기므로 JSON 만 고치면 된다. **start pose 는 전 변형 공통으로
+    고정**한다 — 같은 초기 조건에서 다른 움직임이 나와야 궤적 표본으로 비교가 된다.
+    `STORYBLENDER_TRAJECTORY_SCALE` 은 `cinematographer_stage.py:52` 에서만 읽혀 Stage 3 에 안 먹는다.
+  - **끝점 후보를 같은 `lens_mm` 으로 제한**한다: worker 는 두 keyframe 에 같은 lens 를 쓴다
+    (`:897-898`). 45mm 로 스코어된 위치에 24mm 를 얹으면 피사체가 작아져 가시성 검사에 걸리고,
+    worker 가 `motion_scale` 0.75/0.5/0.35/0.2 사다리로 구제하면 (`:1076-1120`) 조용히 정지 클립이
+    된다. 같은 lens 후보가 모자란 chunk(망원 45~77mm, 25개 중 6개)는 다른 lens 로 채우고
+    `end_variant_tier: "relaxed"`, 그것도 없으면 `"authored"` 로 표시한다 — 요약표에 tier 별
+    개수가 찍히므로 어느 변형이 preset 모양만 다른지 바로 본다. start 에서 `--min_travel_m`(0.08)
+    이내인 후보는 뺀다 (그건 정지 궤적이다).
+  - `--no_vary_end` 로 preset 만 바꾸던 기존 동작을 그대로 쓸 수 있다.
+  - **Stage 3 는 `shots[].cameras` 만 읽는다** (`blender_render_worker.py:1208,1227`). 최상위
+    `cameras` 리스트도 같이 불리되 렌더에 반영되는 건 전자다.
 - **`CinemaTraj/scripts/retime_camera_handoff.py`** — LBM Cinematographer 의 `camera_handoff_v1.json`
   을 chunk 프레임 수(49)에 맞춰 다시 매긴다. 기본 `--dry_run`, 고칠 땐 `--no_dry_run` (원본은
   `.bak`). 멱등 — 여러 번 돌려도 결과가 같다.
@@ -226,6 +394,19 @@
     `SINGLE_SCENE_FALLBACK=1`, `--camera-quality quality`)과 되돌릴 수 있는지 표로 기록.
 
 ### Fixed
+- **`CinemaTraj/scripts/trumans_to_lbm_demo.py:341` — `KeyError: 'action'` 으로 recording 이
+  통째로 죽던 것**. 서술을 조립할 때 primary 아닌 window 는 `entry["action"]` 을 무조건
+  인덱싱했다. `action` 은 항상 있지 않다 — VLM 태거가 스키마 복구에 끝내 실패하면
+  `source:"fallback"` entry 를 쓰는데 거기엔 `shot_description` 만 들어간다.
+  - **범위**: 태그 JSON 53편 전량 스캔 결과 **88 / 1891 entry = 4.7%**, **53 시퀀스 중 34 편**에
+    퍼져 있다. Stage 0 전량 실행에서 `0ab03928` 이 이걸로 rc=1 로 죽었다.
+  - **고침**: `entry.get("action") or entry["shot_description"]` 으로 떨어뜨린다. 행위만이 아니라
+    위치까지 붙어 조금 장황하지만 서술이 빠지는 것보다 낫고, 뒤의 `strip_subject` 가 주어 중복을
+    정리한다. **`action` 이 있는 경우의 결과는 예전과 바이트 단위로 같다.**
+  - **안전성 확인**: `grep '\["action"\]'` 로 이 파일에 다른 무방비 사용이 없음을, 그리고 태그
+    JSON 1891 entry 중 `action`·`shot_description` **둘 다 없는 것이 0개**임을 확인했다
+    (폴백이 그 자체로 KeyError 를 낼 수 없다).
+
 - **`CinemaTraj/scripts/trumans_to_lbm_demo.py --out` 을 `path.abspath()` 로 못 박았다** —
   상대경로로 넘기면 생성된 demo root 가 **조용히 빗나간다**.
   - 증상: `--out out/lbm_demos_c49` 로 만든 `_window.json` 의 `env.BLENDER_USER_SCRIPTS` 와

@@ -38,6 +38,18 @@
     - 검증: 후보 43장의 `_l`/`_r` 을 리그 어깨 본(`CC_Base_{L,R}_Upperarm`)으로 만든 해부학적
       좌우와 대조해 **43/43 일치, flip 0**. 눈으로 본 판단은 두 번 다 틀렸다 — 부호 규약은
       렌더를 보지 말고 본 위치로 검증할 것.
+  - **촬영 각도** `eye_angle_deg`/`eye_angle_range_deg` → `camera_angle` ∈ {low_angle,
+    slight_low, eye_level, slight_high, high_angle, overhead}. 격자축 `elevation_deg` 의 재라벨이
+    **아니다** — 그건 subject AABB 중심(가슴께) 기준이고 이건 **눈높이** 기준이라, 같은
+    elevation 이어도 반경이 커지면 눈높이에 가까워진다. 실측으로 전 elevation 행이 밴드 2개에
+    걸친다 (el10: `slight_low`→`eye_level`, el25: `eye_level`→`slight_high`,
+    el45: `slight_high`→`high_angle`).
+    - 눈높이는 키 비례가 아니라 **눈 메시(`--eye_mesh CC_Base_Eye`) AABB 중심**을 직접 읽는다.
+      실측 eye/stature 가 0.843~0.907 로 **상수가 아니라서**(무릎 꿇기/보행에서 자세가 바뀐다)
+      통상 근사 0.94 는 6~12 cm 높게 나오고, r=1.5 m 에서 약 4.6° = 밴드 하나가 밀린다.
+      메시를 못 찾을 때만 0.94 근사로 떨어진다.
+    - 이 격자(elevation 10/25/45, 전부 subject 중심 위쪽)에서는 `low_angle`(< −25°)과
+      `overhead`(> 60°)가 **0장**이다. 올려다보는 샷을 원하면 음수 elevation 을 넣어야 한다.
 - **`CinemaTraj/scripts/board_contact_sheet.py`** — `board.json` + 렌더 → chunk 별 contact sheet.
   `lbm/overlay.py` 의 `contact_sheet`/`label_tile` 재사용. `--sort_by crop|shot|facing`,
   기본은 crop_keep 오름차순 — 게이트 임계를 숫자로 주장하지 말고 **보고** 정하기 위한 배치다.

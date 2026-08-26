@@ -17,6 +17,12 @@
   로 간다는 것), 그리고 preset 에 직교하는 뱅크 손잡이 8종(`--target_tau` `--speeds`
   `--trackings` `--look_at_biases` `--follow_gains` `--follow_smooths` `--aim_keyframes`
   `--traj_basis`)의 기본값.
+  - **primitive 겹침 기준 재분류**도 같이: ① 단일 축 13종 ② primitive 하나인데 그 안이 이미
+    회전+이동 묶음인 것 4종(`true_orbit`, `crane`) ③ `compose()` 로 2개 이상 **동시** 5종
+    (arc∘dolly 4종 + `orbit_left_pedestal_up`) ④ 시간축 이어붙임 1종(`s_curve`).
+    핵심 함정 하나를 명시: `aim="look_at"` 이면 디코더가 매 프레임 조준을 다시 세워
+    **겹친 회전이 버려진다**(`build_poses.py:12`) — `rise_reveal` 은 디코드 후 `pedestal_up` 과
+    위치가 같고 조준만 다르다. 되살리려면 `--aim_keyframes ≥2 --keyframe_aim preset_rel`.
 - **`tools/recammaster/run_grid.py --builtin`** — manifest 대신 ReCamMaster **저자 preset
   10종**(`example_test_data/cameras/camera_extrinsics.json` 의 `cam01`..`cam10`)을 돈다.
   entry tag 는 `builtin_cam01_pan_right` … `builtin_cam10_arc_right`.

@@ -459,6 +459,20 @@
   - 하단에 스톡 대비 실행 설정 4종(`MOVEMENT_VOCAB=extended`, `TRAJECTORY_SCALE=5`,
     `SINGLE_SCENE_FALLBACK=1`, `--camera-quality quality`)과 되돌릴 수 있는지 표로 기록.
 
+### Changed
+- **`CinemaTraj/scripts/trumans_first_pose_board.py` 반경 격자 기본값을 `d_ref` 배수 → 절대
+  미터로.** `--radii` 기본 `[1.1, 1.5, 2.0, 2.6]` m, `--radii_rel` 은 주면 그때만 상대 격자로
+  바뀌는 opt-in 이 됐다 (기본 `[]`). 분기만 뒤집었고 상대 경로는 그대로 살아있다.
+  - **왜**: Lite 에는 시작 카메라가 없어서 `d_ref` 배수로 잡을 기준 자체가 애매하다. 그리고
+    통과율 천장을 정하는 건 clearance/occlusion 인데 그건 미터 문제라 렌즈에 안 움직인다
+    (실측: lens 25/18/14 에서 `clearance` 365 / `occluded` 334 기각이 **동일**, 렌즈에 반응하는
+    건 `cropped`/`area` 뿐). 상대 격자의 존재 이유였던 "shot scale 의 뜻을 고정한다"는 이제
+    위의 `shot` 태그가 직접 하므로 반경으로 대리할 필요가 없다.
+  - `d_ref` 는 절대 격자에서도 계속 계산·기록하고 후보마다 `radius_rel` 로 실린다.
+  - 회귀 확인: 새 기본값으로 재실행한 board 가 기존 `--radii 1.1 1.5 2.0 2.6` 실행과 게이트·
+    기하·태그 필드 전부 일치 (chunk f51 33/144, f600 40/144, 차이는 `--no_render` 때문에 빠진
+    `cell_id`/`c2w_*`/`K`/`lens_mm` 5개 렌더 전용 필드뿐).
+
 ### Fixed
 - **`CinemaTraj/scripts/trumans_to_lbm_demo.py:341` — `KeyError: 'action'` 으로 recording 이
   통째로 죽던 것**. 서술을 조립할 때 primary 아닌 window 는 `entry["action"]` 을 무조건

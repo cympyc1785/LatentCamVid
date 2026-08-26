@@ -6,6 +6,14 @@
 
 ## [Unreleased]
 
+### Fixed
+- **`CinemaTraj/decode/build_poses.py` — keyframe roll assert 허용치를 도 단위에 맞췄다
+  (2026-08-27).** `roll_about()` 은 **도**를 돌려주는데 두 assert 의 허용치가 `1e-6` = 1.7e-8 rad
+  이라 `arctan2` 로는 도달 불가능한 정밀도였다. k6 뱅크 52편 중 `parkour` 가 잔차 **1.14e-6 deg**
+  로 죽었다 (4K 폭에서 지평선 0.00004 px). `ROLL_TOL_DEG = 1e-4` 상수를 두고 keyframe 분기와
+  `look_at` 분기가 공유한다. **포즈 값은 한 비트도 안 바뀌고 검사 임계만 바뀐다** — 눈에 보이는
+  roll(>=0.01 deg)은 여전히 전부 잡힌다. 상세는 `FIX.log` 2026-08-27 항목.
+
 ### Added
 - **`CinemaTraj/scripts/vista4d_bank_to_dl3dv.py` — Vista4D 뱅크 → latentcam_da3 레이아웃
   (2026-08-27).** 영상 1편 = scene, 뱅크 변이 1개 = segment. 이미지 디렉토리는 **영상당 하나**

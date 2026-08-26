@@ -19,12 +19,25 @@
     probe 5.1~5.2 s, 렌더 ~1.1 s/장.
 - **shot scale / facing 태깅** (게이트 아님, 후보마다 `board.json` 에):
   `height_frac`(화면 밖까지 포함한 투영 세로 / 화면 높이) → `shot` ∈ {extreme_wide … extreme_close},
-  `facing_deg`/`facing_range_deg` → `facing` ∈ {front, front_3q, profile, back_3q, back}.
-  요약표에 chunk 별 분포를 찍는다 — "40장 확보"가 실은 뒤통수 40장인 걸 숫자로 보기 위함
-  (실측: chunk f600 통과 40장이 back_3q 19 / back 15 / profile 6, **front 0**).
+  `facing_deg`/`facing_range_deg` → `facing` ∈ {front, front_3q, profile, back_3q, back} × 좌우
+  접미사 `_l`/`_r`. 요약표에 chunk 별 분포를 찍는다 — "40장 확보"가 실은 뒤통수 40장인 걸
+  숫자로 보기 위함 (실측: chunk f600 통과 40장이 back_3q_l 18 / back 15 / profile_l 5 /
+  profile_r 1 / back_3q_r 1, **front 0**).
   - 정면 축은 하드코딩하지 않고 `resolve_forward_axis` 가 recording 전체의 **보행 구간**에서
     속도 가중 투표로 푼다. 일치도가 `--facing_min_agreement`(0.35) 미만이면 `resolved:false` +
     전부 `unknown` 으로 두고 경고를 남긴다.
+  - **좌우 분리**: 사이각을 `acos` 크기(0~180)가 아니라 `atan2` 로 **부호까지**(-180~180) 받는다.
+    크기만 재면 왼쪽 옆모습과 오른쪽 옆모습이 똑같이 `profile` 로 뭉친다. `+` = 카메라가
+    subject 의 왼쪽. 새 필드 `facing_side_frac`(왼쪽이었던 프레임 비율).
+    - 부호는 **median 이 아니라 다수결**이다. 정후면 근처에서 프레임 값이 `+178`/`-178` 을
+      오가면 중앙값이 0(= 정면)으로 떨어진다. 그래서 크기는 `|각도|` median, 좌우는 부호
+      다수결로 따로 구해 합친다 (실측 f51 `back` 후보: deg 167~174 인데 side_frac 0.67).
+    - `front`/`back` 은 좌우가 정의되지 않아 접미사를 안 붙이고, 그 사이 밴드도 한쪽이
+      `--facing_min_side_frac`(0.70)을 못 넘으면 뗀다 — 창 안에서 사람이 카메라 앞을
+      가로지르면 좌우가 실제로 바뀐다 (실측 f51 `back_3q` 2장이 side_frac 0.67 로 접미사 없음).
+    - 검증: 후보 43장의 `_l`/`_r` 을 리그 어깨 본(`CC_Base_{L,R}_Upperarm`)으로 만든 해부학적
+      좌우와 대조해 **43/43 일치, flip 0**. 눈으로 본 판단은 두 번 다 틀렸다 — 부호 규약은
+      렌더를 보지 말고 본 위치로 검증할 것.
 - **`CinemaTraj/scripts/board_contact_sheet.py`** — `board.json` + 렌더 → chunk 별 contact sheet.
   `lbm/overlay.py` 의 `contact_sheet`/`label_tile` 재사용. `--sort_by crop|shot|facing`,
   기본은 crop_keep 오름차순 — 게이트 임계를 숫자로 주장하지 말고 **보고** 정하기 위한 배치다.

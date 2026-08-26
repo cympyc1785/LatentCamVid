@@ -138,6 +138,19 @@
       el45/r2.0 이 5장 — 방위각만 다른 사실상 같은 그림이었다. 통과가 적은 c08(16장)에서만
       `medium`/`low_angle` 이 섞였는데, 그건 골라진 게 아니라 후보가 없어서 어쩔 수 없던 것.
     - 렌더 비용은 동일하다 (14 chunk 전량 195.9 s vs 195.8 s).
+- **`CinemaTraj/scripts/run_board_sweep.py`** — `Recordings_blend/` 전량에 first-pose board 를
+  돌리는 드라이버. `<out>/<recording>/board.json` + `<out>/sweep.json`(편별 상태·시간·usable).
+  실패해도 안 죽고 stderr 꼬리만 모은다 (66편 중 1편 때문에 65편을 다시 돌리지 않도록),
+  `--skip_done` 으로 이어 돌린다.
+  - **디렉토리 나열이 사소하지 않다.** 72 항목 중 `- 副本` 5개는 중복본이고, `<id>/<id>.blend`
+    규칙을 안 지키는 게 3개 (`*_lph_ng` 접미사 2, `fancy/` 1), `a3fcee3e-…/` 는 빈 디렉토리다.
+    이름 규칙으로만 찾으면 **조용히 3편이 빠진다** → 디렉토리 안의 `.blend` 를 집는다. 남는 게 66편.
+- **`trumans_first_pose_board.py --chunk_stride N`** — `--chunk_starts` 대신 recording 전체를
+  N 간격으로 훑는다 (`--chunk_starts` 는 이제 선택). board.json 에 `chunk_stride` + `frame_range`
+  를 남긴다. 겹치지 않게 하려면 `(num_frames-1)*frame_step+1` (49×3 이면 145).
+  - 편마다 프레임 수가 달라서 start 목록을 밖에서 만들려면 **blend 를 한 번 더 열어야** 한다
+    (편당 ~4 s). 그래서 프레임 범위를 스크립트 안에서 읽는다. 파일럿 blend 에서
+    `--chunk_stride 145` 가 손으로 준 14개 start 와 usable 수까지 일치하는 것을 확인했다.
 - **`CinemaTraj/scripts/board_contact_sheet.py`** — `board.json` + 렌더 → chunk 별 contact sheet.
   `lbm/overlay.py` 의 `contact_sheet`/`label_tile` 재사용. `--sort_by crop|shot|facing`,
   기본은 crop_keep 오름차순 — 게이트 임계를 숫자로 주장하지 말고 **보고** 정하기 위한 배치다.

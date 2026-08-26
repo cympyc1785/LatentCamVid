@@ -7,6 +7,13 @@
 ## [Unreleased]
 
 ### Fixed
+- **`CinemaTraj/scripts/trumans_lite_bank.py` — 열거 실패 recording 을 건너뛴다 (2026-08-27).**
+  `list_actions` 는 recording 당 Blender 를 여러 번 띄워 63편이면 ~1시간인데, `assert` 하나가
+  터지면 그때까지의 열거를 통째로 버리고 뱅크가 **0편**으로 끝났다 (`a2e8ba09` 가
+  `pick_sequence` 에서 죽어 앞선 35편이 날아감). 이제 실패한 편만 빼고 계속하며 stdout `SKIP`
+  줄 + manifest `skipped_recordings` 에 사유를 남긴다. 전멸하면 (`jobs` 가 비면) 그때는 죽는다 —
+  조용히 0편을 만들지 않기 위해서. `--no_skip_bad_recordings` 로 예전 동작 복구.
+  최종 요약 줄에 `recording N/M` 과 스킵 건수를 같이 찍어 개수가 조용히 줄지 않게 했다.
 - **`CinemaTraj/decode/build_poses.py` — keyframe roll assert 허용치를 도 단위에 맞췄다
   (2026-08-27).** `roll_about()` 은 **도**를 돌려주는데 두 assert 의 허용치가 `1e-6` = 1.7e-8 rad
   이라 `arctan2` 로는 도달 불가능한 정밀도였다. k6 뱅크 52편 중 `parkour` 가 잔차 **1.14e-6 deg**

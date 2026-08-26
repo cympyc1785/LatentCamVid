@@ -7,6 +7,28 @@
 ## [Unreleased]
 
 ### Added
+- **`preset_render_demo.py --forward`** — `end_transform` 을 focus 방향으로 직접 놓는 push-in
+  모드(`directed_end` + `FORWARD_ARMS` 7 arm). `--ladder` 가 lateral 방향을 키운 것과 달리
+  **전진/후진/lateral 을 같은 크기로 대조**한다.
+  - **왜 필요했나**: `build_trajectory_plan`(`video_runtime.py:244-296`)의 if/elif 는
+    `orbit_*`/`pedestal_*`/`*_reveal`/`pan_*`/`s_curve`/`static_*` 만 다룬다.
+    **`straight_ease`/`push_in_arc`/`pull_out_arc`/`truck_left`/`truck_right` 5개는 분기가 없어**
+    `mid=lerp(start,end,0.5)` + `end=end_transform` 인 순수 직선 LERP 가 된다 — 방향이 100%
+    입력이고 preset 이름은 `_trajectory_travel_limit` 상한만 준다. 그래서 `--ladder` 의
+    `straight_ease ×8` arm 이 전진이 아니라 truck-right + pedestal-down 으로 나왔다
+    (forward 성분 32.8%, focus 거리 1.913→1.836).
+  - **실측 (7 arm, 49프레임, `trumans_pushin`)**: push_in_arc 요청 0.30/0.60/0.85 → 전부 그대로,
+    요청 1.20 → **0.850 (cap 정확히)**, `straight_ease` 0.95 → 0.950 (cap 정확히),
+    `pull_out_arc` −0.85 → 0.850. 가시성 가드는 **7 arm 전부 미발동**(`--ladder` 의 keyframe
+    arm 은 전부 0.75 가 걸렸던 것과 대조).
+  - **1.20→0.85 축소는 리포트에 흔적이 하나도 안 남는다** — `safety_report` 에
+    `motion_qc`/`trajectory_visibility_report` 만 있고 `motion_speed_policy` 자체가 부재.
+    F02(0.85)와 F03(1.20)의 plan 키프레임이 소수점 4자리까지 동일하다.
+  - **순수 dolly-in 인데 회전 17.98°** 가 나오고 그게 전부 전반부에 몰린다(f25→f49 Δ 0.0001 rad).
+    후보 자체 `start_transform.rotation_euler`(pitch 0.9435/yaw 1.9299) vs
+    `_look_at_euler(start, focus)`(0.7590/1.5902) 차이 — 알려진 스냅을 push-in 경로에서 독립 재현.
+  - 픽셀 `mean|Δ|` (F00 기준): push_in 0.60/0.85/1.20 → 11.3/16.0/16.0, straight_ease 0.95 → 17.5,
+    **pull_out −0.85 → 26.7 (최대)**, truck_right 0.85 → 19.2.
 - **`CinemaTraj/scripts/preset_render_demo.py` + `preset_render_report.py`** — LBM trajectory
   preset 이 **실제 렌더를 얼마나 바꾸는가**를 재는 통제 실험 한 쌍.
   - **왜 통제 실험이 필요한가**: 기존 변종 렌더(`expand_preset_variants.py`)는 `--vary_end` 로

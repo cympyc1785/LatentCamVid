@@ -7,6 +7,33 @@
 ## [Unreleased]
 
 ### Added
+- **`CinemaTraj/scripts/trumans_first_pose_board.py`** — TRUMANS `.blend` 위에서 chunk 마다
+  first-pose 후보 격자를 돌리는 headless Blender 워커. **VLM 없이** 게이트(가림 / clearance /
+  씬 AABB·바닥 / 프레이밍 / 근접 하한)만 걸고 통과분의 카메라 파라미터 + 렌더 PNG 를
+  `board.json` (`trumans_first_pose_board_v1`) 으로 저장한다.
+  - **왜 필요했나**: Lite 는 DA3 좌표계를 쓰는데 frame0 이 항등이라는 것만 알 뿐 그 프레임이
+    blender 씬 **어디에** 있는지는 모른다. LBM 처럼 chunk 별 first pose 샘플링이 먼저다.
+  - blend 로드가 ~4 s 라 `--chunk_starts` 로 여러 chunk 를 **한 번의 기동**에서 처리한다.
+  - `--max_render` 로 자를 때 `render_truncated` 를 기록한다 (조용한 상한 금지).
+  - 실측(lens 18 / step3 / r{1.1,1.5,2.0,2.6} / 144칸): chunk f51 33장, chunk f600 40장 통과.
+    probe 5.1~5.2 s, 렌더 ~1.1 s/장.
+- **shot scale / facing 태깅** (게이트 아님, 후보마다 `board.json` 에):
+  `height_frac`(화면 밖까지 포함한 투영 세로 / 화면 높이) → `shot` ∈ {extreme_wide … extreme_close},
+  `facing_deg`/`facing_range_deg` → `facing` ∈ {front, front_3q, profile, back_3q, back}.
+  요약표에 chunk 별 분포를 찍는다 — "40장 확보"가 실은 뒤통수 40장인 걸 숫자로 보기 위함
+  (실측: chunk f600 통과 40장이 back_3q 19 / back 15 / profile 6, **front 0**).
+  - 정면 축은 하드코딩하지 않고 `resolve_forward_axis` 가 recording 전체의 **보행 구간**에서
+    속도 가중 투표로 푼다. 일치도가 `--facing_min_agreement`(0.35) 미만이면 `resolved:false` +
+    전부 `unknown` 으로 두고 경고를 남긴다.
+- **`CinemaTraj/scripts/board_contact_sheet.py`** — `board.json` + 렌더 → chunk 별 contact sheet.
+  `lbm/overlay.py` 의 `contact_sheet`/`label_tile` 재사용. `--sort_by crop|shot|facing`,
+  기본은 crop_keep 오름차순 — 게이트 임계를 숫자로 주장하지 말고 **보고** 정하기 위한 배치다.
+  - 함정 2개를 주석으로 박아뒀다. ① **cv2 가 `sys.path` 를 새 리스트 객체로 갈아끼운다** —
+    `from sys import path` 로 미리 묶어두면 그 참조가 죽은 리스트라 `insert` 가 조용히 무시되고
+    `ModuleNotFoundError: No module named 'lbm'` 이 난다. `import sys` 로 받을 것.
+    ② TRUMANS 리그는 SMPL-X 가 아니라 Character Creator(`CC_Base_*`)고 **루트 본
+    `CC_Base_BoneRoot` 는 전 프레임 회전 항등 / 위치 `[0,0,-0.946]` 고정**이라 정면을 못 준다
+    (보행 일치도 0.09). Hip/Pelvis/Waist/Spine02/Head 는 전부 로컬 **+z 가 정면**, 일치도 +0.68.
 - **`preset_render_demo.py --forward`** — `end_transform` 을 focus 방향으로 직접 놓는 push-in
   모드(`directed_end` + `FORWARD_ARMS` 7 arm). `--ladder` 가 lateral 방향을 키운 것과 달리
   **전진/후진/lateral 을 같은 크기로 대조**한다.

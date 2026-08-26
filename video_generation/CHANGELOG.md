@@ -7,6 +7,16 @@
 ## [Unreleased]
 
 ### Added
+- **`CinemaTraj/README.md` "지금 가능한 motion — preset 23종"** — `lbm/presets.py` 의 preset
+  어휘를 `aim` 기준으로 정리한 표. `python -m lbm.presets --radius 0.6 --obs_az_span 90`
+  실측(move / rot° / path-over-chord)과 함께, `look_at`(12종, 매 프레임 subject 재조준 →
+  `tracking` 이 유효) vs `traj`(11종, 궤적 회전 그대로 → `tracking_ignored`) 구분, 정지 3종
+  (`STATIC_PRESETS`), 회전 전용 3종(`ROTATION_ONLY_PRESETS`, τ 이분법이 크기를 못 정해
+  divisor 를 `FIT_TAU_MAX_SCALE` 로 바꾸는 이유), zoom 2종이 기본 off 인 이유, orbit sweep 의
+  `0.8 × obs_az_span` clamp, 별칭 8종(`zoom_in`/`zoom_out` 이 **optical zoom 이 아니라 dolly**
+  로 간다는 것), 그리고 preset 에 직교하는 뱅크 손잡이 8종(`--target_tau` `--speeds`
+  `--trackings` `--look_at_biases` `--follow_gains` `--follow_smooths` `--aim_keyframes`
+  `--traj_basis`)의 기본값.
 - **`tools/recammaster/run_grid.py --builtin`** — manifest 대신 ReCamMaster **저자 preset
   10종**(`example_test_data/cameras/camera_extrinsics.json` 의 `cam01`..`cam10`)을 돈다.
   entry tag 는 `builtin_cam01_pan_right` … `builtin_cam10_arc_right`.

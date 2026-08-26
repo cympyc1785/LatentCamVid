@@ -50,6 +50,18 @@
       메시를 못 찾을 때만 0.94 근사로 떨어진다.
     - 이 격자(elevation 10/25/45, 전부 subject 중심 위쪽)에서는 `low_angle`(< −25°)과
       `overhead`(> 60°)가 **0장**이다. 올려다보는 샷을 원하면 음수 elevation 을 넣어야 한다.
+      → 아래 `--elevations` 기본값 변경에서 해소.
+  - **`--elevations` 기본값에 음수 고도 `-10` 추가** (`[10,25,45]` → `[-10,10,25,45]`).
+    고도는 카메라 절대 높이가 아니라 **구 중심(`--anchor_origin`, 기본 subject AABB 중심) 기준
+    각도**라, 양수만 두면 `camera_angle` 이 구조적으로 `low_angle` 을 못 낸다. 실측(chunk
+    51/600/1500, lens 18, `--min_clearance 0.3 --min_crop_keep 0.5`): 통과 수 33→36 / 40→40 /
+    29→31, 늘어난 5장이 **전부 `low_angle`** (eye_angle −25.8 ~ −40.4°).
+    - `-25` 는 **넣지 않았다.** 임계 문제가 아니라 물리적으로 땅속이다 — 세 chunk 의
+      `height_over_floor` 가 −0.54..0.10 / −0.71..−0.08 / −0.42..0.22 m 로 48/48 전부
+      `below_floor`. `--min_height` 를 0 으로 내려도 대부분 음수라 안 살아난다.
+    - `-10` 도 구 중심이 낮으면 통째로 죽는다: 무릎 꿇은 chunk 600(중심 ~0.56 m)은 48/48
+      `below_floor` 로 0장. 서 있는 51/1500 만 3장/2장. 격자 한 줄이 비용의 전부라
+      (`reject` 면 clearance/occlusion 광선 9발을 건너뛴다) 기본에 두는 쪽이 싸다.
 - **`CinemaTraj/scripts/board_contact_sheet.py`** — `board.json` + 렌더 → chunk 별 contact sheet.
   `lbm/overlay.py` 의 `contact_sheet`/`label_tile` 재사용. `--sort_by crop|shot|facing`,
   기본은 crop_keep 오름차순 — 게이트 임계를 숫자로 주장하지 말고 **보고** 정하기 위한 배치다.

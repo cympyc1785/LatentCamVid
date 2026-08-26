@@ -5,6 +5,21 @@ All notable changes to the latentcam sub-project. Follows [Keep a Changelog](htt
 ## [Unreleased]
 
 ### Added
+- **`scripts/data/corpus_clearance_probe.py` — 코퍼스 카메라가 표면에 얼마나 가까이 갔나
+  (2026-08-27).** `corpus_scale_probe.py` 는 이동량 `‖t‖/norm_scale` 만 재는데, "이 씬에서
+  이만큼밖에 못 움직인다"를 모델이 배우려면 **여유 거리(clearance)** 가 데이터에 있어야 한다.
+  세그먼트 프레임의 da3 depth 를 unproject 해 점군 `X` 를 만들고
+  `clearance(f) = min_{x∈X} ‖center(f) − x‖` 의 `min_f` / `med_f` 를 **같은 `norm_scale` 로
+  나눠** 보고한다 → `corpus_scale_probe.py` 의 `med` 와 바로 같은 축에서 비교된다.
+  `norm_scale` 은 `__getitem__` 이 뱉은 값을 그대로 쓴다 (scale_mode 분기 8종을 손으로 다시
+  짜지 않는다). 깊이 불연속 픽셀(`|∇log z| > --edge_thr`, 기본 0.05)은 뺀다 — 안 빼면 물체
+  경계에 붕 뜬 점이 clearance 를 실제보다 작게 만든다.
+  DL3DV 실측 (`da3_7k_da3geo_frontanchor`, n=300, stride 4, GPU 1장 약 2분,
+  `results/mixed/clearance_probe/`):
+  `clearance_min` p01 0.0093 / p05 0.0322 / p25 0.1154 / med **0.1903** / p75 0.3052 /
+  p95 0.4512 (sd(log10) 0.394), `clearance_med` med 0.2800, `depth_min` med 0.2106.
+  같은 분모의 이동량 median 이 0.4367 이므로 **이동량 / 최소 여유 거리 = 2.3** — DL3DV
+  카메라는 최근접 거리의 두 배 넘게 움직인다(= 표면이 궤적을 실제로 제약한다).
 - **`anchor_pred_frame0` — target 첫 카메라를 given 으로 (2026-08-23).** dataset 이 `cam_param` 을
   `rel_t = w2c_t @ inv(w2c_0)` 로 만들어 GT `rel[0]` 은 정확히 항등이고 추론 시에도 target 첫
   카메라는 주어지는데, `out_to_trajectory` 는 `e0` 를 곱하기만 하고 `rel[0]=I` 를 강제하지

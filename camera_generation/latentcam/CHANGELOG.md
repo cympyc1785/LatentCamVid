@@ -236,6 +236,18 @@ All notable changes to the latentcam sub-project. Follows [Keep a Changelog](htt
     잰 게 아님을 로그에 남긴다. !! 분할 수가 다르면 PRDC 값을 arm 간 직접 비교하면 안 된다.
 
 ### Changed
+- **`vista4d_pgt_k6.yaml` 에 `anchor_pred_frame0: true` (2026-08-27, experiment config 만,
+  코드 변경 0줄).** 이 arm 도 frame0 은 given 이다 — dataset 이 `rel_t = w2c_t @ inv(w2c_0)` 로
+  cam_param 을 만들므로 **target 이 소스와 다른 배열이어도** GT `rel[0]` 은 정확히 항등이다.
+  이 코퍼스에서 확인: smoke 의 ref 덤프 160 타깃(테스트 4씬 전부)에서 `transform[0]` 이
+  서로 **비트 단위로 같다**(max 편차 0.0). 씬마다 다른 `e0` 였다면 씬 경계에서 갈렸을 테니
+  상수인 건 `rel[0]=I` 라는 뜻이다.
+  같은 smoke(GPU3, max_scenes=12 epochs=1) 를 anchor off/on 으로 두 번 돌린 실측:
+  - `val/loss_traj` **1.101709 로 동일** — loss 는 안 건드리고 디코드에서만 재앵커하므로
+    학습 동역학은 그대로다. 바뀌는 건 caption/CLaTr 같은 디코드 후 지표뿐이다.
+  - pred frame0 `|dt|` median **4.7002 -> 0.0000**, rot median **27.10deg -> 0.02deg**.
+    (앞 숫자는 1-epoch 미학습 모델 값이라 TRUMANS vls019 epoch 82 의 0.1105 와 비교 금지 —
+    여기서 말하는 건 "anchor 가 실제로 걸렸다" 뿐이다.)
 - **`frontanchor` arm 2개에 `geo_cover_before_only: true`** (`da3_7k_da3geo_frontanchor.yaml`,
   `da3_7k_lagernvsgeo_frontanchor.yaml`; experiment config 만, 코드 변경 0줄). 그 전까지 이 arm 은
   **분모만** 앞쪽(`[0,s)`)으로 제한하고 geo context view 는 양쪽 중 긴 쪽에서 뽑았다

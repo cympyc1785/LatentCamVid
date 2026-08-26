@@ -62,6 +62,33 @@
     - `-10` 도 구 중심이 낮으면 통째로 죽는다: 무릎 꿇은 chunk 600(중심 ~0.56 m)은 48/48
       `below_floor` 로 0장. 서 있는 51/1500 만 3장/2장. 격자 한 줄이 비용의 전부라
       (`reject` 면 clearance/occlusion 광선 9발을 건너뛴다) 기본에 두는 쪽이 싸다.
+  - **`--render_rejects N`** — 탈락 사유마다 대표 후보 N개를 같이 렌더한다 (0 = 기존 동작,
+    통과분만). 통과 0장인 chunk 는 이게 없으면 board 에 그림이 한 장도 없어서 원인을 못 본다.
+    사유가 **적게 겹치는 칸부터** 고른다 — `occluded+cropped+clearance` 가 한꺼번에 걸린 칸은
+    그림에서 원인을 못 가린다. 렌더된 탈락분은 `usable:false` + `reject_primary` 로 구분하고
+    board.json 최상위에 `render_rejects` 를 남긴다 (안 남기면 하류가 전부 통과분으로 읽는다).
+    - 함정: **`crop_keep` 은 frustum 테스트지 가시성 테스트가 아니다.** "가장 덜 나쁜 후보"를
+      `crop_keep` 만으로 고르면 벽 너머에서 subject 를 향한 칸이 `crop 1.00` 으로 1등을 먹고,
+      렌더가 흰 벽만 나온다 (실측으로 한 번 당함). 프레이밍 실패를 격리하려면
+      `clear_frac == 1.0 ∧ clearance ≥ min ∧ subject_dist ≥ min` 을 먼저 통과시킬 것.
+  - **통과 0장 chunk(900/1200/1800)의 원인은 반경이 아니라 보행이었다.** 창(49프레임 ×
+    `frame_step 3` = 4.83 s) 안에서 subject 수평 이동량이 통과 chunk 는 0.03~0.37 m 인데
+    실패 chunk 는 **1.87~2.22 m** 로 겹치지 않는다. 카메라는 anchor(창 중앙) 프레임 위치를
+    겨눈 채 정지해 있고 게이트는 창 전체의 최악값(`crop_keep` = min, `center_offset` = max,
+    `clear_frac` = 1.0 요구)이라, 사람이 창 끝에서 프레임 밖으로 나가면 그 칸이 죽는다.
+
+      | chunk | 이동 m | crop_keep med | center_offset med | usable |
+      |---|---|---|---|---|
+      | 51 | 0.28 | 0.79 | 0.22 | 36/192 |
+      | 600 | 0.03 | 0.98 | 0.20 | 40/192 |
+      | 1500 | 0.37 | 0.82 | 0.25 | 31/192 |
+      | 900 | 2.09 | **0.004** | **0.93** | 0/192 |
+      | 1200 | 1.87 | **0.22** | **0.71** | 0/192 |
+      | 1800 | 2.22 | **0.07** | **0.81** | 0/192 |
+
+      반경을 1.5/2.2/3.0/3.8 m 로 넓혀도 0/144 였던 이유가 이것이다 — 멀어져도 사람은 여전히
+      창 끝에서 나가고, 대신 카메라가 벽에 붙어 `occluded`/`clearance` 가 늘어난다.
+      정지 첫 pose 격자로 풀 수 있는 문제가 아니다 (추종/재조준이 필요).
 - **`CinemaTraj/scripts/board_contact_sheet.py`** — `board.json` + 렌더 → chunk 별 contact sheet.
   `lbm/overlay.py` 의 `contact_sheet`/`label_tile` 재사용. `--sort_by crop|shot|facing`,
   기본은 crop_keep 오름차순 — 게이트 임계를 숫자로 주장하지 말고 **보고** 정하기 위한 배치다.

@@ -7,6 +7,13 @@
 ## [Unreleased]
 
 ### Added
+- **`CinemaTraj/scripts/render_bank_videos.py --depth`** — splatting RGB 대신 **렌더 depth** 를
+  turbo 컬러맵으로 낸다. 점군 색(=소스 영상 픽셀)이 빠지므로 텍스처에 가려 안 보이던 기하만
+  남는다 — 구멍의 모양과 표면까지의 거리 변화. 역깊이(1/z)로 정규화하는 이유는 선형 z 가
+  가까운 표면을 전부 같은 색으로 뭉개서 "카메라가 무엇에 얼마나 가까운지"가 안 보이기
+  때문이다. 눈금은 궤적 전체 유효 depth 의 5~95% 를 **한 번** 잡는다 (프레임마다 다시 잡으면
+  다가가도 색이 안 변해 비교가 성립하지 않는다). 타일끼리 색을 맞추려면 `--depth_range LO HI`
+  로 고정. 구멍은 기존 `paint_holes` 와 같은 마젠타. 기본 off = 기존 동작 그대로.
 - **`CinemaTraj/README.md` "지금 가능한 motion — preset 23종"** — `lbm/presets.py` 의 preset
   어휘를 `aim` 기준으로 정리한 표. `python -m lbm.presets --radius 0.6 --obs_az_span 90`
   실측(move / rot° / path-over-chord)과 함께, `look_at`(12종, 매 프레임 subject 재조준 →

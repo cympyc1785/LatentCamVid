@@ -7,6 +7,34 @@
 ## [Unreleased]
 
 ### Added
+- **`CinemaTraj/scripts/vista4d_bank_to_dl3dv.py` — Vista4D 뱅크 → latentcam_da3 레이아웃
+  (2026-08-27).** 영상 1편 = scene, 뱅크 변이 1개 = segment. 이미지 디렉토리는 **영상당 하나**
+  (`images_4/`, 49장, `--image_scale 0.5` → 640×360) 만 두고 합성 궤적은 `(V,49,·)` 배열
+  `da3/target_poses.npz` 로 따로 낸다 — 변이마다 이미지를 복제하면 713k 장이 된다. 같이 내는 것:
+  `da3/pose.npz` (소스 recon w2c + frame0 K 복사), `da3/prompts.json`
+  (`target: ~ motion: ~` + `caption_fields` 4종 + `tau_max`/`hole_fraction`/`subject_area_med`),
+  `da3/avg_scale_context_first_cam/<seg>.json` (= `scene_graph.json:scale.S`),
+  `meta_vista4d.csv`, `seg_list_vista4d_{train,test}.txt` (**scene 단위 holdout**).
+  intrinsics 고정: DA3 K 는 t 축으로 흔들리므로(정지 카메라에서도 −14% 드리프트) frame0 K 를
+  49프레임에 복사하고, 이미지와 **같은 배율**로 K 를 줄인다 (`hw_list` 가 `cx*2, cy*2` 에서
+  h,w 를 뽑기 때문). 결과: `intr_norm: rel` 에서 `cam_param[9:11]` 이 정확히 `[1,1]`.
+- **`CinemaTraj/scripts/trumans_to_recon.py --aim_keyframes` — TRUMANS 조준을 Vista4D 뱅크와
+  일치 (2026-08-27).** 기존 `synth_source_path` 는 **매 프레임** `look_at_c2w` 로 조준했다
+  (keyframe 0개). Vista4D pseudo-GT 뱅크는 `--aim_keyframes 6` = `[0,10,19,29,38,48]` 에서만
+  조준을 세우고 사이는 smoothstep slerp 다. 두 코퍼스를 섞어 학습할 때 조준 방식이 다르면
+  "카메라가 subject 를 얼마나 빡빡하게 따라보나" 가 그대로 **코퍼스 라벨**이 되어 버린다.
+  - `0` (기본) = 기존 동작 그대로. `N>=2` = keyframe + smoothstep slerp.
+    `N==1` 은 여기서만 추가로 허용 — keyframe 이 하나면 보간할 구간이 없으므로 frame 0 조준을
+    49프레임 내내 유지한다 (subject 추종 없음).
+  - **위치는 안 건드린다.** preset 모양이 이미 clearance 검증을 통과한 것이라 그대로 둬야
+    verify 결과가 유효하다. 실측: k=0 vs k=6 위치 차이 정확히 `0.00e+00`, keyframe 회전 차이
+    `≤9.11e-15`, 사이 구간 조준 오차 max 0.81°, `det(R)=1.000000000`.
+  - `slerp_rotation` / `rotation_log` / `keyframe_indices` 는 `decode/build_poses.py` 에서
+    순수 numpy 4함수만 **복제**했다. import 하면 `lbm.render` → Vista4D 점군 렌더러 → torch 가
+    딸려 오는데 이 스크립트는 Blender orchestration 용이다. 식이 갈라지면 두 뱅크의 조준이
+    어긋나므로 고칠 땐 양쪽 같이 고칠 것.
+  - `scripts/trumans_lite_bank.py` 에 `--aim_keyframes` passthrough + `bank_manifest.json`
+    `clip.aim_keyframes` 기록.
 - **`CinemaTraj/scripts/render_bank_videos.py --depth`** — splatting RGB 대신 **렌더 depth** 를
   turbo 컬러맵으로 낸다. 점군 색(=소스 영상 픽셀)이 빠지므로 텍스처에 가려 안 보이던 기하만
   남는다 — 구멍의 모양과 표면까지의 거리 변화. 역깊이(1/z)로 정규화하는 이유는 선형 z 가

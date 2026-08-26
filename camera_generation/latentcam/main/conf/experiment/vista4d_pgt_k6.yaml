@@ -1,0 +1,74 @@
+# @package _global_
+# Vista4D pseudo-GT arm. DL3DV 코퍼스 로더(dataset_dl3dv)를 **그대로** 쓰고 `dl3dv_root` 만
+# Vista4D 변환본으로 돌린다 (scripts/vista4d_bank_to_dl3dv.py 가 da3 on-disk 계약을 맞췄다).
+#
+# ═══ TRUMANS arm 과 무엇이 다른가 ════════════════════════════════════════════════════════
+# TRUMANS-Lite 는 클립마다 카메라가 하나뿐이라 "recording = scene, clip = segment" 로 두면
+# context(다른 클립) != target(이 클립) 이 저절로 성립했다. Vista4D 는 영상 1편에 소스 궤적이
+# **하나**뿐이고 그 위에 뱅크가 합성 궤적 V개를 얹는다. 그래서 축이 바뀐다:
+#     scene   = 영상 1편 (49프레임)
+#     segment = 뱅크 변이 1개 (V ≈ 56~392)   ← 프레임 구간이 아니다. 전부 frame_idx [0,49] 다.
+#     context = **소스 영상** 프레임 uniform 6장
+#     target  = 그 변이의 합성 49프레임 궤적
+# target 이 소스와 **다른 배열**에서 오므로 (`target_pose_source: da3_target_poses`) context 와
+# 프레임 구간이 겹쳐도 누수가 아니다 — 겹치는 건 이미지이고, 예측 대상인 포즈는 소스에 없다.
+# 모델이 배우는 것은 "이 씬을 (텍스트가 말하는 대로) 이렇게 찍었다면" 이다.
+#
+# ═══ 텍스트 ═════════════════════════════════════════════════════════════════════════════
+# `configs/caption_presets.json` + `scripts/build_bank_captions.py` 가 변이마다
+# {target, event, framing, motion} 네 필드를 만들고, 학습 프롬프트는 **target/motion 둘만**
+# 조립한다 (`--prompt_fields target,motion`):
+#     "target: camel motion: the camera steadily orbits to the left around the subject"
+# framing/event 는 JSON 에 남겨 뒀다 — 축을 늘릴 때 다시 안 만들려고.
+#
+# ═══ intrinsics 고정 ════════════════════════════════════════════════════════════════════
+# DA3 는 프레임마다 focal 이 흔들린다(정지 카메라에서도 -14% 드리프트 관측). 뱅크를
+# `--fixed_focal` 로 만들었고 export 도 frame0 K 를 49프레임에 복사했으므로 context/target 이
+# 같은 상수 K 를 쓴다 -> `intr_norm: rel` 에서 cam_param[9:11] 이 정확히 [1,1] 이다.
+#
+# ═══ keyframe 조준 (k=6) ════════════════════════════════════════════════════════════════
+# 뱅크는 `--aim_keyframes 6` 으로 만들었다: [0,10,19,29,38,48] 여섯 지점에서만 조준을 잡고
+# 그 사이는 smoothstep 보간한다 (위치는 preset 그대로, 회전만 keyframe). keyframe 0 이 소스
+# frame0 회전이라 `aim_anchor` 는 no-op 이 된다 (decode/build_poses.py:549).
+#
+# ═══ 분모 (avg_scale) ═══════════════════════════════════════════════════════════════════
+# `scene_graph.json:scale.S` = frame0 non-sky 픽셀 평균 ray 길이 (DA3 단위). 소스 영상만으로
+# 계산되어 누수가 없고 추론 시 복원 가능하다. scene 상수라 전 변이가 같은 값을 쓴다.
+# 디렉토리 이름 `avg_scale_context_first_cam` 은 dispatch 용으로 빌려 쓴 것이고 정의는 "S" 다
+# (TRUMANS arm 이 같은 디렉토리에 "recording median" 을 넣은 것과 같은 관용).
+# `vae_latent_scale` 은 DL3DV 캘리브레이션 값(0.96032625)을 그대로 둔다 — ckpt 속성이라
+# 코퍼스별로 다르게 둘 수 없다 (mix_dl3dv_sd_datadop_v1 과 같은 이유).
+#
+# ═══ 분할 ═══════════════════════════════════════════════════════════════════════════════
+# scene(영상) 단위 holdout. 같은 영상의 다른 변이가 train/val 에 갈리면 val 은 같은 씬·같은
+# 소스 프레임을 보게 되어 낙관적으로 뜬다.
+exp_name: vista4d_pgt_k6
+dl3dv_root: /data1/cympyc1785/data/Vista4D-Eval-Data/latentcam_da3
+meta_csv: meta_vista4d.csv
+train_seg_list: /data1/cympyc1785/data/Vista4D-Eval-Data/latentcam_da3/seg_list_vista4d_train.txt
+test_seg_list: /data1/cympyc1785/data/Vista4D-Eval-Data/latentcam_da3/seg_list_vista4d_test.txt
+coverage_blacklist_path: null
+
+pose_source: da3
+target_pose_source: da3_target_poses   # target 만 <scene>/da3/target_poses.npz 로 교체
+scale_mode: avg_scale
+avg_scale_ref: context_first_cam       # 디렉토리 avg_scale_context_first_cam <- scene_graph S
+intr_norm: rel                         # vae_20260302_300 = frame-0-relative-intrinsics ckpt
+cam_dim: 64                            # = 그 ckpt 의 latent_dim
+
+geo_encoder: da3
+geo_cam_embed: null
+geo_latent_cache_dir: null
+geo_posed: true
+geo_shuffle_order: false
+da3_geo_model: da3nested-giant-large
+da3_geo_input_hw: [252, 448]
+da3_geo_layers: last
+
+geo_view_sampling: context_uniform  # context range = 영상 전체 [0,49) = 소스 영상 전체
+geo_num_views: 6                    # _even_indices(49,6) = [0,10,19,29,38,48]
+geo_first_view_target_s: true       # view0 = 프레임 s(=0). 이미 첫 픽이라 집합이 안 바뀐다.
+
+batch_size: 8
+epochs: 200
+ckpt_at_epochs: [50, 100]

@@ -324,6 +324,8 @@ class CamDataset(torch.utils.data.Dataset):
         self.scene_dir_list = []    # [scene_dir]  (for avg_scale json lookup)
         self.samples = []           # [(scene_idx, start, end, caption, data_name)]
         self._scene_cache = {}      # lazy: scene_idx -> {w2c,intr,frame_files,hw}
+        # target_pose_source: scene_idx -> {'w2c': (V,T,4,4), 'intr': (V,T,3,3), 'keys': [str]}
+        self._target_pose_cache = {}
         # lazy_dataset (default True): __init__ only builds the sample/scene index (from a persisted
         # cache when available); scene poses/paths are parsed on demand in __getitem__ + cached.
         self.lazy = spec.lazy_dataset or only_segments is not None
@@ -925,6 +927,43 @@ class CamDataset(torch.utils.data.Dataset):
                 raise
             return None
 
+    def _target_poses(self, scene_idx, seg_key):
+        """target_pose_source='da3_target_poses': target 궤적만 합성 pseudo-GT 로 갈아끼운다.
+
+        `<scene>/da3/target_poses.npz` 는 변이(variant) 하나당 궤적 하나를 담는다:
+            extrinsics (V,T,4,4) OpenCV **w2c**   — pose.npz 와 같은 규약
+            intrinsics (V,T,3,3) 픽셀 공간        — 뱅크가 --fixed_focal 이라 T 축으로 상수
+            keys       (V,) str                   — prompts.json 의 세그먼트 키
+        seg_key 로 V 축을 고른다. 이 파일이 없거나 키가 없으면 **터뜨린다** — 조용히 소스
+        궤적으로 학습되면 로그 어디에도 흔적이 안 남고 arm 이 대조군과 같아져 버린다.
+
+        context 는 이 함수를 안 거친다: geo 블록이 `self.extrinsics_list[scene_idx][geo_idxs]`
+        (소스 recon) 와 `self.frame_files_list[scene_idx]` (원본 프레임) 를 직접 읽는다.
+        """
+        cache = self._target_pose_cache.get(scene_idx)
+        if cache is None:
+            p = osp.join(self.scene_dir_list[scene_idx], 'da3', 'target_poses.npz')
+            if not osp.isfile(p):
+                raise FileNotFoundError(
+                    f"target_pose_source={self.target_pose_source!r} 인데 파일이 없다: {p}")
+            z = np.load(p, allow_pickle=True)
+            E = np.asarray(z['extrinsics'], dtype=np.float32)          # (V,T,4,4) or (V,T,3,4)
+            if E.shape[-2] == 3:
+                pad = np.zeros(E.shape[:-2] + (4, 4), dtype=np.float32)
+                pad[..., 3, 3] = 1.0
+                pad[..., :3, :4] = E
+                E = pad
+            cache = {'w2c': torch.from_numpy(E),
+                     'intr': torch.from_numpy(np.asarray(z['intrinsics'], dtype=np.float32)),
+                     'keys': {str(k): i for i, k in enumerate(z['keys'].tolist())}}
+            self._target_pose_cache[scene_idx] = cache
+        v = cache['keys'].get(str(seg_key))
+        if v is None:
+            raise KeyError(f"target_poses.npz 에 세그먼트 키 {seg_key!r} 가 없다 "
+                           f"(scene={self.scene_dir_list[scene_idx]}, "
+                           f"있는 키 {sorted(cache['keys'])[:8]}...)")
+        return cache['w2c'][v], cache['intr'][v]
+
     def _first_farthest_scale(self, extrinsics):
         """LagerNVS-style scale = 1.35 * max(||camera center - FIRST camera||) over the segment
         (relative to frame 0). Matches LagerNVS normalize(): scene_scale = 1.35*max ||t||."""
@@ -1361,6 +1400,12 @@ class CamDataset(torch.utils.data.Dataset):
         intrinsics = self.intrinsics_list[scene_idx][s:e]     # (T,3,3)
         h, w = self.hw_list[scene_idx]
         frame_files = self.frame_files_list[scene_idx]
+
+        # [new 2026-08-27] target 궤적만 합성 pseudo-GT 로 교체. context(geo) 블록은 아래에서
+        # self.extrinsics_list / self.frame_files_list 를 **직접** 읽으므로 여기 지역 변수만
+        # 갈아끼우면 "context = 소스 영상, target = 합성 카메라" 분기가 정확히 성립한다.
+        if getattr(self, 'target_pose_source', None):
+            extrinsics, intrinsics = self._target_poses(scene_idx, data_name.split('_')[-1])
 
         # if the segment has more than num_frames, sample evenly to num_frames
         if extrinsics.shape[0] > self.num_frames:

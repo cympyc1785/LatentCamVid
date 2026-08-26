@@ -90,8 +90,22 @@ AVG_SCALE_DIRS = {
     # !! front_uniform view 집합에 의존해서 만든 값이라 geo_view_sampling='front_uniform' +
     #    geo_num_views 가 생성 때와 같아야 의미가 있다 (아래 resolve 에서 경고한다).
     'da3latent':                     'avg_scale_da3latent',
+    # [new 2026-08-17] 위와 **같은 정의, 다른 view 집합**. da3latent 는 front_uniform 이 고른
+    # 6 view 로 만든 값이라 frustum_cover arm 에서는 쓸 수 없다 (M 도 sigma 도 view 에 의존).
+    # 이건 frustum_cover(out_of_seg/before_only/centered_at_s) 짝이다 ->
+    # da3_7k_da3geo_frontanchor 와 **분모 하나만** 다른 arm 을 만들 수 있다.
+    #   200 세그 dry-run: sigma med 2.72238, M*sigma med 3.26031,
+    #   ratio(이것/front_first_anchor) med 0.87966 p05 0.41889 p95 1.12623 (log10 std 0.1726 dex)
+    'da3latent_cover':               'avg_scale_da3latent_cover',
 }
 AVG_SCALE_REFS = tuple(AVG_SCALE_DIRS)
+
+# [new 2026-08-27] target 궤적만 갈아끼우는 arm. None(기본) 이면 기존 동작 그대로 —
+# target 도 context 와 **같은** pose 배열(soure recon)에서 슬라이스한다.
+#   'da3_target_poses'  <scene>/da3/target_poses.npz 의 합성 궤적을 target 으로 쓴다.
+#     context(이미지·pose·avg_scale 분모)는 소스 그대로라 "이 씬을 이렇게 찍었다면" 을 배운다.
+#     Vista4D LBM-Lite pseudo-GT 뱅크가 이 포맷으로 export 된다.
+TARGET_POSE_SOURCES = {'da3_target_poses'}
 
 # 앞쪽 context 를 요구하는 변형 -> 세그먼트가 s 앞에 최소 몇 프레임을 가져야 하는가.
 # 값이 None 이면 제약 없음. 'nf' 는 num_frames (= target segment 길이) 로 치환된다.
@@ -104,6 +118,10 @@ AVG_SCALE_MIN_FRONT = {
     'front_first_anchor':          1,
     'front_first_anchor_same_len': 'nf',
     'da3latent':                   'nf',
+    # frustum_cover 짝은 [s-L,s) 를 꽉 채울 필요가 없다 -> 짝 arm(front_first_anchor)과 같은 1.
+    # DL3DV da3 는 s in {0,49,98,...} 이라 1 이든 'nf' 든 결과 집합은 같지만(s==0 만 제외),
+    # 의도를 "control 과 동일 인덱스"로 못박아 둔다.
+    'da3latent_cover':             1,
     # [new 2026-08-16] range 가 같으니 제약도 같다 (origin 만 다르다).
     'front_centroid':              1,
     'front_centroid_same_len':     'nf',
@@ -134,6 +152,10 @@ class DatasetSpec:
     # --- 코퍼스 / 경로
     pose_source: str
     avg_scale_ref: str
+    # None(기본) = 기존 동작. target 카메라를 context 카메라와 **같은** pose 배열에서 가져온다.
+    # 'da3_target_poses' = target 만 <scene>/da3/target_poses.npz 의 합성 궤적으로 갈아끼운다
+    #   (context 이미지·pose·avg_scale 은 그대로 소스). Vista4D pseudo-GT arm 이 쓴다.
+    target_pose_source: Optional[str]
     root: str
     num_frames: int
     max_scenes: Optional[int]
@@ -205,6 +227,21 @@ def resolve_dataset_cfg(cfg, verbose=True):
         raise ValueError(f"avg_scale_ref={avg_scale_ref!r} 는 pose_source='da3' 에서만 "
                          f"쓸 수 있다 (해당 디렉토리가 da3 아래에만 있다). "
                          f"현재 pose_source={pose_source!r}")
+
+    # [new 2026-08-27] target 궤적만 합성 pseudo-GT 로 갈아끼우는 arm (Vista4D LBM-Lite 뱅크).
+    # context(이미지·pose·분모)는 소스 그대로라 "이 씬을 이렇게 찍었다면" 을 배우게 된다.
+    # 파일은 da3 아래에만 있으므로 pose_source='da3' 를 강제한다 — 어긋나면 조용히 소스 궤적으로
+    # 학습되고 로그에는 아무 표시도 안 남는다.
+    target_pose_source = getattr(cfg, 'target_pose_source', None) or None
+    if target_pose_source is not None:
+        if target_pose_source not in TARGET_POSE_SOURCES:
+            raise ValueError(f"target_pose_source must be one of {sorted(TARGET_POSE_SOURCES)} "
+                             f"or null, got {target_pose_source!r}")
+        if pose_source != 'da3':
+            raise ValueError(f"target_pose_source={target_pose_source!r} 는 pose_source='da3' "
+                             f"에서만 쓸 수 있다. 현재 pose_source={pose_source!r}")
+        say(f"[target pose] <scene>/da3/target_poses.npz 로 target 궤적 교체 "
+            f"(context 는 소스 그대로)")
 
     geo_hw = tuple(getattr(cfg, 'geo_image_hw', (256, 448)))
     geo_enabled = bool(getattr(cfg, 'geo_encoder', None))   # skip image loading for text-only
@@ -356,11 +393,19 @@ def resolve_dataset_cfg(cfg, verbose=True):
             say("[geo da3] WARNING: geo_posed=True 인데 geo_first_view_target_s=False 다 -> "
                 "DA3 의 view0(=cam_token 재고정 기준)가 target 앵커 프레임 s 가 아니라서 geo "
                 "latent 과 target rel 의 R,t 앵커가 서로 다른 카메라다")
-        if avg_scale_ref == 'da3latent' and not getattr(cfg, 'geo_first_view_target_s', False):
+        if avg_scale_ref == 'da3latent_cover' and _samp != 'frustum_cover':
+            # da3latent 와 대칭인 guard. 이 값은 frustum_cover 가 고른 view 집합의 cam_dec
+            # 출력으로 만들었다 -> sampler 가 바뀌면 그냥 틀린 분모다.
+            raise ValueError(
+                f"avg_scale_ref='da3latent_cover' 는 geo_view_sampling='frustum_cover' 에서만 "
+                f"유효하다 (got {_samp!r}). front_uniform 짝은 avg_scale_ref='da3latent' 다 — "
+                f"scripts/data/make_avg_scale_da3_latent.py --out-dir 참고")
+        if avg_scale_ref in ('da3latent', 'da3latent_cover') \
+                and not getattr(cfg, 'geo_first_view_target_s', False):
             # 저장된 M*sigma 는 view0 = s 인 view 집합으로 cam_dec 를 돌려 만든 값이다
             # (scripts/data/make_avg_scale_da3_latent.py). view0 가 바뀌면 M 도 sigma 도 바뀐다.
             raise ValueError(
-                "avg_scale_ref='da3latent' 는 geo_first_view_target_s=True 에서만 유효하다 "
+                f"avg_scale_ref={avg_scale_ref!r} 는 geo_first_view_target_s=True 에서만 유효하다 "
                 "(분모를 view0 = 프레임 s 인 view 집합으로 만들었다). "
                 "scripts/data/make_avg_scale_da3_latent.py 참고")
         if avg_scale_ref == 'da3latent' and _samp != 'front_uniform':
@@ -420,6 +465,7 @@ def resolve_dataset_cfg(cfg, verbose=True):
     return DatasetSpec(
         pose_source=pose_source,
         avg_scale_ref=avg_scale_ref,
+        target_pose_source=target_pose_source,
         root=cfg.dl3dv_root,
         num_frames=cfg.num_frames,
         max_scenes=getattr(cfg, 'max_scenes', None),      # limit #scenes (e.g. smoke test)

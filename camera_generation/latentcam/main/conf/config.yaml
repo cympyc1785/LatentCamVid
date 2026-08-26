@@ -110,7 +110,15 @@ pose_source: transforms
 # 실측 (da3_7k 39817 세그먼트): first_cam/centroid 비 med 1.41159 -> 분모가 커져 정규화된
 # translation 이 작아진다. vae_latent_scale 을 그대로 두면 diffusion 입력 std 가 arm 마다 달라진다.
 avg_scale_ref: centroid
-lazy_dataset: true         # [new] __init__ builds only the sample index (cached); scene poses parsed lazily in __getitem__
+# [new 2026-08-27] target 궤적만 **합성 pseudo-GT** 로 갈아끼운다. context (이미지·pose·avg_scale
+# 분모) 는 소스 recon 그대로라, 모델이 배우는 건 "이 씬을 (텍스트가 말하는 대로) 이렇게 찍었다면"
+# 이 된다. GT 카메라가 없는 코퍼스(Vista4D / TRUMANS)를 학습에 넣는 유일한 경로다.
+#   null                (기본, 기존 동작) target 도 context 와 같은 pose 배열에서 슬라이스
+#   'da3_target_poses'  <scene>/da3/target_poses.npz 의 (V,T,4,4) w2c + (V,T,3,3) K 를 target 으로
+#                       쓴다. 어느 변이(V) 인지는 세그먼트 이름 끝의 키로 고른다.
+# pose_source='da3' 에서만 쓸 수 있다 (파일이 da3 아래에만 있다).
+target_pose_source: null
+lazy_dataset: true        # [new] __init__ builds only the sample index (cached); scene poses parsed lazily in __getitem__
 use_vae: true
 num_cam: 13
 cam_dim: 64                 # MUST match the ckpt's latent_dim (20260302 -> 64, 20260202 -> 32)

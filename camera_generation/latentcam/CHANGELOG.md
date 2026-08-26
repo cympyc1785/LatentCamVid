@@ -5,6 +5,35 @@ All notable changes to the latentcam sub-project. Follows [Keep a Changelog](htt
 ## [Unreleased]
 
 ### Added
+- **`target_pose_source` — context 는 소스 영상, target 은 합성 pseudo-GT 궤적 (2026-08-27).**
+  GT 카메라가 없는 코퍼스(Vista4D / TRUMANS)를 학습에 넣는 경로다. 기존에는 target 도 context 와
+  **같은** pose 배열에서 슬라이스했으므로 "이 씬을 이렇게 찍었다면" 을 배울 수가 없었다.
+  - `main/conf/config.yaml` — `target_pose_source: null` (기본 = 기존 동작). `'da3_target_poses'`
+    면 `<scene>/da3/target_poses.npz` 의 `(V,T,4,4)` w2c + `(V,T,3,3)` K 를 target 으로 쓴다.
+    어느 변이(V)인지는 세그먼트 이름 끝의 키로 고른다.
+  - `main/dataset_cfg.py` — `DatasetSpec.target_pose_source` 필드 + `TARGET_POSE_SOURCES` 검증.
+    `pose_source='da3'` 를 강제한다 (파일이 da3 아래에만 있다).
+  - `main/dataset_dl3dv.py` — `_target_poses(scene_idx, seg_key)` + `__getitem__` 분기 3줄.
+    **지역 변수 `extrinsics`/`intrinsics` 만** 갈아끼운다: geo(context) 블록은 아래에서
+    `self.extrinsics_list` / `self.frame_files_list` 를 직접 읽으므로 "context = 소스 영상,
+    target = 합성 카메라" 가 정확히 성립한다. 파일이나 키가 없으면 조용히 소스 궤적으로
+    떨어지지 않고 **터진다** (그러면 arm 이 대조군과 같아지는데 로그엔 흔적이 안 남는다).
+    index 캐시는 `(scene_idx, s, e, caption, data_name)` 만 담아 target pose 를 캐시하지
+    않는다 → 이 옵션을 켜고 꺼도 staleness 가 없다.
+  - 검증 (Vista4D smoke export 1편, 56 샘플): `cam_param (49,11)`, intr 열 정확히 `[1.0, 1.0]`,
+    caption `target: man motion: the camera slightly dollies straight forward toward the subject`,
+    소스 path 0.1356 vs 변이0 0.8318 (다른 궤적), frame0 위치 거리 **3.26e-16** (start_mode 유지),
+    `target_pose_source` on/off `cam_param` max diff **0.1906** (분기가 실제로 발화),
+    context idxs `[0, 10, 19, 29, 38, 48]` (소스 영상 uniform 6장).
+- **`main/conf/experiment/vista4d_pgt_k6.yaml` — Vista4D pseudo-GT arm (2026-08-27).**
+  DL3DV 로더를 그대로 쓰고 `dl3dv_root` 만 Vista4D 변환본으로 돌린다. 축이 바뀐다:
+  scene = 영상 1편(49프레임), **segment = 뱅크 변이 1개** (V≈56~392, 프레임 구간이 아니다).
+  `target_pose_source: da3_target_poses` + `geo_view_sampling: context_uniform` /
+  `geo_num_views: 6` + `avg_scale_ref: context_first_cam` (디렉토리 이름만 빌려 쓰고 정의는
+  `scene_graph.json:scale.S` = frame0 non-sky 평균 ray 길이. 소스 전용이라 누수 없음).
+  뱅크가 `--fixed_focal` 이고 export 도 frame0 K 를 49프레임에 복사하므로 `intr_norm: rel`
+  에서 `cam_param[9:11]` 이 정확히 `[1,1]`. 분할은 **scene(영상) 단위 holdout** —
+  같은 영상의 다른 변이가 train/val 로 갈리면 val 이 같은 소스 프레임을 봐서 낙관적으로 뜬다.
 - **`scripts/data/corpus_clearance_probe.py` — 코퍼스 카메라가 표면에 얼마나 가까이 갔나
   (2026-08-27).** `corpus_scale_probe.py` 는 이동량 `‖t‖/norm_scale` 만 재는데, "이 씬에서
   이만큼밖에 못 움직인다"를 모델이 배우려면 **여유 거리(clearance)** 가 데이터에 있어야 한다.

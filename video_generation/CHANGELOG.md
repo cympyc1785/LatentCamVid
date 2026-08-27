@@ -64,6 +64,19 @@
   `CinemaTraj/results/20260827_caption_gendop_compare/compare_th005.txt`.
 
 ### Added
+- **`CinemaTraj/scripts/gendop_release_{infer,eval}.py` — GenDoP 릴리즈 ckpt 를 우리 캡션으로
+  평가 (2026-08-28).** `captions_gendop` 186개(cameras 114 + recon 72)의 `Movement` 캡션을
+  `text_motion.safetensors` (HF Dubhe-zmc/GenDoP) 에 넣어 궤적 생성(모델 1회 로드, GenDoP 리포
+  0줄 수정 — `eval.py:process_data` 의 토큰→c2w 디코드만 이식, 30 native 포즈 저장; 120 슬러프
+  업샘플은 roll 아티팩트라 안 씀) 후 **같은 분절기로 재태깅해 원 카메라 태그와 왕복 대조**.
+  생성 궤적은 DataDoP 게이지라 분절 임계는 DataDoP 원본(0.02/0.4, fps 는 30포즈 환산 7.5),
+  GT 라벨은 `_tag.json`(49f, th 0.05) 그대로. 프레임별 35-class weighted P/R/F
+  (latentcam `CaptionMetrics` 와 같은 정의, 코퍼스가 달라 직접 비교 금지):
+  **pooled P 0.568 / R 0.4157 / F 0.4014**, mean fscore 0.4039, frame match 0.4157,
+  degenerate 0/186. kind 별 mean F: cameras 0.5128 vs recon 0.2313. 35-class 정확 일치 채점이라
+  "move right and forward" vs "move right" 도 0 — 하위 축 단위 lenient 채점은 미구현.
+  결과 `CinemaTraj/results/20260828_gendop_eval/text_motion/roundtrip_eval.json`.
+  `text_rgbd.safetensors` 평가는 MonST3R frame0 depth 완료 후 (task #111).
 - **`CinemaTraj/scripts/render_pred_depth_warp.py` — latentcam 생성 카메라의 depth warp 렌더
   (2026-08-27).** eval 이 떨군 `test/<name>_transforms_pred.json`(scene world **OpenGL** c2w,
   `render_geo_preds.py:load_pred` 와 같은 규약 — ref 를 GT `target_poses.npz` 와 대조해

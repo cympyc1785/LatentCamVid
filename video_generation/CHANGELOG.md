@@ -7,6 +7,12 @@
 ## [Unreleased]
 
 ### Fixed
+- **`CinemaTraj/scripts/trumans_to_recon.py` — `renders_match` 가 엔진까지 대조한다
+  (2026-08-27).** pose 만 보던 탓에 EEVEE 로 찍어둔 렌더가 `--rgb_engine cycles` 재실행에서
+  **조용히 재사용**됐다. 흰 번짐이 그대로 남는데 로그에는 "렌더 재사용" 한 줄만 찍혀서 눈치챌
+  방법이 없었다 (뱅크에 이미 EEVEE 로 찍힌 clip 이 281편 있다). 이제 `render_meta.json` 의
+  `rgb_engine` 이 요청 엔진과 다르면 재렌더하고, **meta 가 없는 옛 렌더는 EEVEE 로 간주**해
+  cycles 요청 시 재사용을 막는다. 기본값 `eevee` 경로의 판정은 전과 동일하다.
 - **`CinemaTraj/scripts/vista4d_bank_to_dl3dv.py` — 사다리 붕괴 중복 변이를 걸러낸다
   (2026-08-27).** hole 사다리 4단은 게이트(obb/ground/approach/elev/shape/collision)가 물리면
   같은 knob 에서 멈춰 **4단이 같은 궤적**이 된다. k6 뱅크 47편 실측에서 15624 변이 중
@@ -30,6 +36,18 @@
   roll(>=0.01 deg)은 여전히 전부 잡힌다. 상세는 `FIX.log` 2026-08-27 항목.
 
 ### Added
+- **`CinemaTraj/scripts/trumans_gt_render.py` — 패스별 Cycles 디바이스 `--rgb_cdevice`
+  (2026-08-27).** `--cdevice` 하나로 두 패스를 묶으면 한쪽이 항상 손해다: RGB(128 spp)는 GPU 가
+  압도적이고 depth/index(1 spp)는 CPU 가 더 빠르다(실측 1.8 s CPU vs 2.55 s GPU). 이제
+  `--rgb_cdevice GPU --cdevice CPU` 로 갈라 잡을 수 있고, 미지정이면 `--cdevice` 를 따라가
+  **기존 호출은 한 비트도 안 바뀐다**. `render_meta.json` 에 `rgb_device` 를 싣고 요약표
+  `engines` 열에 같이 찍는다.
+  - `CinemaTraj/scripts/trumans_to_recon.py` / `trumans_lite_bank.py` 에 `--rgb_engine` /
+    `--rgb_samples` / `--rgb_cdevice` passthrough 추가. `--rgb_engine eevee`(기본)면 하위
+    렌더러에 **인자를 아예 안 넘겨** 기존 렌더 명령과 비트 동일하다.
+  - 실측(960×540, OPTIX, `0a761819` a02 49프레임): Cycles **32 spp** RGB 6.4 s/frame,
+    depth+index 2.4 s/frame. 128 spp 대비 RGB PSNR **46.1 dB**(RMSE 1.26/255)이고 번짐 지표는
+    사실상 동일(`max>=250` 픽셀 두 쪽 다 0, `max>=200` 74790 → 74615) — denoiser 가 흡수한다.
 - **`CinemaTraj/scripts/trumans_gt_render.py` — RGB 패스 엔진 선택 `--rgb_engine {eevee,cycles}`
   (2026-08-27).** TRUMANS `.blend` 는 전부 **Blender 3.3.6 저작**인데 우리는 4.5.9 로 돌린다.
   4.2 에서 EEVEE 가 EEVEE_NEXT 로 전면 재작성되면서, 3.3 기준으로 맞춰둔 발광 재질

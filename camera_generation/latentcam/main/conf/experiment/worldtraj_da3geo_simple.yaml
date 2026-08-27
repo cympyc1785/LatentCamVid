@@ -1,0 +1,70 @@
+# @package _global_
+# `worldtraj_da3geo.yaml` (20260816_211821 / wandb jkuj8mbg) 에서 **캡션 텍스트만** 갈아끼운 arm.
+# 그 arm 과 다른 키는 exp_name / prompts_file **두 개뿐**이므로, 포즈·세그먼트·split·VAE·
+# geo encoder 가 전부 같은 **paired A/B** 다. 곡선을 그대로 겹쳐 읽어도 된다.
+#
+# 무엇이 바뀌나
+# ------------
+#   before  "The camera trucks left while panning right, then pans left while dollying
+#            backward and continues panning right."          <- VLM 이 영상 보고 쓴 산문
+#   after   "target: none. motion: truck left and pan right, then truck left, dolly out,
+#            and pan right"                                   <- 측정된 camera_tags 에서 조립
+#
+# 바꾸는 이유 두 가지:
+#  1) **before 는 틀린다.** 위 예시의 "pans left" 는 없는 움직임이다 — 같은 세그먼트의
+#     camera_tags 는 전 구간 `yaw right` 다. VLM 산문은 카메라 서술이 측정값이 아니라
+#     장면 묘사와 섞인 추측이고, 그 오차가 그대로 텍스트 조건으로 들어간다.
+#  2) **Vista4D/TRUMANS 와 토큰 공간을 맞춘다.** 혼합 학습에서 DL3DV 는 free-moving 을,
+#     Vista4D/TRUMANS 는 피사체 조준 shot 을 담당하는데, 지금은 세 코퍼스의 문장 형식이
+#     서로 달라 `target:`/`motion:` 슬롯이 사실상 코퍼스 식별자로 샌다. 같은 어휘
+#     (truck/dolly/pedestal/pan/tilt/roll)와 같은 두 슬롯으로 통일한다.
+#
+# `target: none` 인 이유 (사용자 지시): DL3DV 는 정적 씬 코퍼스라 조준할 subject 가 없다.
+# 슬롯을 비우지 않고 `none` 이라는 **토큰을 적는** 것은, 같은 자리에 항상 무언가가 있어야
+# "target 이 없다"와 "DL3DV 다"가 모델 안에서 안 겹치기 때문이다.
+#
+# !! 크기(부사)를 안 넣는다. camera_tags 는 **da3 pose** 로 쟀는데 이 arm 은
+#    `pose_source: transforms`(COLMAP)로 돈다. 같은 frame_idx 구간을 서로 다른 추정기로 잰
+#    것이라 **방향은 합의하지만 게이지가 다르다.** 방향만 캡션에 싣는다.
+#
+# 캡션 생성: scripts/data/make_prompts_simple_dl3dv.py
+#   --root /data1/cympyc1785/data/DL3DV/scenes --meta_csv meta_worldtraj.csv
+#   --src_sub "" --tags_rel da3/tags/camera_tags.json --target none
+#   -> 6,098 scene / 39,837 segment, 파싱 실패 0 / 키 불일치 0. frame_idx·세그먼트 키는 불변.
+#
+# !! 캡션은 인덱스 캐시(`.latentcam_index/<key>.pt`) **안에** 들어 있다. dataset 이
+#    `prompts_file != 'prompts.json'` 일 때 캐시 키에 `__pf<stem>` 을 붙이므로
+#    (dataset_dl3dv.py:_load_index) 기본 캡션 캐시를 물어오는 사고는 막혀 있다.
+#    -> 첫 실행은 인덱스를 새로 만든다 (그만큼 느리다).
+#
+# 아래 나머지는 worldtraj_da3geo.yaml 과 **글자 그대로 같다** (근거는 그 파일의 주석 참조).
+exp_name: dl3dv_geo_worldtraj_da3geo_simple
+prompts_file: prompts_simple.json   # <- 이 arm 의 존재 이유. 경로는 pose_source 따라
+                                    #    <scene>/prompts_simple.json (transforms 이므로 da3/ 아님)
+pose_source: transforms       # <- COLMAP. da3 pose 코퍼스가 아니다 (기본값이지만 못 박는다)
+epochs: 100
+ckpt_at_epochs: [50]
+meta_csv: meta_worldtraj.csv
+coverage_blacklist_path: null
+
+geo_encoder: da3
+geo_cam_embed: null           # 카메라는 DA3 cam_enc 토큰으로만
+geo_latent_cache_dir: null    # da3 는 학습되는 인코더라 캐시 불가
+geo_posed: true               # DA3 cam_enc 에 GT(COLMAP) pose 주입
+geo_shuffle_order: false      # DA3 는 view0 를 reference 로 쓴다 -> 셔플 금지 (dataset 이 raise)
+da3_geo_allow_transforms_pose: true
+da3_geo_model: da3nested-giant-large
+da3_geo_input_hw: [252, 448]  # 14 의 배수. 다른 da3geo arm 과 같은 격자(18x32)
+da3_geo_layers: last
+
+# context view 선택 — 20260731_001511 의 값 그대로.
+geo_view_sampling: frustum_cover
+geo_cover_out_of_seg: true
+geo_cover_before_only: false
+geo_cover_centered_at_s: true
+geo_first_view_target_s: true
+geo_cover_subtract_first: true
+
+scale_mode: avg_scale
+intr_norm: rel
+cam_dim: 64

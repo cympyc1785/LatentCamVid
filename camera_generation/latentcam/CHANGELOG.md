@@ -41,6 +41,15 @@ All notable changes to the latentcam sub-project. Follows [Keep a Changelog](htt
   - !! 태그는 **da3 pose** 로 쟀고 학습은 `pose_source: transforms`(COLMAP) 로 돈다. 같은
     frame_idx 구간을 다른 추정기로 잰 것이라 방향은 합의하지만 크기 게이지는 다르다 —
     크기 부사를 안 넣는 이유이기도 하다.
+- **`worldtraj_da3geo_simple.yaml` — DL3DV 축약 캡션 arm (2026-08-27).**
+  `worldtraj_da3geo.yaml` (20260816_211821 / wandb `jkuj8mbg`, 100 epoch 완주) 대비
+  `exp_name` / `prompts_file` **두 키만** 다르다 — 포즈(COLMAP)·세그먼트(`meta_worldtraj.csv`)·
+  split·VAE·geo encoder 가 전부 같은 **paired A/B** 다. 코드 변경 0줄.
+  - 사용자 지시: DL3DV 는 혼합 학습에서 **free-moving** 만 담당하고 `target` 은 `none`,
+    카메라는 **da3 가 아니라 밖에 있는 것**(= `pose_source: transforms`, COLMAP)을 먼저 쓴다.
+  - 캡션 커버리지 실측: `meta_worldtraj.csv` 6,098 scene 전부에 `prompts_simple.json` 존재
+    (누락 0). 무작위 200 scene / 1,304 seg 에서 세그먼트 키·`frame_idx` 불일치 0,
+    캡션 median 86 chars (max 184).
 - **`vista4d_pgt_k6_simple.yaml` / `vista4d_pgt_k6_simple_unposed.yaml` — 축약 텍스트 arm 2종
   (2026-08-27).** 기존 verbose 2종과 합쳐 `{verbose, simple} x {posed, unposed}` 2x2 를 닫는다.
   `vista4d_pgt_k6.yaml` 대비 `prompts_file` (+ `geo_posed`) 만 다르다. 코드 변경 0줄.

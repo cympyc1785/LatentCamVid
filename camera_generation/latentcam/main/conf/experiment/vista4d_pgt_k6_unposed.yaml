@@ -1,0 +1,58 @@
+# @package _global_
+# Vista4D pseudo-GT arm — **context 카메라 없이(unposed)**.
+# `vista4d_pgt_k6.yaml` 과 **`geo_posed` 한 줄만** 다르다. 나머지(코퍼스 경로, 텍스트,
+# target_pose_source, avg_scale, intr_norm, cam_dim, DA3 설정, view sampling, batch, epochs,
+# anchor_pred_frame0)는 전부 동일하므로 두 run 의 차이는 "context 카메라를 넣었나"뿐이다.
+#
+# ═══ geo_posed=false 가 실제로 무엇을 끄는가 ═════════════════════════════════════════════
+# dataset 은 `geo_c2w` / `geo_fxfycxcy` / `geo_hw` 를 batch 에 **안 싣고**
+# (dataset_dl3dv.py:1556 의 `if self.geo_posed:` 블록이 통째로 없다),
+# geo_encode 는 `cam_token=None` 으로 DA3 를 부른다 (train_latent_cam_dm.py:86).
+# 즉 DA3 cross-view ViT 는 **context RGB 6장만** 본다. 카메라가 들어가는 경로가
+# 하나도 남지 않는다 — `geo_cam_embed: null` 이라 relfirst/Plücker 경로도 없고,
+# `geo_encoder='da3'` 는 custom backend 의 픽셀 Plücker/log-depth 도 안 만든다.
+#
+# ═══ 부수효과: view 순서가 보존되지 않는다 ══════════════════════════════════════════════
+# DA3 backbone 의 `select_reference_view` / `reorder_by_reference` 분기는
+# **`cam_token is None` 일 때만 발동**한다 (da3_geo_encoder.py:357-361). 그래서 posed arm 은
+# geo_idxs 순서(= [0,10,19,29,38,48])가 그대로 유지되지만, 이 arm 은 DA3 가
+# `ref_view_strategy='saddle_balanced'` 로 자기가 고른 뷰를 앞에 놓고 재정렬한다.
+# **view 집합은 같고** 재정렬은 이미지에만 의존하는 결정론적 함수라 재현성은 유지된다.
+# 다만 `geo_first_view_target_s: true` 는 이 arm 에서 사실상 무의미하다 (집합만 고정).
+# 이건 버그가 아니라 unposed 경로의 정의다 — 두 arm 을 비교할 때 "카메라 주입"과
+# "뷰 순서 보존"이 함께 움직인다는 점만 해석에 반영하면 된다.
+#
+# 나머지 설계 근거(축 정의, 텍스트, intrinsics 고정, k=6, avg_scale, 분할)는
+# `vista4d_pgt_k6.yaml` 의 주석을 그대로 따른다 — 여기서 중복하지 않는다.
+exp_name: vista4d_pgt_k6_unposed
+dl3dv_root: /data1/cympyc1785/data/Vista4D-Eval-Data/latentcam_da3
+meta_csv: meta_vista4d.csv
+train_seg_list: /data1/cympyc1785/data/Vista4D-Eval-Data/latentcam_da3/seg_list_vista4d_train.txt
+test_seg_list: /data1/cympyc1785/data/Vista4D-Eval-Data/latentcam_da3/seg_list_vista4d_test.txt
+coverage_blacklist_path: null
+
+pose_source: da3
+target_pose_source: da3_target_poses   # target 만 <scene>/da3/target_poses.npz 로 교체
+scale_mode: avg_scale
+avg_scale_ref: context_first_cam       # 디렉토리 avg_scale_context_first_cam <- scene_graph S
+intr_norm: rel                         # vae_20260302_300 = frame-0-relative-intrinsics ckpt
+cam_dim: 64                            # = 그 ckpt 의 latent_dim
+
+geo_encoder: da3
+geo_cam_embed: null
+geo_latent_cache_dir: null
+geo_posed: false                    # ★ 유일한 차이. context 카메라를 DA3 에 안 넣는다.
+geo_shuffle_order: false
+da3_geo_model: da3nested-giant-large
+da3_geo_input_hw: [252, 448]
+da3_geo_layers: last
+
+geo_view_sampling: context_uniform  # context range = 영상 전체 [0,49) = 소스 영상 전체
+geo_num_views: 6                    # _even_indices(49,6) = [0,10,19,29,38,48]
+geo_first_view_target_s: true       # 집합만 고정. 순서는 DA3 가 재정렬한다 (위 주석 참고)
+
+anchor_pred_frame0: true            # posed arm 과 동일 — 비교 축을 하나로 두려고 같이 켠다
+
+batch_size: 8
+epochs: 200
+ckpt_at_epochs: [50, 100]

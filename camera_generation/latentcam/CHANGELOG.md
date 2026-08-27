@@ -5,6 +5,20 @@ All notable changes to the latentcam sub-project. Follows [Keep a Changelog](htt
 ## [Unreleased]
 
 ### Added
+- **`vista4d_pgt_k6_unposed.yaml` — context 카메라 없는(unposed) 대조 arm (2026-08-27).**
+  `vista4d_pgt_k6.yaml` 과 **`geo_posed: true → false` 한 줄만** 다르다. 코드 변경 0줄
+  (config 만 추가). 두 arm 을 동시에 돌려 "context 카메라 주입이 얼마나 기여하나"를 잰다.
+  - `geo_posed=false` 면 dataset 이 `geo_c2w`/`geo_fxfycxcy`/`geo_hw` 를 batch 에 안 싣고
+    (`main/dataset_dl3dv.py:1556` 의 `if self.geo_posed:` 블록이 통째로 빠진다),
+    `main/train_latent_cam_dm.py:86` 이 `cam_token=None` 으로 DA3 를 부른다. `geo_cam_embed: null`
+    이라 relfirst/Plücker 우회로도 없어 **카메라가 들어가는 경로가 하나도 안 남는다.**
+  - **부수효과(해석 시 반영할 것):** DA3 backbone 의 `select_reference_view` /
+    `reorder_by_reference` 분기는 `cam_token is None` 일 때만 발동한다
+    (`models/da3_geo_encoder.py:357-361`). 그래서 posed arm 은 geo_idxs 순서
+    `[0,10,19,29,38,48]` 가 보존되지만 unposed arm 은 DA3 가 `ref_view_strategy='saddle_balanced'`
+    로 재정렬한다. view **집합은 동일**하고 재정렬은 이미지에만 의존하는 결정론적 함수라
+    재현성은 유지되지만, 이 ablation 은 "카메라 주입"과 "뷰 순서 보존"이 함께 움직인다.
+    `geo_first_view_target_s: true` 는 이 arm 에서 사실상 무의미하다.
 - **`target_pose_source` — context 는 소스 영상, target 은 합성 pseudo-GT 궤적 (2026-08-27).**
   GT 카메라가 없는 코퍼스(Vista4D / TRUMANS)를 학습에 넣는 경로다. 기존에는 target 도 context 와
   **같은** pose 배열에서 슬라이스했으므로 "이 씬을 이렇게 찍었다면" 을 배울 수가 없었다.

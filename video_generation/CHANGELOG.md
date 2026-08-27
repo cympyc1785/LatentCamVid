@@ -43,7 +43,9 @@
   (`[+c0|-c1|c2]` 는 det −1 이라 회전이 아니다). 위치는 npz 의 `cam_t_world_u` 를 그대로 쓴다.
   출력은 샘플별 `_rgb.mp4`/`_depth.mp4` + `concat.mp4`(윗줄 소스 영상 + 샘플 RGB / 아랫줄
   **소스 pose depth** + 샘플 depth) + `index.json`. 아랫줄 첫 칸을 소스 pose depth 로 채우는
-  이유는 기준선 없이는 구멍이 카메라 탓인지 점군 탓인지 못 가르기 때문. depth 눈금은
+  이유는 기준선 없이는 구멍이 카메라 탓인지 점군 탓인지 못 가르기 때문.
+  `--rows warp` 면 컬러맵 줄을 빼고 **소스 + depth warp 한 줄**만 깐다 (`--rows depth` 는 반대),
+  `--concat_name` / `--columns` 로 파일을 나눠 쓴다. 기본 `--rows both` 는 위 2줄 구성 그대로. depth 눈금은
   전 샘플 공통 5~95% 로 한 번만 잡는다. `--rot lookat` 은 E.T. 회전을 버리고 위치만 써
   subject 를 조준하는 대조군. 렌더러·컬러맵·mp4 작성은 `lbm.render` / `render_bank_videos` 재사용.
   **camel 파일럿 실측(원본 수치)**: 소스 pose 재렌더 hole **0.0031**(자기 일관성 OK),

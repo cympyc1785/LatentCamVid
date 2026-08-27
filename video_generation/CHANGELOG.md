@@ -51,6 +51,18 @@
   `look_at` 분기가 공유한다. **포즈 값은 한 비트도 안 바뀌고 검사 임계만 바뀐다** — 눈에 보이는
   roll(>=0.01 deg)은 여전히 전부 잡힌다. 상세는 `FIX.log` 2026-08-27 항목.
 
+### Changed
+- **Vista 카메라 캡션 `cam_static_threshold` 0.02 → 0.05 (2026-08-28).** GT 태그 16편
+  캘리브레이션(dance-twirl 은 zoom=focal 축이라 제외): 분절기 속도 눈금 `fps 10 × |Δt|` 에서
+  static GT 쪽 v_med 0.0276~0.0690, moving GT 쪽 0.0725~0.1848 로 경계가 0.07 부근에 있고,
+  분절기 통째 sweep 에서 **0.05 가 static 오탐 0 / moving 누락 0 인 유일값**이다 (0.02 는
+  오탐 7편 — couch-sit 등 정지 shot 이 "move forward"; 0.08 부터 avocado-slice 누락).
+  17편 재실행(같은 pipeline 세팅, `captions_gendop/` 덮어씀) 판정 **exact 11 / partial 4 /
+  miss 2** (0.02: 7/6/4). 남은 miss 2 (camel·cows 의 pan 누락)는 `angular_static_threshold`
+  축이라 별도. 경계 마진이 좁아(0.069 vs 0.073) 전량 재실행 때 `_tag.json` 의 `step_median`
+  으로 경계 근처 scene 을 점검할 것. 비교표
+  `CinemaTraj/results/20260827_caption_gendop_compare/compare_th005.txt`.
+
 ### Added
 - **`CinemaTraj/scripts/render_pred_depth_warp.py` — latentcam 생성 카메라의 depth warp 렌더
   (2026-08-27).** eval 이 떨군 `test/<name>_transforms_pred.json`(scene world **OpenGL** c2w,

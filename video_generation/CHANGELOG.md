@@ -63,6 +63,18 @@
   height 0.98/0.92/0.08/1.00 · 0.02/0.16/0.06/0.04, path 8/8 track 1.00, scene 8/8 track 1.00.
   depth-warp hole 은 반대로 간다 — height 0.206~0.705, path 0.789~0.956, scene 0.739~0.940.
   즉 조준은 좋아지고 시차는 커진다. 기본값은 `height` 로 두어 기존 동작 유지.
+- **`CinemaTraj/scripts/viz_director_pilot.py` — `--space grav` (중력 정렬 top-down)
+  (2026-08-27).** `rel` 은 소스 카메라 축이라 **(x,z) 평면이 수평이 아니다.** snowboard 에서
+  중력축이 카메라 −y 에서 **12.83°** 벗어나 top-down 평면이 **12.14°** 기울었고, 그만큼 수평
+  이동이 고도로 샜다 — 소스 카메라 고도가 49프레임 동안 rel 로는 **+0.553 u** 올라간 것처럼
+  보이는데 중력축으로 재면 **−0.026 u** (사실상 수평)다. subject 도 rel +0.646 u vs
+  중력축 **−0.012 u**. `grav` 는 up 을 `gravity.up_world` 로 잡고 가로/세로는 소스 frame0
+  카메라의 right/forward 를 그 수평면에 투영해서, **좌우는 렌더 화면과 그대로 맞으면서**
+  top-down 이 진짜 수평면이 된다. 기저는 OpenCV 규약 그대로 **(right, down, fwd)** 로 짰다 —
+  up 을 2번 축에 두면 det −1 거울상이 되어 각도가 안 보존된다 (첫 구현이 그랬고 right 를 fwd
+  와 따로 투영해 직교도 깨졌다: 시선각 median 9.2° → 11.4°). 지금은 `det(R_plot)=+1` assert +
+  `right = cross(down, fwd)` 로 두 문제를 같이 막고, 시선각 median 이 rel 과 정확히 9.2° 로
+  일치한다. pose 값 자체는 안 건드린다 — 렌더러와 여전히 비트 동일(4.44e-16).
 - **`CinemaTraj/scripts/viz_director_pilot.py` — `--space rel` + `--planes` (2026-08-27).**
   `--space rel` 은 **첫 context view(소스 `cam_c2w[0]`)를 identity 로 둔 상대 pose** 로 그린다.
   E.T. world 로 그리면 영상에서 오른쪽으로 가는 subject 가 plot 에서 왼쪽으로 가 좌우가 뒤집혀
@@ -70,6 +82,12 @@
   오른쪽이라 화면과 부호가 일치한다. 소스 카메라 궤적도 회색 점선으로 같이 깐다.
   `--planes top side front` 로 행 구성을 고른다(기본 `top side` = 기존 2행).
   세로축 부호는 space 별 표에서 읽어 y-down 인 rel 에서도 위가 위로 간다.
+  같이 들어간 표시 옵션: `--no_source_cam`(소스 카메라 궤적 끄기, 기본은 켬) ·
+  `--aim_line`(카메라→subject 점선 보조선) · `--flip_y`(xz 평면 기준 거울상 `diag(1,-1,1)`;
+  **top-down 에서는 no-op** — 위치·시선 `max|diff| = 0.0` 이고 side(z,y) 시선만 0.743 바뀐다) ·
+  plane 변형 `top_flip`(세로축 반전) 과 `top_mirror`/`top_mirror_flip`(up 축 기준 좌우 반전,
+  rel 전용) · 첫 subplot 에만 legend 를 그려 회색 실선(subject track) 과 회색 점선
+  (source camera) 을 구분한다.
 - **`CinemaTraj/scripts/render_director_depth.py` — DIRECTOR(E.T.) 카메라를 4D 점군에 렌더
   (2026-08-27).** `run_director_vista.py` 가 **회전 규약 미검증**으로 남긴 것을 렌더로 판정한다.
   `R_et_w` 가 world→E.T. 성분 사상이므로 world 축은 `A = R_et_w.T @ R_et[:3,:3]`, E.T. 는

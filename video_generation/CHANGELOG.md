@@ -36,6 +36,57 @@
   roll(>=0.01 deg)은 여전히 전부 잡힌다. 상세는 `FIX.log` 2026-08-27 항목.
 
 ### Added
+- **`CinemaTraj/scripts/render_director_depth.py` — DIRECTOR(E.T.) 카메라를 4D 점군에 렌더
+  (2026-08-27).** `run_director_vista.py` 가 **회전 규약 미검증**으로 남긴 것을 렌더로 판정한다.
+  `R_et_w` 가 world→E.T. 성분 사상이므로 world 축은 `A = R_et_w.T @ R_et[:3,:3]`, E.T. 는
+  y-up/z-forward(det +1)라 OpenCV c2w 는 `[-c0 | -c1 | c2]` = 시선축 180° 회전 하나뿐이다
+  (`[+c0|-c1|c2]` 는 det −1 이라 회전이 아니다). 위치는 npz 의 `cam_t_world_u` 를 그대로 쓴다.
+  출력은 샘플별 `_rgb.mp4`/`_depth.mp4` + `concat.mp4`(윗줄 소스 영상 + 샘플 RGB / 아랫줄
+  **소스 pose depth** + 샘플 depth) + `index.json`. 아랫줄 첫 칸을 소스 pose depth 로 채우는
+  이유는 기준선 없이는 구멍이 카메라 탓인지 점군 탓인지 못 가르기 때문. depth 눈금은
+  전 샘플 공통 5~95% 로 한 번만 잡는다. `--rot lookat` 은 E.T. 회전을 버리고 위치만 써
+  subject 를 조준하는 대조군. 렌더러·컬러맵·mp4 작성은 `lbm.render` / `render_bank_videos` 재사용.
+  **camel 파일럿 실측(원본 수치)**: 소스 pose 재렌더 hole **0.0031**(자기 일관성 OK),
+  샘플 hole s0 0.951 / s1 0.319 / s2 0.419 / s3 0.821, path_len 0.011~0.034 u,
+  depth 눈금 2.595~9.103 u. 시선-대-subject 각 median 7.2~28.2° 로 **회전 규약은 맞고**,
+  구멍의 원인은 거리다 — E.T. 가 낸 카메라-subject 거리가 0.61~4.98 m 인데
+  `--subject_height_m 2.0` 이 정한 `meters_per_u=16.34` 로는 0.037~0.304 u 이고,
+  소스 카메라는 같은 subject 를 **0.622 u (10.2 m)** 밖에서 본다. 즉 DIRECTOR 는 소스보다
+  2~17배 가까운 shot 을 요구한다.
+- **`CinemaTraj/scripts/monst3r_gen_videos.py` — 생성 영상에 MonST3R depth/카메라 추정
+  (2026-08-27).** `eval_data/gen/<scene>/<preset>/` 의 최종 렌더 mp4 를 MonST3R 로 재구성해
+  같은 폴더 밑 `monst3r/` 에 넣는다 (`frame_depth_*.npy`, `frame_*.png`, `dynamic_mask_*.png`,
+  `conf_*.npy`, `scene.glb`, `pred_traj.txt`, `pred_intrinsics.txt`, `run_meta.json`).
+  MonST3R **코드는 0줄 수정** — `run_single.get_reconstructed_scene` 를 그대로 부르고 `gradio`
+  를 stub 으로 채운 뒤 `chdir` 로 상대경로만 맞춘다. `pred_traj.txt` 는 TUM c2w 이고 게이지는
+  MonST3R 자체(미터 아님)라 `run_meta.json:convention` 에 명시한다.
+  camel/three-in-out 스모크 1편 **1093.5 s** (49프레임, GPU 1장).
+  부수로 `third_party/RAFT/models/Tartan-C-T-TSKH-spring540x960-M.pth` 를 패치했다 —
+  `layer.py:110-134` 의 `BasicBlock` 이 **같은 BN 모듈을 `bn3` 과 `downsample.1` 두 이름으로**
+  들고 있는데 HF 배포본은 중복을 제거한 채 저장돼 `strict=True` 로드가 16키 missing 으로 죽는다.
+  `bn3.*` 20키를 `downsample.1.*` 로 별칭 복사(의미상 no-op)했고 원본은 `.orig.pth` 로 백업.
+  MonST3R **코드는 여전히 0줄 수정**이다.
+- **`CinemaTraj/scripts/sweep_caption_thresholds.py` — 카메라 캡션 분절 임계 sweep
+  (2026-08-27).** LLM 호출 없이 preset 이름이 정답인 8개 엔트리에서 config 별 outline 을 찍는다.
+  실측 결론(원본 수치): 합성 카메라는 축별 `|Δt|·fps` median 이 임계 0.02 의 **12~80배**라
+  0.02→0.008→0.004 로 낮춰도 outline 이 **한 글자도 안 바뀐다**. fps 30→10 단독도 합성 카메라
+  outline 을 안 바꾼다. 실제로 듣는 손잡이는 `num_poses` 뿐이고, 120-pose + fps10 조합은
+  recon 소스를 통째로 static 으로 뒤집는다 (camel/source: 4 seg → `static | static+roll right |
+  static`). native 49 + fps 10 은 임계 위에 남는다.
+
+### Changed
+- **`CinemaTraj/scripts/caption_cameras_datadop.py` — 분절기 하이퍼파라미터를 CLI 로 (2026-08-27).**
+  `--fps` / `--num_poses` / `--static_threshold` / `--diff_threshold` /
+  `--angular_static_threshold` / `--smoothing_window_size` / `--min_chunk_size` / `--only` /
+  `--out_subdir` 추가. **기본값은 전부 DataDoP 원본이라 인자 없이 부르면 이전과 bit-identical**
+  이다. `--num_poses 0` 이면 49→120 리샘플을 건너뛰고 원본 프레임을 그대로 쓴다.
+  `--out_subdir` 는 기존 `captions/`(DataDoP 원본 세팅 결과)를 덮지 않으려고 뒀다 —
+  fps 10 결과는 `captions_fps10/` 로 나간다. tag JSON 에 `num_poses` / `seg_kwargs` 를 실어
+  어느 눈금으로 만든 캡션인지 파일만 보고 알 수 있게 했다.
+  **주의: `--min_chunk_size` 는 사실상 무효다** — `segmentation.py:391-393` 이 combine 단계에서
+  `smoothing_window_size=15, min_chunk_size=10` 으로 덮어쓰고, 넘긴 인자는 translation
+  분절(`perform_segmentation`)에만 닿는다.
+
 - **`CinemaTraj/scripts/caption_cameras_datadop.py` — Vista4D eval 카메라에 DataDoP/GenDoP 방식
   카메라 캡션 (2026-08-27).** `eval_data/cameras/<scene>/<preset>.npz` (합성 카메라 114개) 와
   `eval_data/recon_and_seg/<scene>/cameras.npz` (recon 원본 72개) 총 **186개**에

@@ -30,6 +30,31 @@
   roll(>=0.01 deg)은 여전히 전부 잡힌다. 상세는 `FIX.log` 2026-08-27 항목.
 
 ### Added
+- **`CinemaTraj/scripts/trumans_gt_render.py` — RGB 패스 엔진 선택 `--rgb_engine {eevee,cycles}`
+  (2026-08-27).** TRUMANS `.blend` 는 전부 **Blender 3.3.6 저작**인데 우리는 4.5.9 로 돌린다.
+  4.2 에서 EEVEE 가 EEVEE_NEXT 로 전면 재작성되면서, 3.3 기준으로 맞춰둔 발광 재질
+  (`Emission Strength` 노트북 20 / TV 20 / 조명 175~469)이 흰 덩어리로 타서 **옆 물체까지
+  번진다** — "태블릿이 몸을 뚫고 보인다"는 신고의 실제 원인이다(가림이 아니다: index pass 로
+  센 사람 실루엣 내부 laptop 픽셀은 전 프레임 0). 같은 프레임 402 / 같은 카메라 / 같은 조명을
+  Cycles 로 렌더하면 번짐이 **0** 이다 (crop 안 `max>=200` 픽셀 EEVEE 401 → Cycles 0,
+  `>=240` 은 64 → 0). spp 를 16→512 로 올려도 안 변했던 건 샘플링이 아니라 조명 모델 문제라는
+  뜻이었다.
+  - 기본값은 `eevee` 라 **기존 호출은 한 비트도 안 바뀐다**. depth/index 패스는 어느 쪽이든
+    항상 Cycles 1 spp 그대로다.
+  - `--rgb_samples`(기본 128) / `--rgb_bounces`(기본 8) 추가. `--cdevice GPU` 일 때 애드온
+    preferences 에서 OPTIX→CUDA 순으로 명시적으로 잡고 무엇이 잡혔는지 찍는다 (예전엔 디바이스가
+    안 잡혀 있으면 **조용히 CPU 로** 떨어졌다).
+  - `render_meta.json` 의 `rgb_engine` / `rgb_samples` 와 요약표 `engines` 열이 실제 사용 엔진을
+    반영한다.
+  - 실측(960×540, OPTIX): Cycles 128 spp **RGB 4.9 s/frame**, rgb+depth+index 합쳐 ~7 s/frame.
+- **`CinemaTraj/scripts/time_vista_stages.py` — Vista4D target camera 파이프라인 단계별 실측
+  하네스 (2026-08-27).** 샤드 로그에는 `fit` 부터만 찍혀서 `graph`/`pcd`/`bank` 가 공짜인지
+  아무도 몰랐다. `graph → pcd → bank → fit → bankemit` 을 **격리된 `--output_root`** 로 처음부터
+  다시 돌려 벽시계 시간을 잰다 — 기존 `out/<video>/` 는 한 바이트도 안 건드린다(이미 학습에 쓰는
+  `scene_graph.json`/`cloud.npz`/`hole_bank_k6` 를 덮어쓰지 않기 위해). 요약표에 `s/camera` 열과
+  variant 수 대비 기울기·절편을 같이 내서 **고정비(graph/pcd)와 카메라당 비용(fit)** 을 가른다.
+  `bank`(원본 뱅크 `bank/`)와 `fit`(출력 `hole_bank_k6/`)의 `--bank_dir` 를 갈라 놓았다 —
+  섞으면 fit 이 자기 출력을 입력으로 읽는다.
 - **`CinemaTraj/scripts/render_target_poses_depth.py` — 학습 코퍼스의 target pose 에서 depth 를
   렌더해 저장 (2026-08-27).** 입력은 뱅크의 `poses.npz` 가 아니라 export 결과인
   `latentcam_da3/vista4d/<video>/da3/target_poses.npz` 다 — 그래야 dedup(사다리 붕괴 중복 50%

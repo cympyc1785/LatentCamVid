@@ -207,6 +207,13 @@ sd_geo_views: null            # context view 수. null = context clip segment �
 sd_pair_mode: list
 dl3dv_root: /data1/cympyc1785/data/DL3DV/scenes   # DL3DV scene root (images_8 = 480x270; see dataset_dl3dv.py)
 meta_csv: meta.csv            # [new] scene-list CSV under dl3dv_root (e.g. meta_worldtraj.csv = 1K-7K − blacklist)
+# [new 2026-08-27] 세그먼트 키/frame_idx 는 그대로 두고 **캡션만** 다른 파일에서 읽는다.
+#   'prompts.json'        (기본, 기존 동작) <scene>/[da3/]prompts.json
+#   'prompts_simple.json' 같은 세그먼트에 축약 캡션 ("target: woman. motion: arc left and push in")
+# 경로 규칙은 prompts.json 과 같다 -- pose_source='da3' 면 <scene>/da3/<이 파일>.
+# 캡션은 인덱스 캐시 안에 저장되므로 기본값이 아닐 때 캐시 키에 __pf<stem> 이 붙는다
+# (기본값이면 안 붙어서 기존 캐시가 그대로 재사용된다).
+prompts_file: prompts.json
 max_scenes: null              # cap #scenes loaded (null = all; small int for smoke tests)
 train_seg_list: null          # [new] explicit train segment-list file (<batch>/<hash>/<seg>); null = random 90/10 split
 test_seg_list: null           # [new] explicit val/test segment-list file; val = its first (val_max_batches×batch_size) segments
@@ -262,7 +269,8 @@ datadop_letterbox: false      # [자리만] h ∈ {160..416} 이라 34% 가 종�
 # **기존 클래스를 그대로** 생성한다 -> dataset_dl3dv.py / dataset_scene_decoupled.py /
 # resolve_dataset_cfg 는 한 줄도 안 바뀐다.
 #   override 화이트리스트: dl3dv_root, sd_root, sd_split, sd_geo_views, sd_pair_mode, datadop_*,
-#     meta_csv, max_scenes, train_seg_list, test_seg_list, coverage_blacklist_path, train_frac,
+#     meta_csv, prompts_file, max_scenes, train_seg_list, test_seg_list,
+#     coverage_blacklist_path, train_frac,
 #     pose_source, avg_scale_ref, scale_mode, geo_view_sampling, geo_num_views, geo_cover_k,
 #     geo_cover_radius, geo_cover_out_of_seg, geo_cover_before_only, geo_cover_centered_at_s,
 #     geo_first_view_target_s

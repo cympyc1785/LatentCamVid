@@ -342,8 +342,11 @@ class CamDataset(torch.utils.data.Dataset):
     # 두 prompts.json 이 동일하므로 seg 리스트/샘플 인덱싱 로직은 공유한다.
 
     def _prompts_path(self, scene_dir):
-        return osp.join(scene_dir, 'da3', 'prompts.json') if self.pose_source == 'da3' \
-            else osp.join(scene_dir, 'prompts.json')
+        # [new 2026-08-27] prompts_file: 같은 세그먼트 키/frame_idx 위에 **캡션만 갈아끼우는**
+        # 손잡이. 기본값 'prompts.json' 이면 경로가 예전과 글자 그대로 같다.
+        name = getattr(self.cfg, 'prompts_file', None) or 'prompts.json'
+        return osp.join(scene_dir, 'da3', name) if self.pose_source == 'da3' \
+            else osp.join(scene_dir, name)
 
     def _avg_scale_dir(self, scene_dir):
         # avg_scale_ref (pose_source='da3' 에서만 의미가 있다): 저장된 avg_scale 을 어느 context
@@ -424,6 +427,13 @@ class CamDataset(torch.utils.data.Dataset):
         # 기존 캐시는 그대로 재사용되게 한다.
         if self._min_front > 0:
             key += f"__as{self.avg_scale_ref}"
+        # [new 2026-08-27] caption 은 인덱스 캐시 **안에** 들어 있다 (samples 튜플의 4번째 원소).
+        # prompts_file 을 키에 안 넣으면 기본 캡션으로 만든 캐시를 그대로 물어와서 텍스트만
+        # 예전 것으로 학습된다 -- 로그·지표 어디에도 안 드러나는 종류의 사고다.
+        # 기본값일 때는 안 붙여서 기존 캐시 파일을 그대로 재사용한다.
+        prompts_file = getattr(self.cfg, 'prompts_file', None) or 'prompts.json'
+        if prompts_file != 'prompts.json':
+            key += f"__pf{osp.splitext(prompts_file)[0]}"
         cache_dir = osp.join(self.root, '.latentcam_index'); os.makedirs(cache_dir, exist_ok=True)
         cache_path = osp.join(cache_dir, key.replace('/', '_') + '.pt')
         if self.only_segments is not None:

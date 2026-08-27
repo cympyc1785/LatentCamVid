@@ -5,6 +5,46 @@ All notable changes to the latentcam sub-project. Follows [Keep a Changelog](htt
 ## [Unreleased]
 
 ### Added
+- **`prompts_file` — 같은 세그먼트 위에 캡션만 갈아끼우는 손잡이 (2026-08-27).**
+  세그먼트 키·`frame_idx`·pose·`avg_scale`·seg list 는 그대로 두고 **텍스트만** 다른 파일에서
+  읽는다. 기본값 `prompts.json` 이면 경로도 캐시 파일명도 예전과 글자 그대로 같다.
+  - `main/conf/config.yaml` — `prompts_file: prompts.json`. 경로 규칙은 `prompts.json` 과 동일
+    (`pose_source='da3'` 면 `<scene>/da3/<이 파일>`, `transforms` 면 `<scene>/<이 파일>`).
+  - `main/dataset_dl3dv.py` — `_prompts_path` 가 이 값을 쓴다. **`_load_index` 캐시 키에
+    `__pf<stem>` 추가** — 캡션은 인덱스 캐시 *안에* 저장되므로(samples 튜플 인덱스 3) 키를
+    안 바꾸면 옛 캡션 캐시를 그대로 물어와 **로그·지표 어디에도 안 드러난 채** 예전 텍스트로
+    학습된다. 기본값일 때는 안 붙여서 기존 캐시를 그대로 재사용한다.
+  - `main/dataset_mixed.py` — mixed override 화이트리스트에 `prompts_file` 추가.
+- **`scripts/data/make_prompts_simple.py` — Vista4D 축약 캡션 생성기 (2026-08-27).**
+  `<scene>/da3/prompts.json` → `prompts_simple.json`. `prompt_camera_with_scene_video.concise`
+  하나만 덮어쓰고 나머지 필드는 통째로 복사한다 (50 scene / 9873 seg, 키·`frame_idx`·
+  `variant_id`·`preset`·`caption_fields` 0 불일치 실측).
+  `"target: camel motion: the camera significantly dollies straight forward toward the subject"`
+  → `"target: camel. motion: dolly in"` (median 91 → 33 chars).
+  - **크기 부사를 뺀다** (사용자 지시). `barely/slightly/steadily/significantly/dramatically` 는
+    `tau_max` 또는 `pan_deg` 버킷이라 실제 이동량 정보였다. 그래서 이 ablation 은 "문장 길이"와
+    "이동량 지시" **두 축을 같이** 움직인다 — 결과 해석 시 반영할 것. 부사를 남기려면
+    `--keep_magnitude` (`tiny/small/medium/big/huge`).
+- **`scripts/data/make_prompts_simple_dl3dv.py` — DL3DV 축약 캡션 생성기 (2026-08-27).**
+  `<scene>/prompts.json` + **측정된** `<scene>/da3/tags/camera_tags.json` → `prompts_simple.json`
+  (6098 scene / 39837 seg, 파싱 실패 0).
+  `"target: none. motion: truck left and pan right, then truck left, dolly out, and pan right"`.
+  - 원래 `concise` 는 VLM 이 쓴 산문이라 카메라와 장면 묘사가 섞여 있고 **틀린다** — 실측 사례로
+    concise 가 "pans left" 라고 쓴 구간을 태그는 전 구간 `yaw right` 로 잰다. 그래서 캡션을
+    측정 태그에서 다시 만든다.
+  - `target: none` 은 사용자 지시 — DL3DV 는 정적 씬 코퍼스라 조준할 subject 가 없고 혼합
+    학습에서 **free-moving** 만 담당한다. 슬롯을 비우지 않고 글자로 적어 `target:` 이 코퍼스
+    식별자로 새지 않게 한다.
+  - 태그 축 단어를 Vista4D simple 과 **같은 어휘**로 옮긴다 (`move left`→`truck left`,
+    `forward`→`dolly in`, `up/down`→`pedestal up/down`, `yaw`→`pan`, `pitch`→`tilt`,
+    `static`→`hold still`). sub-shot 여러 개면 `, then` 으로 잇는다 (실측 1/2/3 = 30/46/24%).
+  - !! 태그는 **da3 pose** 로 쟀고 학습은 `pose_source: transforms`(COLMAP) 로 돈다. 같은
+    frame_idx 구간을 다른 추정기로 잰 것이라 방향은 합의하지만 크기 게이지는 다르다 —
+    크기 부사를 안 넣는 이유이기도 하다.
+- **`vista4d_pgt_k6_simple.yaml` / `vista4d_pgt_k6_simple_unposed.yaml` — 축약 텍스트 arm 2종
+  (2026-08-27).** 기존 verbose 2종과 합쳐 `{verbose, simple} x {posed, unposed}` 2x2 를 닫는다.
+  `vista4d_pgt_k6.yaml` 대비 `prompts_file` (+ `geo_posed`) 만 다르다. 코드 변경 0줄.
+  wandb `640y40ql` (train2/GPU4) · `c3l8oy51` (train4/GPU5).
 - **`vista4d_pgt_k6_unposed.yaml` — context 카메라 없는(unposed) 대조 arm (2026-08-27).**
   `vista4d_pgt_k6.yaml` 과 **`geo_posed: true → false` 한 줄만** 다르다. 코드 변경 0줄
   (config 만 추가). 두 arm 을 동시에 돌려 "context 카메라 주입이 얼마나 기여하나"를 잰다.

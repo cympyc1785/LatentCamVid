@@ -1,0 +1,50 @@
+# @package _global_
+# Vista4D pseudo-GT arm — **축약 텍스트(simple) + context 카메라 없음(unposed)**.
+# 2x2 의 네 번째 칸이다:
+#                     posed                        unposed
+#     verbose   vista4d_pgt_k6            vista4d_pgt_k6_unposed
+#     simple    vista4d_pgt_k6_simple     vista4d_pgt_k6_simple_unposed   <- 이 파일
+# 네 config 는 `prompts_file` 과 `geo_posed` 두 줄만으로 갈린다. 나머지는 전부 동일하다.
+#
+# 텍스트 축(simple 이 무엇을 버리는가, 왜 축이 둘인가)은 `vista4d_pgt_k6_simple.yaml` 주석,
+# 카메라 축(geo_posed=false 가 무엇을 끄는가, DA3 view 재정렬 부수효과)은
+# `vista4d_pgt_k6_unposed.yaml` 주석을 볼 것 — 여기서 중복하지 않는다.
+#
+# ═══ 이 칸에서만 짚을 것 ════════════════════════════════════════════════════════════════
+# 카메라도 없고 크기 부사도 없으므로 이 arm 에 들어가는 **이동량 정보가 하나도 없다**.
+# 모델은 context RGB 6장(순서는 DA3 가 재정렬) + preset 14종 지시만으로 크기를 정해야 한다.
+# 즉 이 칸의 성능은 "코퍼스 평균 이동량을 얼마나 잘 외웠나"에 가깝고, 나머지 세 칸과
+# 같은 잣대로 읽으면 안 된다.
+exp_name: vista4d_pgt_k6_simple_unposed
+dl3dv_root: /data1/cympyc1785/data/Vista4D-Eval-Data/latentcam_da3
+meta_csv: meta_vista4d.csv
+prompts_file: prompts_simple.json      # ★ 텍스트 축
+train_seg_list: /data1/cympyc1785/data/Vista4D-Eval-Data/latentcam_da3/seg_list_vista4d_train.txt
+test_seg_list: /data1/cympyc1785/data/Vista4D-Eval-Data/latentcam_da3/seg_list_vista4d_test.txt
+coverage_blacklist_path: null
+
+pose_source: da3
+target_pose_source: da3_target_poses
+scale_mode: avg_scale
+avg_scale_ref: context_first_cam
+intr_norm: rel
+cam_dim: 64
+
+geo_encoder: da3
+geo_cam_embed: null
+geo_latent_cache_dir: null
+geo_posed: false                    # ★ 카메라 축
+geo_shuffle_order: false
+da3_geo_model: da3nested-giant-large
+da3_geo_input_hw: [252, 448]
+da3_geo_layers: last
+
+geo_view_sampling: context_uniform
+geo_num_views: 6
+geo_first_view_target_s: true       # 집합만 고정. 순서는 DA3 가 재정렬한다 (unposed arm 주석)
+
+anchor_pred_frame0: true
+
+batch_size: 8
+epochs: 200
+ckpt_at_epochs: [50, 100]

@@ -1,0 +1,59 @@
+# @package _global_
+# Vista4D pseudo-GT arm — **축약 텍스트(simple)**, context 카메라 있음(posed).
+# `vista4d_pgt_k6.yaml` 과 **`prompts_file` 한 줄만** 다르다. 코퍼스·포즈·분모·view·batch·epochs
+# 전부 동일하므로 이 arm 과의 차이는 "프롬프트 문장"뿐이다.
+#
+# ═══ 무엇이 바뀌나 ══════════════════════════════════════════════════════════════════════
+# 세그먼트 키 / frame_idx / target_poses / avg_scale / seg list 는 **한 글자도 안 바뀐다**.
+# `<scene>/da3/prompts_simple.json` 은 `prompts.json` 을 통째로 복사하고
+# `prompt_camera_with_scene_video.concise` 만 덮어쓴 파일이다
+# (`scripts/data/make_prompts_simple.py`, 50 scene / 9873 seg).
+#     verbose  "target: camel motion: the camera significantly dollies straight forward
+#               toward the subject"
+#     simple   "target: camel. motion: dolly in"
+#
+# ═══ 이 ablation 이 실제로 움직이는 축은 둘이다 (해석 시 반드시 반영) ═══════════════════
+# ① 문장 길이/상용구  ② **이동량 지시**. 원본의 `barely/slightly/steadily/significantly/
+# dramatically` 는 `tau_max`(=|t|/z_med) 또는 `pan_deg` 버킷이라 실제 크기 정보였고, simple 은
+# 그걸 뺐다 (사용자 지시). 그래서 simple arm 의 텍스트는 **preset 14종만** 지시하고 이동량은
+# 모델이 정한다. 성능이 떨어져도 "짧아서"인지 "크기를 안 알려줘서"인지 이 두 arm 만으로는
+# 못 가른다 — 가르려면 `--keep_magnitude` 로 만든 세 번째 파일이 필요하다.
+# 실측 test 500 seg 부사 분포: significantly 35.2% / steadily 25.2% / dramatically 24.2% /
+# slightly 13.6% / barely 1.8% — 버려지는 정보가 적지 않다.
+# 고유 motion 문장 수: verbose 57종 -> simple 14종 (test 기준).
+#
+# 나머지 설계 근거(축 정의, intrinsics 고정, k=6, avg_scale, 분할, anchor)는
+# `vista4d_pgt_k6.yaml` 의 주석을 그대로 따른다 — 여기서 중복하지 않는다.
+exp_name: vista4d_pgt_k6_simple
+dl3dv_root: /data1/cympyc1785/data/Vista4D-Eval-Data/latentcam_da3
+meta_csv: meta_vista4d.csv
+prompts_file: prompts_simple.json      # ★ vista4d_pgt_k6.yaml 과의 유일한 차이
+train_seg_list: /data1/cympyc1785/data/Vista4D-Eval-Data/latentcam_da3/seg_list_vista4d_train.txt
+test_seg_list: /data1/cympyc1785/data/Vista4D-Eval-Data/latentcam_da3/seg_list_vista4d_test.txt
+coverage_blacklist_path: null
+
+pose_source: da3
+target_pose_source: da3_target_poses
+scale_mode: avg_scale
+avg_scale_ref: context_first_cam
+intr_norm: rel
+cam_dim: 64
+
+geo_encoder: da3
+geo_cam_embed: null
+geo_latent_cache_dir: null
+geo_posed: true
+geo_shuffle_order: false
+da3_geo_model: da3nested-giant-large
+da3_geo_input_hw: [252, 448]
+da3_geo_layers: last
+
+geo_view_sampling: context_uniform
+geo_num_views: 6
+geo_first_view_target_s: true
+
+anchor_pred_frame0: true
+
+batch_size: 8
+epochs: 200
+ckpt_at_epochs: [50, 100]

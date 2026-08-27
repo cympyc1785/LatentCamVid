@@ -39,7 +39,7 @@ _VALID_NAMES = ('dl3dv', 'scene_decoupled', 'datadop')
 # 코퍼스별로 달라져도 되는 키. 여기 없는 키를 override 에 쓰면 raise 한다.
 OVERRIDE_WHITELIST = {
     'dl3dv_root', 'sd_root', 'sd_split', 'sd_geo_views', 'sd_pair_mode',
-    'meta_csv', 'max_scenes', 'train_seg_list', 'test_seg_list',
+    'meta_csv', 'prompts_file', 'max_scenes', 'train_seg_list', 'test_seg_list',
     'coverage_blacklist_path', 'train_frac',
     'pose_source', 'avg_scale_ref', 'scale_mode',
     'geo_view_sampling', 'geo_num_views', 'geo_cover_k', 'geo_cover_radius',

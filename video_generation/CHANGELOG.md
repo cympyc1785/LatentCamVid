@@ -52,6 +52,14 @@
   roll(>=0.01 deg)은 여전히 전부 잡힌다. 상세는 `FIX.log` 2026-08-27 항목.
 
 ### Added
+- **`CinemaTraj/scripts/caption_cameras_datadop.py` — `--shuffle_taxonomy` / `--no_shuffle_taxonomy`
+  (2026-08-27).** pipeline `configs/captioning/caption_cam+char.yaml:21` 의 그 키를 우리 CLI 에도
+  뚫었다. True 면 chunk 마다 DataDoP 어휘표와 CAMERABENCH 어휘표 중 하나를 `random.choice` 로
+  골라 라벨을 쓴다 (`processing/captioning.py:147`). **기본 False = pipeline 값이자 기존 동작** —
+  우리 스크립트는 `CAM_INDEX_TO_PATTERN`/`ANG_INDEX_TO_PATTERN` 만 import 해 왔고 CAMERABENCH 표는
+  참조한 적이 없다(vendored 리포엔 그 표가 아예 없다). 즉 이전 실행들도 이미 `false` 경로였고,
+  이번 변경은 **그 사실을 `_tag.json` 의 `shuffle_taxonomy` 필드로 명시화**하는 것이다. 재실행
+  17편에서 chunk 총 28개로 이전과 동일. True 인데 리포에 CAMERABENCH 표가 없으면 `parser.error`.
 - **`CinemaTraj/scripts/caption_cameras_datadop.py` — `--gendop_root` (분절기 리포 교체)
   (2026-08-27).** 사용자 지시로 캡션 세팅을 `/data1/cympyc1785/pipeline/GenDoP` 쪽에 맞추는데,
   두 GenDoP 리포는 **같은 함수 안의 하드코딩 값이 다르다** — `segment_rigidbody_trajectories` 가

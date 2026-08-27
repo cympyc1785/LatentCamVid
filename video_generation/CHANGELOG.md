@@ -36,6 +36,36 @@
   roll(>=0.01 deg)은 여전히 전부 잡힌다. 상세는 `FIX.log` 2026-08-27 항목.
 
 ### Added
+- **`CinemaTraj/scripts/caption_cameras_datadop.py` — Vista4D eval 카메라에 DataDoP/GenDoP 방식
+  카메라 캡션 (2026-08-27).** `eval_data/cameras/<scene>/<preset>.npz` (합성 카메라 114개) 와
+  `eval_data/recon_and_seg/<scene>/cameras.npz` (recon 원본 72개) 총 **186개**에
+  `captions/<name>_{tag.json,grid.png,caption.json}` 을 붙인다. DataDoP 3단(rigid-body
+  segmentation → Movement 캡션 → 4×4 프레임 그리드 + Detailed/Concise Interaction)을 그대로
+  재현하며 **GenDoP 리포는 0줄 수정** — `processing.segmentation` 과 `core.utils` 만 import 하고
+  프롬프트는 `dataset/scripts/configs/captioning/llm/*` 를 런타임에 읽는다
+  (`Dataset_DataDoP` 는 `processing.cleaning` → `stonesoup` 미설치라 import 불가).
+  세 가지를 **가정 대신 실측**했다:
+  ① **규약** — DataDoP 는 OpenGL c2w 다. `convert_viser_poses_to_new_coordinate_system` 의
+  `matrix[:3,1:3] *= -1` + 인덱스 대조(1→"move backward", 3→"move up", 9→"move right")로 확인.
+  우리 OpenCV c2w 는 같은 flip 으로 변환한다.
+  ② **게이지 D=1** — DataDoP 22,314 clip 중 400편 실측 total |t| **median 0.1016** vs 우리 recon
+  **0.1664**. 같은 자릿수라 rescale 없이 `cam_static_threshold=0.02` 를 그대로 쓴다.
+  (depth 정규화는 MonST3R 가 이미 shot 단위로 했으므로 기각.)
+  ③ **프레임 수** — DataDoP 는 실제 shot 길이와 무관하게 `pose_clean_normalize` 가 120 pose @
+  fps 30.0 으로 리샘플한다. 우리 49프레임을 날것으로 넣으면 smoothing window(15+)가 궤적의 1/3 을
+  덮어 전 구간이 한 segment 로 뭉개지므로 같은 `sample_from_dense_cameras` 로 49→120 slerp 한다.
+  측정된 tag 분포(원본 수치): recon n=72 segment 수 {1:13, 2:10, 3:31, 4:18}, all-static 6,
+  step_median p10 0.00069 / med 0.00226 / p90 0.00753. cameras n=114 segment 수
+  {1:69, 2:24, 3:13, 4:8}, all-static 4, step_median p10 0.00386 / med 0.02047 / p90 0.05538.
+  **한계: 합성 카메라 114개 중 48개가 focal ramp > 1.1× 인데 DataDoP 어휘에 zoom 이 없어
+  캡션에서 사라진다** — `focal_ratio` 는 `_tag.json` 에만 남는다. `crane-above/below` 도
+  DataDoP 의 `cam_diff_threshold=0.4` 가 열세 축을 죽여 수직 단어를 잃는다 (예:
+  `avocado-slice/close-crane-above` d·fwd −4.390 vs d·up +1.118 → 상대차 0.745 > 0.4). 여섯 축
+  자체는 모호하지 않은 preset 으로 전부 확인했다 (`room-argue/pedestal-up` d·up +1.188 → "move
+  up", `golf/dolly-in` → forward, `bed-shopping/dolly-out` → backward,
+  `basketball-four/right-left` → left, `breakdance/left-right` → right).
+  LLM 은 로컬 vLLM `Qwen/Qwen3-VL-30B-A3B-Instruct` @ `127.0.0.1:22002` (`lbm/vlm.py` 재사용),
+  `--api_base`/`--model` 로 교체 가능. `--no_llm` 이면 tag 만, `--num_shards/--shard_id` 로 분할.
 - **`CinemaTraj/scripts/run_director_vista.py` + `viz_director_pilot.py` — DIRECTOR(E.T.)
   파일럿 (2026-08-27).** Vista 씬의 subject OBB track 을 char 조건으로, 영문 caption 을 text
   조건으로 넣어 카메라 궤적을 받는다. DIRECTOR 의 `src/evaluate.py` 는 et-data 데이터셋에 묶여

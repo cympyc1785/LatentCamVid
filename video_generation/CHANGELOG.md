@@ -7,6 +7,22 @@
 ## [Unreleased]
 
 ### Fixed
+- **DIRECTOR 파일럿이 scene graph G frame 을 world 로 착각했다 — 파일럿 산출물 전량 무효
+  (2026-08-27).** `scene_graph.json` 의 노드 좌표(`track.center_smooth`, `obb.center`)는 G
+  frame(up=+z, 스케일 1/S)인데, `run_director_vista.py:world_to_et` 는 그 위에 **world 축**
+  (`gravity.up_world`, 상수 `fwd=[0,0,1]`)을 물렸고 `render_director_depth.py` 는 npz 의 pose 를
+  world c2w 로 알고 렌더러에 그대로 넘겼다. 축 오차는 up **93.75°**(camel) / **101.28°**
+  (snowboard), fwd 93.67° / 102.14°. 그 결과 subject OBB center 가 **49프레임 전부 카메라 뒤
+  z<0** 로 떨어졌다. `fwd=[0,0,1]` 의 근거였던 주석 "cam_c2w[0]=I" 도 거짓이다 (snowboard
+  |t0|=**0.8104**, rot 6.18°). 이 버그는 **hole/z_p50 표에 안 나타난다** — 렌더는 매 프레임
+  성공한다. 수정: `graph_basis()` 가 G 에서 up=+z 를 쓰고 시선은 실제 frame0 c2w 열2 를 `R_gw`
+  로 G 에 옮겨 쓰고, `g_to_world(c2w_g, T_wg, R_wg)` 가 위치엔 `T_wg`, 회전엔
+  `R_wg = T_wg[:3,:3]/S` 만 적용한다 (`R_wg @ R_wg.T ≈ I` assert). npz 포맷을
+  `director_pilot_v2` 로 올리고 키를 `cam_t_g`/`char_g` 로 바꿔 **프레임을 이름에 박았다** —
+  렌더러는 `cam_t_g` 가 없는 v1 npz 를 거절한다. 옛 동작은 `--et_basis legacy` 로 보존.
+  검증(snowboard, rel 좌표계): `frac(시선각<25°)` 가 수정 전 8 track 전부 0.00~0.33 이었는데
+  수정 후 path·scene 게이지는 8/8 track 이 1.00 이다. 무효화된 산출물
+  (`results/20260827_director_{camel,snowboard}/*`)은 지우지 않고 남겼다. 상세는 `FIX.log` FIX-13.
 - **`CinemaTraj/scripts/trumans_to_recon.py` — `renders_match` 가 엔진까지 대조한다
   (2026-08-27).** pose 만 보던 탓에 EEVEE 로 찍어둔 렌더가 `--rgb_engine cycles` 재실행에서
   **조용히 재사용**됐다. 흰 번짐이 그대로 남는데 로그에는 "렌더 재사용" 한 줄만 찍혀서 눈치챌
@@ -36,6 +52,24 @@
   roll(>=0.01 deg)은 여전히 전부 잡힌다. 상세는 `FIX.log` 2026-08-27 항목.
 
 ### Added
+- **`CinemaTraj/scripts/run_director_vista.py` — `--scale_mode {height,path,scene}` (2026-08-27).**
+  E.T. 는 미터 단위로 학습돼서 `meters_per_u` 하나가 shot 크기를 전부 정한다. 기존 `height`
+  (subject 키 = `--subject_height_m`) 는 snowboard 에서 `meters_per_u 12.210` 이 나와 카메라를
+  subject 로부터 0.15~15.8 m 로 흩뿌렸다. 새 게이지 둘 — `path` 는 char **이동거리**를
+  `--target_path_m`(기본 1.0) 로 맞추고(snowboard: 1.2869 u → 0.777), `scene` 은 **depth 로 잰
+  씬 스케일**을 `--target_scene_m`(기본 1.0) 로 맞춘다. 후자는 `S`("1 u ≜ S DA3 units",
+  frame0 non-sky 평균 ray 길이)의 정의상 G frame 에서 씬 스케일이 정확히 1.0 u 이므로
+  `meters_per_u = target_scene_m` 이다. 실측(snowboard, rel 좌표계 `frac(시선각<25°)`):
+  height 0.98/0.92/0.08/1.00 · 0.02/0.16/0.06/0.04, path 8/8 track 1.00, scene 8/8 track 1.00.
+  depth-warp hole 은 반대로 간다 — height 0.206~0.705, path 0.789~0.956, scene 0.739~0.940.
+  즉 조준은 좋아지고 시차는 커진다. 기본값은 `height` 로 두어 기존 동작 유지.
+- **`CinemaTraj/scripts/viz_director_pilot.py` — `--space rel` + `--planes` (2026-08-27).**
+  `--space rel` 은 **첫 context view(소스 `cam_c2w[0]`)를 identity 로 둔 상대 pose** 로 그린다.
+  E.T. world 로 그리면 영상에서 오른쪽으로 가는 subject 가 plot 에서 왼쪽으로 가 좌우가 뒤집혀
+  보였다 (E.T. `char dx −9.216` vs rel `+3.070`). rel 좌표계의 +x 는 소스 frame0 카메라의
+  오른쪽이라 화면과 부호가 일치한다. 소스 카메라 궤적도 회색 점선으로 같이 깐다.
+  `--planes top side front` 로 행 구성을 고른다(기본 `top side` = 기존 2행).
+  세로축 부호는 space 별 표에서 읽어 y-down 인 rel 에서도 위가 위로 간다.
 - **`CinemaTraj/scripts/render_director_depth.py` — DIRECTOR(E.T.) 카메라를 4D 점군에 렌더
   (2026-08-27).** `run_director_vista.py` 가 **회전 규약 미검증**으로 남긴 것을 렌더로 판정한다.
   `R_et_w` 가 world→E.T. 성분 사상이므로 world 축은 `A = R_et_w.T @ R_et[:3,:3]`, E.T. 는

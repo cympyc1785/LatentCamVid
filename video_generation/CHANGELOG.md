@@ -52,6 +52,15 @@
   roll(>=0.01 deg)은 여전히 전부 잡힌다. 상세는 `FIX.log` 2026-08-27 항목.
 
 ### Added
+- **`CinemaTraj/scripts/render_pred_depth_warp.py` — latentcam 생성 카메라의 depth warp 렌더
+  (2026-08-27).** eval 이 떨군 `test/<name>_transforms_pred.json`(scene world **OpenGL** c2w,
+  `render_geo_preds.py:load_pred` 와 같은 규약 — ref 를 GT `target_poses.npz` 와 대조해
+  max|diff| 2.4e-7 실측)을 `diag(1,-1,-1,1)` 로 OpenCV 로 되돌려 기존 `CloudRenderer` 로
+  렌더한다. 열 구성 SOURCE | GT | arm 별 pred, pred 타일 캡션은 그 arm 이 실제 조건으로 받은
+  텍스트(`_caption.json`). 기존 두 렌더 스크립트는 뱅크/학습 target 만 읽고 **생성** 궤적을
+  읽는 코드가 없어서 새로 만들었다 (조립 부품 `render_variant`/`label_tile`/`contact_sheet`/
+  `write_video` 는 전부 재사용). eval JSON 의 K 와 cloud frame0 K 가 다르면 assert.
+  entry 별 mp4 + 이어붙인 reel + hole 실측 `index.json`.
 - **`CinemaTraj/scripts/caption_cameras_datadop.py` — `--shuffle_taxonomy` / `--no_shuffle_taxonomy`
   (2026-08-27).** pipeline `configs/captioning/caption_cam+char.yaml:21` 의 그 키를 우리 CLI 에도
   뚫었다. True 면 chunk 마다 DataDoP 어휘표와 CAMERABENCH 어휘표 중 하나를 `random.choice` 로

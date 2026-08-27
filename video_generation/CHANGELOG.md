@@ -64,6 +64,23 @@
   `CinemaTraj/results/20260827_caption_gendop_compare/compare_th005.txt`.
 
 ### Added
+- **DynPose-LBM 파이프라인 — dynpose-0000 880편에 vista 방식 target camera 뱅크 (2026-08-28).**
+  체인은 vista 와 동일 스크립트에 `--eval_data /data1/.../DATA/DynPose-LBM` 만 바꿔 낀다:
+  recon(`recon_and_seg_single.py --recon_method da3 --num_frames 49`) → VLM 명사
+  (`extract_nouns_vlm.py`, **`--eval_data` pre-scan 추가** — module 상수라 argparse 전에 훑는다;
+  metadata.csv 없는 corpus 는 authored 비교만 빠짐) → SAM3(`sam3_seg_instances.py`, keywords 는
+  VLM dynamic 명사를 `DynPose-LBM/metadata.csv` 로 씀) → **신규
+  `dynpose_dynamic_mask_from_seg.py`** (recon 의 dynamic_mask 를 SAM3 트랙 합집합 packbits
+  해제로 덮어씀) → graph → cloud → bank/fit(k6 knobs)/emit.
+  **recon 규약 함정**: 기본 `--seg_keywords _all_` 은 dynamic_mask 를 전부 1 로 채워
+  scene_graph 의 정적 점이 0 이 된다 (파일럿 실측 사망). **빈 `--seg_keywords` +
+  `--keep_recon_sky`** 로 돌리고 dynamic 은 후처리로 채우는 것이 규약.
+  파일럿 2편 실측(초): recon 83 / nouns 7 / sam3 63 / mask-fix 2 / graph 112~134 / cloud 28 /
+  bank 24~94 / fit 20~481 / emit 6~12. video1(주방, tau_start 0.15) **152 변이** 성공,
+  video2(보행, tau_start 1.57) 는 190 조합 전부 saturated — snowboard 와 같은 D67 탈락이라
+  dynpose 의 보행 영상 비율만큼 수율이 깎인다 (fit 이 20s 로 싸서 사전 필터 없이 skipped.json
+  으로 걸러도 된다). 880편 recon 샤드 러너 `/tmp/dynpose_recon_shard.sh` (skip=cameras.npz,
+  49f 미만은 FAIL 로그). vLLM 재기동 함정 3종은 FIX-15.
 - **`CinemaTraj/scripts/gendop_release_{infer,eval}.py` — GenDoP 릴리즈 ckpt 를 우리 캡션으로
   평가 (2026-08-28).** `captions_gendop` 186개(cameras 114 + recon 72)의 `Movement` 캡션을
   `text_motion.safetensors` (HF Dubhe-zmc/GenDoP) 에 넣어 궤적 생성(모델 1회 로드, GenDoP 리포

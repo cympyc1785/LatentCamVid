@@ -52,6 +52,21 @@
   roll(>=0.01 deg)은 여전히 전부 잡힌다. 상세는 `FIX.log` 2026-08-27 항목.
 
 ### Added
+- **`CinemaTraj/scripts/caption_cameras_datadop.py` — `--gendop_root` (분절기 리포 교체)
+  (2026-08-27).** 사용자 지시로 캡션 세팅을 `/data1/cympyc1785/pipeline/GenDoP` 쪽에 맞추는데,
+  두 GenDoP 리포는 **같은 함수 안의 하드코딩 값이 다르다** — `segment_rigidbody_trajectories` 가
+  combine 단계에서 인자를 덮어쓰며 vendored 는 `min_chunk_size = 10`, pipeline 은 `= 12` 를 쓴다
+  (`smoothing_window_size = 15` 는 둘 다 같다). 인자로는 못 바꾸니 리포 자체를 갈아끼운다.
+  `processing.segmentation` 은 import 시점에 경로가 정해져야 해서 argparse 전에 `sys.argv` 를
+  훑는다. 기본값은 vendored 라 기존 호출은 그대로다. `_tag.json` 에 `gendop_root` 를 남긴다.
+  **17편 실측(Vista4D recon 소스, 사용자 수동 GT tag 대비)**: pipeline 세팅
+  (n=49 리샘플 없음 / fps 10 / diff 0.6) 이 exact 7 · partial 6 · miss 4,
+  기존 기본값(120 pose 리샘플 / fps 30 / diff 0.4) 이 exact 1 · partial 11 · miss 5.
+  chunk 수는 scene 당 3.06 → 1.65 로 줄었다. 결정적인 노브는 **120 pose 리샘플**이다 —
+  같은 17편 knob ablation 에서 roll chunk 가 리샘플 없음 **0개** vs 리샘플 **18개**(fps·diff 는
+  각각 0개·0개로 무영향), 기존 기본값 조합은 **26개**다. GT 17편에 roll 은 한 번도 안 나온다.
+  즉 옛 `_tag.json` 의 roll 은 slerp 보간이 만든 것이다. 비교표는
+  `CinemaTraj/results/20260827_caption_gendop_compare/{compare.txt,config.json}`.
 - **`CinemaTraj/scripts/run_director_vista.py` — `--scale_mode {height,path,scene}` (2026-08-27).**
   E.T. 는 미터 단위로 학습돼서 `meters_per_u` 하나가 shot 크기를 전부 정한다. 기존 `height`
   (subject 키 = `--subject_height_m`) 는 snowboard 에서 `meters_per_u 12.210` 이 나와 카메라를

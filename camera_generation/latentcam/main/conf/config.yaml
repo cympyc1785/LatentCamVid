@@ -214,6 +214,11 @@ meta_csv: meta.csv            # [new] scene-list CSV under dl3dv_root (e.g. meta
 # 캡션은 인덱스 캐시 안에 저장되므로 기본값이 아닐 때 캐시 키에 __pf<stem> 이 붙는다
 # (기본값이면 안 붙어서 기존 캐시가 그대로 재사용된다).
 prompts_file: prompts.json
+# [new 2026-08-27] subject OBB track concat 조건. >0 이면 <scene>/da3/target_track.npz 의
+# world 궤적을 frame-s 카메라 좌표 + norm_scale 게이지로 옮긴 (T,4)[xyz,valid] 를 latent 토큰
+# 길이로 interp 해 x_t 채널에 concat 한다 (4 = xyz+valid). 0 = 기존 구조/동작 비트 동일.
+target_track_dim: 0
+target_track_dropout: 0.1     # per-sample null 드랍 (추론에서 track 없이 쓸 수 있게)
 max_scenes: null              # cap #scenes loaded (null = all; small int for smoke tests)
 train_seg_list: null          # [new] explicit train segment-list file (<batch>/<hash>/<seg>); null = random 90/10 split
 test_seg_list: null           # [new] explicit val/test segment-list file; val = its first (val_max_batches×batch_size) segments

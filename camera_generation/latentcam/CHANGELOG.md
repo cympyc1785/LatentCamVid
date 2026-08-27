@@ -5,6 +5,25 @@ All notable changes to the latentcam sub-project. Follows [Keep a Changelog](htt
 ## [Unreleased]
 
 ### Added
+- **`target_track_dim` — subject OBB 3D 궤적을 x_t 채널에 concat 하는 조건 (2026-08-28).**
+  V4D-PGT 9 ablation. `<scene>/da3/target_track.npz` (CinemaTraj `export_target_track.py` 산출,
+  scene_graph 의 dyn `track.center_smooth` / stat `obb.center` 를 `T_wg` 로 world 변환, 50 scene
+  전 변이 valid) 의 subject world 궤적을 **cam_param 과 같은 앵커·같은 분모**로 옮긴다:
+  `q(f) = (E_s @ [p_w(f);1])[:3] / norm_scale` (camel 실측 subject z 0.62~0.65 전 프레임 z>0,
+  cam rel |t| max 0.402 와 같은 자릿수). `(49,4)[xyz,valid]` 를 VAE stride-2×2 격자에 맞춰
+  latent 토큰 13개로 linear interp 후 x_t `(B,13,64)` 에 채널 concat.
+  - `models/camera_diffusion_model_latent.py` — `cond_dim` 인자; `cam_in = Linear(64+cond_dim,·)`.
+    **null = 전 채널 0** — concat 조건은 cross-attn 과 달리 uncond forward 에서 못 빼므로 CFG 를
+    null 값으로 정의한다. `cond=None` 이면 zeros (계측 호출 보호).
+  - `main/dataset_dl3dv.py` — `_target_track`/`_track_cond` (+ 캐시). 파일 없으면 loud fail
+    (`_target_poses` 와 같은 이유 — 조용히 zero 조건이면 arm 이 대조군과 같아진다).
+  - `main/train_latent_cam_dm.py` — `build_track_cond` (interp + per-sample dropout 0.1),
+    train/val/`sample()` 배선, `is_ar`/`per_token_noise` 와 병용 시 startup assert.
+  - `scripts/eval_testset.py` — run_validation 과 동일하게 dropout 없이 조건 전달.
+  - `main/conf/config.yaml` `target_track_dim: 0`(기본, 기존 arm 비트 동일) ·
+    `target_track_dropout: 0.1`; `main/conf/experiment/vista4d_pgt_k6_track.yaml`
+    (k6 대비 `target_track_dim: 4` 한 줄 차이). smoke exit 0 (wandb dpp3oxvq),
+    본학습 20260828_000434 (wandb folprs73, screen train5/GPU6 — 사용자 허용).
 - **`prompts_file` — 같은 세그먼트 위에 캡션만 갈아끼우는 손잡이 (2026-08-27).**
   세그먼트 키·`frame_idx`·pose·`avg_scale`·seg list 는 그대로 두고 **텍스트만** 다른 파일에서
   읽는다. 기본값 `prompts.json` 이면 경로도 캐시 파일명도 예전과 글자 그대로 같다.

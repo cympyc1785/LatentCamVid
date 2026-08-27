@@ -93,13 +93,19 @@ class CameraDiffusionModel(nn.Module):
         geo_encoder=None,
         geo_cam_raw_dim=0,
         geo_cam_embed_dim=128,
+        cond_dim=0,
     ):
         super().__init__()
 
         self.num_layers = num_layers
         self.num_heads = num_heads
 
-        self.cam_in = nn.Linear(cam_dim, hidden_dim)
+        # [new 2026-08-27] cond_dim > 0 (cfg.target_track_dim): x_t 채널에 per-token 조건
+        # (subject OBB track 등)을 concat 한다. concat 조건은 cross-attn 과 달리 uncond
+        # forward 에서 "빼기"가 불가능하므로 null = 전 채널 0 (forward 의 cond=None 분기).
+        # 0 = 기존 구조 그대로 (기존 ckpt 와 state_dict 호환).
+        self.cond_dim = int(cond_dim)
+        self.cam_in = nn.Linear(cam_dim + self.cond_dim, hidden_dim)
 
         self.time_mlp = TimeEmbedding(time_emb_dim)
         self.time_proj = nn.Linear(time_emb_dim, hidden_dim)
@@ -148,7 +154,7 @@ class CameraDiffusionModel(nn.Module):
         d = self.geo_cam_raw_dim
         return torch.cat([geo_emb[..., :-d], self.geo_cam_mlp(geo_emb[..., -d:])], dim=-1)
 
-    def forward(self, x_t, t, text_emb, text_mask, geo_emb=None, geo_mask=None):
+    def forward(self, x_t, t, text_emb, text_mask, geo_emb=None, geo_mask=None, cond=None):
         self.text_cross_attn_weight = None
         # geo latent is provided externally (on-the-fly frozen geo_encoder in the
         # training loop); condition on it whenever geo_emb is given.
@@ -158,6 +164,14 @@ class CameraDiffusionModel(nn.Module):
         B, T, _ = x_t.shape
 
         device = x_t.device
+
+        # [new 2026-08-27] per-token concat 조건. cond=None 이면 zeros = null 조건 — 계측용
+        # 호출(geo_attn_probe 등)이 cond 를 모르고 불러도 죽지 않게 하려는 것이지, 학습/샘플링
+        # 경로는 반드시 cond 를 명시적으로 넘겨야 한다 (train_latent_cam_dm.build_track_cond).
+        if self.cond_dim > 0:
+            if cond is None:
+                cond = x_t.new_zeros(B, T, self.cond_dim)
+            x_t = torch.cat([x_t, cond.to(x_t.dtype)], dim=-1)
 
         h = self.cam_in(x_t)
 

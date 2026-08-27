@@ -306,8 +306,11 @@ def main():
                 # (common random numbers). 전역 시드만 맞추는 것과 달리 앞 배치의 RNG 소비량이나
                 # arm 별 RNG 사용 패턴에 흔들리지 않는다.
                 _g = (torch.Generator().manual_seed(_seed + step) if _seed is not None else None)
+                # [new 2026-08-27] target_track arm: run_validation 과 동일하게 dropout 없이 조건
+                # 그대로. target_track_dim=0 이면 None = 기존 호출과 동일.
+                _cond = T.build_track_cond(data, traj_len, device)
                 out = T.sample(model, noise_scheduler, traj_len, text_embeds, text_masks,
-                               pc_embeds, pc_masks, generator=_g)
+                               pc_embeds, pc_masks, generator=_g, cond=_cond)
 
             tot_lat += F.mse_loss(out, traj_latents, reduction='mean').item() * B
             traj_pred = camera_vae.decode(out * cfg.vae_latent_scale) if cfg.use_vae else out

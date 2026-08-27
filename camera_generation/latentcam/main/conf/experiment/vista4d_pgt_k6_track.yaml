@@ -1,0 +1,53 @@
+# @package _global_
+# V4D-PGT 9: subject OBB track concat 조건 ablation.
+#
+# `vista4d_pgt_k6.yaml` 과 **`target_track_dim` 한 줄만** 다르다 (exp_name 제외). 코퍼스·포즈·
+# 분모·geo view·batch·epochs 전부 동일 — 이 arm 의 존재 이유가 "명시적 3D 추종 신호가 geo
+# latent(암묵) 위에 얹혔을 때 뭐가 좋아지나" 하나이므로 다른 축은 전부 고정한다.
+#
+# 조건이 들어가는 방식 (models/camera_diffusion_model_latent.py cond_dim / dataset_dl3dv
+# _track_cond / train_latent_cam_dm.build_track_cond):
+#   <scene>/da3/target_track.npz 의 subject world 궤적 p_w(f) (49,3)
+#     -> q(f) = (E_s @ [p_w(f);1])[:3] / norm_scale       (cam_param 과 같은 앵커·같은 분모)
+#     -> (49,4)[xyz,valid] 를 latent 토큰 13개로 linear interp
+#     -> x_t (B,13,64) 에 채널 concat, cam_in = Linear(64+4, hidden)
+# null = 전 채널 0 (target_track_dropout 0.1 로 per-sample 드랍) — concat 조건은 uncond
+# forward 에도 채널이 있어야 해서 CFG 를 빼기가 아니라 null 값으로 정의한다.
+#
+# target_track.npz 는 CinemaTraj/scripts/export_target_track.py 산출 (scene_graph.json 의
+# track.center_smooth(dyn) / obb.center(stat) 를 T_wg 로 world 변환, 변이별 anchor 매핑).
+exp_name: vista4d_pgt_k6_track
+dl3dv_root: /data1/cympyc1785/data/Vista4D-Eval-Data/latentcam_da3
+meta_csv: meta_vista4d.csv
+train_seg_list: /data1/cympyc1785/data/Vista4D-Eval-Data/latentcam_da3/seg_list_vista4d_train.txt
+test_seg_list: /data1/cympyc1785/data/Vista4D-Eval-Data/latentcam_da3/seg_list_vista4d_test.txt
+coverage_blacklist_path: null
+
+pose_source: da3
+target_pose_source: da3_target_poses
+scale_mode: avg_scale
+avg_scale_ref: context_first_cam
+intr_norm: rel
+cam_dim: 64
+
+target_track_dim: 4                    # ★ vista4d_pgt_k6.yaml 과의 유일한 차이
+target_track_dropout: 0.1
+
+geo_encoder: da3
+geo_cam_embed: null
+geo_latent_cache_dir: null
+geo_posed: true
+geo_shuffle_order: false
+da3_geo_model: da3nested-giant-large
+da3_geo_input_hw: [252, 448]
+da3_geo_layers: last
+
+geo_view_sampling: context_uniform
+geo_num_views: 6
+geo_first_view_target_s: true
+
+anchor_pred_frame0: true
+
+batch_size: 8
+epochs: 200
+ckpt_at_epochs: [50, 100]

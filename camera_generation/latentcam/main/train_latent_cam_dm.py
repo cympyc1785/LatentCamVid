@@ -245,8 +245,29 @@ def _geo_attn_figure(attn_v, grid_hw, images, stats):
     return fig
 
 
+def build_track_cond(data, t_lat, device, dropout_p=0.0):
+    """[new 2026-08-27] data['target_track'] (B,T,4)[xyz,valid] -> (B,t_lat,4) concat 조건.
+
+    키가 없으면 None (기존 arm 경로 그대로). VAE 가 49프레임을 stride-2 두 번으로 t_lat 토큰으로
+    줄이므로 조건도 같은 축으로 linear interp 한다. null = 전 채널 0 (valid 포함) — concat 조건은
+    uncond forward 에도 채널이 있어야 해서 CFG 를 '빼기'가 아니라 null 값으로 정의한다.
+    dropout_p 는 per-sample: 추론에서 track 없이 쓸 수 있게 null 조건을 학습에 남겨 두는 장치.
+    """
+    tt = data.get('target_track')
+    if tt is None:
+        return None
+    tt = tt.to(device).float().transpose(1, 2)                      # (B,4,T)
+    cond = F.interpolate(tt, size=int(t_lat), mode='linear',
+                         align_corners=True).transpose(1, 2)        # (B,t_lat,4)
+    if dropout_p > 0:
+        drop = torch.rand(cond.shape[0], device=device) < float(dropout_p)
+        cond[drop] = 0.0
+    return cond
+
+
 @torch.no_grad()
-def sample(model, scheduler, traj_len, text_emb, text_masks, point_emb, point_mask, generator=None):
+def sample(model, scheduler, traj_len, text_emb, text_masks, point_emb, point_mask, generator=None,
+           cond=None):
     """generator: x_T 추첨용 **CPU** torch.Generator. None 이면 전역 RNG (기존 동작).
 
     이걸 넘기면 sampling 이 완전히 결정적이 된다 — cfg.sampling_type='ddim' 의 DDIMScheduler
@@ -265,7 +286,8 @@ def sample(model, scheduler, traj_len, text_emb, text_masks, point_emb, point_ma
             t,
             device=device,
         )
-        noise_pred = model(x_t, timesteps.float(), text_emb, text_masks, point_emb, point_mask)
+        noise_pred = model(x_t, timesteps.float(), text_emb, text_masks, point_emb, point_mask,
+                           cond=cond)
         x_t = scheduler.step(noise_pred, t, x_t).prev_sample
     return x_t
 
@@ -452,10 +474,18 @@ def train():
                        geo_cam_embed_dim=getattr(cfg, 'geo_cam_embed_dim', 128))
         print(f"(model) geo_cam_embed={cfg.geo_cam_embed}: geo_proj input = "
               f"{_geo_kw['geo_latent_dim']} + {_geo_kw['geo_cam_embed_dim']}")
+    # [new 2026-08-27] cfg.target_track_dim>0: subject OBB track 을 x_t 채널에 concat.
+    # 0 (기본) 이면 cond_dim=0 -> cam_in 이 기존과 동일 (state_dict/동작 비트 동일).
+    _track_dim = int(getattr(cfg, 'target_track_dim', 0) or 0)
+    if _track_dim > 0:
+        assert not getattr(cfg, 'is_ar', False) and not getattr(cfg, 'per_token_noise', False), \
+            "target_track_dim>0 은 표준 diffusion 경로에만 배선되어 있다 (is_ar/per_token_noise 미지원)"
+        print(f"(model) target_track_dim={_track_dim}: cam_in input = cam_dim + {_track_dim}")
     if cfg.point_encoder != 'custom':
-        model = CameraDiffusionModel(cam_dim=cfg.cam_dim, **_geo_kw)
+        model = CameraDiffusionModel(cam_dim=cfg.cam_dim, cond_dim=_track_dim, **_geo_kw)
     else:
-        model = CameraDiffusionModel(cam_dim=cfg.cam_dim, pc_encoder=pc_encoder, **_geo_kw)
+        model = CameraDiffusionModel(cam_dim=cfg.cam_dim, cond_dim=_track_dim,
+                                     pc_encoder=pc_encoder, **_geo_kw)
     
     # Load weights from the (peeked) resume checkpoint. Optimizer/step/epoch are
     # restored after accelerator.prepare() below (full resume only).
@@ -705,8 +735,10 @@ def train():
                     # None (기본값 아님, 명시적 null) 이면 기존처럼 전역 RNG 를 쓴다.
                     _vs = getattr(cfg, 'val_sample_seed', None)
                     _g = torch.Generator().manual_seed(int(_vs) + step) if _vs is not None else None
+                    # val 은 dropout 없이 실제 조건 그대로 (target_track_dim=0 이면 None = 기존).
+                    _cond = build_track_cond(data, traj_len, device)
                     out = sample(model, noise_scheduler, traj_len, text_embeds, text_masks,
-                                 pc_embeds, pc_masks, generator=_g)
+                                 pc_embeds, pc_masks, generator=_g, cond=_cond)
 
                 val_loss_latent = F.mse_loss(out, traj_latents, reduction='mean')
                 total_loss_latent += val_loss_latent * B
@@ -991,7 +1023,11 @@ def train():
                                            pc_embeds, pc_masks)
             else:
                 noisy_x = noise_scheduler.add_noise(traj_latents, noise, timesteps)
-                noise_pred = model(noisy_x, timesteps.float(), text_embeds, text_masks, pc_embeds, pc_masks)
+                # target_track_dim=0 이면 _cond=None -> 기존 호출과 동일.
+                _cond = build_track_cond(data, traj_latents.shape[1], device,
+                                         dropout_p=float(getattr(cfg, 'target_track_dropout', 0.1)))
+                noise_pred = model(noisy_x, timesteps.float(), text_embeds, text_masks,
+                                   pc_embeds, pc_masks, cond=_cond)
                 loss = F.mse_loss(noise_pred, noise)
                 
             t5 = time.time()

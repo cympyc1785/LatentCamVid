@@ -326,6 +326,8 @@ class CamDataset(torch.utils.data.Dataset):
         self._scene_cache = {}      # lazy: scene_idx -> {w2c,intr,frame_files,hw}
         # target_pose_source: scene_idx -> {'w2c': (V,T,4,4), 'intr': (V,T,3,3), 'keys': [str]}
         self._target_pose_cache = {}
+        # target_track_dim>0: scene_idx -> {'track': (V,T,3) world, 'valid': (V,), 'keys': {str:i}}
+        self._target_track_cache = {}
         # lazy_dataset (default True): __init__ only builds the sample/scene index (from a persisted
         # cache when available); scene poses/paths are parsed on demand in __getitem__ + cached.
         self.lazy = spec.lazy_dataset or only_segments is not None
@@ -974,6 +976,54 @@ class CamDataset(torch.utils.data.Dataset):
                            f"있는 키 {sorted(cache['keys'])[:8]}...)")
         return cache['w2c'][v], cache['intr'][v]
 
+    def _target_track(self, scene_idx, seg_key):
+        """[new 2026-08-27] target_track_dim>0: 변이의 subject(anchor) OBB world 궤적.
+
+        `<scene>/da3/target_track.npz` (CinemaTraj/scripts/export_target_track.py 산출):
+            track_world (V,T,3) float32 — DA3 world 좌표의 OBB/track center
+            valid       (V,)   bool     — anchor 를 scene_graph 에서 못 찾은 변이는 False
+            keys        (V,)   str      — target_poses.npz 와 같은 세그먼트 키
+        파일이 없으면 **터뜨린다** — _target_poses 와 같은 이유 (조용히 zero 조건으로 학습되면
+        arm 이 대조군과 같아져 버리고 로그에 흔적이 없다).
+        """
+        cache = self._target_track_cache.get(scene_idx)
+        if cache is None:
+            p = osp.join(self.scene_dir_list[scene_idx], 'da3', 'target_track.npz')
+            if not osp.isfile(p):
+                raise FileNotFoundError(
+                    f"target_track_dim>0 인데 파일이 없다: {p} — "
+                    f"CinemaTraj/scripts/export_target_track.py 를 먼저 돌릴 것")
+            z = np.load(p, allow_pickle=True)
+            cache = {'track': torch.from_numpy(np.asarray(z['track_world'], dtype=np.float32)),
+                     'valid': np.asarray(z['valid'], dtype=bool),
+                     'keys': {str(k): i for i, k in enumerate(z['keys'].tolist())}}
+            self._target_track_cache[scene_idx] = cache
+        v = cache['keys'].get(str(seg_key))
+        if v is None:
+            raise KeyError(f"target_track.npz 에 세그먼트 키 {seg_key!r} 가 없다 "
+                           f"(scene={self.scene_dir_list[scene_idx]})")
+        return cache['track'][v], bool(cache['valid'][v])
+
+    def _track_cond(self, scene_idx, seg_key, extrinsics, norm_scale):
+        """subject world 궤적 -> cam_param 과 같은 게이지의 (T,4) [x,y,z,valid].
+
+        cam_param 의 translation 은 rel = E @ inv(E_s) 의 t 를 norm_scale 로 나눈 것이고,
+        rel_f 는 **frame-s 카메라 좌표 -> frame-f 카메라 좌표** 변환이다. 그래서 subject 를
+        같은 좌표계에 두려면 frame-s 카메라 좌표가 맞다: q(f) = (E_s @ [p_w(f);1])[:3] / norm_scale.
+        분모까지 같아야 모델이 카메라 t 와 subject 위치를 같은 자로 읽는다.
+        valid=0 이면 xyz 도 0 — concat 조건의 null 정의 (train_latent_cam_dm.build_track_cond).
+        """
+        track, valid = self._target_track(scene_idx, seg_key)
+        T = extrinsics.shape[0]
+        if not valid:
+            return torch.zeros(T, 4)
+        if track.shape[0] != T:      # 소스가 num_frames 보다 길 때의 subsample 과 같은 규칙
+            track = track[self._even_indices(track.shape[0], T)]
+        E_s = extrinsics[0].float()
+        q = track.float() @ E_s[:3, :3].T + E_s[:3, 3]
+        q = q / norm_scale.reshape(1, 1).float()
+        return torch.cat([q, torch.ones(T, 1)], dim=-1)
+
     def _first_farthest_scale(self, extrinsics):
         """LagerNVS-style scale = 1.35 * max(||camera center - FIRST camera||) over the segment
         (relative to frame 0). Matches LagerNVS normalize(): scene_scale = 1.35*max ||t||."""
@@ -1460,6 +1510,13 @@ class CamDataset(torch.utils.data.Dataset):
             norm_scale = self._cam_dist_mean_scale(extrinsics)
         out = self._target_out(extrinsics, intrinsics, norm_scale, h, w, caption, data_name)
         norm_scale = out['norm_scale']
+
+        # [new 2026-08-27] subject OBB track concat 조건. 기본 target_track_dim=0 = 이 블록을
+        # 아예 안 탄다 (기존 arm 비트 동일). extrinsics 는 위에서 이미 target 궤적으로 교체된
+        # 뒤라 E_s = 그 변이의 frame0 w2c (= 소스 frame0 카메라, 뱅크가 frame0 공유).
+        if int(getattr(self.cfg, 'target_track_dim', 0) or 0) > 0:
+            out['target_track'] = self._track_cond(
+                scene_idx, data_name.split('_')[-1], extrinsics, norm_scale)
 
         # geo encoder input (multi-view images) — only for the geo path; text-only skips it.
         # [new] cache hit short-circuits the whole block: the frozen geo_emb is read straight off

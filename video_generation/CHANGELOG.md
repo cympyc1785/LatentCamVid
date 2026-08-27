@@ -36,6 +36,21 @@
   roll(>=0.01 deg)은 여전히 전부 잡힌다. 상세는 `FIX.log` 2026-08-27 항목.
 
 ### Added
+- **`CinemaTraj/scripts/run_director_vista.py` + `viz_director_pilot.py` — DIRECTOR(E.T.)
+  파일럿 (2026-08-27).** Vista 씬의 subject OBB track 을 char 조건으로, 영문 caption 을 text
+  조건으로 넣어 카메라 궤적을 받는다. DIRECTOR 의 `src/evaluate.py` 는 et-data 데이터셋에 묶여
+  있어(`root_filenames.index(sample_id)`) 단일 샘플을 못 넣으므로 배치를 손으로 조립해
+  `Diffuser.sample()` 만 부른다 — DIRECTOR 리포는 **0줄 수정**. 49프레임은 `padding_mask` 로
+  300 에 패딩한다 (`trajectory_dataset.py:146-147` 이 쓰는 그 규약).
+  **출력으로 규약 두 개를 실측했다**: c2w 의 `col2` 가 char 을 향하고(cos 0.899, 부호 반전 0건)
+  `col1` 이 world +Y 와 cos 0.988 → E.T. 카메라는 **y-up / z-forward**, `det(R)=+1`.
+  caption 반응은 camel `dyn_0` · seed 24개로 측정: `pushes in` 이 col2 방향 **+0.115±0.050 m**
+  (21/24 전진) vs `pulls out` **−0.181±0.058 m** (5/24), `trucks right` 가 col0 방향
+  **+0.106±0.061 m** vs `trucks left` **−0.310±0.101 m**. `remains static` 은 경로
+  **0.152 m** 로 이동 caption(0.39~0.67 m)과 갈린다. **화면 좌우와 col0 의 대응은 미검증** —
+  기하만 보면 col0 은 screen-left 여야 하는데 caption 은 반대로 움직인다. 렌더로 확인하기 전엔
+  좌우를 단정하지 말 것. `u`→m 환산은 subject OBB 높이 기준(camel 0.1224 u = 2.0 m 가정,
+  16.35 m/u)이라 이것도 가정값이다.
 - **`CinemaTraj/scripts/trumans_gt_render.py` — 패스별 Cycles 디바이스 `--rgb_cdevice`
   (2026-08-27).** `--cdevice` 하나로 두 패스를 묶으면 한쪽이 항상 손해다: RGB(128 spp)는 GPU 가
   압도적이고 depth/index(1 spp)는 CPU 가 더 빠르다(실측 1.8 s CPU vs 2.55 s GPU). 이제

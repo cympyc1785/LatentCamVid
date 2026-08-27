@@ -30,6 +30,21 @@
   roll(>=0.01 deg)은 여전히 전부 잡힌다. 상세는 `FIX.log` 2026-08-27 항목.
 
 ### Added
+- **`CinemaTraj/scripts/render_target_poses_depth.py` — 학습 코퍼스의 target pose 에서 depth 를
+  렌더해 저장 (2026-08-27).** 입력은 뱅크의 `poses.npz` 가 아니라 export 결과인
+  `latentcam_da3/vista4d/<video>/da3/target_poses.npz` 다 — 그래야 dedup(사다리 붕괴 중복 50%
+  제거)과 K 고정(frame0 K × `--image_scale`)이 **이미 반영된 것**을 그대로 쓴다. `extrinsics` 는
+  w2c 라 `inv` 로 c2w 를 만들고, 저장 K 는 640×360 인데 `CloudRenderer.render` 가 넘겨받은 K 를
+  `width/self.width` 로 다시 스케일하므로 **native(1280×720)로 되돌려** 넘긴다 (안 그러면 FOV 가
+  두 번 반토막 난다). `renderer.K_src[0]` 대조 assert 로 막아 뒀다.
+  - 저장: `<video>/da3/target_depth/<variant_id>.npz` (`depth` float16, **hole = 0**, 그래서
+    `depth > 0` 이 곧 valid — 마스크를 따로 안 만든다) + `index.json` (`vista4d_target_depth_v1`).
+  - **자기검증**: 렌더 `hole_fraction` 을 `prompts.json` 에 이미 있는 **뱅크 실측치**와 대조해
+    요약표에 `|Δhole| med/max` 를 찍는다. w2c↔c2w 나 K 규약이 어긋나면 0.1 단위로 벌어진다.
+    실측 camel `|Δ| med 0.0046 / max 0.0299`, avocado-slice `0.0094 / 0.0292`.
+  - `--videos --limit --variants --scale --preview N --dry_run --no_check` 지원. 코퍼스에 없는
+    영상은 `hole_bank_k6/skipped.json` 의 사유를 읽어 `[건너뜀]` 에 찍는다 (snowboard =
+    `tau_start_exceeds_ladder`).
 - **`CinemaTraj/scripts/vista4d_bank_to_dl3dv.py` — Vista4D 뱅크 → latentcam_da3 레이아웃
   (2026-08-27).** 영상 1편 = scene, 뱅크 변이 1개 = segment. 이미지 디렉토리는 **영상당 하나**
   (`images_4/`, 49장, `--image_scale 0.5` → 640×360) 만 두고 합성 궤적은 `(V,49,·)` 배열

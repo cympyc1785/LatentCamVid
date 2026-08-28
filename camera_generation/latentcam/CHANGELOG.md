@@ -15,6 +15,14 @@ All notable changes to the latentcam sub-project. Follows [Keep a Changelog](htt
   그만큼 **이 커밋 전까지 track arm 은 한 번도 eval 된 적이 없다**. 자세한 내역은 `FIX.log`.
 
 ### Added
+- **`make_prompts_simple.py --fields` — 축약이 아니라 캡션 **절 선택** (2026-08-28).**
+  `caption_fields` 의 문장을 한 글자도 안 고치고 어느 절을 넣을지만 고른다
+  (`--fields motion` → `"target: man motion: ..."` 에서 `target:` 절만 제거). 조립 규칙은
+  `CinemaTraj/scripts/build_bank_captions.py:84 prompt_of` 와 같아
+  `--fields target,motion` 이 원본 `prompts.json` 을 그대로 재현한다 (동일성 확인용, 실측 일치).
+  기존 `SIMPLE_PHRASE` 축약 경로는 `--fields` 미지정 시 그대로 — 즉 이 모드는 "target 절 유무"
+  **한 축만** 움직이므로, 문장 길이와 이동량 지시가 같이 움직이는 축약 ablation 과 섞이지 않는다.
+  snowboard preset arm 의 대조 프롬프트(`prompts_notarget.json`)가 이걸로 만들어졌다.
 - **`target_track_val_drop` — validation 을 track 없이 돌린다 (2026-08-28).**
   지금까지 val 은 `build_track_cond(...)` 를 **dropout 없이** 불러 실제 track 을 그대로 넣었다
   (`train_latent_cam_dm.py:738`). 그래서 val 곡선은 "track 이 있을 때"만 보여줬고,

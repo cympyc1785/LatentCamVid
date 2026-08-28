@@ -21,6 +21,19 @@
 `preset` 필드에서 읽으므로 뱅크 CSV 를 다시 안 읽는다. 표에 없는 preset 이 나오면 **raise** 한다
 — 조용히 빈 motion 을 흘리면 그 변이만 텍스트가 사라진 채 학습된다.
 
+═══ `--fields` — 축약이 아니라 **절 선택** (2026-08-28) ══════════════════════════════════
+위 축약 경로와 별개로, `caption_fields` 의 문장을 **한 글자도 안 고치고 어느 절을 넣을지만**
+고르는 모드다. `--fields motion` 이면
+    "target: man motion: the camera dramatically arcs to the left ..."
+    ->            "motion: the camera dramatically arcs to the left ..."
+가 된다. 조립 규칙은 `CinemaTraj/scripts/build_bank_captions.py:84 prompt_of` 와 같다
+(`"{field}: {value}"` 를 공백으로 join, 빈 필드는 건너뜀) — 그래서 `--fields target,motion` 은
+원본 `prompts.json` 을 그대로 재현한다 (동일성 확인용).
+
+**축약 경로와 섞이지 않는다**: `--fields` 를 주면 `SIMPLE_PHRASE`/`--keep_magnitude` 는 아예
+안 탄다. 즉 이 모드는 "target 절 유무" **한 축만** 움직이므로 축약 ablation 처럼 두 축이
+같이 움직이는 문제가 없다. `--fields` 미지정(기본) = 기존 동작 비트 동일.
+
 env: 아무거나 (표준 라이브러리만 쓴다).
 
 예시:
@@ -28,6 +41,9 @@ env: 아무거나 (표준 라이브러리만 쓴다).
     $PY scripts/data/make_prompts_simple.py \
         --root /data1/cympyc1785/data/Vista4D-Eval-Data/latentcam_da3 --meta_csv meta_vista4d.csv
     $PY scripts/data/make_prompts_simple.py --root ... --meta_csv ... --dry_run
+    # target 절 없는 대조 프롬프트 (motion 문장은 원본 그대로)
+    $PY scripts/data/make_prompts_simple.py --root ... --meta_csv meta_snowboard.csv \
+        --fields motion --out_name prompts_notarget.json
 """
 import json
 import os.path as osp
@@ -68,6 +84,16 @@ def magnitude_of(motion: str):
     return parts[2] if len(parts) > 2 and parts[2] in SIMPLE_MAGNITUDE else None
 
 
+def fields_prompt(seg: dict, fields):
+    """`caption_fields` 에서 고른 절만 **원문 그대로** 이어 붙인다 (축약 없음).
+
+    조립 규칙은 `build_bank_captions.py:84 prompt_of` 와 동일 — 빈 값은 건너뛰므로
+    `--fields target,motion` 이 원본 `prompts.json` 을 그대로 재현한다.
+    """
+    caption = seg.get("caption_fields") or {}
+    return " ".join(f"{f}: {caption[f]}" for f in fields if caption.get(f))
+
+
 def simple_prompt(seg: dict, keep_magnitude: bool):
     """세그먼트 dict -> 축약 문장. target 이 비면 motion 절만 낸다 (빈 'target: .' 방지)."""
     fields = seg.get("caption_fields") or {}
@@ -92,6 +118,7 @@ def read_scenes(root: str, meta_csv: str):
 
 
 def main(args):
+    _fields = [f.strip() for f in (args.fields or "").split(",") if f.strip()]
     scenes = read_scenes(args.root, args.meta_csv)
     n_scene = n_seg = 0
     missing, samples = [], []
@@ -105,12 +132,15 @@ def main(args):
             prompts = json.load(file)
         out = {}
         for key, seg in prompts.items():
-            text = simple_prompt(seg, args.keep_magnitude)
+            # --fields 를 주면 절 선택 모드, 아니면 기존 축약 경로 (기본값 = 기존 동작).
+            text = (fields_prompt(seg, _fields) if _fields
+                    else simple_prompt(seg, args.keep_magnitude))
             # 원본 세그먼트를 통째로 복사하고 캡션만 덮어쓴다 -- variant_id / preset /
             # tau_max 등 부가 메타를 잃지 않아야 나중에 필터·분석이 그대로 된다.
             new = dict(seg)
             new["prompt_camera_with_scene_video"] = {"concise": text}
-            new["prompt_source"] = f"simple(from {args.src_name})"
+            new["prompt_source"] = (f"fields[{','.join(_fields)}](from {args.src_name})"
+                                    if _fields else f"simple(from {args.src_name})")
             out[key] = new
             n_seg += 1
             presets[seg.get("preset")] = presets.get(seg.get("preset"), 0) + 1
@@ -147,6 +177,8 @@ if __name__ == "__main__":
     parser.add_argument("--meta_csv", default="meta.csv")   # scene 목록 CSV (루트 기준)
     parser.add_argument("--src_name", default="prompts.json")          # 읽을 파일
     parser.add_argument("--out_name", default="prompts_simple.json")   # 쓸 파일
+    # [new 2026-08-28] caption_fields 절 선택 모드 (축약 안 함). 미지정 = 기존 축약 경로.
+    parser.add_argument("--fields", default=None, type=str)            # 예: "motion", "target,motion"
     parser.add_argument("--keep_magnitude", action="store_true")       # 크기 부사 유지
     parser.add_argument("--no_keep_magnitude", dest="keep_magnitude", action="store_false")
     parser.set_defaults(keep_magnitude=False)

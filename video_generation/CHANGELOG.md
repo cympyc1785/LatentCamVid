@@ -64,6 +64,27 @@
   `CinemaTraj/results/20260827_caption_gendop_compare/compare_th005.txt`.
 
 ### Added
+- **`CinemaTraj/scripts/gendop_preds_to_eval_dir.py` — GenDoP npz → latentcam eval 폴더 어댑터
+  (2026-08-28).** `render_pred_depth_warp.py` 는 arm 을 `--eval_dir LABEL=DIR` 로 받아 그 DIR 의
+  `test/<name>_{transforms_ref,transforms_pred,caption}.json` 세 짝을 읽는데, GenDoP 은
+  `latentcam__<scene>__<idx>.npz` 하나만 떨군다. 렌더러를 고치는 대신 **그 레이아웃으로 갈아
+  끼우는 얇은 어댑터**를 새로 뒀다 (렌더러 수정 0줄, 렌더러의 arm-ref 대조 assert 가 어댑터
+  검산으로 그대로 쓰인다). 정합은 4단계 — `raw @ GL2CV` (GL c2w → CV c2w) → frame0 rel-anchor
+  → `np.rint(np.linspace(0,29,49))` index pick (보간 없음, `gendop_release_eval.py` 와 같은 규칙)
+  → `rmax` 를 GT 것에 맞춘 뒤 `GT_c2w[0] @ rel` 로 scene world 에 심기. **rmax 를 GT 에서
+  빌려오므로 이 산출물은 "크기"가 아니라 "모양"만 본다** — 게이지가 다른 두 모델을 한 화면에
+  놓는 유일한 방법이다. `rmax<1e-9` 인 degenerate entry 는 스킵하고 개수를 표에 찍는다 (조용히
+  항등 궤적을 렌더하면 "GenDoP 이 정지 궤적을 냈다"로 오독된다). `--caption_from npz` 는 GenDoP
+  이 실제로 받은 문장(영상 라벨용), `--caption_from ref` 는 기준 eval 폴더 캡션(지표용 짝지은
+  비교 — CLaTr 이 텍스트-궤적 정합을 보므로 두 arm 이 같은 문장을 봐야 궤적 차이만 남는다).
+- **`CinemaTraj/scripts/rescale_eval_preds_to_ref.py` — pred 궤적 rmax 를 GT 에 맞추는 대조군
+  생성기 (2026-08-28).** 위 어댑터가 GenDoP 에 GT 의 크기를 쥐여 주는데, CLaTr 은
+  **표준화를 안 한다** (`main/evaluate/CLaTr/src/datasets/modalities/trajectory_dataset.py:43`
+  `self.standardize = False`, 47-50/89-93/114-118 정규화 전량 주석 처리 — 궤적이 velocity 표현의
+  raw 단위로 들어간다). 그래서 rmax 를 빌려주는 것만으로 GenDoP 이 크기 축을 공짜로 얻는다.
+  같은 변환을 우리 pred 에도 걸어 **모양만 남는 대조군**을 만든다. GT 가 정확히 정지(rmax=0)인
+  entry 는 `--skip_static_ref`(기본 on)로 빼고 개수를 보고한다 — 안 빼면 rescale 이 pred 를
+  항등으로 뭉개서 "모델이 정지 shot 을 맞혔다"로 읽힌다.
 - **`CinemaTraj/configs/caption_presets.json` — 빠져 있던 preset 5종 문구 (2026-08-28).**
   `lbm/presets.py` 의 `PRESETS` 는 23종인데 캡션 표는 18종뿐이라, 그 5종이 든 뱅크에
   `build_bank_captions.py` 를 돌리면 assert 로 즉사했다 (snowboard `hole_bank_k6` 는

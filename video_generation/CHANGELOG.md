@@ -6,6 +6,44 @@
 
 ## [Unreleased]
 
+### Changed
+- **`CinemaTraj/lbm/presets.py` — preset 이름을 하나의 규칙으로 정리, 옛 이름은 전부 alias
+  (2026-08-28).** 사용자 지시. 규칙은
+  `[track_]<primitive>_<direction>[_<primitive2>_<direction2>][_aimed|_locked]` 이고,
+  `_aimed`/`_locked` 는 **같은 모양이 두 aim 으로 다 존재할 때만** 붙는다 (dolly, hold) —
+  나머지는 aim 이 primitive 로 정해지므로(pan/truck/pedestal=traj, arc/orbit/crane/s_curve=look_at)
+  `truck_left` 처럼 접미사가 없다. 고친 것: `straight_ease` → `dolly_in_aimed` ("ease" 는 speed
+  축 어휘였다), `dolly_in/out` → `dolly_in/out_locked`, `orbit_left/right_arc` →
+  `orbit_left/right` (`T.true_orbit` 이라 `_arc` 가 틀린 말이었다), `rise_reveal`/`drop_reveal` →
+  `crane_up`/`crane_down` ("reveal" 은 의도지 동작이 아니다), `push_in_arc`/`pull_out_arc` →
+  `push_in_arc_left`/`pull_out_arc_right` (4칸 중 2칸만 방향이 적혀 있었다),
+  `zoom_out_pan_right` → `pan_right_zoom_out` (합성은 `<주동작>_<부동작>` 순),
+  `static_hold` → `static_hold_aimed`, `static_subtle_zoom` → `static_zoom_in` ("subtle" 은
+  바로 위 항목에서 캡션에서 뺀 크기 부사다), `track_follow*` → `track_hold_*`,
+  `track_side_*` → `track_truck_*`, `track_push_in`/`track_pull_out` →
+  `track_dolly_in/out_aimed`, `track_rise`/`track_drop` → `track_crane_up`/`track_crane_down`.
+  결과적으로 **`track_X` 는 전부 `track_` + 비-track 이름**이 된다 (예외는 hold 하나로, 비-track
+  쪽이 `static_`(안 움직인다) / track 쪽이 `track_`(subject 와 같이 움직인다)).
+  **옛 이름 20종은 `PRESET_ALIASES` 에 의미 그대로 남아 있고**(`resolve_preset()` 신설,
+  `build_shape`/`focal_track`/`build_bank_captions.py` 가 조회 전에 통과시킨다) 궤적이 **비트
+  동일**함을 검증했다 — 배포 뱅크 51편 16,748 변이와 기존 `decision.json`·`captions.json` 은
+  한 톨도 안 바뀐다 (camel `hole_bank_k6` 280 변이 캡션 재생성이 같은 문장을 냈다).
+  `configs/caption_presets.json` 키도 새 이름으로 바꾸고(36종, PRESETS 와 누락/잉여 0 검증),
+  `lbm/prompts/system_traj.md` 의 VLM 어휘 목록과 `loop.py`/`build_decision_fallback.py` 기본값
+  (`orbit_left`), `sample_camera_bank.py:ROTATION_ONLY_PRESETS`, `expand_preset_variants.py` 의
+  클래스 표(옛 키 유지 + 새 키 추가)를 같이 맞췄다.
+
+### Added
+- **`CinemaTraj` tracking preset 에 수직축 4칸 (2026-08-28).** 사용자 지적. 비-track 어휘에는
+  `pedestal_up/down`(순수 수직, aim="traj")과 `crane_up/down`(재조준, aim="look_at")이 위/아래
+  짝을 다 갖고 있는데 track 쪽은 crane-up 하나뿐이었다. `track_pedestal_up`,
+  `track_pedestal_down`, `track_crane_up`, `track_crane_down` 을 추가해 tracking preset 이
+  9종 → **12종**이 됐다 (`PRESET_FOLLOW` 는 이제 `track_` 접두어로 자동 채워진다).
+  camel `dyn_0` τ 0.20 실측에서 4종 모두 `gain 1.00 / side-tracking / τ 0.1966~0.1994` 로
+  붙었고 비-track preset 은 전부 `gain 0.00` 그대로다. **하강 2종은 위 짝보다 게이트 탈락이
+  잦을 수 있다** — micro-adjust 의 elevation clamp [5°, 70°] 와 "지면 아래 금지"(LBM-Lite 14)가
+  하강에만 걸린다. 탈락률은 실제 뱅크로 재야 하고 아직 안 쟀다.
+
 ### Fixed
 - **DIRECTOR 파일럿이 scene graph G frame 을 world 로 착각했다 — 파일럿 산출물 전량 무효
   (2026-08-27).** `scene_graph.json` 의 노드 좌표(`track.center_smooth`, `obb.center`)는 G

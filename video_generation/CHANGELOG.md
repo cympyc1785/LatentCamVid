@@ -64,6 +64,28 @@
   `CinemaTraj/results/20260827_caption_gendop_compare/compare_th005.txt`.
 
 ### Added
+- **GenDoP 캡션·추론·평가 3종에 `latentcam` 분기 + 신규 `render_preset_grid_warp.py`
+  (2026-08-28).** LBM-Lite 로 합성한 target 카메라(`latentcam_da3/vista4d/<scene>/da3/
+  target_poses.npz`)에 DataDoP 방식 캡션을 달고 validation 500 entry 를 GenDoP release
+  ckpt 로 왕복 평가하기 위한 배선. 코퍼스 레이아웃이 `eval_data/{cameras,recon_and_seg}` 와
+  달라서(scene 밑 `da3/`, 영상 대신 `images_4/` 프레임 폴더, npz 가 `(N,49,4,4)` 스택) 기존
+  경로로는 한 군데도 안 맞는다.
+  - `caption_cameras_datadop.py`: `--sets latentcam` + `--latentcam_root/--latentcam_split`.
+    `build_grid` 가 mp4 대신 **프레임 디렉토리**도 받고, `collect_entries` 가 8-tuple 로
+    `entry_index` 를 실어 나른다. `target_poses.npz:extrinsics` 는 **OpenCV w2c** 라
+    `load_entry_cameras` 가 `inv()` 로 c2w 를 만든다 (실측: `inv(M)@GL2CV` vs eval ref
+    max|diff| 2.7e-07 이고 `M`/`M@GL2CV` 는 3.64, `inv(M)` 은 2.0). grid 는 scene 당 1장
+    (`_scene_grid.png`) — 같은 scene 의 entry 들이 소스 영상을 공유한다. `cameras`/`recon`
+    출력은 `source_npz` 상대경로까지 비트 동일하게 유지.
+  - `gendop_release_infer.py`: `--split` 이 주어지면 split 파일이 열거한 entry 만, **순서까지
+    그대로** 돈다. 디렉토리 glob 이면 학습셋 캡션이 조용히 섞인다.
+  - `gendop_release_eval.py`: `kind=="latentcam"` 인 npz 의 GT tag 를 `--latentcam_root` 밑
+    `vista4d/<scene>/da3/captions_gendop/` 에서 찾는다.
+  - `render_preset_grid_warp.py`: **target 고정 + preset 을 격자로.** `render_pred_depth_warp`
+    의 reel 은 시간축이라 preset 8종을 한눈에 못 보고, `render_target_swap_warp` 는 축이
+    반대(preset 고정 + target 을 열)다. 4열 밴드마다 GT 행 바로 아래가 그 preset 의 PRED 행이라
+    같은 열이 같은 preset. preset 당 entry 는 `variant_id` 의 **사다리 단이 가장 낮은 것**을
+    골라 τ 효과가 preset 효과에 섞이지 않게 한다 (실측 hole 로 고르면 preset 마다 다른 단이 뽑힌다).
 - **`render_pred_depth_warp.py --label_mode target_motion` + 신규
   `render_target_swap_warp.py` (2026-08-28).** eval 이 떨구는 caption 은 문장뿐이라 영상만 봐선
   어떤 preset·hole 단을 조건으로 준 건지 못 가른다. `--label_mode target_motion` 은 코퍼스

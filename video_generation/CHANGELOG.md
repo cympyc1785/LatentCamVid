@@ -64,6 +64,17 @@
   `CinemaTraj/results/20260827_caption_gendop_compare/compare_th005.txt`.
 
 ### Added
+- **`render_pred_depth_warp.py --label_mode target_motion` + 신규
+  `render_target_swap_warp.py` (2026-08-28).** eval 이 떨구는 caption 은 문장뿐이라 영상만 봐선
+  어떤 preset·hole 단을 조건으로 준 건지 못 가른다. `--label_mode target_motion` 은 코퍼스
+  `da3/prompts.json` 에서 `preset`/`anchor_label`/`hole_fraction`/`tau_max` 를 읽어 타일 라벨에
+  preset, GT 캡션에 `target:`, pred 캡션에 motion 문장을 박고, `--order target_motion` 으로
+  (anchor, preset, hole) 순 정렬 + anchor 별 `reel_target_<anchor>.mp4` 를 따로 뽑는다. 기본값
+  `condition`/`index` 는 기존 동작 그대로.
+  `render_target_swap_warp.py` 는 **entry 를 열**로 놓는다 (기존 스크립트는 시간축으로 이어붙여서
+  target 만 다른 entry 를 나란히 못 본다): 1행 GT / 2행 pred, 열 = 같은 preset 의 anchor 별 entry
+  (anchor 당 hole 낮은 순 `--per_target` 개 — 사다리 단이 섞이면 target 효과와 이동량 효과가
+  뒤엉킨다).
 - **DynPose-LBM 파이프라인 — dynpose-0000 880편에 vista 방식 target camera 뱅크 (2026-08-28).**
   체인은 vista 와 동일 스크립트에 `--eval_data /data1/.../DATA/DynPose-LBM` 만 바꿔 낀다:
   recon(`recon_and_seg_single.py --recon_method da3 --num_frames 49`) → VLM 명사

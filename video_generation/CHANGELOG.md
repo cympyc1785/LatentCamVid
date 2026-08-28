@@ -7,6 +7,36 @@
 ## [Unreleased]
 
 ### Changed
+- **`CinemaTraj/lbm/presets.py` — 조준 표기를 비대칭으로, `_aimed`/`_locked` → 무표기/`_dont_look`
+  (2026-08-28, D76).** 사용자 지시("LAMP DSL 참고해봐, aimed/locked 가 좀 별로인 것 같은데").
+  **바로 아래 항목(D75)의 `_aimed`/`_locked` 대칭 표기를 대체한다.** 규칙은
+  `[track_]<primitive>_<direction>[_<primitive2>_<direction2>][_dont_look]` — 조준
+  (`aim="look_at"`)이 **기본값이라 이름에 안 적고**, 거기서 벗어나는 쪽에만 `_dont_look` 을
+  붙인다. 어휘가 학습 캡션에 그대로 나가는데 36개 중 5개가 "기본 동작"을 이름에 적고 있었다.
+  바뀐 10종: `dolly_in/out_aimed`→`dolly_in/out`, `dolly_in/out_locked`→`dolly_in/out_dont_look`,
+  `static_hold_aimed`→`static_hold`, `static_hold_locked`→`static_hold_dont_look`,
+  `track_hold_aimed`→`track_hold`, `track_hold_locked`→`track_hold_dont_look`,
+  `track_dolly_in/out_aimed`→`track_dolly_in/out`.
+  ⚠ **`dolly_in`/`dolly_out` 은 뜻이 뒤집힌 유일한 두 이름이다** — D75 에서 `_locked`
+  (`aim="traj"`)의 별칭이었는데 지금은 정식 이름(`aim="look_at"`)이다. 디스크의 옛 뱅크가 옛
+  뜻으로 이 문자열을 쓴다(실측: `out`+`out_dynpose` 336 파일 105,329 `variants[]` 행 중
+  `("dolly_in","traj") 845` / `("dolly_out","traj") 846`, `aim="look_at"` 인 건 0). **뱅크
+  파일은 하나도 안 고쳤다** — `fit_hole_ladder.py` 가 `out_dynpose` 를 실행 중이라 rewrite 는
+  경합이다. 대신 `resolve_preset(name, aim)` + `LEGACY_AIM_COLLISIONS` 가 행이 기록한 `aim` 을
+  보고 옛 뜻으로 되돌린다. 모든 행이 `aim` 을 명시하므로 정보 손실이 없다. **뱅크 행을 읽는
+  코드는 `aim` 을 반드시 같이 넘길 것** — `build_bank_captions.py` 에 이름↔행 `aim` 불일치
+  assert 를 넣어 틀린 매핑이 캡션으로 새는 걸 막았다.
+  같이 맞춘 것: `configs/caption_presets.json`(키 10종 + `note_naming`/`note_naming_collision`),
+  `lbm/prompts/system_traj.md`(VLM 어휘), `verify.py`/`decode/emit.py`/`decode/build_poses.py`/
+  `scripts/ablate_vlm_hole_perception.py` 주석, `README.md`(preset 표 두 개를 36종 실측값으로
+  재생성 — 종전 표는 D75 의 `track_*` 12종이 빠진 23종이었다), `DECISIONS.md` D76.
+  `scripts/expand_preset_variants.py` 는 `PRESET_CLASS` 에 새 키만 **추가**(옛 키 유지)하고
+  `SHAPE_PRESETS`/`STATIC_PRESETS` 는 **안 건드렸다** — 그 문자열들은 우리 어휘가 아니라 원본
+  LBM `video_runtime.PRESET_NAMES` 로 나가 `build_trajectory_plan` 이 읽는다.
+  검증: alias 33종 전부 `PRESETS` 로 resolve + alias 키/정식 이름 충돌 0, D75 10종의 `aim`
+  보존, `LEGACY_AIM_COLLISIONS` 양방향, `PRESETS` 36 : `caption_presets.json` 36 일치,
+  디스크 105,329 행 resolve 시 미지 preset 0 / 캡션 누락 0 / **aim 불일치 0**,
+  camel·goat·parkour·snowboard `hole_bank_k6` 캡션 **1,180개 재생성 → 전부 bit-identical**.
 - **`CinemaTraj/lbm/presets.py` — preset 이름을 하나의 규칙으로 정리, 옛 이름은 전부 alias
   (2026-08-28).** 사용자 지시. 규칙은
   `[track_]<primitive>_<direction>[_<primitive2>_<direction2>][_aimed|_locked]` 이고,
@@ -34,6 +64,15 @@
   클래스 표(옛 키 유지 + 새 키 추가)를 같이 맞췄다.
 
 ### Added
+- **`CinemaTraj/scripts/{build_bank_captions,vista4d_bank_to_dl3dv}.py` — 캡션 파일 이름을
+  인자로 (2026-08-28).** `build_bank_captions.py --out_name`, `vista4d_bank_to_dl3dv.py
+  --captions_name`. 둘 다 기본값이 예전 하드코딩 이름(`captions.json`)이라 안 주면 동작이
+  그대로다. **왜**: 같은 뱅크(=같은 궤적) 위에 프롬프트만 다른 대조군을 얹기 위해서다 —
+  snowboard `hole_bank_k6` 를 `target:` 절 있는 판/없는 판 두 갈래로 내보냈고, 두 데이터셋의
+  `da3/target_poses.npz` (77,49,4,4) 는 비트 동일하고 `prompts.json` 텍스트만 다르다.
+  (주의: `vista4d_bank_to_dl3dv.py main()` 은 처리한 영상만으로 `meta_vista4d.csv` 와
+  `seg_list_vista4d_{train,test}.txt` 를 **다시 쓴다** — 1편만 돌릴 때 공용 root 를 주면
+  51편 split 이 날아간다. 반드시 별도 `--out_root`.)
 - **`CinemaTraj` tracking preset 에 수직축 4칸 (2026-08-28).** 사용자 지적. 비-track 어휘에는
   `pedestal_up/down`(순수 수직, aim="traj")과 `crane_up/down`(재조준, aim="look_at")이 위/아래
   짝을 다 갖고 있는데 track 쪽은 crane-up 하나뿐이었다. `track_pedestal_up`,

@@ -64,6 +64,19 @@
   `CinemaTraj/results/20260827_caption_gendop_compare/compare_th005.txt`.
 
 ### Added
+- **`CinemaTraj/configs/caption_presets.json` — 빠져 있던 preset 5종 문구 (2026-08-28).**
+  `lbm/presets.py` 의 `PRESETS` 는 23종인데 캡션 표는 18종뿐이라, 그 5종이 든 뱅크에
+  `build_bank_captions.py` 를 돌리면 assert 로 즉사했다 (snowboard `hole_bank_k6` 는
+  `--follow_gains auto` 재생성에서 `pull_out_arc_left` / `push_in_arc_right` /
+  `orbit_left_pedestal_up` 이 들어와 19 preset). 방향은 이름이 아니라 **코드**로 확인했다 —
+  `presets.py:91-92` 의 실측 부호 규약(`arc(+)` = 카메라가 왼쪽으로 가며 오른쪽을 봄)에 따라
+  `pull_out_arc_left` = `arc(+)+dolly(−)` → "arcs to the left while pulling back",
+  `push_in_arc_right` = `arc(−)+dolly(+)` → "arcs to the right while pushing in"
+  (기존 `push_in_arc`/`pull_out_arc` 문구와 부호가 일관된다). 나머지 2종
+  (`zoom_out_pan_right`, `static_subtle_zoom`)도 같이 채워 코드↔캡션 차집합을 0 으로 만들었다.
+  - snowboard 228 변이 캡션 실측: magnitude 부사가 `dramatically` 221 / `steadily` 3 /
+    `slightly` 2 / `significantly` 2 로 **사실상 한 값**이다. τ 사다리가 소스 추종에 다 먹혀
+    knob 이 floor(1.9641) 근처에 몰린 결과라 이 영상에서 크기 부사는 신호가 아니다.
 - **GenDoP 캡션·추론·평가 3종에 `latentcam` 분기 + 신규 `render_preset_grid_warp.py`
   (2026-08-28).** LBM-Lite 로 합성한 target 카메라(`latentcam_da3/vista4d/<scene>/da3/
   target_poses.npz`)에 DataDoP 방식 캡션을 달고 validation 500 entry 를 GenDoP release

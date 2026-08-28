@@ -6,6 +6,31 @@
 
 ## [Unreleased]
 
+### Added
+- **`CinemaTraj/scripts/sample_camera_bank.py` — `--track_dynamic_only` (기본 켬, 2026-08-29, D77).**
+  `track_*` 12종을 **움직이는 anchor** 에만 건다. 근거: `track_*` 의 유일한 차이는
+  `PRESET_FOLLOW` 가 켜는 follow_gain 1.0 이고, 그건 anchor 의 world 변위를 카메라 위치에
+  더하는 것뿐이다 — 안 움직이는 anchor 는 변위가 0 이라 궤적이 비-track 짝과 **비트 단위로
+  같아진다**. 그대로 두면 "같은 카메라 / 다른 캡션" 쌍이 대량 생겨 텍스트 조건이 오염된다.
+  판정은 `node["moving"]`(graph 가 이미 실측한 플래그). `path_len_u` 를 안 쓰는 이유는 `stat`
+  노드의 OBB 중심이 재적합 지터로 **21.0 u** 까지 흔들려 실제 이동과 구분이 안 되기 때문이다.
+  실측(53 씬 484 노드): `moving=True` 124개(전부 `kind="dyn"`), `dyn` 인데 안 움직이는 것 52개,
+  `stat` 308개. 씬당 moving anchor 평균 2.34 / 중앙값 2, 0개인 씬이 10개.
+  `--no_track_dynamic_only` 로 예전 동작(전 anchor × 전 preset) 복원. 닫는 요약표에
+  잘려나간 (anchor, preset) 쌍 수를 찍는다. camel 스모크: `dyn_0/dyn_1` 만 track 52행씩,
+  `stat_0/1/2` 는 0 (36쌍 드롭), track 행 `follow_gain=1.0` / 비-track 행 `0.0` 확인.
+- **`CinemaTraj/scripts/fit_hole_ladder.py` — `--tau_bank_dir` (기본 `bank`).** τ 뱅크 경로가
+  `out/<video>/bank/bank.json` 로 하드코딩돼 있어서 preset 축이 바뀐 새 τ 뱅크를 만들면 k6
+  소스를 덮어써야 했다. 기본값이 예전 경로 그대로라 기존 실행은 무변경. `bank.json` 의
+  `source_bank` 필드도 실제 읽은 폴더를 적는다.
+- **`CinemaTraj/scripts/run_k7_shard.sh` — D77 뱅크(34 preset) 샤드 러너.** τ 뱅크(`bank_d77`)
+  → `fit_hole_ladder` → `emit_bank` 를 한 번에 돌린다. `run_k6_shard.sh` 와 달리 τ 뱅크부터
+  다시 만든다 — `fit_hole_ladder.py:520` 이 τ 뱅크에 seed 행이 없는 (anchor, preset) 쌍을
+  조용히 건너뛰므로 `--presets` 로 넘겨도 `track_*` 이 안 나온다. `--follow_gains` 를 **안 준다**
+  (기본 `"0"`): `decode/build_poses.py:472` 는 들어온 gain 이 문자열 `"0"` 일 때만
+  `PRESET_FOLLOW` 를 적용하고, `auto` 를 주면 τ 최소 gain 이 풀려 `track_*` 이 조용히 추종을
+  멈춘다(캡션만 "tracks" 인 궤적).
+
 ### Changed
 - **`CinemaTraj/lbm/presets.py` — 조준 표기를 비대칭으로, `_aimed`/`_locked` → 무표기/`_dont_look`
   (2026-08-28, D76).** 사용자 지시("LAMP DSL 참고해봐, aimed/locked 가 좀 별로인 것 같은데").

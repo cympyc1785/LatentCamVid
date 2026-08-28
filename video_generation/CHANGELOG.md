@@ -77,6 +77,10 @@
   항등 궤적을 렌더하면 "GenDoP 이 정지 궤적을 냈다"로 오독된다). `--caption_from npz` 는 GenDoP
   이 실제로 받은 문장(영상 라벨용), `--caption_from ref` 는 기준 eval 폴더 캡션(지표용 짝지은
   비교 — CLaTr 이 텍스트-궤적 정합을 보므로 두 arm 이 같은 문장을 봐야 궤적 차이만 남는다).
+  `--no_rescale` 을 주면 4단계(rmax 빌려오기)를 건너뛰어 **GenDoP 이 낸 크기를 그대로 두는 raw
+  arm** 이 나온다 (축·원점·프레임수만 맞춤). rmax 를 아무도 안 빌린 대조군이지만 DataDoP
+  게이지가 씬 단위와 무관하므로 그 수치는 궤적 오차와 **게이지 차를 같이 잰다** — 표에 쓸 때
+  반드시 같이 적을 것.
 - **`CinemaTraj/scripts/rescale_eval_preds_to_ref.py` — pred 궤적 rmax 를 GT 에 맞추는 대조군
   생성기 (2026-08-28).** 위 어댑터가 GenDoP 에 GT 의 크기를 쥐여 주는데, CLaTr 은
   **표준화를 안 한다** (`main/evaluate/CLaTr/src/datasets/modalities/trajectory_dataset.py:43`

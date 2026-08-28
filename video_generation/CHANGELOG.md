@@ -52,6 +52,16 @@
   roll(>=0.01 deg)은 여전히 전부 잡힌다. 상세는 `FIX.log` 2026-08-27 항목.
 
 ### Changed
+- **`CinemaTraj/scripts/build_bank_captions.py` — motion 문장에서 크기 부사를 기본 뺐다
+  (2026-08-28).** 사용자 지시. `the camera significantly dollies straight forward toward the
+  subject` → `the camera dollies straight forward toward the subject`. 부사(barely / slightly /
+  steadily / significantly / dramatically)는 τ 사다리 단을 텍스트로 노출하는 것인데, τ = |t|/z_med
+  라 **같은 부사가 씬마다 다른 실제 이동량**을 가리킨다 — 어휘를 preset 하나로 좁혀야 텍스트↔궤적
+  대응이 1:1 이 된다. 사다리 정보는 뱅크 행(`tau_max`)에 그대로 남아 있다. 예전 문장은
+  `--magnitude` 로 비트 단위 재현된다 (camel 실측 확인). 부사가 빠지면서 motion 어휘가
+  14 preset × 5 부사 = **69종 → preset 32종**이 된다. `captions.json` 에 `magnitude` 플래그를
+  기록하고, `track_*` preset 인데 `follow_gain` 이 0 인 변이는 요약표에 ⚠ 로 센다 (캡션이
+  "tracks" 라고 말했는데 궤적은 추종이 아닌 경우를 조용히 넘기지 않게).
 - **Vista 카메라 캡션 `cam_static_threshold` 0.02 → 0.05 (2026-08-28).** GT 태그 16편
   캘리브레이션(dance-twirl 은 zoom=focal 축이라 제외): 분절기 속도 눈금 `fps 10 × |Δt|` 에서
   static GT 쪽 v_med 0.0276~0.0690, moving GT 쪽 0.0725~0.1848 로 경계가 0.07 부근에 있고,
@@ -64,6 +74,31 @@
   `CinemaTraj/results/20260827_caption_gendop_compare/compare_th005.txt`.
 
 ### Added
+- **`CinemaTraj` — tracking shot preset 9종 (`track_*`) (2026-08-28).** 지금까지 preset 은
+  "카메라가 어떻게 움직이나"만 정의했고 **subject 를 따라가는 축은 `--follow_gains` CLI 에만**
+  있었다. 그 결과 배포 뱅크 51편 **16,748 변이의 `follow_gain` 이 전량 0** 이고 학습 캡션
+  9,373건의 motion 어휘에 track/follow 가 **0건**이다 (키워드 grep + 뱅크 JSON 두 방향으로 확인).
+  `lbm/presets.py` 에 `track_follow` / `track_follow_locked` / `track_side_{left,right}` /
+  `track_push_in` / `track_pull_out` / `track_orbit_{left,right}` / `track_rise` 를 추가하고,
+  `PRESET_ZOOM_END` 와 같은 형태의 **side-dict `PRESET_FOLLOW`** 로 이름에 gain 을 묶었다 —
+  기존 preset 은 dict 에 없으므로 동작이 한 톨도 안 바뀐다 (실측: camel `straight_ease` /
+  `truck_left` gain 0.0 그대로, `track_*` 만 1.0). gain 을 `auto` 가 아니라 **1.0** 으로 둔
+  이유는 `auto` 가 τ 를 **최소화**하는 값을 풀어서 정지 subject 에서 0 에 가깝게 나오기
+  때문이다 — 그러면 캡션은 "tracks" 인데 궤적은 추종이 아니게 된다. 예산이 모자라면 `fit_tau`
+  가 모양만 깎고, 그래도 넘치면 `tau_saturated` 로 뱅크에서 빠진다 (조용히 추종을 끄지 않는다).
+  `track_follow*` 는 모양이 identity 라 τ 가 스케일에 반응하지 않으므로 `STATIC_PRESETS` 에
+  넣었다(사다리 첫 단만, `drop_saturated` 면제). `decode/build_poses.py` 는 **명시 gain 이 0 일
+  때만** preset 기본값을 쓴다 — 밖에서 준 `--follow_gain auto` 가 여전히 이긴다.
+  `configs/caption_presets.json` 의 문구는 **카메라 기준 방향(left/right/in/out/up)만** 말한다:
+  subject 진행방향 대비 tail/lead/side 는 `follow_shot_kind` 가 **측정**하는 값이라 preset
+  이름으로 보장할 수 없다 (camel dyn_0 은 셋 다 `side-tracking` 으로 측정됐다).
+- **`CinemaTraj/scripts/gendop_release_infer.py --text_from_eval_dir` — 텍스트 축만 바꾼 짝지은
+  arm (2026-08-28).** latentcam eval 폴더의 `test/vista4d_<scene>_<idx>_caption.json` (= k6 가
+  **실제로 받은 그 문장**)을 `captions_gendop` 문장 대신 GenDoP 에 넣는다. 안 주면 기존 동작
+  그대로. 파일명 규약이 달라(`<idx>_caption.json` vs `vista4d_<scene>_<idx>_caption.json`)
+  경로를 여기서 다시 만들고, 없으면 세어서 `skipped` 로 보고한다 (조용히 다른 문장을 쓰지
+  않는다). `config.json` 에 `text_from_eval_dir` 를 기록해 어느 문장으로 돌렸는지 산출물만
+  보고도 알 수 있게 했다.
 - **`CinemaTraj/scripts/gendop_preds_to_eval_dir.py` — GenDoP npz → latentcam eval 폴더 어댑터
   (2026-08-28).** `render_pred_depth_warp.py` 는 arm 을 `--eval_dir LABEL=DIR` 로 받아 그 DIR 의
   `test/<name>_{transforms_ref,transforms_pred,caption}.json` 세 짝을 읽는데, GenDoP 은

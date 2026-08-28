@@ -480,7 +480,10 @@ def train():
     if _track_dim > 0:
         assert not getattr(cfg, 'is_ar', False) and not getattr(cfg, 'per_token_noise', False), \
             "target_track_dim>0 은 표준 diffusion 경로에만 배선되어 있다 (is_ar/per_token_noise 미지원)"
-        print(f"(model) target_track_dim={_track_dim}: cam_in input = cam_dim + {_track_dim}")
+        # dropout / val 조건은 로그에 안 남으면 나중에 run 을 봐도 어느 쪽인지 알 수 없다.
+        print(f"(model) target_track_dim={_track_dim}: cam_in input = cam_dim + {_track_dim} | "
+              f"train dropout={float(getattr(cfg, 'target_track_dropout', 0.1))} | "
+              f"val cond={'null (track 없이)' if getattr(cfg, 'target_track_val_drop', False) else 'track'}")
     if cfg.point_encoder != 'custom':
         model = CameraDiffusionModel(cam_dim=cfg.cam_dim, cond_dim=_track_dim, **_geo_kw)
     else:
@@ -736,7 +739,11 @@ def train():
                     _vs = getattr(cfg, 'val_sample_seed', None)
                     _g = torch.Generator().manual_seed(int(_vs) + step) if _vs is not None else None
                     # val 은 dropout 없이 실제 조건 그대로 (target_track_dim=0 이면 None = 기존).
-                    _cond = build_track_cond(data, traj_len, device)
+                    # [new 2026-08-28] cfg.target_track_val_drop=true 면 val 을 **track 없이**
+                    # (cond=None -> 모델이 전 채널 0 = null 을 채운다, forward:171) 돌린다.
+                    # 학습 때 target_track_dropout 이 남겨 둔 그 조건이라 미학습 입력이 아니다.
+                    _cond = (None if getattr(cfg, 'target_track_val_drop', False)
+                             else build_track_cond(data, traj_len, device))
                     out = sample(model, noise_scheduler, traj_len, text_embeds, text_masks,
                                  pc_embeds, pc_masks, generator=_g, cond=_cond)
 

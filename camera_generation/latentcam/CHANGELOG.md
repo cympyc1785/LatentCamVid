@@ -15,6 +15,17 @@ All notable changes to the latentcam sub-project. Follows [Keep a Changelog](htt
   그만큼 **이 커밋 전까지 track arm 은 한 번도 eval 된 적이 없다**. 자세한 내역은 `FIX.log`.
 
 ### Added
+- **`target_track_val_drop` — validation 을 track 없이 돌린다 (2026-08-28).**
+  지금까지 val 은 `build_track_cond(...)` 를 **dropout 없이** 불러 실제 track 을 그대로 넣었다
+  (`train_latent_cam_dm.py:738`). 그래서 val 곡선은 "track 이 있을 때"만 보여줬고,
+  `target_track_dim=0` arm 과 눈금이 달라 곧바로 비교할 수 없었으며, dropout 이 null 조건을
+  실제로 학습시켰는지도 학습 중엔 알 수 없었다. `true` 면 val 에서 `cond=None` 을 넘겨
+  모델이 전 채널 0(null)을 채운다 — 학습 때 `target_track_dropout` 이 남겨 둔 그 조건이라
+  미학습 입력이 아니다. 기본값 `false` = 기존 동작 비트 동일, `target_track_dim=0` 이면 no-op.
+- **`conf/experiment/vista4d_pgt_k6_track_d5.yaml` — dropout 0.5 + val 은 track 없이
+  (2026-08-28).** `vista4d_pgt_k6_track.yaml` 과 `target_track_dropout`(0.1→0.5) ·
+  `target_track_val_drop`(→true) 두 줄만 다르다. 0.1 arm(`20260828_000434`)은 그대로 돌려
+  dropout 0.1 vs 0.5 대조로 남긴다.
 - **`eval_testset.py --drop-track` — track 조건 없이 추론 (2026-08-28).**
   학습 때 `target_track_dropout`(기본 0.1)이 per-sample 로 남겨 둔 **null 조건**(전 채널 0)을
   추론에서 실제로 요청하는 손잡이. 이게 없으면 dropout 이 만들어 준 "track 은 optional" 이

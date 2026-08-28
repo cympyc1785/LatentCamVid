@@ -1,0 +1,47 @@
+# @package _global_
+# V4D-PGT 9b: track 조건을 **정말 optional** 로 — dropout 0.5 + val 은 track 없이.
+#
+# `vista4d_pgt_k6_track.yaml` 과 **두 줄만** 다르다 (exp_name 제외):
+#   target_track_dropout 0.1 -> 0.5   샘플의 절반을 null 로 봐서 track 없는 경로를 실제로 학습
+#   target_track_val_drop   -> true   val 을 cond=null 로 돌려 "track 없이 얼마나 하나"를 잰다
+#
+# 왜: 0.1 arm 은 val 을 실제 track 으로 돌리므로 val 곡선이 "track 있을 때"만 보여준다. track 이
+# optional 이라면 없을 때의 성능이 학습 중에 보여야 하고, 그 눈금은 target_track_dim=0 arm
+# (vista4d_pgt_k6) 과 같아야 비교가 된다 — val_drop=true 가 그 눈금을 맞춘다.
+# 0.1 arm (20260828_000434) 은 그대로 돌려 dropout 0.1 vs 0.5 대조로 남긴다.
+exp_name: vista4d_pgt_k6_track_d5
+dl3dv_root: /data1/cympyc1785/data/Vista4D-Eval-Data/latentcam_da3
+meta_csv: meta_vista4d.csv
+train_seg_list: /data1/cympyc1785/data/Vista4D-Eval-Data/latentcam_da3/seg_list_vista4d_train.txt
+test_seg_list: /data1/cympyc1785/data/Vista4D-Eval-Data/latentcam_da3/seg_list_vista4d_test.txt
+coverage_blacklist_path: null
+
+pose_source: da3
+target_pose_source: da3_target_poses
+scale_mode: avg_scale
+avg_scale_ref: context_first_cam
+intr_norm: rel
+cam_dim: 64
+
+target_track_dim: 4
+target_track_dropout: 0.5              # ★ 0.1 arm 과의 차이 1
+target_track_val_drop: true            # ★ 0.1 arm 과의 차이 2 (val = track 없이)
+
+geo_encoder: da3
+geo_cam_embed: null
+geo_latent_cache_dir: null
+geo_posed: true
+geo_shuffle_order: false
+da3_geo_model: da3nested-giant-large
+da3_geo_input_hw: [252, 448]
+da3_geo_layers: last
+
+geo_view_sampling: context_uniform
+geo_num_views: 6
+geo_first_view_target_s: true
+
+anchor_pred_frame0: true
+
+batch_size: 8
+epochs: 200
+ckpt_at_epochs: [50, 100]

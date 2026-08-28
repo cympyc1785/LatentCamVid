@@ -219,6 +219,11 @@ prompts_file: prompts.json
 # 길이로 interp 해 x_t 채널에 concat 한다 (4 = xyz+valid). 0 = 기존 구조/동작 비트 동일.
 target_track_dim: 0
 target_track_dropout: 0.1     # per-sample null 드랍 (추론에서 track 없이 쓸 수 있게)
+# [new 2026-08-28] val 을 **track 없이**(cond = 전 채널 0 = null) 돌린다. false = 기존 동작
+# (val 은 실제 track 을 그대로 받는다). true 면 val 곡선이 "track 없이도 얼마나 하나"를 재므로
+# target_track_dim=0 arm 과 같은 눈금이 되고, dropout 이 실제로 null 조건을 학습시켰는지가
+# 학습 중에 바로 보인다. target_track_dim=0 이면 조건 자체가 없어 no-op.
+target_track_val_drop: false
 max_scenes: null              # cap #scenes loaded (null = all; small int for smoke tests)
 train_seg_list: null          # [new] explicit train segment-list file (<batch>/<hash>/<seg>); null = random 90/10 split
 test_seg_list: null           # [new] explicit val/test segment-list file; val = its first (val_max_batches×batch_size) segments

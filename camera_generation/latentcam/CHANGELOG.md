@@ -4,7 +4,30 @@ All notable changes to the latentcam sub-project. Follows [Keep a Changelog](htt
 
 ## [Unreleased]
 
+### Fixed
+- **`eval_testset.py` 가 `target_track` arm ckpt 를 못 읽던 것 (2026-08-28).**
+  `CameraDiffusionModel(cam_dim=..., **_geo_kw)` 에 `cond_dim` 을 안 넘겨서 `cam_in` 이
+  `Linear(64, 512)` 로 만들어지고, ckpt 의 `Linear(68, 512)` 와 strict load 에서 shape
+  mismatch 로 즉사했다 (`cam_in.weight` `[512,68]` vs `[512,64]`). 아래 `target_track_dim`
+  항목의 "eval_testset.py — 동일하게 조건 전달" 은 **호출부만** 맞고 생성자가 빠져 있었다.
+  → `cond_dim=_track_dim` 을 넘긴다. `target_track_dim=0` 이면 생성자 기본값과 같아
+  기존 arm 은 글자 그대로 동일. strict load 라 조용히 틀린 평가가 나올 여지는 없었지만,
+  그만큼 **이 커밋 전까지 track arm 은 한 번도 eval 된 적이 없다**. 자세한 내역은 `FIX.log`.
+
 ### Added
+- **`eval_testset.py --drop-track` — track 조건 없이 추론 (2026-08-28).**
+  학습 때 `target_track_dropout`(기본 0.1)이 per-sample 로 남겨 둔 **null 조건**(전 채널 0)을
+  추론에서 실제로 요청하는 손잡이. 이게 없으면 dropout 이 만들어 준 "track 은 optional" 이
+  학습 쪽에만 존재하고 쓸 방법이 없다. `cond=None` 으로 넘기면 모델이
+  `camera_diffusion_model_latent.forward` 에서 zeros 를 채우므로 미학습 입력이 아니다.
+  출력 tag 에 `__notrack` 을 붙여 track 있는 결과를 덮어쓰지 않게 하고(시드를 tag 에 박는
+  것과 같은 이유), `meta.json` 에 `target_track_dim` / `drop_track` 을 남긴다.
+  `target_track_dim=0` 인 arm 에서는 경고만 찍고 no-op. 플래그를 안 주면 기존 경로 그대로.
+  - 스모크 (last.pth, `--max-batches 2` = 16 samples, seed 42, GPU 2) — **n=16 이라 arm
+    판정용이 아니다**: track 조건 `val/loss_latent 0.07827442139387131` /
+    `val/loss_traj 0.015194708947092295`, `--drop-track` `0.13371194899082184` /
+    `0.026392601896077394`, 대조 `20260827_051423_vista4d_pgt_k6`(track 없는 arm)
+    `0.16339020431041718` / `0.035439545288681984`.
 - **`target_track_dim` — subject OBB 3D 궤적을 x_t 채널에 concat 하는 조건 (2026-08-28).**
   V4D-PGT 9 ablation. `<scene>/da3/target_track.npz` (CinemaTraj `export_target_track.py` 산출,
   scene_graph 의 dyn `track.center_smooth` / stat `obb.center` 를 `T_wg` 로 world 변환, 50 scene

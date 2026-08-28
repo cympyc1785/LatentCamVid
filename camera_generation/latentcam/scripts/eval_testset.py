@@ -109,6 +109,12 @@ def main():
     # test_seg_list 파일 순서(shuffle=False)로 만들므로 이 값과 무관하게 그대로다.
     ap.add_argument('--sample-seed', type=int, default=None,
                     help='per-batch seed for sample()의 x_T (default: cfg.random_seed, -1=legacy 전역 RNG)')
+    # [new 2026-08-28] target_track arm 을 **track 없이** 돌린다 (cond = 전 채널 0 = 학습 때
+    # target_track_dropout 이 남겨 둔 null 조건). 같은 ckpt 로 이 플래그만 켜고 끄면
+    # "track 조건이 실제로 얼마나 기여하나"가 짝지은 비교로 나온다. target_track_dim=0 인
+    # arm 에서는 조건 자체가 없으므로 no-op (경고만 찍는다).
+    ap.add_argument('--drop-track', action='store_true',
+                    help='target_track 조건을 null(전 채널 0)로 강제 — track 없이 추론')
     args = ap.parse_args()
 
     if args.gpu is not None:
@@ -170,6 +176,13 @@ def main():
     tag = f"{osp.basename(run_dir)}__{args.ckpt[:-4]}"
     if _seed is not None:
         tag += f"__seed{_seed}"
+    # --drop-track 은 같은 ckpt·같은 시드로 도는 **다른 조건**이라 tag 를 갈라 두지 않으면
+    # track 있는 결과를 조용히 덮어쓴다 (시드를 tag 에 박는 것과 같은 이유).
+    _track_dim = int(getattr(cfg, 'target_track_dim', 0) or 0)
+    if args.drop_track:
+        if _track_dim == 0:
+            print("[warn] --drop-track 인데 target_track_dim=0 — 이 arm 엔 track 조건이 없다 (no-op)")
+        tag += "__notrack"
     out_dir = args.out or osp.join(REPO, EVAL_ROOT, tag)
     # 상대경로 --out 은 REPO 기준. os.chdir(MAIN) 이 이미 돌았기 때문에 그냥 abspath 하면
     # main/ 밑으로 떨어진다 (기본값은 REPO 를 붙여서 만드니 영향 없고, --out 을 준 경우만 문제).
@@ -210,7 +223,10 @@ def main():
         _raw = 6 if cfg.geo_cam_embed == 'plucker' else 11
         _geo_kw = dict(geo_latent_dim=getattr(cfg, 'geo_latent_dim', 768), geo_cam_raw_dim=_raw,
                        geo_cam_embed_dim=getattr(cfg, 'geo_cam_embed_dim', 128))
-    model = CameraDiffusionModel(cam_dim=cfg.cam_dim, **_geo_kw)
+    # [fix 2026-08-28] target_track arm(cond_dim>0)은 cam_in 이 Linear(cam_dim+4, hidden) 이라
+    # cond_dim 을 안 넘기면 strict load 가 shape mismatch 로 죽는다 (b7cc928 이 이 줄을 빼먹었다).
+    # target_track_dim=0 이면 cond_dim=0 = 기존 생성자 호출과 동일.
+    model = CameraDiffusionModel(cam_dim=cfg.cam_dim, cond_dim=_track_dim, **_geo_kw)
     sd = torch.load(ckpt_path, map_location='cpu')
     sd = sd['model'] if isinstance(sd, dict) and 'model' in sd else sd
     model.load_state_dict(sd, strict=True)              # strict: a shape/name drift must not pass silently
@@ -252,6 +268,8 @@ def main():
         'vae_latent_scale': cfg.vae_latent_scale, 'vae_ckpt_path': cfg.vae_ckpt_path,
         'scale_mode': cfg.scale_mode, 'intr_norm': cfg.intr_norm,
         'sampling_type': cfg.sampling_type, 'diffusion_inference_step': cfg.diffusion_inference_step,
+        # [new 2026-08-28] track 조건을 실제로 넣었나. drop_track=true 면 null(전 채널 0).
+        'target_track_dim': _track_dim, 'drop_track': bool(args.drop_track),
     }
     _rp = osp.join(run_dir, 'ckpts', 'resume.pth')      # epoch/step/wandb_id the run reached
     if osp.isfile(_rp):
@@ -308,7 +326,10 @@ def main():
                 _g = (torch.Generator().manual_seed(_seed + step) if _seed is not None else None)
                 # [new 2026-08-27] target_track arm: run_validation 과 동일하게 dropout 없이 조건
                 # 그대로. target_track_dim=0 이면 None = 기존 호출과 동일.
-                _cond = T.build_track_cond(data, traj_len, device)
+                # [new 2026-08-28] --drop-track 이면 cond=None -> 모델이 전 채널 0 (null) 을
+                # 채운다 (camera_diffusion_model_latent.forward:171). 학습 때
+                # target_track_dropout 이 남겨 둔 그 조건이라 미학습 입력이 아니다.
+                _cond = None if args.drop_track else T.build_track_cond(data, traj_len, device)
                 out = T.sample(model, noise_scheduler, traj_len, text_embeds, text_masks,
                                pc_embeds, pc_masks, generator=_g, cond=_cond)
 

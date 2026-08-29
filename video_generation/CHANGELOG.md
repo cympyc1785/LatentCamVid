@@ -27,6 +27,33 @@
   (`translation_degenerate` 50행은 `static_hold*` 의 |t|=0 — NaN 아님).
 
 ### Added
+- **`CinemaTraj/scripts/caption_datadop_chunks.py` — DataDoP 원본 shot 을 49프레임 chunk 로 잘라
+  태깅만 해서 우리 plan-text 형식으로 낸다 (2026-08-29).** DataDoP 는 카메라 궤적만 있고 물체
+  anchor 가 없으므로 `target` 은 **`none`** 고정, `motion` 만 GenDoP 분절기 어휘로 채운다
+  (`CAM_INDEX_TO_PATTERN` 27종 × `ANG_INDEX_TO_PATTERN` 7종 →
+  `move left and yaw right, then pitch up, then static`). LLM/VLM 을 한 번도 안 부르고 GenDoP
+  리포는 0줄 수정한다. 출력은 `lbm_bank_captions_v1` 그대로라
+  `prompt = "target: none motion: <...>"` 로 뱅크 캡션과 같은 형식이다.
+  규약 3종과 그 실측 근거:
+  ① `_transforms_cleaning.json` 은 **이미 OpenGL c2w** 라 `tag_trajectory(..., convert=False)`
+  로 `[:3,1:3]*=-1` flip 을 끈다. 안 끄면 yaw 부호가 뒤집힌다 — `1_0001/shot_0102` 실측
+  `convert=False` "move left and **yaw right**" vs `convert=True` "yaw left" 인데, DataDoP 자신의
+  `_caption.json` `Movement` 는 "moving left while **yawing right**" 라 `False` 가 맞다.
+  ② **리샘플 안 함** (`--num_poses 0`). 49프레임을 120 으로 늘리면 프레임당 이동량이 (48/119)
+  배로 줄어 `cam_static_threshold=0.02` 가 훨씬 많은 구간을 static 으로 찍는다. 원본 pose 를
+  그대로 쓰면 속도 눈금이 DataDoP 와 동일하고, 실제로 라벨 분포가 보존된다 — 40 shot 대조:
+  전체 120프레임 `move static` 48.6% / `angular static` 75.2% vs 49프레임 chunk 49.0% / 76.2%.
+  ③ combine 단계 window 는 못 바꾼다 (`segmentation.py:392-403` 이 인자와 무관하게 15/10 으로
+  덮어쓰고 chunk 4개 이하가 될 때까지 5씩 키운다). 48 velocity 샘플 기준 chunk 는 1~4개.
+  chunk 자르기는 `--chunks_per_shot 3` = `linspace(0, 120-49, 3)` → 시작 0/36/71 로 120 pose 를
+  빠짐없이 덮는다 (stride 36 짜리 `range` 는 71 을 못 만들어 뒤 22프레임이 버려진다).
+  전량 실행 (8샤드, GenDoP env, CPU only, 샤드당 220s): **22,314 shot → 66,942 entry**, 건너뛴
+  shot 0. 고유 `motion` 문자열 10,957개, `static` 단독 26.6%, 상위는 `move forward` 6.0% /
+  `move backward` 2.6% / `move forward, then static` 2.1%.
+  산출물 `CinemaTraj/out/datadop_chunk_captions/captions.json` (48 MB) + 샤드 8개.
+- **`CinemaTraj/scripts/caption_cameras_datadop.py` — `tag_trajectory(..., convert=)` 분기
+  (2026-08-29).** 입력이 이미 DataDoP(OpenGL) c2w 일 때 flip 을 끄기 위한 것. 기본값 `True` 는
+  기존 npz(OpenCV c2w) 경로라 예전 동작과 bit-identical.
 - **`CinemaTraj/scripts/merge_static_rung.py` — 정지 rung 전용 뱅크를 기존 hole 뱅크에 붙인다
   (2026-08-29, D78).** D78 을 반영해 52편을 **전량 재fit** 하면 편당 9~44분이 다시 든다.
   정지 rung 은 이분법이 없어 (anchor × 4 preset) × 렌더 2회뿐이라 편당 2분 미만이므로

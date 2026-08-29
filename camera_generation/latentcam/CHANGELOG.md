@@ -15,13 +15,18 @@ All notable changes to the latentcam sub-project. Follows [Keep a Changelog](htt
   그만큼 **이 커밋 전까지 track arm 은 한 번도 eval 된 적이 없다**. 자세한 내역은 `FIX.log`.
 
 ### Added
-- **k7 뱅크용 experiment config 2종 — `vista4d_pgt_k7` / `vista4d_pgt_k7_track_d5` (2026-08-29).**
+- **D77 뱅크용 experiment config 2종 — `vista4d_pgt_k6_d77` / `vista4d_pgt_k6_d77_track_d5`
+  (2026-08-29 추가, 2026-08-30 이름 정정).**
   각각 `vista4d_pgt_k6.yaml` / `vista4d_pgt_k6_track_d5.yaml` 을 그대로 복사하고 **데이터
   경로 3줄 + `exp_name` 만** 바꿨다. 학습 하이퍼는 한 글자도 안 건드렸다 — k6 대비 달라진
   것이 데이터뿐이어야 두 뱅크가 비교가 되기 때문이다. `_track_d5` 는 posed arm 과
   `target_track_dim: 4` / `target_track_dropout: 0.5` / `target_track_val_drop: true`
   세 줄만 다르다 (k6 때의 그 세 줄 그대로).
-  - 데이터: `latentcam_da3_k7` = preset 20종 -> **34종**(`track_*` 10종 신규,
+  - **한때 `k7` 이라고 불렀는데 오해를 부르는 이름이었다.** `k<N>` 은 `--aim_keyframes N`
+    이고 두 뱅크 모두 `fixed.aim_keyframes` 가 **6** 이다 — keyframe 수는 안 바뀌었고 바뀐
+    것은 preset pool 하나뿐이라 (`bank/` -> `bank_d77/`, 20 -> 34종) `k6_d77` 로 고쳤다.
+    데이터 root 도 `latentcam_da3_k7` -> `latentcam_da3_k6_d77`.
+  - 데이터: `latentcam_da3_k6_d77` = preset 20종 -> **34종**(`track_*` 10종 신규,
     `follow_gain 1.0`), D76 이름 규칙 통일, 영상 51 -> **52편**(snow-bike 추가),
     dedup 후 변이 9,873 -> **13,705** (train 13,016 / test 689).
     test holdout 4편(camel, avocado-slice, bmx-bumps, couple-hug)은 **k6 와 같다** —
@@ -30,7 +35,7 @@ All notable changes to the latentcam sub-project. Follows [Keep a Changelog](htt
     context 는 소스 영상이라 뱅크와 무관하게 scene 상수이고, 두 root 의 `images_4` 가
     byte 단위로 같다(camel/rhino/women-talk × frame 0/24/48 md5 일치). 읽기 경로
     (`dataset_dl3dv.py:1568`)는 dtype(fp32)만 보고 `meta` 는 안 보므로, 굽는 스크립트가
-    `meta` 에 넣는 `exp` 문자열이 k6/k7 중 무엇이든 학습 결과에 영향이 없다.
+    `meta` 에 넣는 `exp` 문자열이 무엇이든 학습 결과에 영향이 없다.
     복제하면 2.2 GB 를 한 벌 더 쓴다.
   - smoke 통과(둘 다 1 epoch 1627 step + val, `WANDB_MODE=disabled`):
     posed `val/loss_traj=0.274468`, track_d5 `val/loss_traj=0.272950`, 캐시

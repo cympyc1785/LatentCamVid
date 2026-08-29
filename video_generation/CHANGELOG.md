@@ -6,6 +6,45 @@
 
 ## [Unreleased]
 
+### Added
+- **`CinemaTraj/scripts/build_trumans_metadata.py` — TRUMANS 매니페스트 -> Vista 스키마
+  `metadata.csv` (2026-08-30).** `build_bank_captions.py:load_events()` 는 `video` 와
+  `prompt` **두 열만** 읽으므로, 매니페스트에서 그 두 열을 만들어 주면 캡션 빌더를 한 줄도
+  안 고치고 TRUMANS 의 `event` 절을 채울 수 있다. 737편 `out/trumans_recon/*_s3f0k6/
+  manifest_a*.json` 을 훑어 `A man is putting down the book with both hands indoors.`
+  같은 문장을 만든다. 동사 -> 현재분사는 **26개 표**를 명시했다 — 자음중복 휴리스틱은
+  `open` 을 `openning` 으로 만든다. 결과 737행 / 녹화 53편 / preset 8종 / 서로 다른 문장 170개.
+- **`CinemaTraj/configs/trumans_labels.json` (`lbm_label_map_v1`) + `build_bank_captions.py
+  --label_map` (2026-08-30).** TRUMANS 의 정적 노드 라벨은 .blend index pass 의 **원본 오브젝트
+  이름**이라 `Floor.008` / `WallInner.021` / `283217/model` / `book_left_01` 이 그대로 학습
+  프롬프트의 `target:` 절에 들어가고 있었다. 표는 `seg_instances_static` 737편 전수(키워드
+  1,409 / stem 566)에서 뽑았다: 명명 stem 82종(occurrence 29,305)은 자연어 명사로,
+  3D-FRONT 숫자 자산 ID 484종(occurrence 5,754 = 16.4%)은 로컬에 `model_info.json` 이
+  없어 상위어 `furniture` 로 떨어뜨린다. `.NNN` / `_NNN` 접미는 조회 전에 벗긴다.
+  파일럿 실측: `{Floor.008, 283217/model, book_left_01, WallInner.021, static_chair_03, ...}`
+  -> `person 124 / wall 164 / furniture 246 / floor 82 / chair 82 / book 82`, unmapped 0.
+  `--label_map` 을 안 주면 `normalize_label()` 이 `None` 을 받고 그대로 통과하므로 **Vista 는
+  비트 단위로 같다** (실측: captions identical True, meta diff `{}`).
+  뱅크 행의 `anchor_label` 은 추적 가능하도록 원래 이름 그대로 남는다.
+- **`CinemaTraj/scripts/run_trumans_d77_shard.sh` (2026-08-30).** `run_k6_d77_shard.sh` 와
+  다른 점은 **앞 두 단계가 더 있다**는 것뿐이다 — Vista 51편은 `scene_graph.json` /
+  `cloud.npz` 를 예전에 만들어 뒀지만 TRUMANS 737편은 없다. 뒤 3단계
+  (`sample_camera_bank` / `fit_hole_ladder` / `emit_bank`)는 인자까지 동일하다
+  (`--aim_keyframes 6 --keyframe_aim auto --keyframe_ease smoothstep --fixed_focal`) —
+  두 코퍼스 뱅크가 같은 규약이어야 섞어 학습할 수 있다. `--follow_gains` 를 안 주는 것도
+  같다: `decode/build_poses.py:472` 는 gain 이 문자열 `"0"` 일 때만 `PRESET_FOLLOW` 를
+  적용해서, `auto` 를 주면 `track_*` 이 조용히 추종을 멈춘다. 각 단계는 산출물이 있으면
+  건너뛰고(재시작 안전), 실패한 영상은 다음 영상으로 넘어간다.
+
+### Changed
+- **`hole_bank_k7` -> `hole_bank_k6_d77`, `run_k7_shard.sh` -> `run_k6_d77_shard.sh`
+  (2026-08-30).** `k<N>` 은 `--aim_keyframes N` 인데 두 뱅크 모두 `fixed.aim_keyframes` 가
+  **6** 이다 (실측). `k7` 은 "keyframe 7" 로 읽히지만 실제로 바뀐 것은 preset pool 하나뿐
+  (`bank/` -> `bank_d77/`, 20 -> 34종)이라 이름이 사실과 달랐다. Vista 뱅크 디렉토리 104개
+  (`hole_bank_k7` 52 + `hole_bank_k7_static` 52)를 개명하고 `merge_static_rung.py` /
+  `run_static_rung_shard.sh` / 러너 스크립트의 참조를 같이 고쳤다. TRUMANS 러너도 같은
+  이름을 쓴다. 산출물 내용은 한 바이트도 안 바뀐다 — 경로 이름만이다.
+
 ### Fixed
 - **`CinemaTraj/scripts/fit_hole_ladder.py` — 정지 preset 이 emit 뱅크에서 통째로 빠지던 것
   (`--static_rung`, 기본 켬, 2026-08-29, D78).** `fit_hole_ladder.py:436` 이 preset 목록을

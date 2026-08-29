@@ -1,20 +1,23 @@
 # @package _global_
-# V4D-PGT 12: k7 뱅크 위의 track-conditioned arm. `vista4d_pgt_k7.yaml` 과 **세 줄만** 다르다
-# (exp_name 제외) — `vista4d_pgt_k6_track_d5.yaml` 이 k6 대비 달랐던 그 세 줄 그대로다:
+# V4D-PGT 12: D77 뱅크 위의 track-conditioned arm. `vista4d_pgt_k6_d77.yaml` 과 **세 줄만**
+# 다르다 (exp_name 제외) — `vista4d_pgt_k6_track_d5.yaml` 이 k6 대비 달랐던 그 세 줄 그대로다:
 #   target_track_dim: 4        subject(anchor) OBB world 궤적을 x_t 채널에 concat
 #   target_track_dropout: 0.5  샘플 절반을 null 로 봐서 track 없는 경로도 실제로 학습
 #   target_track_val_drop: true  val 을 cond=null 로 돌려 "track 없이 얼마나 하나"를 잰다
-#                                -> 눈금이 vista4d_pgt_k7 (track_dim=0) 과 같아져 비교가 된다
+#                                -> 눈금이 vista4d_pgt_k6_d77 (track_dim=0) 과 같아져 비교가 된다
 #
-# k7 뱅크에서 이 arm 이 특히 의미가 있는 이유: track_* preset 10종이 새로 들어와 **카메라가
+# 이름 규칙(`k6` = `--aim_keyframes 6`, `d77` = D77 어휘 34 preset)은 `vista4d_pgt_k6_d77.yaml`
+# 헤더 주석 참조. 이 뱅크도 aim_keyframes 는 6 이고 바뀐 건 preset pool 뿐이다.
+#
+# D77 뱅크에서 이 arm 이 특히 의미가 있는 이유: track_* preset 10종이 새로 들어와 **카메라가
 # subject 변위를 따라가는** 궤적이 데이터에 처음 생겼다. 그 궤적은 subject 궤적을 모르면
 # 원리적으로 예측할 수 없으므로, target_track 조건의 효과가 k6 때보다 크게 나와야 한다.
 # 안 나오면 track 채널이 실제로 안 쓰이고 있다는 뜻이다.
-exp_name: vista4d_pgt_k7_track_d5
-dl3dv_root: /data1/cympyc1785/data/Vista4D-Eval-Data/latentcam_da3_k7
+exp_name: vista4d_pgt_k6_d77_track_d5
+dl3dv_root: /data1/cympyc1785/data/Vista4D-Eval-Data/latentcam_da3_k6_d77
 meta_csv: meta_vista4d.csv
-train_seg_list: /data1/cympyc1785/data/Vista4D-Eval-Data/latentcam_da3_k7/seg_list_vista4d_train.txt
-test_seg_list: /data1/cympyc1785/data/Vista4D-Eval-Data/latentcam_da3_k7/seg_list_vista4d_test.txt
+train_seg_list: /data1/cympyc1785/data/Vista4D-Eval-Data/latentcam_da3_k6_d77/seg_list_vista4d_train.txt
+test_seg_list: /data1/cympyc1785/data/Vista4D-Eval-Data/latentcam_da3_k6_d77/seg_list_vista4d_test.txt
 coverage_blacklist_path: null
 
 pose_source: da3
@@ -42,7 +45,7 @@ geo_num_views: 6
 geo_first_view_target_s: true
 
 # posed arm 과 **같은 캐시**를 공유한다 (context 는 track 조건과도, 뱅크와도 무관하게 소스 영상
-# 그대로). 디렉토리는 k6 arm 것과도 공유한다 — 근거는 vista4d_pgt_k7.yaml 주석.
+# 그대로). 디렉토리는 k6 arm 것과도 공유한다 — 근거는 vista4d_pgt_k6_d77.yaml 주석.
 geo_raw_cache_dir: /data1/cympyc1785/data/Vista4D-Eval-Data/latentcam_da3/geo_raw_cache_da3
 da3_cam_token_per_sample: true
 

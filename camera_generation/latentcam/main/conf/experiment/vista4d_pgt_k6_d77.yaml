@@ -1,9 +1,16 @@
 # @package _global_
-# V4D-PGT 11/12: **k7 뱅크** 위의 posed arm. `vista4d_pgt_k6.yaml` 을 그대로 복사하고
-# 데이터 경로 3줄(+ exp_name)만 바꿨다. 학습 하이퍼는 한 글자도 안 건드렸다 — k6 대비 달라진
-# 것이 데이터뿐이어야 두 arm 이 비교가 된다.
+# V4D-PGT 11/12: **D77 뱅크** 위의 posed arm. `vista4d_pgt_k6.yaml` 을 그대로 복사하고
+# 데이터 경로 3줄(+ exp_name)만 바꿨다. 학습 하이퍼는 한 글자도 안 건드렸다 — 기존 뱅크 대비
+# 달라진 것이 데이터뿐이어야 두 arm 이 비교가 된다.
 #
-# ═══ k6 뱅크와 무엇이 다른가 ═════════════════════════════════════════════════════════════
+# ═══ 이름 규칙 (이 파일은 한때 `vista4d_pgt_k7.yaml` 이었다) ══════════════════════════════
+# `k6` 은 `--aim_keyframes 6` 을 뜻한다 (TRUMANS `_s3f0k6` 의 k6 과 같은 약어). **이 뱅크도
+# k6 이다** — `out/<video>/hole_bank_*/bank.json` 의 `fixed.aim_keyframes` 가 기존 뱅크와
+# 똑같이 6 이다. 디렉토리를 `hole_bank_k7` 로 부르는 바람에 "keyframe 7" 로 읽힐 수 있었는데,
+# keyframe 은 안 바뀌었고 바뀐 건 **preset pool 하나뿐**이라 이름을 `k6_d77` 로 고쳤다
+# (`d77` = τ 뱅크 소스 `bank_d77/`, D77 어휘 34 preset).
+#
+# ═══ 기존 k6 뱅크와 무엇이 다른가 ════════════════════════════════════════════════════════
 # 1) **track_* preset 10종 추가** (track_{truck,dolly,orbit,crane,pedestal}_{left,right,in,out,
 #    up,down} + track_hold[_dont_look]). follow_gain 1.0 으로 subject 변위를 카메라 위치에
 #    싣는 궤적이라, "카메라가 피사체를 따라간다"는 축이 처음으로 학습 데이터에 들어온다.
@@ -19,11 +26,11 @@
 #
 # 나머지 설계 근거(축 정의, target_pose_source, intrinsics 고정, avg_scale, anchor_pred_frame0)는
 # `vista4d_pgt_k6.yaml` 주석과 같다 — 바뀐 게 없으므로 여기 복붙하지 않는다.
-exp_name: vista4d_pgt_k7
-dl3dv_root: /data1/cympyc1785/data/Vista4D-Eval-Data/latentcam_da3_k7
+exp_name: vista4d_pgt_k6_d77
+dl3dv_root: /data1/cympyc1785/data/Vista4D-Eval-Data/latentcam_da3_k6_d77
 meta_csv: meta_vista4d.csv
-train_seg_list: /data1/cympyc1785/data/Vista4D-Eval-Data/latentcam_da3_k7/seg_list_vista4d_train.txt
-test_seg_list: /data1/cympyc1785/data/Vista4D-Eval-Data/latentcam_da3_k7/seg_list_vista4d_test.txt
+train_seg_list: /data1/cympyc1785/data/Vista4D-Eval-Data/latentcam_da3_k6_d77/seg_list_vista4d_train.txt
+test_seg_list: /data1/cympyc1785/data/Vista4D-Eval-Data/latentcam_da3_k6_d77/seg_list_vista4d_test.txt
 coverage_blacklist_path: null
 
 pose_source: da3
@@ -47,12 +54,12 @@ geo_num_views: 6                    # _even_indices(49,6) = [0,10,19,29,38,48]
 geo_first_view_target_s: true       # view0 = 프레임 s(=0). 이미 첫 픽이라 집합이 안 바뀐다.
 
 # context 는 소스 영상이라 **뱅크와 무관하게 scene 상수**다 — 캐시 파일은 k6 arm 과 완전히 같은
-# 것이고, 그래서 디렉토리를 하나만 두고 **k6 arm 과 공유**한다 (52편, 2.2 GB). k7 에서 새로 들어온
+# 것이고, 그래서 디렉토리를 하나만 두고 **k6 arm 과 공유**한다 (52편, 2.2 GB). D77 에서 새로 들어온
 # 2편(snow-bike, snowboard)도 같은 디렉토리에 추가했다.
 # 근거: 두 root 의 images_4 가 byte 단위로 같고(camel/rhino/women-talk × frame 0/24/48 md5 일치)
 # geo_* 설정도 같으므로 pre-ln 토큰이 같다. 굳이 복제하면 2.2 GB 를 한 벌 더 쓴다.
 # 읽기 경로(dataset_dl3dv.py:1568)는 dtype(fp32)만 보고 meta 는 안 보므로, 굽는 스크립트가
-# meta 에 넣는 `exp` 문자열이 k6/k7 중 무엇이든 학습 결과에 영향이 없다.
+# meta 에 넣는 `exp` 문자열이 어느 arm 것이든 학습 결과에 영향이 없다.
 geo_raw_cache_dir: /data1/cympyc1785/data/Vista4D-Eval-Data/latentcam_da3/geo_raw_cache_da3
 da3_cam_token_per_sample: true   # 캐시는 B=1 로 구워진다 — 켜야 on-the-fly 폴백과 일치
 

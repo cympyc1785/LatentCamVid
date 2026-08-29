@@ -137,9 +137,10 @@ class DA3SceneEncoder(nn.Module):
     def __init__(self, repo_path, model_name='da3nested-giant-large', ckpt_path=None,
                  hf_home=None, input_hw=None, layers='last', layer_fuse='concat',
                  norm='ln', ref_view_strategy='saddle_balanced', debug=False,
-                 keep_cam_dec=False):
+                 keep_cam_dec=False, cam_token_per_sample=False):
         super().__init__()
         self.keep_cam_dec = bool(keep_cam_dec)
+        self.cam_token_per_sample = bool(cam_token_per_sample)
         layers = str(layers or 'last')
         if layers not in self.LAYER_MODES:
             raise ValueError(f"da3_geo_layers must be one of {self.LAYER_MODES}, got {layers!r}")
@@ -290,8 +291,24 @@ class DA3SceneEncoder(nn.Module):
         hw = geo_hw.to(dev)
         # cam_enc 는 batch 당 하나의 (H,W) 만 받는다. 보통 scene 해상도가 같아서 한 번에 끝나고,
         # 섞인 배치에서만 샘플별로 쪼갠다.
+        #
+        # [new 2026-08-29] cam_token_per_sample: 수학적으로는 배치가 섞이지 않는데도 cam_enc 를
+        # B>1 로 부르면 cuBLAS 가 다른 kernel 을 골라 결과가 `max|d| 1.0e-5` (rel 2.9e-7) 만큼
+        # 달라진다. 그 자체는 무시할 크기지만 **DA3 backbone 이 이걸 5만배로 증폭한다** — cam_token
+        # 은 x[:, :, 0] 에 꽂혀 전 view 가 attend 하는 자리라, 3e-7 짜리 섭동이 pre-ln 토큰에서
+        # rel 2.3e-2 (token cos 평균 0.9997 / 최소 0.968) 로 커진다 (실측). 즉 **같은 샘플이
+        # batch_size 8 로 학습될 때와 1 로 추론될 때 서로 다른 geo token 을 본다.** 켜면
+        # 샘플별로 쪼개 불러 배치 크기에 완전히 불변이 된다 (per-sample[0] vs 단독 B=1: max|d| 0).
+        # 비용은 B=8 기준 3.3 -> 26.1 ms, backbone 468 ms 대비 +4.9%.
+        # 기본값 false 는 기존 arm 재현용이고, geo_raw_cache_dir (B=1 로 구운 캐시) 을 쓸 때는
+        # true 여야 캐시 경로와 on-the-fly 경로가 일치한다 (dataset_cfg 가 경고한다).
         with torch.autocast(device_type=dev.type, enabled=False):   # da3.py:127 과 동일
-            if bool((hw == hw[0:1]).all()):
+            if self.cam_token_per_sample and B > 1:
+                tok = torch.cat([
+                    cam_enc(w2c[b:b + 1], K[b:b + 1],
+                            (int(hw[b, 0].item()), int(hw[b, 1].item())))
+                    for b in range(B)], dim=0)
+            elif bool((hw == hw[0:1]).all()):
                 tok = cam_enc(w2c, K, (int(hw[0, 0].item()), int(hw[0, 1].item())))
             else:
                 tok = torch.cat([
@@ -349,20 +366,46 @@ class DA3SceneEncoder(nn.Module):
         x = (x - self._mean.to(x.dtype)) / self._std.to(x.dtype)
         return x.view(B, V, *x.shape[1:])
 
-    def forward(self, images, cam_token=None):
-        """images (B,V,3,H,W) float [0,1] (정규화 전) -> tokens (B, V*P, out_dim)."""
+    @torch.no_grad()
+    def encode_raw(self, images, cam_token=None):
+        """`forward` 의 **frozen 구간만** 돌려 pre-ln 토큰 (B,V,P,C_native) 을 낸다.
+
+        [new 2026-08-29] 캐시 지점이 왜 하필 여기인가: `self.ln` 과 그 위의 `GeoEncoder.proj`
+        (3072->768) 는 **학습되는** 파라미터다 (`geo_encoder.py:201 trainable = True`). 그 출력을
+        파일로 얼리면 두 모듈이 초기값에 영원히 머문다 — `dataset_cfg.py:360` 이 da3 에서
+        `geo_latent_cache_dir` 을 끄는 이유가 정확히 이것이다. 반대로 `self.net` 은
+        `:239 requires_grad_(False)` + 영구 eval 이라 같은 (images, cam_token) 에 항상 같은 값을
+        낸다. 그래서 잘라도 되는 유일한 선이 backbone 출력과 `ln` 사이다.
+
+        Vista4D 처럼 context view 가 scene 상수인 코퍼스에서는 이 값이 **변이(=segment) 와
+        무관**하므로 scene 당 파일 하나로 전 변이가 공유된다 (52 scene x 42.5 MB ~ 2.2 GB).
+
+        반환 dtype 은 bf16 autocast 아래서도 **fp32** 다. autocast 가 내리는 건 matmul/linear 뿐이고
+        블록이 `x = x + attn(ln(x))` 라 residual stream 이 fp32 로 남는다. 캐시를 bf16 으로 저장하면
+        왕복에서 `max|d| 2.0` / `||d||/||a|| 1.8e-3` 이 생기므로 **fp32 로 저장할 것**.
+        배치 크기에는 불변이다 (B=1/2/6, 동료 scene·순서 무관 max|d| 0.0000 실측) — global
+        attention 이 `b (s n) c` 로 배치 축을 안 섞고, reference-view 선택은 view 수만 본다.
+        따라서 B=1 로 구운 캐시를 batch_size=8 학습에 그대로 먹여도 된다.
+        """
         x = self._prep_images(images)
-        with torch.no_grad():
-            # export_feat_layers 는 None 이면 backbone 안에서 `i in None` 으로 터진다 -> [] 필수.
-            # cam_token 을 주면 select_reference_view / reorder_by_reference 가 건너뛰어져
-            # (그 분기는 cam_token is None 일 때만 발동) view 순서가 보존된다.
-            outs, _ = self.net.backbone(
-                x, cam_token=cam_token, export_feat_layers=[],
-                ref_view_strategy=self.ref_view_strategy)
+        # export_feat_layers 는 None 이면 backbone 안에서 `i in None` 으로 터진다 -> [] 필수.
+        # cam_token 을 주면 select_reference_view / reorder_by_reference 가 건너뛰어져
+        # (그 분기는 cam_token is None 일 때만 발동) view 순서가 보존된다.
+        outs, _ = self.net.backbone(
+            x, cam_token=cam_token, export_feat_layers=[],
+            ref_view_strategy=self.ref_view_strategy)
         feats = [o[0] for o in outs]            # out_layer 당 patch token (B,V,P,per_layer)
         if self.layers == 'last':
-            t = feats[-1].float()
-        else:
-            t = torch.cat([f.float() for f in feats], dim=-1)
-        t = self.ln(t)
-        return einops.rearrange(t, 'b v p c -> b (v p) c')
+            return feats[-1].float()
+        return torch.cat([f.float() for f in feats], dim=-1)
+
+    def from_raw(self, t):
+        """`encode_raw` 의 결과(또는 그 캐시) -> tokens (B, V*P, out_dim).
+
+        학습되는 `ln` 이 여기 걸린다 — 캐시 경로에서도 gradient 가 살아 있어야 하므로
+        `no_grad` 를 걸지 않는다."""
+        return einops.rearrange(self.ln(t), 'b v p c -> b (v p) c')
+
+    def forward(self, images, cam_token=None):
+        """images (B,V,3,H,W) float [0,1] (정규화 전) -> tokens (B, V*P, out_dim)."""
+        return self.from_raw(self.encode_raw(images, cam_token))

@@ -15,6 +15,39 @@ All notable changes to the latentcam sub-project. Follows [Keep a Changelog](htt
   그만큼 **이 커밋 전까지 track arm 은 한 번도 eval 된 적이 없다**. 자세한 내역은 `FIX.log`.
 
 ### Added
+- **`geo_raw_cache_dir` — DA3 backbone 출력(pre-`ln`)을 scene 키로 캐시 (2026-08-29).**
+  Vista4D 는 `geo_view_sampling='context_uniform'` 이라 context view 가 **scene 만 보고**
+  정해진다 (실측: 9,873 변이 / 50 scene, geo_idxs 가 전 샘플 `(0,10,19,29,38,48)` 로 상수).
+  그래서 변이 9,873개가 scene 파일 50개를 공유한다. 자르는 지점은 `ln` **직전**이라
+  학습 대상인 `DA3SceneEncoder.ln` / `GeoEncoder.proj` 는 그대로 gradient 를 받는다 —
+  기존 `cache_geo_embeddings.py` 가 `proj` **뒤**를 얼려서 da3 에서 못 쓰던 것과 다른 지점이다.
+  `scripts/data/cache_geo_raw_da3.py` 로 굽고 (`<dir>/<scene_key>.pt`), 파일이 없는 scene 은
+  조용히 on-the-fly DA3 로 떨어진다. `geo_raw_cache_preload`(기본 true)면 `__init__` 에서
+  전량 RAM 적재 후 fork 로 worker 가 공유한다 (2.12 GB 한 벌).
+  `dataset_cfg.py` 가 성립 조건(da3 / context_uniform / cam_embed null / shuffle false /
+  swap null / test_inseg_k 0 / latent_cache 미사용)을 전부 검사하고 하나라도 어긋나면 끈다.
+  기본값 `null` = 기존 동작 그대로.
+  - **dtype 은 fp32 다.** 학습이 bf16 autocast 아래서 돌아도 `encode_raw` 출력은 fp32 다 —
+    autocast 는 matmul/linear 만 내리고 DA3 블록이 `x = x + attn(ln(x))` 라 residual stream 이
+    fp32 로 남는다. bf16 으로 저장하면 왕복에서 `max|d| 1.9993` / `||d||/||a|| 1.78e-3` 의
+    **scene 마다 고정된 편향**이 생겨 캐시 없이 도는 추론과 어긋난다. 낡은 bf16 파일은
+    로더와 `is_done()` 이 dtype 으로 걸러 각각 on-the-fly 폴백 / 덮어쓰기로 처리한다.
+  - 실측: `geo_emb` 캐시 vs on-the-fly `max|d| 0` (9샘플 전부), `geo_mask` 동일,
+    `ln.weight.grad 3.88e+06` / `proj.weight.grad 1.41e+10` / backbone grad 0.
+    epoch 시간 `12:01 -> 07:40` (1.63 -> 2.54 it/s), geo forward 단독 374.30 -> 41.26 ms/step.
+- **`da3_cam_token_per_sample` — `cam_enc` 를 샘플별로 호출 (2026-08-29).**
+  수학적으로는 배치가 안 섞이는데도 `cam_enc` 를 `B>1` 로 부르면 cuBLAS 가 다른 kernel 을
+  골라 `cam_token` 이 `rel 2.9e-7` 달라진다. 그 자체는 무시할 크기지만 **DA3 backbone 이
+  5만배로 증폭한다** — `cam_token` 은 `x[:, :, 0]` 에 꽂혀 전 view 가 attend 하는 자리라,
+  pre-`ln` 토큰에서 `rel 2.3e-2` (token cos 평균 0.999744 / 최소 0.968340) 가 된다.
+  즉 **기존 da3 arm 은 전부 `batch_size=8` 학습과 `batch_size=1` 추론에서 서로 다른 geo
+  token 을 보고 있었다.** 배치 *구성*은 무관하고 (동료 scene 을 바꿔도 `max|d| 0`)
+  *크기*만 문제라, 학습 자체는 자기 일관적이었지만 추론과 갈렸다.
+  `true` 면 샘플별로 쪼개 불러 배치 크기에 완전히 불변이 된다 (per-sample[0] vs 단독 B=1:
+  `max|d| 0`). 비용은 B=8 에서 `cam_enc` 3.26 -> 26.05 ms, backbone 468.3 ms 대비 **+4.9%**.
+  기본값 `false` = 기존 arm 재현용. `geo_raw_cache_dir` 은 캐시를 B=1 로 굽기 때문에
+  **`true` 여야** 캐시 경로와 on-the-fly 폴백이 일치하며, `dataset_cfg.py` 가 경고한다.
+  `vista4d_pgt_k6.yaml` / `vista4d_pgt_k6_track_d5.yaml` 두 experiment 에 캐시와 함께 켰다.
 - **`make_prompts_simple.py --fields` — 축약이 아니라 캡션 **절 선택** (2026-08-28).**
   `caption_fields` 의 문장을 한 글자도 안 고치고 어느 절을 넣을지만 고른다
   (`--fields motion` → `"target: man motion: ..."` 에서 `target:` 절만 제거). 조립 규칙은

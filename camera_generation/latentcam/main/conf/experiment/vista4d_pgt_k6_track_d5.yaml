@@ -40,6 +40,11 @@ geo_view_sampling: context_uniform
 geo_num_views: 6
 geo_first_view_target_s: true
 
+# context view 가 scene 상수라 DA3 backbone 출력(pre-ln)을 미리 구워 둔다. k6 arm 과 같은 캐시를
+# 공유한다 (context 는 track 조건과 무관하게 소스 영상 그대로). 근거는 vista4d_pgt_k6.yaml 주석.
+geo_raw_cache_dir: /data1/cympyc1785/data/Vista4D-Eval-Data/latentcam_da3/geo_raw_cache_da3
+da3_cam_token_per_sample: true   # 캐시는 B=1 로 구워진다 — 켜야 on-the-fly 폴백과 일치
+
 anchor_pred_frame0: true
 
 batch_size: 8

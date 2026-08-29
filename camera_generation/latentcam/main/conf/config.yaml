@@ -433,6 +433,23 @@ geo_cam_embed_dim: 128        # width of the trainable MLP that lifts the raw di
 # The cache is keyed by the geo context selection, so it is only valid for the experiment that
 # built it (geo_worldtraj: frustum_cover + out_of_seg + subtract_first + anchor_first + posed).
 geo_latent_cache_dir: null
+# [new 2026-08-29] scene 키 **pre-ln** DA3 캐시 (scripts/data/cache_geo_raw_da3.py). null = OFF.
+# 위 geo_latent_cache_dir 과 자르는 지점이 다르다:
+#   geo_latent_cache_dir -> GeoEncoder.proj **뒤**. da3 는 ln+proj 가 학습 대상이라 못 쓴다
+#                           (dataset_cfg.py:360 이 강제로 끈다).
+#   geo_raw_cache_dir    -> DA3SceneEncoder 의 backbone 출력, `self.ln` **직전**. 여기서 위쪽은
+#                           전부 requires_grad=False + 영구 eval 이라 얼려도 학습이 안 바뀐다.
+# 파일 하나가 scene 하나다: <dir>/<scene_key>.pt = {'raw': (V,P,C) fp32, 'geo_idxs': (V,) int16,
+# 'meta': {...}}. scene_key 는 data_name 의 마지막 '_<seg>' 를 뗀 것이다. dtype 이 fp32 인 이유:
+# backbone 출력은 bf16 autocast 아래서도 fp32 다 (residual stream). bf16 으로 내리면 왕복에서
+# ||d||/||a|| 1.8e-3 이 생겨 캐시 경로와 on-the-fly 경로가 갈린다.
+# 성립 조건 (dataset_cfg 가 전부 검사하고, 하나라도 어긋나면 끈다):
+#   geo_encoder='da3' / geo_view_sampling='context_uniform' (선택이 (s,e) 가 아니라 scene 만 봄)
+#   geo_cam_embed=null / geo_shuffle_order=false / geo_swap_mode=null / geo_test_inseg_k=0
+# Vista4D 처럼 "scene 1편 = 소스 영상, segment = 뱅크 변이" 인 코퍼스에서 변이 9,873개가
+# scene 파일 52개를 공유한다 (~2.2 GB). 파일이 없는 scene 은 조용히 on-the-fly 로 떨어진다.
+geo_raw_cache_dir: null
+geo_raw_cache_preload: true   # __init__ 에서 전량 RAM 적재 (fork 로 worker 가 공유; false = 매번 read)
 geo_inseg_span: null          # in-seg sampling span override (null = full segment)
 geo_covis_radius: 2.0         # covisibility retrieval: ball radius
 geo_covis_theta0: 10.0        # covisibility retrieval: min view-angle separation (deg)
@@ -489,6 +506,14 @@ da3_geo_layer_fuse: concat    # (all 일 때) 현재 concat 만 구현
 da3_geo_norm: ln              # ln | none. cat_token 의 두 반쪽은 앞이 un-normed local_x,
                               #   뒤가 norm 통과라 분산 스케일이 크게 다르다. 끄면 한쪽이 먹는다.
 da3_geo_debug: false
+# [new 2026-08-29] cam_enc(pose token) 을 샘플별로 부를지. false = 기존 동작(배치 통째로 한 번).
+# 수학적으로는 배치가 안 섞이는데도 B>1 이면 cuBLAS 가 다른 kernel 을 골라 cam_token 이 rel 2.9e-7
+# 달라지고, cam_token 이 x[:, :, 0] 에 꽂혀 전 view 가 attend 하는 자리라 DA3 backbone 이 그걸
+# pre-ln 토큰에서 rel 2.3e-2 (token cos 평균 0.9997 / 최소 0.968) 로 증폭한다. 즉 끄면 같은
+# 샘플이 batch_size=8 학습과 batch_size=1 추론에서 다른 geo token 을 본다. 켜면 배치 크기에
+# 완전히 불변 (max|d| 0). 비용은 B=8 에서 cam_enc 3.3 -> 26.1 ms, backbone 468 ms 대비 +4.9%.
+# geo_raw_cache_dir 을 쓸 때는 캐시가 B=1 로 구워지므로 **true 여야** 두 경로가 일치한다.
+da3_cam_token_per_sample: false
 # [new 2026-08-16] geo_encoder=da3 + geo_posed=true 는 기본적으로 pose_source='da3' 를 요구한다
 #   (dataset_cfg.py 의 raise — da3 코퍼스 arm 에서 pose_source 를 빠뜨리는 오타를 잡는 가드다).
 #   true 로 켜면 transforms(COLMAP) pose 코퍼스로도 돌린다. 안전한 이유:

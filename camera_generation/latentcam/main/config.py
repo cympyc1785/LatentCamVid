@@ -247,6 +247,12 @@ class Config:
     # [new] precomputed frozen geo-latent cache root (main/cache_geo_embeddings.py). None = OFF,
     # i.e. run LagerNVS every step as before. See conf/config.yaml for layout + validity caveats.
     geo_latent_cache_dir = None
+    # [new 2026-08-29] scene 키 pre-ln DA3 캐시 (scripts/data/cache_geo_raw_da3.py). None = OFF.
+    # geo_latent_cache_dir 과 자르는 지점이 다르다 — 저건 proj 뒤(=학습 대상 뒤)라 da3 에서는
+    # 못 쓰고, 이건 ln 직전이라 ln/proj 가 그대로 학습된다. context 가 scene 상수인 코퍼스
+    # (Vista4D) 전용. 조건은 conf/config.yaml 주석 참조.
+    geo_raw_cache_dir = None
+    geo_raw_cache_preload = True    # scene 파일 전량을 __init__ 에서 RAM 에 올린다 (fork 공유)
     # [new] per-context-view camera embedding channel-concatenated onto the geo tokens.
     # None = OFF (geo condition stays the plain (M, 768) LagerNVS tokens). 'relfirst' = 11-d pose
     # of each context view relative to the target's FIRST camera (trans / norm_scale), appended
@@ -289,6 +295,10 @@ class Config:
     da3_geo_norm = 'ln'         # cat_token 두 반쪽(un-normed local | normed global)의 스케일을
                                 #   맞추는 LayerNorm. 'none' 으로 끄면 한쪽이 다른 쪽을 먹는다.
     da3_geo_debug = False
+    # [new 2026-08-29] cam_enc 를 샘플별로 부를지. False = 기존(배치 통째). 근거는
+    # da3_geo_encoder.build_cam_token 주석 — B>1 로 부르면 cuBLAS kernel 이 바뀌어 cam_token 이
+    # rel 2.9e-7 흔들리고, backbone 이 그걸 pre-ln 토큰에서 rel 2.3e-2 로 증폭한다.
+    da3_cam_token_per_sample = False
     # [new 2026-08-16] da3 backend 를 transforms(COLMAP) pose 로도 허용할지. 기본 False =
     # 기존 raise 유지. 근거는 conf/config.yaml 의 같은 키 주석 참고.
     da3_geo_allow_transforms_pose = False

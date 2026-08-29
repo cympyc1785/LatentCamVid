@@ -168,6 +168,10 @@ class DatasetSpec:
     geo_posed: bool
     geo_return_idxs: bool
     geo_latent_cache_dir: Optional[str]
+    # [new 2026-08-29] scene 키 pre-ln DA3 캐시. geo_latent_cache_dir 과 **동시에 켤 수 없다**
+    # (둘 다 켜면 위 캐시가 먼저 return 해서 이쪽이 죽은 코드가 된다 — dataset_cfg 가 막는다).
+    geo_raw_cache_dir: Optional[str]
+    geo_raw_cache_preload: bool
     # --- custom geo (RGBD) 경로
     geo_custom: bool
     geo_custom_channels: str
@@ -448,6 +452,49 @@ def resolve_dataset_cfg(cfg, verbose=True):
             f"context views, but the cache is keyed by segment only")
         geo_latent_cache_dir = None
 
+    # [new 2026-08-29] scene 키 pre-ln DA3 캐시. 위 cascade 와 **독립된** 캐시다 (자르는 지점이
+    # ln 직전이라 학습되는 ln/proj 를 얼리지 않는다) — 그래서 da3 에서 유일하게 쓸 수 있다.
+    # 여기서 다 막는 이유: 캐시 키가 **scene** 이므로 "context view 선택이 scene 만 보고 정해진다"
+    # 가 깨지는 순간 조용히 틀린 토큰을 먹인다. 한 조건이라도 어긋나면 켜지 않는다.
+    geo_raw_cache_dir = getattr(cfg, 'geo_raw_cache_dir', None) or None
+    if geo_raw_cache_dir and geo_enabled:
+        _why = []
+        if str(getattr(cfg, 'geo_encoder', None)) != 'da3':
+            _why.append(f"geo_encoder={getattr(cfg, 'geo_encoder', None)!r} != 'da3' "
+                        f"(encode_raw/from_raw 는 da3 backend 에만 있다)")
+        if str(getattr(cfg, 'geo_view_sampling', 'even')) != 'context_uniform':
+            # 나머지 sampler 는 (s,e) 나 retrieval 을 보므로 변이마다 view 가 달라진다.
+            _why.append(f"geo_view_sampling={getattr(cfg, 'geo_view_sampling', 'even')!r} "
+                        f"!= 'context_uniform' -> context 가 scene 상수가 아니다")
+        if getattr(cfg, 'geo_cam_embed', None) is not None:
+            # geo_cam_param 은 target frame0 기준이라 변이마다 다르다. 캐시 경로는 안 만든다.
+            _why.append(f"geo_cam_embed={getattr(cfg, 'geo_cam_embed')!r} (변이별 값)")
+        if getattr(cfg, 'geo_shuffle_order', False):
+            _why.append("geo_shuffle_order=True -> view 순서가 매 스텝 달라진다")
+        if geo_swap_mode:
+            _why.append(f"geo_swap_mode={geo_swap_mode!r} -> context 가 다른 segment 로 바뀐다")
+        if geo_test_inseg_k:
+            _why.append(f"geo_test_inseg_k={geo_test_inseg_k} -> context view 가 바뀐다")
+        if geo_latent_cache_dir is not None:
+            # 데이터셋에서 geo_latent_cache_dir 분기가 먼저 return 한다 -> 이쪽이 죽은 코드가 된다.
+            _why.append("geo_latent_cache_dir 과 동시에 켤 수 없다")
+        if _why:
+            say("[geo raw cache] DISABLED: " + " | ".join(_why))
+            geo_raw_cache_dir = None
+        else:
+            if not getattr(cfg, 'da3_cam_token_per_sample', False):
+                # 캐시는 cache_geo_raw_da3.py 가 B=1 로 굽는다. on-the-fly 폴백(캐시 miss)은
+                # batch_size 통째로 cam_enc 를 부르는데, cuBLAS kernel 이 바뀌어 cam_token 이
+                # rel 2.9e-7 달라지고 backbone 이 그걸 pre-ln 토큰에서 rel 2.3e-2 로 증폭한다
+                # (da3_geo_encoder.build_cam_token 주석 참조). 두 경로를 섞으면 같은 배치 안에
+                # 서로 다른 게이지의 토큰이 들어간다.
+                say("[geo raw cache] WARNING: da3_cam_token_per_sample=false -> 캐시(B=1)와 "
+                    "on-the-fly 폴백(B=batch_size)이 rel 2.3e-2 갈린다. true 로 켤 것")
+            say(f"[geo raw cache] reading {geo_raw_cache_dir}/<scene_key>.pt "
+                f"(pre-ln (V,P,C) fp32; miss -> on-the-fly DA3). ln/proj 는 그대로 학습된다")
+    else:
+        geo_raw_cache_dir = None
+
     # honest selection: anchor at the target's FIRST frame only (known at inference);
     # radius scaled by CONTEXT (not the unseen rest of the target segment).
     # [renamed 2026-07-31] geo_anchor_first_frame -> geo_cover_centered_at_s. The old name read
@@ -483,6 +530,8 @@ def resolve_dataset_cfg(cfg, verbose=True):
         # Off by default: on a cache HIT it costs the frustum_cover search the cache exists to skip.
         geo_return_idxs=bool(getattr(cfg, 'geo_return_idxs', False)),
         geo_latent_cache_dir=geo_latent_cache_dir,
+        geo_raw_cache_dir=geo_raw_cache_dir,
+        geo_raw_cache_preload=bool(getattr(cfg, 'geo_raw_cache_preload', True)),
         geo_custom=geo_custom,
         geo_custom_channels=geo_custom_channels,
         geo_depth_cache_dir=geo_depth_cache_dir,

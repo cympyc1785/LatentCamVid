@@ -214,6 +214,7 @@ class _DA3Backend(nn.Module):
             layer_fuse=getattr(cfg, 'da3_geo_layer_fuse', 'concat'),
             norm=getattr(cfg, 'da3_geo_norm', 'ln'),
             debug=bool(getattr(cfg, 'da3_geo_debug', False)),
+            cam_token_per_sample=bool(getattr(cfg, 'da3_cam_token_per_sample', False)),
         )
         self.out_dim = self.net.out_dim
         self.camera_encoding_dim = self.net.camera_encoding_dim
@@ -225,7 +226,16 @@ class _DA3Backend(nn.Module):
     def forward(self, images, cam_token=None):
         """cam_token=None 이면 DA3 가 자기 learned camera_token 을 쓴다 (unposed).
         lagernvs 처럼 zeros 를 넣으면 안 된다 — 학습된 토큰 자리를 0 으로 덮게 된다."""
-        tokens = self.net(images, cam_token)                 # (B, V*P, C)
+        return self.from_raw(self.encode_raw(images, cam_token))
+
+    # [new 2026-08-29] pre-ln 캐시 진입점. 자세한 근거는 da3_geo_encoder.encode_raw docstring.
+    def encode_raw(self, images, cam_token=None):
+        """frozen backbone 구간만 -> (B,V,P,C_native) pre-ln. 캐시 빌더가 쓴다."""
+        return self.net.encode_raw(images, cam_token)
+
+    def from_raw(self, t):
+        """pre-ln 토큰(또는 그 캐시) -> (tokens (B,V*P,C), mask). ln 은 여기서 학습된다."""
+        tokens = self.net.from_raw(t)                        # (B, V*P, C)
         mask = torch.ones(tokens.shape[:2], dtype=torch.bool, device=tokens.device)
         return tokens, mask
 
@@ -293,6 +303,26 @@ class GeoEncoder(nn.Module):
     def build_cam_token(self, geo_c2w, geo_fxfycxcy, geo_hw, override_scale=None):
         """Delegate to the backend (posed geo). -> cam_token (B, V, 11)."""
         return self.backend.build_cam_token(geo_c2w, geo_fxfycxcy, geo_hw, override_scale=override_scale)
+
+    # ------------------------------------------------------------------ #
+    # [new 2026-08-29] pre-ln 캐시 (cfg.geo_raw_cache_dir).
+    # `geo_latent_cache_dir` 은 **proj 뒤**를 얼리므로 backend 가 trainable 이면 못 쓴다.
+    # 이 쌍은 그 선을 backend 안쪽(ln 직전)으로 옮긴 것이라 ln/proj 는 그대로 학습된다.
+    # da3 backend 만 지원한다 (lagernvs 는 애초에 frozen 이라 기존 캐시로 충분).
+    # ------------------------------------------------------------------ #
+    def encode_raw(self, images, cam_token=None):
+        """frozen backend 구간만 -> pre-ln 토큰 (B, V, P, C_native). 캐시 빌더 전용."""
+        if not hasattr(self.backend, 'encode_raw'):
+            raise TypeError(f"geo backend '{self.backend_name}' 는 pre-ln 캐시를 지원하지 않는다 "
+                            f"(da3 만 encode_raw/from_raw 를 가진다)")
+        return self.backend.encode_raw(images, cam_token)
+
+    def from_raw(self, t):
+        """pre-ln 토큰(또는 그 캐시) -> geo_embeds (B, M, out_dim), geo_masks (B, M) bool."""
+        if not hasattr(self.backend, 'from_raw'):
+            raise TypeError(f"geo backend '{self.backend_name}' 는 pre-ln 캐시를 지원하지 않는다")
+        tokens, mask = self.backend.from_raw(t)
+        return self.proj(tokens), mask
 
 
 def build_geo_encoder(cfg):

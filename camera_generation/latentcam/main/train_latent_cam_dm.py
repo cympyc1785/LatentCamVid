@@ -64,6 +64,19 @@ def geo_emb_from_cache(data, device):
     return emb, mask
 
 
+def geo_emb_from_raw_cache(geo_encoder, data, device):
+    """[new 2026-08-29] pre-ln 캐시 경로 (cfg.geo_raw_cache_dir).
+
+    `geo_emb_from_cache` 와 달리 **인코더를 통과시킨다** — 캐시가 담고 있는 건 DA3 backbone 의
+    frozen 출력(ln 직전)이고, 그 위의 `ln` + `GeoEncoder.proj` 는 학습 대상이라 매 스텝 다시
+    돌아야 한다. 얼린 구간이 frozen 이므로 값은 on-the-fly 와 비트 단위로 같다
+    (실측 `geo_emb max|d| 0`, 단 `da3_cam_token_per_sample: true` 여야 한다).
+    캐시는 fp32 로 굽는다 — `encode_raw` 가 bf16 autocast 아래서도 fp32 를 돌려주기 때문이다
+    (`da3_geo_encoder.encode_raw` docstring). `.float()` 는 낡은 bf16 캐시가 섞여 들어와도
+    on-the-fly 경로 (`feats[-1].float()`) 와 dtype 이 갈리지 않게 하는 보험이다."""
+    return geo_encoder.from_raw(data['geo_raw'].to(device).float())
+
+
 def geo_encode(geo_encoder, data, device):
     """Run the geo encoder on a batch. When cfg.geo_posed and the batch carries geo-view
     geometry, feed the posed lagernvs cam_token; otherwise unposed (cam_token=None).
@@ -662,7 +675,10 @@ def train():
                 else:
                     pc_embeds, pc_masks = None, None
                 # Geo latent conditioning (image-based, frozen) — mirrors the train loop.
-                if 'geo_emb' in data:
+                if 'geo_raw' in data:
+                    with accelerator.autocast():
+                        pc_embeds, pc_masks = geo_emb_from_raw_cache(geo_encoder, data, device)
+                elif 'geo_emb' in data:
                     pc_embeds, pc_masks = geo_emb_from_cache(data, device)
                 elif geo_encoder is not None and 'images' in data:
                     # train loop 과 같은 autocast 를 걸어 val 쪽 geo 토큰 수치가 어긋나지 않게 한다
@@ -997,7 +1013,12 @@ def train():
             # geo_latent_cache_dir); otherwise fall back to the original LagerNVS forward.
             # [new 2026-08-07] geo_encoder='custom' 은 GeoTokenizer/proj 가 학습 대상이라
             # no_grad 로 감싸면 gradient 가 끊긴다. lagernvs 는 frozen 이므로 기존대로 no_grad.
-            if 'geo_emb' in data:
+            if 'geo_raw' in data:
+                # pre-ln 캐시: frozen 구간만 건너뛰고 ln/proj 는 gradient 를 받아야 하므로
+                # no_grad 로 감싸지 않는다 (얼린 쪽이 이미 backbone 안에서 no_grad 다).
+                with accelerator.autocast():
+                    pc_embeds, pc_masks = geo_emb_from_raw_cache(geo_encoder, data, device)
+            elif 'geo_emb' in data:
                 pc_embeds, pc_masks = geo_emb_from_cache(data, device)
             elif geo_encoder is not None and 'images' in data:
                 if _geo_trainable:

@@ -69,6 +69,15 @@ geo_view_sampling: context_uniform  # context range = 영상 전체 [0,49) = 소
 geo_num_views: 6                    # _even_indices(49,6) = [0,10,19,29,38,48]
 geo_first_view_target_s: true       # view0 = 프레임 s(=0). 이미 첫 픽이라 집합이 안 바뀐다.
 
+# context view 가 scene 상수라 (9,873 변이가 scene 파일 50개를 공유) DA3 backbone 출력을 미리
+# 구워 둔다. 자르는 지점은 ln **직전**이라 학습되는 ln/proj 는 그대로 살아 있다. scripts/data/
+# cache_geo_raw_da3.py 로 굽고, 파일이 없는 scene 은 조용히 on-the-fly 로 떨어진다.
+geo_raw_cache_dir: /data1/cympyc1785/data/Vista4D-Eval-Data/latentcam_da3/geo_raw_cache_da3
+# 캐시는 B=1 로 구워진다. cam_enc 를 B>1 로 부르면 cuBLAS kernel 이 바뀌어 cam_token 이 rel 2.9e-7
+# 흔들리고 backbone 이 그걸 pre-ln 토큰에서 rel 2.3e-2 로 증폭하므로, 캐시를 쓸 때는 켜야
+# 캐시 경로와 on-the-fly 폴백이 일치한다. 부수 효과로 batch_size=8 학습과 =1 추론도 일치한다.
+da3_cam_token_per_sample: true
+
 # frame0 은 여기서도 given 이다. dataset 이 cam_param 을 rel_t = w2c_t @ inv(w2c_0) 로 만들므로
 # **target 배열이 소스와 다른 배열이어도** GT rel[0] 은 정확히 항등이다. 이 코퍼스에서 확인함:
 # smoke 의 ref 덤프 160 타깃(테스트 4씬 전부)에서 transform[0] 이 서로 **비트 단위로 같다**

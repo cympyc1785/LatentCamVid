@@ -338,6 +338,45 @@ class CamDataset(torch.utils.data.Dataset):
             self.frame_files_list = _LazyScenes(self, 'frame_files')
         else:
             self.load_data()
+        self._geo_raw_mem = {}
+        if self.geo_raw_cache_dir is not None and self.geo_raw_cache_preload:
+            self._preload_geo_raw()
+
+    # ---- pre-ln DA3 캐시 (scene 키) -----------------------------------------------------
+    @staticmethod
+    def geo_raw_key(data_name):
+        """data_name '<batch>_<hash>_<seg>' -> scene 키 '<batch>_<hash>'. 캐시 파일 이름이다.
+
+        segment(=Vista4D 뱅크 변이) 를 떼는 것이 이 캐시의 전부다 — context view 가 scene 만 보고
+        정해지므로(`geo_view_sampling='context_uniform'`, dataset_cfg 가 강제) 변이 9,873개가
+        scene 파일 52개를 공유한다."""
+        return data_name.rsplit('_', 1)[0]
+
+    def _preload_geo_raw(self):
+        """캐시 파일 전량을 __init__ 에서 RAM 에 올린다.
+
+        왜 lazy 로 안 하는가: DataLoader worker 는 fork 로 뜨므로 여기서 올려 두면 tensor storage
+        가 copy-on-write 로 **공유**된다 (~2.2 GB 한 벌). worker 안에서 채우면 num_workers 배로
+        불어나고, 매번 read 하면 /data1(Lustre) 에서 샘플당 42 MB 를 다시 읽는다."""
+        keys = sorted({self.geo_raw_key(s[4]) for s in self.samples})
+        hit, nbytes, badt = 0, 0, 0
+        for k in keys:
+            p = osp.join(self.geo_raw_cache_dir, f'{k}.pt')
+            if not osp.exists(p):
+                continue
+            c = torch.load(p, map_location='cpu', weights_only=False)
+            if c['raw'].dtype != torch.float32:
+                # bf16 로 굽던 시절의 낡은 캐시. 조용히 쓰면 on-the-fly 와 1.8e-3 만큼 갈린다.
+                badt += 1
+                continue
+            self._geo_raw_mem[k] = c
+            hit += 1; nbytes += c['raw'].numel() * c['raw'].element_size()
+        print(f"[geo raw cache] preloaded {hit}/{len(keys)} scenes "
+              f"({nbytes / 1e9:.2f} GB) from {self.geo_raw_cache_dir}"
+              + ("" if hit == len(keys) else "  <- 나머지는 on-the-fly DA3"))
+        if badt:
+            print(f"[geo raw cache] WARNING: {badt} scene 이 fp32 가 아니라 무시했다 "
+                  f"(cache_geo_raw_da3.py 로 다시 구울 것 — 같은 디렉토리에 덮어쓴다)")
 
     # ---- pose_source 별 경로/파싱 ------------------------------------------------------
     # 아래 4개가 'transforms' 와 'da3' 의 유일한 차이점이다. 세그먼트 경계와 키('0','1',...)는
@@ -1522,6 +1561,28 @@ class CamDataset(torch.utils.data.Dataset):
         # [new] cache hit short-circuits the whole block: the frozen geo_emb is read straight off
         # disk, so no images are decoded and no context views are selected. A miss falls through
         # to the original on-the-fly path below, so a partial cache is safe.
+        # [new 2026-08-29] pre-ln DA3 캐시 (scene 키). 위 geo_latent_cache_dir 과 배타적이다
+        # (dataset_cfg 가 동시 활성을 막는다). 여기 담기는 건 `self.ln` **이전** 토큰이라
+        # ln/proj 는 학습 경로에 그대로 남는다 — geo_latent_cache_dir 이 da3 에서 금지된 이유가
+        # 그 둘을 얼려서였다. cam_token 도 scene 상수(소스 카메라 + view0 재고정)라 캐시에 굽혀 있다.
+        if self.geo_enabled and self.geo_raw_cache_dir is not None:
+            _k = self.geo_raw_key(data_name)
+            _c = self._geo_raw_mem.get(_k)
+            if _c is None and not self.geo_raw_cache_preload:
+                _p = osp.join(self.geo_raw_cache_dir, f'{_k}.pt')
+                if osp.exists(_p):
+                    _c = torch.load(_p, map_location='cpu', weights_only=False)
+                    if _c['raw'].dtype != torch.float32:
+                        _c = None       # 낡은 bf16 캐시 -> on-the-fly (preload 경로와 같은 판정)
+            if _c is not None:
+                # fp32 그대로 넘긴다. autocast(bf16) 아래서도 backbone 의 residual stream 은
+                # fp32 라 on-the-fly 출력이 fp32 다 — bf16 으로 내리면 ||d||/||a|| 1.8e-3 만큼
+                # 캐시 경로가 갈린다 (da3_geo_encoder.encode_raw docstring 참조).
+                out['geo_raw'] = _c['raw']                 # (V, P, C) fp32
+                if self.geo_return_idxs:
+                    self._attach_geo_ctx(out, scene_idx, _c['geo_idxs'].tolist())
+                return out
+
         if self.geo_enabled and self.geo_latent_cache_dir is not None:
             _p = osp.join(self.geo_latent_cache_dir, data_name.split('_')[0], f'{data_name}.pt')
             if osp.exists(_p):

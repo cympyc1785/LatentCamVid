@@ -27,6 +27,32 @@
   (`translation_degenerate` 50행은 `static_hold*` 의 |t|=0 — NaN 아님).
 
 ### Added
+- **`CinemaTraj/scripts/gendop_release_infer.py` — GenDoP `text_rgbd` ckpt 분기
+  (`--cond_mode depth+image+text`, 2026-08-29, #111).** 텍스트에 더해 **생성 영상 frame0 의
+  RGB + MonST3R depth** 를 조건으로 준다. `eval.py:311-313` 과 같이 `num_cond_tokens` 를
+  77 → **591**(= 77 text + 257 image + 257 depth) 로 올리고, `eval.py:110/145` 의
+  `standard_image`/`standard_depth`(BGR→RGB, /255, center-crop, zero-pad) 를 그대로 옮겨 적었다
+  — GenDoP 리포는 여전히 **0줄 수정**. 새 인자 `--cond_mode` / `--gen_root` / `--monst3r_sub` /
+  `--rgb_name` / `--depth_name` / `--kinds`. **기본값 `--cond_mode text` 는 기존 경로 그대로**
+  (같은 인자로 두 번 돌려 c2w 완전 일치 확인; 186-entry 원본 런과 다른 건 entry 순서가 바뀌면
+  샘플링 RNG 스트림이 달라지기 때문이지 코드 변경 때문이 아니다).
+  - **RGB/depth 출처**: `eval_data/gen/<scene>/<name>/monst3r/{frame_0000.png,
+    frame_depth_0000.npy}`. MonST3R 가 자기 입력 해상도(288×512)로 리사이즈해 쓴 프레임이라
+    depth 와 픽셀 정렬이 이미 맞다 — mp4 에서 뽑으면 해상도가 어긋난다.
+  - **depth 정규화는 하지 않는다**(실측 근거). `standard_depth` 는 center-crop/zero-pad 만 하고
+    정규화 연산이 없다(`# [0, 1]` 주석은 코드로 뒷받침되지 않음). GenDoP 자체 예시
+    `assets/examples/text_rgbd` 의 depth 범위 case1 0.2660~0.7221 / case2 0.0353~0.5065 와
+    우리 MonST3R 출력 0.0438~0.6261 · 0.0820~0.6039 · 0.1437~0.8829 · 0.0795~0.5972 가 같은
+    구간이다 — [0,1] 정규화도(case1 은 0/1 근처에 가지도 않는다) 미터 단위도 아닌, 양쪽 다
+    같은 MonST3R 게이지. 그대로 넣는 게 맞다.
+  - **실행**: eval `cameras` 114 entry 전량(`--kinds cameras`), GPU 2 / screen infer1,
+    text_key `Concise Interaction`. written 114/114, degenerate **0**, no_rgbd 0.
+    → `results/20260829_gendop_rgbd/text_rgbd/`.
+  - **왕복 평가**(`gendop_release_eval.py`, 같은 DataDoP 분절 게이지):
+    pooled P/R/F **0.4749 / 0.4377 / 0.4179**, mean fscore 0.4309, frame match 0.4377,
+    degenerate 0 (114 entry, tag 없음 0).
+  - HF 토큰 만료로 `laion/CLIP-ViT-H-14-laion2B-s32B-b79K` 가 401→"Repository Not Found" 로
+    떨어진다. 공개 리포이므로 `HF_HUB_DISABLE_IMPLICIT_TOKEN=1` 을 붙이면 받아진다.
 - **`CinemaTraj/scripts/caption_datadop_chunks.py` — DataDoP 원본 shot 을 49프레임 chunk 로 잘라
   태깅만 해서 우리 plan-text 형식으로 낸다 (2026-08-29).** DataDoP 는 카메라 궤적만 있고 물체
   anchor 가 없으므로 `target` 은 **`none`** 고정, `motion` 만 GenDoP 분절기 어휘로 채운다

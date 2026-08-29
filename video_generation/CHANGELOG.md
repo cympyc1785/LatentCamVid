@@ -6,7 +6,47 @@
 
 ## [Unreleased]
 
+### Fixed
+- **`CinemaTraj/scripts/fit_hole_ladder.py` — 정지 preset 이 emit 뱅크에서 통째로 빠지던 것
+  (`--static_rung`, 기본 켬, 2026-08-29, D78).** `fit_hole_ladder.py:436` 이 preset 목록을
+  `[p for p in tau_bank["axes"]["presets"] if knob_kind(p)]` 로 만들었는데, `knob_kind()` 는
+  `STATIC_PRESETS`(`static_hold`, `static_hold_dont_look`, `static_zoom_in`, `track_hold`,
+  `track_hold_dont_look`)에 `None` 을 돌려준다. 사다리를 못 만든다는 이유로 preset **자체**를
+  버린 것이라, τ 뱅크에는 있는 행이 emit 뱅크에는 **0 행**이었다 (camel k6 실측: τ 뱅크
+  `static_hold` 273 / `track_hold` 76 행 → emit 0 / 0). 그래서 학습 캡션 어휘에서 "카메라가
+  가만히 있는다"와 `track_hold`(움직임이 전부 follow offset 에서 나오는 **순수 추종**)가
+  사라졌다. `track_hold` 는 특히 정지와 다른 궤적이다 — camel 실측 `path_u`
+  `static_hold` 0.000 vs `track_hold` 0.064/0.052.
+  고침: 정지 preset 을 rung **1개**로 통과시킨다 (`sample_camera_bank.py:429` 가 τ 뱅크에서
+  이미 하던 것과 같은 예외). 손잡이 값은 τ 뱅크 행의 `target_tau` 를 그대로 실어
+  `emit_bank.decision_from_variant` 가 **같은 결정**을 되만들게 하고, `knob_kind` 는 `None` 이
+  아니라 문자열 `"none"` 으로 찍는다 (`None` 이면 CSV 에 `"None"` 으로 나가고 요약표의
+  `:>7` 포맷이 TypeError). `--no_static_rung` 으로 예전 동작 복원.
+  camel 검증: 14변이 / 182렌더, `emit_bank` `494 중 494 내보냄`, `pose 재현 최대오차
+  0.000e+00`, `21<->49 왕복 최대오차 0.000e+00`, 14개 canonical 카메라 전부 유한
+  (`translation_degenerate` 50행은 `static_hold*` 의 |t|=0 — NaN 아님).
+
 ### Added
+- **`CinemaTraj/scripts/merge_static_rung.py` — 정지 rung 전용 뱅크를 기존 hole 뱅크에 붙인다
+  (2026-08-29, D78).** D78 을 반영해 52편을 **전량 재fit** 하면 편당 9~44분이 다시 든다.
+  정지 rung 은 이분법이 없어 (anchor × 4 preset) × 렌더 2회뿐이라 편당 2분 미만이므로
+  (camel 실측 14변이/182렌더), 정지 preset 만 `hole_bank_k7_static` 으로 따로 적합하고 여기서
+  붙인다. 두 fit 은 anchor·preset 루프가 독립이고 같은 τ 뱅크·같은 인자를 쓰므로 붙인 결과가
+  전량 재fit 결과와 같은데, 그 전제를 **붙이기 전에 검사한다**: `fixed` 블록 13키
+  (`speed`/`tracking`/`look_at_bias`/`start_mode`/`aim_anchor`/`aim_ramp_frames`/
+  `orbit_span_frac`/`min_sweep_deg`/`traj_basis`/`aim_keyframes`/`keyframe_aim`/
+  `keyframe_ease`/`fixed_focal`) + 스칼라 4키(`video`/`num_frames`/`S`/`z_med`) +
+  `source_bank` 가 어긋나면 붙이지 않고 rc=2. 정지 preset 이 아닌 행이 섞여 있으면 rc=3.
+  멱등하다 (이미 붙은 정지 행을 먼저 걷어낸다). `bank.json` 에 `static_rung_merged` 표식을
+  남기고 `bank.csv` 열 목록은 **기존 csv 헤더에서 읽는다** — 여기 따로 적으면
+  `fit_hole_ladder` 의 `columns` 와 어긋나는 순간 조용히 열이 밀린다. `--dry_run` 있음.
+- **`CinemaTraj/scripts/run_static_rung_shard.sh` — D78 정지 rung 샤드 러너 (2026-08-29).**
+  정지 preset 4종만 적합 → `merge_static_rung.py` → `emit_bank.py` 를 한 번에. 인자는
+  `run_k7_shard.sh` 와 **똑같이** 준다 (`--aim_keyframes 6 --keyframe_aim auto
+  --keyframe_ease smoothstep --fixed_focal`, `--follow_gains` 미지정) — 다르면 위 호환성
+  검사에 걸려 안 붙는다. `bank.json` 의 `static_rung_merged` 표식으로 재시작 안전.
+  (`static_zoom_in` 은 `STATIC_PRESETS` 지만 `usable_presets(allow_zoom)` 가 τ 뱅크에서 이미
+  빼므로 대상이 아니다 — `emit_model_cams.py` 에 intrinsics 채널이 없다.)
 - **`CinemaTraj/scripts/sample_camera_bank.py` — `--track_dynamic_only` (기본 켬, 2026-08-29, D77).**
   `track_*` 12종을 **움직이는 anchor** 에만 건다. 근거: `track_*` 의 유일한 차이는
   `PRESET_FOLLOW` 가 켜는 follow_gain 1.0 이고, 그건 anchor 의 world 변위를 카메라 위치에

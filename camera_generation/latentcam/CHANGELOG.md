@@ -15,6 +15,43 @@ All notable changes to the latentcam sub-project. Follows [Keep a Changelog](htt
   그만큼 **이 커밋 전까지 track arm 은 한 번도 eval 된 적이 없다**. 자세한 내역은 `FIX.log`.
 
 ### Added
+- **`avg_scale_ref: ctx_all_first_cam` + experiment `vista4d_pgt_k6_d77_ctxall` (2026-08-30).**
+  `norm_scale` 의 **분모만** 바꾸는 arm. Vista4D 뱅크에서 `avg_scale_context_first_cam`
+  디렉토리에 실제로 들어 있는 값은 DL3DV 정의(context range 점군, conf>=P40)가 아니라
+  `scene_graph.json:scale.S` 다 — 즉 **frame0 한 장**의 non-sky 평균 ray 길이
+  (`vista4d_bank_to_dl3dv.py:183` 이 그 값을 복사해 넣는다). context range 는 소스 영상
+  전체 `[0,49)` 인데 분모만 첫 프레임에서 나온 상태였다. 같은 이름 아래 정의가 이미 셋이라
+  (DL3DV / Vista4D / TRUMANS) 디렉토리를 새로 판다.
+  - `S      = mean over **frame0** non-sky px  of  z * ||K^-1 [u+.5, v+.5, 1]||`
+  - `ctxall = mean over **전 프레임** non-sky px of  ||p_world - c2w[0][:3,3]||`
+    기준점(첫 카메라)은 그대로, 점 집합만 구간 전체. 둘 다 소스 영상만으로 계산되므로
+    target 누수가 없고 추론 때 복원 가능하며 scene 상수다.
+  - 배선은 `dataset_cfg.AVG_SCALE_DIRS` 에 키 하나 추가한 것뿐이다 — `AVG_SCALE_REFS` 와
+    `dataset_dl3dv._avg_scale_dir` 이 거기서 파생되므로 기존 8개 ref 의 동작은 글자 그대로
+    같다. `config.yaml` 기본값도 `centroid` 그대로.
+  - 데이터 생성기 `models/Planner/CinemaTraj/scripts/make_avg_scale_vista4d_ctxall.py`
+    (그 트리는 `.gitignore:223 camera_generation/models` 라 커밋에 안 들어간다).
+    정의는 `trumans_to_recon.py:avg_scale_first_cam` 을 **import 해서** 쓴다 — 재구현하면
+    sky 마스크 / ray 곱 / pixel stride 중 하나가 조용히 어긋난다. stride 2.
+    52편 / 13,705 변이 전량 기록(ok 52 / skip 0 / fail 0). 영상마다 같은 로더로 frame0 `S`
+    를 재계산해 뱅크 저장값과 rel 1e-6 안에서 일치하는지 assert -> 52/52 통과.
+  - 분모 변화 실측 `ratio = ctxall / S`: 영상 단위 med 1.0110 / p05 0.9058 / p95 1.3271,
+    변이 가중(13,705) med 1.0039 / p05 0.8705 / p95 1.3445 / mean 1.1300.
+    `|log10 ratio| > 0.1` 인 변이는 1,031 / 13,705 = **7.52%** 뿐이다. 큰 쪽:
+    camera-lens 6.1598(n=284) · snowboard 1.3883(64) · couch-sit 1.3445(490) ·
+    desert-park 1.3129(193) · soapbox 0.8258(225) · car-roundabout 0.8705(556).
+    camera-lens 는 `z_med` 가 프레임 0->48 에서 1.059 -> 20.844 로 단조 증가하는 pull-out
+    이고 sky frac max 0.035 라 마스크 누수가 아니다 — frame0 분모가 구간을 대표하지 못하는
+    바로 그 경우다.
+  - experiment yaml 은 `vista4d_pgt_k6_d77.yaml` 과 **`avg_scale_ref` 한 줄만** 다르다.
+    `vae_latent_scale` 은 일부러 안 건드렸다 (ckpt 속성, `config.yaml:168` = 0.96032625).
+    분모가 바뀌면 diffusion 입력 std 도 같이 바뀌지만 변이 가중 `1/ratio` 가 med 0.9961 /
+    mean 0.9683 이라 코퍼스 전체로는 3% 안이고, 두 arm 이 분모 하나만 다르려면 이 값이
+    같아야 한다.
+  - smoke 통과 (`WANDB_MODE=disabled`, GPU 0, `epochs=1 val_max_batches=2`, exit 0):
+    `avg_scale_ref=ctx_all_first_cam` / train 13,016 · val 689 / geo raw cache 52/52
+    (2.21 GB) / `val/loss_traj 0.281759 @ep0 -> best.pth`. (n=16 미학습 값이라 판정용
+    아니고, 분모가 다르면 loss 눈금 자체가 달라 posed arm 의 0.274468 과 비교 불가.)
 - **D77 뱅크용 experiment config 2종 — `vista4d_pgt_k6_d77` / `vista4d_pgt_k6_d77_track_d5`
   (2026-08-29 추가, 2026-08-30 이름 정정).**
   각각 `vista4d_pgt_k6.yaml` / `vista4d_pgt_k6_track_d5.yaml` 을 그대로 복사하고 **데이터

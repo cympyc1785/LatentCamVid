@@ -97,6 +97,18 @@ AVG_SCALE_DIRS = {
     #   200 세그 dry-run: sigma med 2.72238, M*sigma med 3.26031,
     #   ratio(이것/front_first_anchor) med 0.87966 p05 0.41889 p95 1.12623 (log10 std 0.1726 dex)
     'da3latent_cover':               'avg_scale_da3latent_cover',
+    # [new 2026-08-30] Vista4D 전용. 위 넷의 2x2 축(range x origin)이 아니라 **점 집합 규약이
+    # 다르다** -- conf>=P40 이 아니라 non-sky 전 픽셀, stride 2, z 를 ray 길이로 곱한 거리.
+    #   context_first_cam (Vista4D 뱅크에서) = scene_graph.json:scale.S = **frame0 한 장**의
+    #     non-sky 평균 ray 길이. context range 는 영상 전체 [0,49) 인데 분모만 첫 프레임이다.
+    #   ctx_all_first_cam                    = **전 프레임** depth 를 unproject 한 점군에서
+    #     첫 카메라까지의 평균 거리. 기준점(첫 카메라)은 같고 점 집합만 구간 전체로 넓혔다.
+    # 생성기: models/Planner/CinemaTraj/scripts/make_avg_scale_vista4d_ctxall.py
+    #   (정의는 trumans_to_recon.py:avg_scale_first_cam 을 import 해서 그대로 쓴다)
+    # 52편 실측 ratio(ctxall/S) med 1.0110 min 0.8258(soapbox) max 6.1598(camera-lens) --
+    # 대부분은 거의 안 변하고, 카메라가 크게 빠지는 씬(camera-lens 는 z_med 가 1.06->20.84)
+    # 에서만 분모가 커진다. 그게 이 arm 이 검증하려는 지점이다.
+    'ctx_all_first_cam':             'avg_scale_ctx_all_first_cam',
 }
 AVG_SCALE_REFS = tuple(AVG_SCALE_DIRS)
 

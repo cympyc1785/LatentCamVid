@@ -1,0 +1,68 @@
+# @package _global_
+# V4D-PGT: `vista4d_pgt_k6_d77.yaml` 에서 **분모(norm_scale) 하나만** 바꾼 arm.
+# 데이터·hyperparam·ckpt 속성(vae_latent_scale 0.96032625, intr_norm rel, cam_dim 64)은 전부 같다.
+#
+# ═══ 무엇이 다른가 ══════════════════════════════════════════════════════════════════════
+#   d77      avg_scale_ref: context_first_cam  -> <scene>/da3/avg_scale_context_first_cam/
+#   여기     avg_scale_ref: ctx_all_first_cam   -> <scene>/da3/avg_scale_ctx_all_first_cam/
+#
+# Vista4D 뱅크에서 `context_first_cam` 디렉토리에 실제로 들어 있는 값은 DL3DV 쪽 정의(context
+# range 점군)가 아니라 `scene_graph.json:scale.S` 다 -- 즉 **frame0 한 장**의 non-sky 평균 ray
+# 길이 (vista4d_bank_to_dl3dv.py:183). 디렉토리 이름만 빌려 쓴 것이라, context range 는 소스
+# 영상 전체 [0,49) 인데 분모만 첫 프레임에서 나온 상태였다.
+#
+#   S      = mean over **frame0** non-sky px  of  z * ||K^-1 [u+.5, v+.5, 1]||
+#   ctxall = mean over **전 프레임** non-sky px of  ||p_world - c2w[0][:3,3]||     <- 이 arm
+#
+# 기준점(첫 카메라)은 그대로고 점 집합만 구간 전체로 넓혔다. 둘 다 소스 영상만으로 계산되므로
+# target 누수가 없고 추론 때 복원 가능하며 scene 상수라 한 영상의 전 변이가 같은 값을 쓴다.
+#
+# 52편 실측 ratio(ctxall/S): med 1.0110  min 0.8258(soapbox)  max 6.1598(camera-lens).
+# 대부분의 씬은 사실상 안 변하고, 카메라가 크게 빠지면서 깊이가 통째로 바뀌는 씬에서만 분모가
+# 커진다 (camera-lens 는 z_med 가 1.059 -> 20.844 로 단조 증가하는 pull-out, sky frac max 0.035).
+# 그런 씬에서 frame0 분모는 target translation 을 과대평가하게 만든다 -- 그게 이 arm 이 재는 것.
+#
+# 생성기: models/Planner/CinemaTraj/scripts/make_avg_scale_vista4d_ctxall.py
+#   (정의는 trumans_to_recon.py:avg_scale_first_cam 을 import 해서 그대로 쓴다. stride 2.
+#    52편 / 13,705 변이 전량 기록됐고, 같은 로더로 재계산한 frame0 S 가 뱅크 저장값과 1e-6 안에서
+#    일치하는지 영상마다 assert 로 확인했다 -- 로더/규약 드리프트가 없다는 뜻.)
+#
+# vae_latent_scale 은 **일부러 안 건드렸다**. ckpt 속성이고(config.yaml:168 = 0.96032625),
+# 두 live arm 과 같은 값이어야 "분모 하나만 다른" 비교가 된다.
+exp_name: vista4d_pgt_k6_d77_ctxall
+dl3dv_root: /data1/cympyc1785/data/Vista4D-Eval-Data/latentcam_da3_k6_d77
+meta_csv: meta_vista4d.csv
+train_seg_list: /data1/cympyc1785/data/Vista4D-Eval-Data/latentcam_da3_k6_d77/seg_list_vista4d_train.txt
+test_seg_list: /data1/cympyc1785/data/Vista4D-Eval-Data/latentcam_da3_k6_d77/seg_list_vista4d_test.txt
+coverage_blacklist_path: null
+
+pose_source: da3
+target_pose_source: da3_target_poses   # target 만 <scene>/da3/target_poses.npz 로 교체
+scale_mode: avg_scale
+avg_scale_ref: ctx_all_first_cam       # <- d77 arm 과 다른 유일한 줄
+intr_norm: rel                         # vae_20260302_300 = frame-0-relative-intrinsics ckpt
+cam_dim: 64                            # = 그 ckpt 의 latent_dim
+
+geo_encoder: da3
+geo_cam_embed: null
+geo_latent_cache_dir: null
+geo_posed: true
+geo_shuffle_order: false
+da3_geo_model: da3nested-giant-large
+da3_geo_input_hw: [252, 448]
+da3_geo_layers: last
+
+geo_view_sampling: context_uniform  # context range = 영상 전체 [0,49) = 소스 영상 전체
+geo_num_views: 6                    # _even_indices(49,6) = [0,10,19,29,38,48]
+geo_first_view_target_s: true       # view0 = 프레임 s(=0). 이미 첫 픽이라 집합이 안 바뀐다.
+
+# k6 / k6_d77 arm 과 **같은** 캐시를 공유한다. context 는 소스 영상이라 뱅크·분모와 무관하게
+# scene 상수이고, 분모는 pre-ln 토큰이 아니라 target 정규화에만 들어가므로 캐시가 그대로 유효하다.
+geo_raw_cache_dir: /data1/cympyc1785/data/Vista4D-Eval-Data/latentcam_da3/geo_raw_cache_da3
+da3_cam_token_per_sample: true   # 캐시는 B=1 로 구워진다 — 켜야 on-the-fly 폴백과 일치
+
+anchor_pred_frame0: true
+
+batch_size: 8
+epochs: 200
+ckpt_at_epochs: [50, 100]

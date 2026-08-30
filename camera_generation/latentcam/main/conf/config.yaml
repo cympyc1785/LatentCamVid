@@ -109,6 +109,14 @@ pose_source: transforms
 # pose_source != 'da3' 과 같이 쓰면 에러 (해당 디렉토리가 da3 아래에만 있다).
 # 실측 (da3_7k 39817 세그먼트): first_cam/centroid 비 med 1.41159 -> 분모가 커져 정규화된
 # translation 이 작아진다. vae_latent_scale 을 그대로 두면 diffusion 입력 std 가 arm 마다 달라진다.
+# [new 2026-08-30] Vista4D 뱅크 전용 -- 위와 달리 **점 집합 규약 자체가 다르다** (conf>=P40 이
+# 아니라 non-sky 전 픽셀, z 를 ray 길이로 곱함).
+#   'ctx_all_first_cam'  <scene>/da3/avg_scale_ctx_all_first_cam/
+# Vista4D 뱅크에서 'context_first_cam' 에 들어 있는 값은 scene_graph.json:scale.S 즉 **frame0
+# 한 장**의 평균 ray 길이라, context range 가 영상 전체 [0,49) 인데 분모만 첫 프레임에서 나왔다.
+# 'ctx_all_first_cam' 은 **전 프레임 depth 를 unproject 한 점군 전체**에서 첫 카메라까지의
+# 평균 거리다 (기준점은 그대로, 점 집합만 구간 전체). 52편 ratio med 1.0110 / max 6.1598
+# (camera-lens: z_med 1.06 -> 20.84 인 pull-out) -- 대부분 그대로고 깊이가 크게 변하는 씬만 바뀐다.
 avg_scale_ref: centroid
 # [new 2026-08-27] target 궤적만 **합성 pseudo-GT** 로 갈아끼운다. context (이미지·pose·avg_scale
 # 분모) 는 소스 recon 그대로라, 모델이 배우는 건 "이 씬을 (텍스트가 말하는 대로) 이렇게 찍었다면"

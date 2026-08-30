@@ -64,6 +64,19 @@
   `--no_subject_visible` 로 끄면 열이 빠지고 예전 뱅크와 bit-identical.
 
 ### Fixed
+- **D85: DataDoP 외부 궤적의 비-직교 회전이 `det(R) != 1` 로 영상을 통째로 날렸다 (2026-08-31).**
+  `lbm/presets.register_external_presets` 가 shape 의 `rel` 회전을 **JSON 에 실린 그대로** 썼다.
+  그 값은 MonST3R pose 를 float32 로 저장하고 JSON 으로 한 번 더 돌린 추정치라 `det(R)` 가 1 에서
+  **median 4.8e-7 / max 8.2e-7** 떠 있다 (188 shape **전량**). `decode/build_poses.py:581` 의
+  마지막 검사는 `< 1e-9` 이라 500배 초과다. `_project_so3()` (SVD 극분해, `det=-1` 반사 방지로
+  마지막 열 부호 보정)를 등록 시점에 한 번 걸어 고쳤다 — det 오차 8.2e-7 → **2.7e-15**,
+  행렬 변화량은 최대 **4.6e-7** 이라 궤적 모양은 그대로고 `rel[0]` 은 정확히 I 를 유지한다.
+  **왜 지금까지 안 터졌나**: `fit_tau` 의 `se3.scale_traj` 가 로그/지수를 거치며 *우연히*
+  재직교화해 준다. 스케일이 1 이라 그 경로가 생략되는 변이에서만 터지므로 코퍼스 중간에
+  산발적으로 터진다. 보간도 못 막는다 — DataDoP shape 은 **전부 m=49** 라 `_se3_interp` 가
+  `num_frames=49` 에서 `rel.copy()` 로 그대로 통과시킨다.
+  D84 코퍼스 실측: 첫 10편에서 3편 손실 (`frame 1` / `frame 10` 등), 고친 뒤 같은 영상
+  (`023464b2-…`) 이 bank 단계 통과.
 - **`build_bank_captions.py` — `prompt` 열 없는 `metadata.csv` 에서 `KeyError` (2026-08-31).**
   `load_events()` 가 행마다 `row["prompt"]` 를 무조건 읽었다. DynPose-LBM 의 `metadata.csv` 는
   `video,dynamic` 두 열뿐이고 영상 캡션 소스가 데이터 디렉토리 어디에도 없어서, dynpose 코퍼스

@@ -7,6 +7,34 @@
 ## [Unreleased]
 
 ### Added
+- **`CinemaTraj/scripts/caption_cameras_datadop.py --sets datadop` — DataDoP GT 원본을 같은
+  태거에 태운다 (2026-08-30).** 지금까지 이 스크립트는 우리 카메라(`cameras` / `recon` /
+  `latentcam`)만 읽었고, **대조군인 DataDoP GT 자체는 한 번도 태깅한 적이 없다**. 새 branch 는
+  `DataDoP_valid.txt` 를 읽어 `DataDoP_with_scene/<scene>/<shot>_transforms_cleaning.json` 의
+  120 pose 를 그대로 쓴다. 규약 주의점 하나 — 그 json 은 **이미 OpenGL c2w** 라
+  `tag_trajectory(convert=False)` 로 넘긴다. 우리 npz 경로처럼 `[:3,1:3]*=-1` 을 또 걸면
+  up/forward 부호가 되돌아가 라벨이 조용히 반대로 나온다. 부수 인자: `--datadop_root` /
+  `--datadop_valid` / `--datadop_out` / `--datadop_limit` / `--datadop_seed`
+  (seed 고정 서브샘플, 0 = valid 전량 28,971편).
+  또 `--no_llm` 의 skip 기준을 `_caption.json` -> `_tag.json` 으로 바꿨다 — 태깅만 도는 경로에서
+  caption 은 애초에 안 쓰이므로 예전에는 매 실행이 전량 재태깅이었다. **기본 인자만 주면 기존
+  세 set 의 동작은 bit-identical** 이다.
+- **`CinemaTraj/scripts/compare_camera_distributions.py` — 두 코퍼스 `_tag.json` 대조
+  (2026-08-30).** 우리 뱅크 GT vs DataDoP GT 의 이동량 레벨(`step_median` / `total_translation`)
+  · 산포(log10 sd) · 정지 비율(shot 전체 static / static 프레임 비중) · translation·angular
+  어휘 점유를 한 표로 낸다. 표를 내기 **전에** 양쪽 `seg_kwargs` / `num_poses` / `gendop_root`
+  가 같은지 검사해서 다르면 죽는다 (`--allow_mismatch` 로만 뚫림) — fps 는 velocity 눈금에
+  그대로 곱해지고 vendored/pipeline GenDoP 은 `min_chunk_size` 가 10 vs 12 로 달라서, 노브가
+  어긋나면 차이가 코퍼스가 아니라 태거에서 나온다 (`prdc-not-comparable-across-corpora` 와
+  같은 실패 모드).
+  게이지 보정 인자 `--a_divisor_subdir` / `--b_divisor_subdir` 도 같이 넣었다 — raw D=1 world
+  단위는 코퍼스마다 게이지가 달라(우리는 DA3 frame0, DataDoP 은 MonST3R) 그대로 비교하면 안
+  되고, 우리 쪽만 `<scene>/da3/avg_scale_context_first_cam/<name>.json` 으로 나눠야 학습이
+  실제로 보는 눈금이 된다 (`scale_mode: avg_scale`). 그리고 `--floor`(기본 1e-6) — 우리 뱅크는
+  `*_hold` preset 과 τ 사다리 바닥이 `step_median ~1e-19` 로 18.1% 를 차지해서 그냥 `sd(log10)`
+  을 내면 4.66 이 나오는데, 그건 산포가 아니라 그 스파이크다. floor 위에서만 레벨·산포를 재고
+  `below floor frac` / `trans-frozen shot frac` 을 따로 낸다 (우리는 [1e-6, 1e-4] 구간이 완전히
+  비어 있고 DataDoP 은 최소값이 1.29e-6 이라 한 편도 안 잃는다).
 - **`CinemaTraj/scripts/sample_camera_bank.py --skip_on_empty` — 변이 0 을 실패가 아니라
   skip 으로 끝낸다 (2026-08-30).** 이 스크립트는 `rows` 가 비면 `assert` 로 죽는데, 산출물이
   하나도 안 남으므로 대량 러너 입장에선 "아직 안 한 영상"과 구분되지 않는다. 그래서

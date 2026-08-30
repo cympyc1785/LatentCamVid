@@ -7,6 +7,32 @@
 ## [Unreleased]
 
 ### Added
+- **D81: `subject_visible_frac` / `subject_visible_min` — 뱅크에 G3 가림 열 (2026-08-31).**
+  `sample_camera_bank.measure_trajectory(subject_points=...)` 가 프레임마다 **두 번 렌더**한다 —
+  subject 점만 그린 실루엣(`alone`)과 전체 렌더의 depth 를 비교해 "그려졌어야 하는데 앞에 뭔가
+  온" 픽셀을 센다 (`lbm.gates.evaluate:338-349` 와 같은 식, 여유 `0.02·S`). 실루엣이 비면 0.
+  열은 프레임 median(`_frac`)과 최악 프레임(`_min`) 둘 다 — 책상 밑 shot 은 중간이 멀쩡해도
+  바닥 근처에서 통째로 가린다. `sample_camera_bank` / `fit_hole_ladder` / `emit_bank` 3곳에 배선.
+  WHY: 기존 `subject_area_med` 는 **그려진 실루엣의 화면 면적비**라 가림과 구분이 안 된다
+  (실측 160 뱅크: `pedestal_down` 0.029 vs `orbit_left` 0.031 — 사실상 같다).
+  `render.CloudRenderer.measure` 의 `num_subject_points` 판은 픽셀수를 점 개수로 나눈 **밀도**라
+  비율이 아니다 (그 함수 docstring 이 직접 경고한다).
+  **이분법에는 안 넘긴다** — 판정(verify) 패스에서만. 이분법이 푸는 답은 물리 게이트와 hole 이지
+  가림이 아니고, 넘기면 렌더가 2배인데 `fit` 이 이미 런타임을 지배한다 (파일럿 fit 101s vs
+  bank 31s). 실측(dynpose `100c897d`, anchor=plate, 식탁 위 접시):
+  게이트 켠 기본 경로는 `pedestal_down` vis 0.911/min 0.886 (`binding=ground`) —
+  **지면 게이트가 이미 막고 있다**. `--no_collision_free` 로 게이트를 끄면 같은 preset 이
+  0.603/0.353(Δ0.35), 0.450/0.207(Δ0.5) 로 무너지는데 **같은 hole(0.618)의 `dolly_out` 은
+  0.909/0.895 로 그대로**다 — 거리가 아니라 가림을 재고 있다는 뜻.
+  `--no_subject_visible` 로 끄면 열이 빠지고 예전 뱅크와 bit-identical.
+
+### Fixed
+- **D81 argparse 기본값 뒤집힘.** `--subject_visible`(store_false) 를 `--no_subject_visible`
+  **앞에** 선언했더니 argparse 가 **먼저 선언된 action 의 default** 를 쓰는 바람에
+  (`store_false` 의 암묵 default 는 `True`) 새 열이 조용히 꺼진 채로 돌았다 — 스모크에서
+  `vis=None` 으로 잡았다. 파일의 기존 관례(`--measure_behind` 쌍)대로 양수 플래그 +
+  `default` 를 먼저, `--no_*` 를 `dest=` 로 뒤에 두는 순서로 고쳤다.
+
 - **`CinemaTraj/scripts/render_pred_depth_warp.py --scores_csv` — caption F1 band 별 reel
   (2026-08-30).** latentcam eval 의 `preds_scores.csv` 에서 per-sample `captions/fscore` 를 읽어
   ① SOURCE 타일 라벨에 `f1 0.xxx` 를 박고 ② `index.json` 의 entry 마다 `caption_fscore` 를 남기고

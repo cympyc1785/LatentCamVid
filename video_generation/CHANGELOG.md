@@ -7,6 +7,15 @@
 ## [Unreleased]
 
 ### Added
+- **`CinemaTraj/scripts/sample_camera_bank.py --skip_on_empty` — 변이 0 을 실패가 아니라
+  skip 으로 끝낸다 (2026-08-30).** 이 스크립트는 `rows` 가 비면 `assert` 로 죽는데, 산출물이
+  하나도 안 남으므로 대량 러너 입장에선 "아직 안 한 영상"과 구분되지 않는다. 그래서
+  dynpose downstream 러너가 같은 8편을 매 pass 마다 graph→cloud→bank 로 다시 돌고 또 죽었다
+  (13회 반복 확인). 플래그를 주면 `<bank_dir>/skipped.json`(`lbm_camera_bank_skipped_v1`,
+  `reason:"no_surviving_anchors"`, 탈락 anchor 목록 포함)을 남기고 rc=0 으로 끝나 그 루프가
+  끊긴다. **기본값은 예전 assert 그대로**라 TRUMANS D77 8샤드 동작은 변하지 않는다.
+  dynpose 8편 전량에 적용해 확인 — anchor 1~6개가 전부 소스 frame 0 가시성/`--min_area_frac`
+  에서 탈락한 경우였다.
 - **`CinemaTraj/scripts/build_trumans_metadata.py` — TRUMANS 매니페스트 -> Vista 스키마
   `metadata.csv` (2026-08-30).** `build_bank_captions.py:load_events()` 는 `video` 와
   `prompt` **두 열만** 읽으므로, 매니페스트에서 그 두 열을 만들어 주면 캡션 빌더를 한 줄도

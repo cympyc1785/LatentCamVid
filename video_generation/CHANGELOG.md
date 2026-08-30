@@ -7,6 +7,21 @@
 ## [Unreleased]
 
 ### Added
+- **D84: `route_presets.py --num_anchors N` — 한 씬에서 target 을 둘 이상 잡는다 (2026-08-31).**
+  지금까지 라우터는 `pick_anchor()` 로 anchor 를 **딱 하나** 골랐다. 그러면 그 영상의 모든 변이가
+  같은 `target:` 문장을 갖는다 — 캡션의 target 절이 씬 안에서 상수라 "무엇을 보느냐"의 학습
+  신호가 0 이다. `pick_anchors(graph, min_area_frac, num)` 가 같은 정렬(움직이는 노드 우선 →
+  `max_area_frac` → `num_visible_frames`)의 상위 `num` 개를 돌려주고, `main()` 이 anchor 마다
+  따로 `route()` 를 부른다 (away side 도 track 여부도 그 노드의 성질에서 나와야 하므로).
+  `sample_camera_bank` 는 (nodes × presets) 격자를 돌기 때문에 preset 은 **합집합**으로 넘긴다 —
+  정지 anchor 에 `track_` 이 걸린 조합은 D77 이 비-track 쌍둥이와 bit-identical 이라 알아서 버린다.
+  `route(..., node=...)` 인자가 추가됐고 `pick_anchor()` 는 `pick_anchors(...,1)` 의 옛 이름으로
+  남는다(호출부 계약 유지). JSON 에 `anchor_ids` / `anchors[]`(anchor 별 slots·reasons) 추가,
+  `--emit args` 는 노드 id 를 전부 찍고, 노드 목록만 보는 `--emit nodes` 를 넣었다.
+  **`--num_anchors 1`(기본값)은 기존 출력과 동일**하다. dynpose 코퍼스 dry run(GPU 없이 라우팅만):
+  274편 중 **272편 라우팅 성공, 2편 anchor 없음**(`0b975bcd-…`, `0f02bd2a-…`), 영상당 anchor
+  **1.94개** / preset **16.42개** / track **4.68개**, (node × preset) 격자 합 **8749**,
+  DataDoP shape **188/188** · label 조합 **47/47** 전부 소진.
 - **D82: `route_presets.py --track_mode {add,replace,off}` — 한 씬 안에 track/비-track 공존
   (2026-08-31).** 지금까지 라우터는 anchor 가 움직이면 **모든 슬롯**에 `track_` 을 붙였다
   (= 새 `replace`). 그러면 한 영상의 preset 이 전부 추종이거나 전부 비-추종이라, 같은 씬·같은
@@ -49,6 +64,14 @@
   `--no_subject_visible` 로 끄면 열이 빠지고 예전 뱅크와 bit-identical.
 
 ### Fixed
+- **`build_bank_captions.py` — `prompt` 열 없는 `metadata.csv` 에서 `KeyError` (2026-08-31).**
+  `load_events()` 가 행마다 `row["prompt"]` 를 무조건 읽었다. DynPose-LBM 의 `metadata.csv` 는
+  `video,dynamic` 두 열뿐이고 영상 캡션 소스가 데이터 디렉토리 어디에도 없어서, dynpose 코퍼스
+  캡션 생성이 첫 행에서 죽었다. `reader.fieldnames` 에 `prompt` 가 있을 때만 문장을 뽑고
+  없으면 event 를 **빈 문자열**로 둔다 — `prompt_of` 가 빈 필드를 자동으로 떨어뜨리므로
+  프롬프트에서 `event:` 절이 통째로 사라진다. 빈 dict 를 돌려주면 안 되는 이유는
+  `--videos all` 이 이 dict 의 **key** 로 영상 목록을 만들기 때문이다 (목록은 채우고 문장만 비운다).
+
 - **D81 argparse 기본값 뒤집힘.** `--subject_visible`(store_false) 를 `--no_subject_visible`
   **앞에** 선언했더니 argparse 가 **먼저 선언된 action 의 default** 를 쓰는 바람에
   (`store_false` 의 암묵 default 는 `True`) 새 열이 조용히 꺼진 채로 돌았다 — 스모크에서

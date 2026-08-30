@@ -7,6 +7,15 @@
 ## [Unreleased]
 
 ### Added
+- **`CinemaTraj/scripts/render_pred_depth_warp.py --scores_csv` — caption F1 band 별 reel
+  (2026-08-30).** latentcam eval 의 `preds_scores.csv` 에서 per-sample `captions/fscore` 를 읽어
+  ① SOURCE 타일 라벨에 `f1 0.xxx` 를 박고 ② `index.json` 의 entry 마다 `caption_fscore` 를 남기고
+  ③ `reel_f1_high.mp4` / `reel_f1_mid.mp4` / `reel_f1_low.mp4` 로 묶는다 (임계
+  `--f1_high` 기본 0.8, `--f1_low` 기본 0.0). `--order fscore` 는 F1 내림차순 정렬.
+  WHY: caption F1 은 프레임 라벨 189-class 의 weighted-F1 이라 **숫자만 봐선 왜 0 인지 안 보인다**
+  — 같은 preset 인데 GT 는 라벨이 잡히고 pred 는 static 으로 떨어지는 식이라 warp 를 나란히
+  놓고 봐야 판별된다. `--scores_csv` 를 안 주면 라벨·reel·`index.json` 전부 기존과 동일하다
+  (anchor 별 reel 파일명만 `reel_target_<anchor>.mp4` 로 그대로 유지).
 - **`CinemaTraj/scripts/caption_cameras_datadop.py --sets datadop` — DataDoP GT 원본을 같은
   태거에 태운다 (2026-08-30).** 지금까지 이 스크립트는 우리 카메라(`cameras` / `recon` /
   `latentcam`)만 읽었고, **대조군인 DataDoP GT 자체는 한 번도 태깅한 적이 없다**. 새 branch 는

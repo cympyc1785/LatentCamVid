@@ -7,6 +7,28 @@
 ## [Unreleased]
 
 ### Added
+- **D82: `route_presets.py --track_mode {add,replace,off}` — 한 씬 안에 track/비-track 공존
+  (2026-08-31).** 지금까지 라우터는 anchor 가 움직이면 **모든 슬롯**에 `track_` 을 붙였다
+  (= 새 `replace`). 그러면 한 영상의 preset 이 전부 추종이거나 전부 비-추종이라, 같은 씬·같은
+  소스 위에서 "따라간다 / 안 따라간다"를 가르는 대조가 학습 데이터에 없다.
+  `add`(새 기본값)는 추종이 궤적을 실제로 바꾸는 슬롯(`TRACK_KEEP_SLOTS = lateral, orbit,
+  static`)만 track 으로 두고 나머지는 비-track 으로 남긴 뒤, `TRACK_BONUS_SLOTS
+  = recede, advance, vertical` 중 하나를 **영상 id 해시**로 골라 track 을 하나 더 붙인다.
+  `off` 은 `track_` 을 아예 안 쓰는 대조군.
+  dynpose 267편 실측: 영상당 track 평균 **3.09개**, (track, 비-track) 분포는
+  (3,4) 84편 / (3,5) 80편 / (4,4) 41편 / (2,5) 36편 / (4,3) 24편 — anchor 가 non-moving 인
+  2편(0,7)/(0,8)을 빼면 **전 영상이 섞인다**. 보너스 슬롯은 advance 95 / recede 81 /
+  vertical 43, 나머지 46편은 그 씬에 vertical 슬롯 자체가 없어 반영 안 됨
+  (`reasons.track_bonus_dropped=true`, 그 영상은 track 이 하나 줄어든다).
+  구현 주의점 둘 — ① 보너스 해시 seed 는 `<video>/<node_id>` 다. `node["id"]` 는 `dyn_0` 처럼
+  **씬 안에서만 유일**해서 그것만 쓰면 코퍼스 전체가 한 슬롯으로 쏠린다(실측 확인).
+  ② `track_` 짝이 실재하는 preset 만 접두사를 받는다 — `lbm/presets.py` 에 `track_pan_*` /
+  `track_pull_out_arc_*` / `track_s_curve` 가 없으므로 rotate·arc 슬롯과, 좁은 `obs_az_span`
+  에서 orbit 대신 나오는 `s_curve` 는 `track_mode` 와 무관하게 항상 비-track 이다. 그 목록은
+  하드코딩하지 않고 `lbm.presets.PRESETS` 에서 직접 읽는다(preset 추가 시 조용히 어긋나지 않게).
+  **`--track_mode replace` 는 기존 출력과 동일**하다 (267편 전량 대조). `reasons` 에
+  `track_mode` / `track_bonus_slot` / `track_bonus_dropped` / `num_track` 을 실어
+  `preset_route.json` 만 보고도 라우팅을 감사할 수 있다.
 - **D81: `subject_visible_frac` / `subject_visible_min` — 뱅크에 G3 가림 열 (2026-08-31).**
   `sample_camera_bank.measure_trajectory(subject_points=...)` 가 프레임마다 **두 번 렌더**한다 —
   subject 점만 그린 실루엣(`alone`)과 전체 렌더의 depth 를 비교해 "그려졌어야 하는데 앞에 뭔가

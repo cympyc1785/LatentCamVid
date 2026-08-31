@@ -16,6 +16,14 @@
   된다. 나머지 필드(`event`/`framing`)는 종전대로 빈 값이면 빠진다.
   d84 코퍼스 재생성 실측: 266편 / 변이 **12,193**, `target: none.` **5,798 (47.8%)**.
 
+### Added
+- **D86: `models/Planner/CinemaTraj/presets.md` — 현재 쓰는 preset 목록 문서 (2026-08-31).**
+  `PRESETS` 40종 중 라우팅이 **실제로 실현하는 19종**만, `aim`(look_at/traj) · 캡션 `target:`
+  유무 · slot · 실측 지표(tau/hole/subject_in_frame/path_len/view_angle median)와 함께 적었다.
+  DataDoP `dd_*` 188 shape 은 slot × move × angular **47 조합**으로 묶어서 표로. 뒤에 알려진
+  구멍 5가지(tracking/speed 다양성 0, pan 의 sif 0.46~0.54, look_at 인데 안 보이는 346개,
+  event 전량 공백, anchor-free 카메라 부재)를 붙였다.
+
 ### Fixed
 - **D86: `configs/caption_presets.json` 에 `track_{push_in,pull_out}_arc_{left,right}` 4종 추가
   (2026-08-31).** D82 의 `TRACK_KEEP_SLOTS` 에 `arc` 가 들어가면서 라우터가 이 이름을 뱅크에

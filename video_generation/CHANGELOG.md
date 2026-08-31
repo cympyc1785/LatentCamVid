@@ -7,6 +7,23 @@
 ## [Unreleased]
 
 ### Changed
+- **굽기 기본값 `--tau_ref auto` — `track_*` 만 follow 기준, 나머지는 예전 그대로 (D97,
+  2026-09-01).** `auto` 는 `PRESET_TAU_REF` 를 타고, 그 표는 `track_` 으로 시작하는 preset 에만
+  `"follow"` 를 준다. 그래서 non-track preset 의 τ 는 한 자리도 안 바뀐다.
+  · 바꾼 곳(굽기 기본값): `scripts/sample_camera_bank.py` / `scripts/fit_hole_ladder.py`
+    argparse 기본값 `auto`.
+  · **안 바꾼 곳(의도)**: `fit_hole_ladder.SHAPE_DEFAULTS["tau_ref"]`,
+    `emit_bank.FIXED_FALLBACK["tau_ref"]`, `build_poses(..., tau_ref="source")` 서명 기본값 —
+    D96 의 `keyframe_ease` 와 같은 이유로 **키가 없는 옛 뱅크의 재현 폴백**이라 영원히
+    `"source"` 다. `emit_bank.decision_from_variant` 는 행의 `tau_ref`(resolve 결과)가 아니라
+    `fixed.tau_ref`(요청값)를 다시 넘긴다.
+  · `merge_static_rung.py` 는 `tau_ref` 를 `FIXED_KEYS` 에 **안 넣고** `TAU_REF_FALLBACK`
+    폴백 대조로 검사한다 — 넣으면 D97 이전 뱅크가 (`None` vs `"auto"`) 로 전부 병합 거부된다.
+  · 회귀 검증: 옛 `hole_bank_k6_d94` **196행 전량**을 `poses.npz` 대비 재현 — 최대 오차
+    `0.000e+00`. follow 기준 대수 검증: `tau_max == max|p_shape − p_start|/z_med` (오차 < 2e-4),
+    `tau_start == 0.0`.
+  · 새 규약으로 구울 때는 D96 과 마찬가지로 **`$BANK` 이름을 새로 준다** (한 폴더에 두 규약이
+    섞이면 `fixed.tau_ref` 대조 말고는 알 방법이 없다).
 - **회전 스케줄 기본값이 `smoothstep` → `smooth_kf` (D96, 2026-09-01).** trumans / vista /
   dynpose 세 코퍼스를 앞으로 같은 규약으로 굽기 위한 것이다. 근거는 `decode/build_poses.py:965`
   에 적힌 714 변이 실측 — 프레임간 각속도 맥동비 **21.65 → 4.58**, 49프레임 조준오차 median
@@ -76,6 +93,26 @@
   `aim` 을 포함하지 않으므로 저장된 fingerprint 가 무효화되지 않는다.
 
 ### Added
+- **`--tau_ref {source,follow,auto}` — `track_*` 의 τ 를 추종 궤적 위의 *상대* 변위로 잰다
+  (D97, 2026-09-01).** 새 파일 `lbm/presets.py: PRESET_TAU_REF / TAU_REF_CHOICES /
+  resolve_tau_ref()`.
+  · **왜.** `track_*` 는 subject 추종 offset `off(f)` 를 카메라 위치에 더한다. 그런데 τ 는
+    소스 카메라 기준 절대 변위 `|p_plan(f) − p_src(f)| / z_med` 였으므로, 추종 성분이 τ 예산을
+    통째로 먹고 preset 모양(`p_shape`)에 남는 몫이 없다. snowboard `hole_bank_k6_d94` 12행
+    실측 — follow 순변위와 shape 순변위 사잇각 **145.6~146.1°**(거의 반대), `|follow|`
+    3.70~3.75 u, `|shape|` 4.53~5.44 u 인데 둘이 상쇄돼 `|plan|` 은 2.53~3.15 u 다.
+    "추종하며 왼쪽으로 트럭"이라 적어 놓고 world 에선 거의 안 움직인다.
+  · **무엇이 바뀌나.** `tau_ref="follow"` 면 기준을 `p_ref(f) = p_start + off(f)` 로 두어
+    τ = `|p_shape(f) − p_start| / z_med` 가 된다 (`off` 가 대수적으로 지워진다).
+    구현은 `fit_tau` 를 안 고치고 `src_centers` 에 `basis_c2w[:3,3]` 상수 배열을 넘기는 것뿐.
+    부수효과로 `tau0 = 0` 이라 `tau_saturated` 가 **원리적으로 못 뜬다**.
+  · **행/뱅크에 남는 것**: `tau_ref`(resolve 된 값), `tau_ref_max`(그 기준에서 잰 τ).
+    기존 `tau_max` 는 **계속 소스 기준**이다 — hole 예산·게이트·verify 가 쓰는 자다.
+    `target_tau` 와 맞는 건 `tau_ref_max` 쪽이다.
+  · 실측(snowboard `bank_d97`, dyn_0 `track_truck_left`, 5칸 사다리): 소스 기준 뱅크는
+    0.10/0.20 칸이 `tau_saturated` 로 **드롭**돼 3칸만 남았는데, follow 기준은 5칸 전부 생존
+    (`subject_in_frame` 1.00 / 0.80 / 0.60 / 0.40 / 0.40, `hole` 0.003~0.004).
+    사다리 전체 60변이에서 `saturated 0`.
 - **밀집 LOS — `trumans_scene_probe.py --los_samples / --los_bands / --los_mode`,
   `bank_to_blender_poses.py --los_samples / --los_bands / --min_los_frac` (D92, 2026-09-01).**
   기존 시선 판정은 조준점 **3점 OR** (`aim_points`) 이라 "몸 어딘가 한 점이라도 보이나"만 답한다

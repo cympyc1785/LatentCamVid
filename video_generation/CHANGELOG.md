@@ -6,7 +6,91 @@
 
 ## [Unreleased]
 
+### Fixed
+- **중력축 기준 roll 누수 — `--deroll` (D99, 2026-09-01).** TRUMANS 의 arc 계열 카메라가
+  기울어지는 원인은 궤적이 아니라 **회전 규약 두 곳**이었다. 둘 다 D98 의 중력축 수정으로는
+  안 없어진다.
+  · **① `aim="free"` preset 은 회전축이 카메라 로컬이다.** `traj.py:72-84` 의 `pan = rot_y`,
+    `tilt = rot_x` 이고 `build_poses` 가 `basis_c2w @ rel_local[f]` 로 합성한다. 기울어진
+    카메라를 카메라-로컬 y 둘레로 pan 하면 광축이 원뿔을 그려 지평선이 같이 돈다. 실제 삼각대
+    pan 은 중력 둘레다.
+  · **② `aim_keyframes` 는 keyframe *사이*에서 roll 을 만든다.** keyframe 회전이 전부
+    roll=0 이어도 yaw·pitch 가 동시에 다른 두 회전 사이의 SO(3) 측지선은 중간에서 roll 을
+    지난다 (구면 holonomy). `build_poses.py:774-788` 이 이걸 문서화하고 있었지만 assert 는
+    **keyframe 위에서만** 걸려 있었다.
+  · 실측 (`tru_0ac97866_a09_s3f0k6`, `pan_deg 45`, k6 `smooth_kf`, 소스 frame0 roll −8.079°).
+    `dev` = `max_f |roll(f) − roll(0)|`, 단위 deg:
+
+    | preset | aim | dev (off) | dev (on) |
+    |---|---|---|---|
+    | tilt_up / tilt_down | free | 163.88 / 163.84 | 0.00 / 0.00 |
+    | pan_right / pan_left | free | 18.12 / 16.16 | 0.00 / 0.00 |
+    | track_dolly_in_look_at | look_at | 19.85 | 8.08 |
+    | crane_down | look_at | 10.35 | 8.08 |
+    | push_in_arc_left | look_at | 9.47 | 8.08 |
+    | dolly_in_look_at | look_at | 8.37 | 8.08 |
+    | dolly/truck/pedestal/static/track_hold 등 14종 | free | 0.00 | 0.00 |
+
+    `look_at` 계열의 잔여 8.08° 는 **소스 카메라 자신의 기울기**다 — `poses[0]==c2w_start`
+    assert(`build_poses.py:802`) 가 frame 0 을 소스와 완전히 같게 요구하므로, 목표 roll
+    프로파일은 keyframe roll(`kf0 = 소스 roll`, `kf>0 = 0`)의 선형보간이다. 그 프로파일 대비
+    잔차는 검사한 12 preset 전부 **0.0000°**.
+  · **광축을 안 건드리는 게 이 수정이 안전한 이유다.** 광축(`poses[:,:3,2]`) 둘레로만 다시
+    돌리므로 `aim_err_max/med/frame0/at_kf`, `look_at`, τ, view angle, hole·coverage 가 전부
+    그대로다 (실측: forward 축 최대 차이 `2.7e-06`도, 위치 차이 `0.0`,
+    `aim_err_max_deg` 46.361 → 46.361).
+  · 중력축에서 `pole_deg=5°` 안쪽 프레임은 right 축이 정의가 안 되므로 건너뛰고
+    `deroll_skipped` 로 센다 (위 chunk 에서는 12 preset 전부 0).
+  · **기본값은 아직 전부 `False`** — `build_poses` 서명 / `sample_camera_bank` /
+    `fit_hole_ladder` / `emit_bank.FIXED_FALLBACK` / `merge_static_rung.DEROLL_FALLBACK`.
+    D98 vista 뱅크가 "3번까지 검증된 세팅"으로 굽는 중이라 지금 뒤집으면 같은 뱅크 안에서
+    앞뒤 영상이 다른 규약으로 섞인다 (샤드 드라이버가 영상마다 python 을 새로 띄운다).
+    검증 후 `fit_hole_ladder.py` / `sample_camera_bank.py` 의 argparse 기본값 두 줄만 바꾼다.
+  · 회귀 검증: D99 이전 `hole_bank_k6_d77` 변종 18건을 `poses.npz` 대비 재현 — 최대 오차
+    `0.000e+00`.
+  · `decision_fingerprint` 는 **켰을 때만** `deroll` 키를 넣는다 (`follow_smooth` / D73 과 같은
+    규칙) — 안 그러면 D99 이전 뱅크 전량이 거짓 stale 판정된다.
+
+### Added
+- `decode/build_poses.py` 의 `deroll_poses()` / `_roll_about_forward()` 와
+  `build_poses(..., deroll=False)`, `--deroll` / `--no_deroll` CLI 쌍 (D99). 같은 쌍이
+  `scripts/sample_camera_bank.py` / `scripts/fit_hole_ladder.py` 에도 있고, 뱅크 `fixed` 블록에
+  `deroll` 이 기록되어 `emit_bank` / `merge_static_rung` 이 그 값을 따른다. `info` 에
+  `roll_vs_frame0_max_deg` / `deroll` / `deroll_skipped` 를 추가.
+
 ### Changed
+- **중력축 기본 소스가 `--gravity_source auto` — GeoCalib 사이드카가 있으면 그것, 없으면
+  예전 ground RANSAC (D98, 2026-09-01).** `scripts/build_scene_graph.py` 의 새 인자
+  `--gravity_source {auto,ransac,gt,geocalib}` (기본 `auto`).
+  · **왜.** ground RANSAC 은 **물었을 때만** 정확하고, 안 물리면 조용히
+    `camera_up_fallback`(카메라 up 평균)으로 떨어진다. TRUMANS GT 65 chunk 실측 —
+    GT 대비 각도 오차 median/p90/max:
+
+    | RANSAC 판정 | n | ransac~GT | geocalib~GT |
+    |---|---|---|---|
+    | `camera_up_fallback` | 15 | 11.14 / 15.88 / 24.18 | 0.75 / 1.39 / 1.66 |
+    | `ground_ransac` | 50 | 0.08 / 4.07 / 5.28 | 0.96 / 2.55 / 5.59 |
+    | 전체 | 65 | 1.79 / 12.48 / 24.18 | 0.87 / 2.42 / 5.59 |
+
+    RANSAC 이 물린 50 chunk 에서는 median 0.08° 로 GeoCalib 보다 낫지만, fallback 15 chunk 의
+    꼬리(max 24.18°)를 GeoCalib 이 5.59° 로 자른다. **중력축은 roll=0 기준이자 OBB 의
+    yaw·extent 축이라 한 편만 틀려도 그 편의 뱅크 전량이 Dutch angle 로 기운다** — 그래서
+    median 이 아니라 꼬리로 고른다.
+  · **정책은 "GeoCalib 주(主) · RANSAC 검증"이다.** RANSAC 은 계속 돌리되 결과를
+    `gravity.ransac_method` / `ransac_inlier_ratio` / `angle_to_ransac_deg` /
+    `disagrees_with_ransac`(>10°) 로 **기록만** 하고 자동 전환은 안 한다. 어긋나면 숨기지 말고
+    드러내는 쪽.
+  · **안 바꾼 곳(의도)**: `--gravity_source ransac` 은 사이드카를 통째로 무시하므로 예전 결과와
+    **비트 동일**이다 (camel 을 사이드카 없는 `--output_root` 로 빌드 → `ground_ransac 0.73 4.6`
+    재현 확인). TRUMANS 경로(`--gravity_source gt`)와 사이드카가 없는 코퍼스는 `auto` 에서
+    자동으로 예전 동작을 탄다 — 샤드 스크립트를 하나도 안 고쳤다.
+  · vista 52편 재빌드 실측(진행 중, 31편 시점): `disagrees_with_ransac` **7편**
+    (bed-shopping 25.5° / magnifying-glass 24.5° / camera-lens 18.3° / mountain-man 17.9° /
+    goat 15.7° / hike 14.3° / couple-newspaper 12.7°), RANSAC 이 애초에 fallback 이던 게 **5편**.
+    나머지 19편은 3.6° 이내로 일치.
+  · 새 중력축 위에서 뱅크를 다시 굽는다: `scripts/run_k6_d98_shard.sh`
+    (τ `bank_d98/`, emit `hole_bank_k6_d98/`). **preset 은 안 넘긴다 = 현재 어휘 40종 전량.**
+    D96/D97 과 같은 이유로 폴더 이름을 새로 준다 (한 폴더에 두 규약을 섞지 말 것).
 - **굽기 기본값 `--tau_ref auto` — `track_*` 만 follow 기준, 나머지는 예전 그대로 (D97,
   2026-09-01).** `auto` 는 `PRESET_TAU_REF` 를 타고, 그 표는 `track_` 으로 시작하는 preset 에만
   `"follow"` 를 준다. 그래서 non-track preset 의 τ 는 한 자리도 안 바뀐다.
@@ -93,6 +177,22 @@
   `aim` 을 포함하지 않으므로 저장된 fingerprint 가 무효화되지 않는다.
 
 ### Added
+- **GeoCalib 중력 사이드카 — `scripts/geocalib_gravity.py`(굽기) + `scene_graph/geocalib_sidecar.py`
+  (읽기) + `scripts/run_k6_d98_shard.sh`(뱅크 재굽기) (D98, 2026-09-01).**
+  · **왜 파일로 주고받나.** GeoCalib 은 `kornia` 를 요구하는데 그건 env `geocalib` 에만 있고
+    scene graph 는 env `vista4d` 에서 돈다. 새 패키지를 깔지 않기로 했으므로 두 단계로 쪼갠다 —
+    굽기는 env `geocalib`, 읽기는 env `vista4d`. 포맷 `geocalib_gravity_v1`,
+    파일 `out/<video>/geocalib_gravity.json`.
+  · **규약(실측으로 확정)**: `result["gravity"].vec3d` 는 **카메라 프레임(OpenCV)의 up** 이다.
+    따라서 `up_world = R_c2w[f] @ vec3d[f]` — 부호를 뒤집으면 176~178° 가 나온다.
+  · 프레임 3장(균등)에서 각각 추정해 소스 카메라로 world 로 올린 뒤 각도 trim 평균.
+    `spread_deg`(프레임간 최대 각도차)가 신뢰도다 — GT 실측에서 spread<5° 인 206 chunk 는
+    오차 p90 **1.64°**, spread≥5° 인 40 chunk 는 p90 **7.05°** 로 갈렸다.
+  · `load_geocalib_gravity()` 는 `estimate_gravity` / `gt_trumans.gt_gravity` 와 **같은 키
+    집합**을 돌려준다 — 하류(`graph_frame` 이하)가 소스를 몰라도 되게. `plane_d` 는 None
+    (GeoCalib 은 지면 높이를 모른다). vista 경로는 `relations.ground_height`(G 프레임 z 2%
+    분위수)가 지면을 다시 뽑으므로 상관없다.
+  · 이미 구운 것: vista 72편, TRUMANS 246 chunk(검증용 `out_geocalib_trumans_check/`).
 - **`--tau_ref {source,follow,auto}` — `track_*` 의 τ 를 추종 궤적 위의 *상대* 변위로 잰다
   (D97, 2026-09-01).** 새 파일 `lbm/presets.py: PRESET_TAU_REF / TAU_REF_CHOICES /
   resolve_tau_ref()`.

@@ -7,6 +7,32 @@
 ## [Unreleased]
 
 ### Changed
+- **회전 스케줄 기본값이 `smoothstep` → `smooth_kf` (D96, 2026-09-01).** trumans / vista /
+  dynpose 세 코퍼스를 앞으로 같은 규약으로 굽기 위한 것이다. 근거는 `decode/build_poses.py:965`
+  에 적힌 714 변이 실측 — 프레임간 각속도 맥동비 **21.65 → 4.58**, 49프레임 조준오차 median
+  **0.668° → 0.418°**. 대가는 keyframe 회전을 정확히 통과하지 않는 것 하나뿐이고 그건
+  `aim_err_at_kf_deg` 로 뱅크에 남는다.
+  · 바꾼 곳: `scripts/sample_camera_bank.py:865` argparse 기본값,
+    `scripts/run_{trumans_d77,k6_d77,k6}_shard.sh` (하드코딩 `smoothstep` →
+    `EASE="${EASE:-smooth_kf}"` — 옛 뱅크를 되만들려면 `EASE=smoothstep` 을 앞에 붙인다),
+    `scripts/time_vista_stages.py:40`. `fit_hole_ladder.py` 는 D89 부터 이미 `smooth_kf` 였다.
+    **dynpose 는 고칠 파일이 없다** — 그 드라이버는 ease 를 안 넘기고 두 스크립트의 기본값을
+    그대로 타므로 이 변경으로 같이 넘어간다.
+  · **안 바꾼 곳(의도)**: `fit_hole_ladder.SHAPE_DEFAULTS`, `emit_bank.FIXED_FALLBACK`,
+    `build_poses` 서명 기본값 — 셋 다 **키가 없는 옛 뱅크를 되만들 때의 폴백**이라 영원히
+    `smoothstep` 이어야 한다. 배포된 뱅크는 전부 `fixed.keyframe_ease` 를 명시적으로 싣고
+    있어서 재현 경로가 안 바뀐다 (실측: vista 51 + dynpose 266 전량 `smoothstep`,
+    `out/snowboard/hole_bank_k6_d94` 만 `smooth_kf`).
+  · `run_static_rung_shard.sh` 는 **고정 기본값을 안 쓴다.** 붙일 대상 뱅크의
+    `fixed.keyframe_ease` 를 읽어서 그 값으로 fit 한다 (`EASE_OVERRIDE=` 로 강제 가능) — 안 그러면
+    smoothstep 으로 구워 둔 51편에 smooth_kf 정지 rung 을 붙이려다 `merge_static_rung.py`
+    호환성 검사에서 rc=2 로 죽는다.
+  · 새 규약으로 구울 때는 **`$BANK` 이름도 새로 준다.** 한 폴더에 두 규약이 섞이면
+    `fixed` 블록 대조 말고는 알아챌 방법이 없다.
+  · 검증: snowboard 3변이 τ 뱅크 + hole 사다리를 새 기본값으로 구워
+    `fixed = {keyframe_ease: smooth_kf, smooth_passes: 12, smooth_lambda: 0.5}` 확인
+    (`변이 3 렌더 57`, 전부 `solved`, `남은 위반 0`). 샤드 4종 `bash -n` 통과.
+    기존 뱅크는 하나도 안 건드렸다 (샤드는 canonical 이 있으면 건너뛴다).
 - **`hold` 는 이제 "안 움직이고 재조준도 안 한다" — 조준은 `_look_at` 으로만 표기 (D94,
   2026-09-01).** `static_hold`↔`static_hold_dont_look`, `track_hold`↔`track_hold_dont_look`
   네 이름이 서로 맞바뀌었다. 궤적은 넷 다 `T.hold(I, n)` 으로 **그대로**고 바뀐 건 이름과
@@ -33,6 +59,13 @@
     `pose 재현 최대오차 0.000e+00`, `21<->49 왕복 최대오차 0.000e+00`.
 
 ### Fixed
+- **`merge_static_rung.py` 가 `smooth_kf` 평활 인자를 대조하지 않았다 (D96).** `smooth_passes` /
+  `smooth_lambda` 가 `FIXED_KEYS` 에 없어서, 정지 rung 을 다른 평활 세기로 fit 해 붙여도 통과했다.
+  **위치는 정확히 맞고 회전만 어긋나는** 종류라 육안·assert 어느 쪽에도 안 잡힌다 (D90 에서 실제로
+  당한 실패 모드). `fixed.keyframe_ease == "smooth_kf"` 일 때만 비교한다 — `FIXED_KEYS` 에 그냥
+  넣으면 이 키가 아예 없는 smoothstep 옛 뱅크가 `None vs 12` 로 멀쩡한 병합을 거부한다.
+  키가 없는 뱅크는 `build_poses` **서명** 기본값 12/0.5 로 폴백. 4개 경우(옛/신 smoothstep,
+  smooth_kf 12-vs-4, smooth_kf 12-vs-키없음, ease 자체 불일치) 단위 확인.
 - **emit 경로가 뱅크 행의 `aim` 을 안 날랐다 (기존 결함, D94 가 드러냄).**
   `scripts/emit_bank.py decision_from_variant` 는 `variant["preset"]` 만으로 decision 을 만들었고
   `decode/build_poses.py:581 resolve_aim(preset, trajectory.get("aim"))` 이 `None` 을 받아

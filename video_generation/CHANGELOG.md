@@ -6,6 +6,17 @@
 
 ## [Unreleased]
 
+### Added
+- **`render_pred_depth_warp.py` 에 `--labels` / `--no_labels` 쌍 (2026-08-31).**
+  기본값은 `--labels` 로 예전 동작 그대로다. `--no_labels` 면 타일에 preset·hole·f1 텍스트를
+  안 굽는다 — 궤적 자체를 눈으로 볼 때 라벨이 화면을 가려서 요청된 옵션이다.
+
+### Fixed
+- **`render_pred_depth_warp.py` reel 누적을 `--reel` 일 때만 하도록 가드 (2026-08-31).**
+  이전에는 `--no_reel` 이어도 전 entry 프레임을 메모리에 계속 쌓아 두었다. 689 entry 실행에서
+  수십 GB 로 불어나 OOM 이 났다. 이제 `if args.reel:` 안에서만 append 한다. `--reel` 기본
+  경로의 결과물은 그대로다.
+
 ### Changed
 - **`presets.md` 를 "가능한 option + preset" 표로 재작성 (2026-08-31).**
   이전 문서는 D84 코퍼스에 **실현된 19종만** 적고 나머지는 산문 한 문단으로 뭉갰다. 어휘를

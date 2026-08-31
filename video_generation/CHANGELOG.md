@@ -7,6 +7,20 @@
 ## [Unreleased]
 
 ### Added
+- **`build_poses.py --keyframe_ease` 에 `arclen` / `arclen_kf` 추가, 기본값을 `arclen_kf` 로
+  (D86, 2026-08-31).** 기존 `smoothstep` 은 ease 를 keyframe **구간마다 독립**으로 걸어서
+  각속도가 keyframe 5곳에서 0 으로 떨어졌다가 구간 중앙에서 최대가 된다 — 이동은 등속인데
+  회전만 펌핑한다. 배포 코퍼스 실측: keyframe 각속도 / 주변 10프레임 평균 = **0.316**
+  (p10 0.210), 프레임간 회전각 max/median median 3.16×(Vista4D d77) / 3.70×(TRUMANS d77).
+  · `arclen_kf` (신규 기본값) = 누적 호길이를 (keyframe 프레임, 누적각) 매듭 위 **PCHIP** 으로
+    이어 각속도를 C1 으로 만든다. keyframe 은 제 프레임에 그대로 오므로 조준 정확도가 안 변한다
+    — 실측 keyframe 각속도비 0.316 → **0.924**, `aim_err_med` 0.39° → **0.36°**.
+  · `arclen` = 누적 호길이 위 **전역 smoothstep**. 각속도가 가장 평탄하지만(0.316 → 1.021,
+    프레임간 회전각 max/med 5.31 → 1.33) keyframe 회전이 제 프레임을 떠나 `aim_err_med` 가
+    0.39° → **5.17°** (p90 14.50°) 로 13배 커진다. `aim_err_max` 는 26.0 → 26.4° 로 사실상 동일.
+  · `smoothstep` / `linear` 은 그대로 남아 D71~D84 코퍼스를 비트 단위로 재현한다.
+  · `keyframe_ease="arclen"` 일 때 roll assert 는 `poses[frames]` 가 아니라 **keyframe 회전
+    자체**(`keyframe_rolls`)에서 잰다 — 재타이밍 때문에 프레임에서 재면 무의미하다.
 - **`render_pred_depth_warp.py` 에 `--labels` / `--no_labels` 쌍 (2026-08-31).**
   기본값은 `--labels` 로 예전 동작 그대로다. `--no_labels` 면 타일에 preset·hole·f1 텍스트를
   안 굽는다 — 궤적 자체를 눈으로 볼 때 라벨이 화면을 가려서 요청된 옵션이다.

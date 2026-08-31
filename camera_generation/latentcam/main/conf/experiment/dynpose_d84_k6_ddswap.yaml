@@ -1,0 +1,35 @@
+# @package _global_
+# D84 세 번째 arm — `dynpose_d84_k6_nodd` 와 **크기·캡션 균형·targeted 세그먼트가 동일**하고
+# **targetless 617칸의 궤적 출처만** 다르다 (우리 `pan_*` <-> DataDoP `dd_*`). 궤적 출처 한 축만
+# 가르기 위한 대조군이다. 주석 뺀 diff 는 `dynpose_d84_k6.yaml` 대비 3줄.
+#
+# ═══ 왜 "d84 를 그냥 내려깎기"가 아닌가 ════════════════════════════════════════════════
+# `dd_*` 는 코퍼스에서 **100% targetless** 다 (실측: dd 4,120 전량 targetless, targeted 0).
+# 그래서 own 세그먼트를 다 남긴 채 dd 만 줄여 targetless 14.8% 를 맞추려 하면
+#   (617 + n) / (4169 + n) = 0.148  ->  n = 0
+# 즉 nodd 와 같은 코퍼스가 된다 — 퇴화한다. 균형을 유지하면서 dd 를 넣으려면 targetless
+# 슬롯의 **내용물을 바꾸는** 수밖에 없다.
+#
+# ═══ 세 arm 구성 (train 기준) ═══════════════════════════════════════════════════════
+#   arm     targeted        targetless                          계
+#   d84     own 3,552       own pan 617 + dd 3,676            7,845
+#   nodd    own 3,552       own pan 617                        4,169
+#   ddswap  own 3,552       dd 617                             4,169   <- 이 파일
+# test 도 같은 방식: own targeted 432 + dd 75 = 507 (targetless 14.79%).
+# targeted 3,552 는 세 arm 이 **같은 세그먼트**다. ddswap 과 nodd 는 총량·균형이 같고
+# targetless 617칸만 갈린다 -> 그 격차가 궤적 출처의 효과다.
+#
+# ═══ dd 617 을 어떻게 골랐나 ════════════════════════════════════════════════════════
+# 씬별 층화 추출(최대잔여법) + `np.random.default_rng(42)`. dd 를 가진 206개 씬 전부에
+# 최소 1개가 들어간다 (dd 가 아예 없는 씬 33개는 targeted 만 남는다). 씬 수는 239 로
+# nodd/d84 와 같다. 특정 영화 몇 편의 궤적이 617칸을 독식하는 것을 막기 위함이다.
+#
+# 코퍼스 디렉토리 · geo_raw 캐시 · avg_scale · 프롬프트 파일은 d84 것을 **그대로 재사용**한다.
+# 축 정의 · 뱅크 전제 · 분모 · 분할 원칙은 전부 `dynpose_d84_k6.yaml` 주석 그대로이고,
+# holdout 27편도 세 arm 이 동일하다.
+defaults:
+  - dynpose_d84_k6
+
+exp_name: dynpose_d84_k6_ddswap
+train_seg_list: /data1/cympyc1785/data/DynPose-LBM/latentcam_dynpose/seg_list_dynpose_ddswap_train.txt
+test_seg_list: /data1/cympyc1785/data/DynPose-LBM/latentcam_dynpose/seg_list_dynpose_ddswap_test.txt

@@ -1,0 +1,72 @@
+# @package _global_
+# DynPose-LBM D84 arm. `vista4d_pgt_k6.yaml` 과 **모델·손실·뷰 샘플링이 전부 같고** 코퍼스만
+# 바뀐다 (Vista4D 51편 -> DynPose-LBM 266편). 아래는 그 차이와, 차이 때문에 확인해야 했던 것만
+# 적는다. 축 정의(scene=영상 / segment=뱅크 변이 / context=소스 프레임 / target=합성 궤적),
+# intrinsics 고정, keyframe 조준, 분모, 분할 원칙은 전부 `vista4d_pgt_k6.yaml` 의 주석 그대로다.
+#
+# ═══ 코퍼스 ═════════════════════════════════════════════════════════════════════════════
+# DynPose-LBM dynpose-0000 880편 중 뱅크가 만들어진 **266편**. 변이 12,193개
+# (dedup 전; export 가 pose 배열 동일성으로 중복을 걷어낸다).
+#   route_presets.py --num_anchors 2   -> 영상 1편이 target 을 둘까지 가진다. 캡션의 target 절이
+#                                         씬 안에서 상수가 아니게 되어 "무엇을 보느냐"에 신호가 생긴다.
+#   hole 사다리 Δ[0.20, 0.35]           -> 변이당 2단 (Vista4D arm 은 4단이었다)
+#   DataDoP 188 shape (`dd_*`)          -> 실촬영 궤적. 코퍼스의 47.8%
+#
+# ═══ 뱅크가 k6 config 의 전제를 지키는지 (확인함) ═══════════════════════════════════════
+#   bank.json: fixed_focal=True, fixed.aim_keyframes=6, num_frames=49
+# 즉 `intr_norm: rel` 에서 cam_param[9:11]=[1,1] 이고 keyframe 조준도 [0,10,19,29,38,48] 이라
+# Vista4D arm 과 같은 계약이다.
+#
+# ═══ 캡션 ═══════════════════════════════════════════════════════════════════════════════
+# 프롬프트는 `target/motion` 두 필드, D86 형식(절을 마침표로 끊고 빈 target 은 `none` 명시):
+#     "target: hand. motion: the camera tracks the subject while pulling back from it."
+#     "target: none. motion: the camera moves downward while panning left."
+# target 없음 6,578 (53.9%) / 있음 5,615 (46.1%) 로 거의 반반이다. 없음 쪽은 `dd_*` 5,830 +
+# `pan_*` 748 (`targetless` 플래그, D86) 이다 — pan 은 sif median 0.50 이라 target 을 적으면
+# 지키지 못할 약속이 된다. 자세한 근거는 CinemaTraj/presets.md §0.
+#
+# ═══ event 절이 비어 있다 ═══════════════════════════════════════════════════════════════
+# DynPose 의 metadata.csv 는 `video,dynamic` 두 열뿐이라 씬 캡션 소스가 없다. 기본
+# `--prompt_fields target,motion` 이라 **프롬프트에는 영향이 없다** (Vista4D arm 도 event 를
+# 프롬프트에 안 넣었다). JSON 의 event 필드가 전량 공백일 뿐이다.
+#
+# ═══ 분할 ═══════════════════════════════════════════════════════════════════════════════
+# scene(영상) 단위 holdout, 정렬된 UUID 의 **매 10번째 27편**. 결정론적이라 재현되고,
+# 씬 단위라 같은 영상의 다른 변이가 train/val 로 갈리지 않는다.
+exp_name: dynpose_d84_k6
+dl3dv_root: /data1/cympyc1785/data/DynPose-LBM/latentcam_dynpose
+meta_csv: meta_dynpose.csv
+train_seg_list: /data1/cympyc1785/data/DynPose-LBM/latentcam_dynpose/seg_list_dynpose_train.txt
+test_seg_list: /data1/cympyc1785/data/DynPose-LBM/latentcam_dynpose/seg_list_dynpose_test.txt
+coverage_blacklist_path: null
+
+pose_source: da3
+target_pose_source: da3_target_poses   # target 만 <scene>/da3/target_poses.npz 로 교체
+scale_mode: avg_scale
+avg_scale_ref: context_first_cam       # 디렉토리 avg_scale_context_first_cam <- scene_graph S
+intr_norm: rel                         # vae_20260302_300 = frame-0-relative-intrinsics ckpt
+cam_dim: 64                            # = 그 ckpt 의 latent_dim
+
+geo_encoder: da3
+geo_cam_embed: null
+geo_latent_cache_dir: null
+geo_posed: true
+geo_shuffle_order: false
+da3_geo_model: da3nested-giant-large
+da3_geo_input_hw: [252, 448]
+da3_geo_layers: last
+
+geo_view_sampling: context_uniform  # context range = 영상 전체 [0,49) = 소스 영상 전체
+geo_num_views: 6                    # _even_indices(49,6) = [0,10,19,29,38,48]
+geo_first_view_target_s: true       # view0 = 프레임 s(=0). 이미 첫 픽이라 집합이 안 바뀐다.
+
+# context view 가 scene 상수라 (변이 수천 개가 scene 파일 266개를 공유) DA3 backbone 출력을 미리
+# 구워 둔다. 파일이 없는 scene 은 조용히 on-the-fly 로 떨어진다 (scripts/data/cache_geo_raw_da3.py).
+geo_raw_cache_dir: /data1/cympyc1785/data/DynPose-LBM/latentcam_dynpose/geo_raw_cache_da3
+da3_cam_token_per_sample: true      # 캐시가 B=1 로 구워지므로 켜야 폴백 경로와 일치한다
+
+anchor_pred_frame0: true
+
+batch_size: 8
+epochs: 200
+ckpt_at_epochs: [50, 100]

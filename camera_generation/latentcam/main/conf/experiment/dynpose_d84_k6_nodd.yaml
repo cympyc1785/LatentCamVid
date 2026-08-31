@@ -1,0 +1,33 @@
+# @package _global_
+# DynPose-LBM D84 arm 에서 **DataDoP 궤적(`dd_*`)만 뺀** 대조군. `dynpose_d84_k6.yaml` 과
+# 주석 뺀 diff 기준 **정확히 3줄**(exp_name + train/test seg_list)만 다르다. 코퍼스 디렉토리 ·
+# geo_raw 캐시 · avg_scale · 프롬프트 파일은 **같은 것을 그대로 재사용**한다 — seg_list 로
+# 세그먼트를 골라내기만 하므로 재export 도 캐시 재생성도 필요 없다.
+#
+# ═══ 무엇을 뺐나 ═══════════════════════════════════════════════════════════════════════
+# `prompts.json` 의 `preset` 이 `dd_` 로 시작하는 세그먼트 전량. DataDoP 188 shape 은 실촬영
+# 궤적을 그대로 옮긴 것이고, 나머지는 route_presets.py 가 만든 합성 preset 이다.
+#   train 7,845 -> 4,169 (53.1%,  dd 3,676 제거)   씬 239 (씬은 하나도 안 잃었다)
+#   test    951 ->   507 (53.3%,  dd   444 제거)   씬  27
+#   합    8,796 -> 4,676
+# 잔존 preset 19 종 (상위: dolly_out 523 / track_hold 381 / pan_left 352 /
+#   track_pull_out_arc_right 351 / s_curve 313 / track_dolly_out 305 ...  train 기준).
+#
+# ═══ !! 축이 하나가 아니다 — 해석 시 주의 ══════════════════════════════════════════════
+# `dd_*` 가 targetless 캡션의 대부분(5,830 중)이었기 때문에, 이 arm 은 궤적 종류만 바뀌는 게
+# 아니라 **캡션 분포도 같이 바뀐다**:
+#   d84  target 없음 4,812 (54.7%) / 있음 3,984 (45.3%)
+#   nodd target 없음   692 (14.8%) / 있음 3,984 (85.2%)   <- 남은 targetless 는 pan_left 386
+#                                                             + pan_right 306 뿐
+# 즉 d84 대비 성능 차이를 "DataDoP 궤적의 기여"로만 읽으면 안 된다. target 절이 거의 항상
+# 있는 조건으로 바뀐 효과가 섞여 있다. 이 둘을 가르려면 d84 쪽에서 targetless 비율을 14.8%
+# 로 맞춘 세 번째 arm 이 필요하다 (아직 안 돌렸다).
+#
+# 그 외 축 정의 · 뱅크 전제 · 분모 · 분할 원칙은 전부 `dynpose_d84_k6.yaml` 주석 그대로다.
+# 분할도 같은 27편 holdout 이라 두 arm 의 val 씬이 동일하다 (세그먼트 수만 951 -> 507).
+defaults:
+  - dynpose_d84_k6
+
+exp_name: dynpose_d84_k6_nodd
+train_seg_list: /data1/cympyc1785/data/DynPose-LBM/latentcam_dynpose/seg_list_dynpose_nodd_train.txt
+test_seg_list: /data1/cympyc1785/data/DynPose-LBM/latentcam_dynpose/seg_list_dynpose_nodd_test.txt

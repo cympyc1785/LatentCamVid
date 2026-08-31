@@ -15,6 +15,28 @@ All notable changes to the latentcam sub-project. Follows [Keep a Changelog](htt
   그만큼 **이 커밋 전까지 track arm 은 한 번도 eval 된 적이 없다**. 자세한 내역은 `FIX.log`.
 
 ### Added
+- **DynPose D84 대조군 2종 — experiment `dynpose_d84_k6_nodd` / `dynpose_d84_k6_ddswap` (2026-08-31).**
+  기존 `dynpose_d84_k6` 코퍼스에서 **DataDoP 외부 궤적(`dd_*`)의 기여를 가르기 위한** arm 두 개.
+  코드 변경은 없고 `conf/experiment/` 에 yaml 두 개를 추가한 것뿐이다 — 둘 다
+  `defaults: [dynpose_d84_k6]` 로 상속하고 `exp_name` / `train_seg_list` / `test_seg_list`
+  **3줄만** 덮어쓴다. 코퍼스 디렉토리 · `geo_raw_cache_da3`(11.30 GB) · `avg_scale` ·
+  `prompts.json` · holdout 27편은 세 arm 이 **그대로 공유**하므로 재-export 도 캐시 재빌드도 없다.
+  - `dynpose_d84_k6_nodd` — `dd_*` 세그먼트를 전량 제거. train 7,845 -> **4,169**, test 507.
+  - `dynpose_d84_k6_ddswap` — nodd 와 **총량·targeted 세그먼트가 글자 그대로 동일**하고
+    targetless 617칸의 **궤적 출처만** 우리 `pan_*` <-> DataDoP `dd_*` 로 갈린다.
+    train own_targeted 3,552 + dd 617 = 4,169 (targetless 0.1480),
+    test own_targeted 432 + dd 75 = 507 (targetless 0.1479).
+  - **왜 "d84 를 그냥 내려깎기"가 아닌가**: `dd_*` 는 코퍼스에서 100% targetless 다
+    (실측 dd 4,120 전량 targetless / targeted 0). own 을 다 남긴 채 dd 만 줄여 targetless
+    14.8% 를 맞추려 하면 `(617+n)/(4169+n)=0.148 -> n=0`, 즉 nodd 와 같은 코퍼스로 **퇴화**한다.
+    균형을 유지하며 dd 를 넣으려면 targetless 슬롯의 내용물을 바꾸는 수밖에 없다.
+  - dd 617 선정: 씬별 층화 추출(최대잔여법) + `np.random.default_rng(42)`. dd 를 가진 206개 씬
+    **전부**에 최소 1개가 들어간다(dd 가 없는 씬 33개는 targeted 만 남음). 씬 수 239 로 d84/nodd 와 동일.
+    특정 영화 몇 편이 617칸을 독식하는 것을 막기 위함.
+  - 집합 관계 실측 (train / test): `ddswap` 중 d84 에 없는 것 **0 / 0**, `ddswap ∩ nodd` 3,552 / 432,
+    `nodd only` 617 / 75, `ddswap only` 617 / 75.
+  - seg-list 파일은 `latentcam_dynpose/seg_list_dynpose_{nodd,ddswap}_{train,test}.txt`
+    (데이터 디렉토리라 커밋에 안 들어간다).
 - **`avg_scale_ref: ctx_all_first_cam` + experiment `vista4d_pgt_k6_d77_ctxall` (2026-08-30).**
   `norm_scale` 의 **분모만** 바꾸는 arm. Vista4D 뱅크에서 `avg_scale_context_first_cam`
   디렉토리에 실제로 들어 있는 값은 DL3DV 정의(context range 점군, conf>=P40)가 아니라

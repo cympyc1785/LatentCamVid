@@ -6,6 +6,42 @@
 
 ## [Unreleased]
 
+### Changed
+- **`hold` 는 이제 "안 움직이고 재조준도 안 한다" — 조준은 `_look_at` 으로만 표기 (D94,
+  2026-09-01).** `static_hold`↔`static_hold_dont_look`, `track_hold`↔`track_hold_dont_look`
+  네 이름이 서로 맞바뀌었다. 궤적은 넷 다 `T.hold(I, n)` 으로 **그대로**고 바뀐 건 이름과
+  조준뿐이다.
+
+  | D93 까지 | aim | → D94 | aim |
+  |---|---|---|---|
+  | `static_hold` | look_at | `static_look_at` | look_at |
+  | `static_hold_dont_look` | free | `static_hold` | free |
+  | `track_hold` | look_at | `track_look_at` | look_at |
+  | `track_hold_dont_look` | free | `track_hold` | free |
+
+  · **옛 뱅크는 다시 안 쓴다.** `dolly_in`/`dolly_out`(D76) 과 **같은 장치** —
+    `LEGACY_AIM_COLLISIONS[("static_hold","look_at")] = "static_look_at"` 등 (이름, aim) 쌍으로
+    되돌리고 `*_hold_dont_look` 은 `PRESET_ALIASES` 로 새 `*_hold` 를 가리킨다. 배포 d77 뱅크의
+    `track_hold` 행 **3,282 개가 전부 `aim="look_at"`** 이라 물량은 track 쪽이 크다.
+  · 배선: `lbm/presets.py`(PRESETS / STATIC_PRESETS / PRESET_ALIASES / LEGACY_AIM_COLLISIONS),
+    `scripts/route_presets.py:187` (static 슬롯이 `*_look_at` 을 뽑도록 — 이름만 두면 카메라가
+    조용히 바뀐다), `configs/caption_presets.json`, `lbm/prompts/system_traj.md`,
+    `scripts/run_static_rung_shard.sh:24`, `presets.md` / `README.md` / `DECISIONS.md`.
+  · 검증: (이름, aim) **19 조합** 전부 정식이름·디코드 aim·follow·tracking·static 판정 일치.
+    `out/snowboard/{bank_d94 166변이, hole_bank_k6_d94 196변이}` 재생성 — `aim` 이 166/166,
+    196/196 전 행에 기록된다. emit: `variants 196 중 196 내보냄 (필터 0 / 접힌 단 0 / path 0)`,
+    `pose 재현 최대오차 0.000e+00`, `21<->49 왕복 최대오차 0.000e+00`.
+
+### Fixed
+- **emit 경로가 뱅크 행의 `aim` 을 안 날랐다 (기존 결함, D94 가 드러냄).**
+  `scripts/emit_bank.py decision_from_variant` 는 `variant["preset"]` 만으로 decision 을 만들었고
+  `decode/build_poses.py:581 resolve_aim(preset, trajectory.get("aim"))` 이 `None` 을 받아
+  **preset 의 *현재* 기본값**을 탔다. 뜻이 뒤집힌 이름(D94 의 `*_hold`, D90 의 `truck_left` 등)에서
+  조용히 다른 카메라가 디코드된다. 실측 — `dyn_0__static_hold__hole0.1` pose 재현 오차:
+  `aim` 미전달 **6.574e-01** / 전달 **0.000e+00**. `sample_camera_bank.make_decision(..., aim=None)`
+  → trajectory dict → `emit_bank` 로 배선했다. `decision_fingerprint`(`build_poses.py:101-150`)는
+  `aim` 을 포함하지 않으므로 저장된 fingerprint 가 무효화되지 않는다.
+
 ### Added
 - **밀집 LOS — `trumans_scene_probe.py --los_samples / --los_bands / --los_mode`,
   `bank_to_blender_poses.py --los_samples / --los_bands / --min_los_frac` (D92, 2026-09-01).**

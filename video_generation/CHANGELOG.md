@@ -6,6 +6,23 @@
 
 ## [Unreleased]
 
+### Changed
+- **D86: 프롬프트를 마침표로 끊고 target 없음을 `target: none.` 으로 명시 (2026-08-31).**
+  `build_bank_captions.py` 의 `prompt_of` 가 두 가지를 바꾼다. ① 절 끝에 **마침표**를 찍는다 —
+  이전 `target: person motion: the camera dollies ...` 는 값과 다음 필드 이름 사이에 경계가
+  없어 `person motion` 이 한 명사구처럼 읽혔다. ② `NONE_FIELDS = ("target",)` 는 값이 비어도
+  빠지지 않고 `none` 으로 남는다. free-moving(`dd_*`)이 코퍼스의 **47.8%** 라, 빈 값을 그냥
+  빼면 프롬프트가 `motion:` 하나로 시작하는 **문장 구조 자체**가 "target 이 없다"의 지름길이
+  된다. 나머지 필드(`event`/`framing`)는 종전대로 빈 값이면 빠진다.
+  d84 코퍼스 재생성 실측: 266편 / 변이 **12,193**, `target: none.` **5,798 (47.8%)**.
+
+### Fixed
+- **D86: `configs/caption_presets.json` 에 `track_{push_in,pull_out}_arc_{left,right}` 4종 추가
+  (2026-08-31).** D82 의 `TRACK_KEEP_SLOTS` 에 `arc` 가 들어가면서 라우터가 이 이름을 뱅크에
+  넣기 시작했는데 캡션 config 에는 문구가 없어 `build_bank_captions.py` 의
+  `assert spec is not None` 이 `track_pull_out_arc_right` 에서 죽었다 (d84 코퍼스 **774 변이**).
+  `lbm/presets.py` 의 `PRESETS` 40종과 config 를 대조해 누락분 4종을 전부 채웠다.
+
 ### Added
 - **D84: `route_presets.py --num_anchors N` — 한 씬에서 target 을 둘 이상 잡는다 (2026-08-31).**
   지금까지 라우터는 `pick_anchor()` 로 anchor 를 **딱 하나** 골랐다. 그러면 그 영상의 모든 변이가

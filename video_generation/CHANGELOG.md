@@ -7,6 +7,26 @@
 ## [Unreleased]
 
 ### Added
+- **`scene_graph/gt_trumans.py` — TRUMANS 전용 GT 중력축·GT 지면 (D88, 2026-08-31).**
+  TRUMANS 클립은 우리가 Blender 로 직접 렌더한 것이라 카메라의 **blend world pose 가 디스크에
+  남아 있다** (`render_a<NN>/cameras.json` 의 `c2w_opencv`). blend 씬은 z-up 이고
+  `trumans_to_recon.py:745` 가 `inv(world[0]) @ world` 로 frame0 앵커만 거는 rigid 변환이므로
+  recon world 중력축은 `up = R0[2, :]` 로 **닫힌 형태로 나온다** — RANSAC 도 fallback 도 필요 없다.
+  지면은 `probe_a<NN>.json` 의 `floor_z` (사람 발 아래로 쏜 광선, `trumans_scene_probe.py:344-358`).
+  · 코퍼스 191 chunk 실측 (`estimate_gravity` 대비 각도 오차): `ground_ransac` 142편은
+    median **0.1°** / max 9.7° 로 사실상 정확하다. 문제는 **49편(26%)이 `camera_up_fallback` 으로
+    떨어져 median 10.9° / p90 19.1° / max 26.2°** (59% 가 10° 초과) 기울어 있었다는 것 — 그 chunk
+    의 뱅크 전량에 Dutch angle 이 박히고 OBB 도 같은 각도로 기울어 fit 된다.
+  · `estimate_gravity` 와 **같은 키**(`up_world`/`plane_d`/`method`/`confidence`/`inlier_ratio`)를
+    채워서 하류가 안 갈라진다. `resolve_dirs` 는 glob 이 2개 이상 물면 실패로 친다 — 조용히 다른
+    recording 의 GT 를 집어오는 것보다 낫다.
+- **`build_scene_graph.py --gravity_source {ransac,gt}` / `--ground_source {pointcloud,gt}` /
+  `--gt_root` (D88, 2026-08-31).** 기본값이 `ransac`/`pointcloud` 라 **Vista4D 51편 기존 결과는
+  비트 단위로 그대로**다. `gt` 인데 GT 를 못 찾으면 조용히 추정으로 안 떨어지고 assert 로 죽는다.
+  `graph["gravity"]` 에 `estimated_method` / `estimated_error_deg` / `gt_source` /
+  `floor_z_blend` 를 같이 실어 "이 chunk 가 예전에 얼마나 기울어 있었나"가 JSON 에 남는다.
+- **`relations.build_relations(ground_z_override=...)` (D88, 2026-08-31).** 주면 점군 2% 분위수
+  (`ground_height`) 대신 그 값을 쓴다. 안 주면 예전 경로 그대로.
 - **`build_poses.py --keyframe_ease` 에 `arclen` / `arclen_kf` 추가, 기본값을 `arclen_kf` 로
   (D86, 2026-08-31).** 기존 `smoothstep` 은 ease 를 keyframe **구간마다 독립**으로 걸어서
   각속도가 keyframe 5곳에서 0 으로 떨어졌다가 구간 중앙에서 최대가 된다 — 이동은 등속인데

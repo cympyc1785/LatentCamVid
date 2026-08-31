@@ -44,6 +44,33 @@
 - **`render_pred_depth_warp.py` 에 `--labels` / `--no_labels` 쌍 (2026-08-31).**
   기본값은 `--labels` 로 예전 동작 그대로다. `--no_labels` 면 타일에 preset·hole·f1 텍스트를
   안 굽는다 — 궤적 자체를 눈으로 볼 때 라벨이 화면을 가려서 요청된 옵션이다.
+- **`build_poses.py --keyframe_ease smooth_kf` + `--smooth_passes` / `--smooth_lambda`
+  (D89, 2026-08-31).** D86 의 `arclen`/`arclen_kf` 는 **리타이밍**이라 궤적이 keyframe 을 지나는
+  geodesic 折れ線 **위에 그대로** 있고 속도만 바뀐다. `smooth_kf` 는 선형 slerp 折れ線을 깐 뒤
+  SO(3) Laplacian 으로 **모서리를 깎는다** — 折れ線을 떠나므로 성질이 다르다.
+  `R_f <- R_f · exp((lam/2)·(log(R_fᵀR_{f-1}) + log(R_fᵀR_{f+1})))`, 양끝 고정, `passes` 회 반복.
+  · GT 뱅크 714 변이 전량 실측 (half-hfov 35.75°). 열은 각속도 맥동비 `w_max/w_kf` · `jerk_p95` ·
+    회전총량비 · smoothstep 대비 keyframe 회전 측지각 `kf_dev` (med/p90/max) · p90 을 half-hfov 로 나눈 값:
+    ```
+    smoothstep   25.03  0.5072  1.0000   0.000  0.000   0.00   0.0%
+    arclen_kf    21.65  0.2176  1.0000   0.011  0.014   0.02   0.0%
+    smooth p4     4.58  0.2073  0.9873   1.530  1.897   6.89   5.3%
+    smooth p8     4.48  0.1290  0.9819   2.197  2.725   9.90   7.6%
+    smooth p12    4.47  0.0911  0.9778   2.705  3.354  12.18   9.4%
+    smooth p24    4.36  0.0530  0.9688   3.845  4.768  17.31  13.3%
+    ```
+    맥동비는 p4 에서 이미 포화하는데 조준 오차는 계속 커진다 — `passes` 는 p4~p8 이 효율 구간.
+    회전총량비 < 1 은 모서리를 깎아 실제로 짧아진 것(p12 −2.2%).
+  · 기본값은 안 바뀐다 (`build_poses.py` CLI 는 `arclen_kf`, `emit_bank.py` 는 뱅크 `fixed` 값).
+    `smoothstep`/`linear`/`arclen`/`arclen_kf` 는 비트 단위로 그대로다.
+  · roll assert 는 `arclen` 과 같은 이유로 `smooth_kf` 에서도 `keyframe_rolls` 에서 잰다.
+- **`keyframe_info.aim_err_at_kf_deg` 지표 (D89, 2026-08-31).** keyframe **프레임에서의** 조준
+  오차 최댓값. 기존 `aim_err_med`/`aim_err_max` 는 49프레임 전체라 "keyframe 을 정확히 통과하나"를
+  못 가른다 — 리타이밍(0°)과 corner-cutting(2~4°)을 구분하는 열이다.
+- **`emit_bank.py --smooth_passes` / `--smooth_lambda` (D89, 2026-08-31).**
+  `--keyframe_ease smooth_kf` 일 때만 쓰인다. 다른 ease 에서는 아무 일도 안 한다.
+  D87 과 같이 **위치는 재fit 없이 비트 단위 동일**하고 회전 스케줄만 바뀐다
+  (GT 뱅크 714/714 실측 `pose 재현 최대오차 0.000e+00 [위치 전용]`).
 
 ### Fixed
 - **`render_pred_depth_warp.py` reel 누적을 `--reel` 일 때만 하도록 가드 (2026-08-31).**

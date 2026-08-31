@@ -93,6 +93,40 @@
   (GT 뱅크 714/714 실측 `pose 재현 최대오차 0.000e+00 [위치 전용]`).
 
 ### Fixed
+- **뱅크를 읽는 쪽이 preset 이름을 안 풀어 라벨·CSV·코퍼스가 궤적과 다른 카메라를 가리키던 것
+  — `lbm/presets.py::row_preset()` + 읽기 8곳 (2026-09-01).**
+  쓰는 쪽(`sample_camera_bank.py`)은 늘 정식 이름을 적지만, **디스크에 이미 구워진 뱅크**는
+  그때그때의 어휘로 적혀 있다. 읽는 쪽이 `row["preset"]` 을 그대로 쓰면 D76 에서 뜻이 뒤집힌
+  `dolly_in`/`dolly_out` 과 D75/D90 별칭이 **그 행이 실제로 만든 카메라와 다른 이름**으로 나간다.
+  캡션(`build_bank_captions.py:176`)은 이미 `resolve_preset` 을 거치고 있어서, 안 고치면
+  **같은 행의 캡션과 라벨이 서로 다른 카메라를 가리킨다.**
+  · 실측 어긋난 비율 — vista `hole_bank_k6` 51편 16,748행 중 **8,368행 (50.0%)**,
+    vista `bank/` 52편 19,609행 중 **9,797행 (50.0%)**, trumans `hole_bank_k6_d77` 80편
+    62,966행 중 **11,948행 (19.0%)**, trumans `bank_d77` 80편 29,586행 중 **5,442행 (18.4%)**.
+    vista 쪽 7종은 `straight_ease`→`dolly_in`, `push_in_arc`→`push_in_arc_left`,
+    `pull_out_arc`→`pull_out_arc_right`, `orbit_{left,right}_arc`→`orbit_{left,right}`,
+    `rise_reveal`→`crane_up`, `drop_reveal`→`crane_down` (각 1,192~1,352행).
+  · 새 헬퍼 `row_preset(row, raw=False)` — 행의 `aim` 을 같이 넘겨 `resolve_preset` 을 부른다.
+    `raw=True` 면 적힌 문자열 그대로 (옛 산출물 재현용).
+  · 고친 곳: `render_bank_videos.py` 타일 라벨(+`--raw_preset_names`, `--presets` 는 이제 적힌
+    이름·정식 이름 **둘 다** 매칭) / `vista4d_bank_to_dl3dv.py` 코퍼스 `prompts.json`
+    (`preset` 정식 + `preset_raw` + **`aim` 신규 export**) / `emit_bank.py` manifest /
+    `audit_bank_geometry.py` `geometry.csv` (preset 별 집계가 이 열로 묶인다) /
+    `bank_to_blender_poses.py` (`preset_canonical` 열 신규) / `render_pred_depth_warp.py`
+    `load_entry_meta` (→ `render_preset_grid_warp.py`·`render_target_swap_warp.py` 도 전이적으로) /
+    `render_target_cams_warp.py` (이 이름이 곧 렌더 파일 이름) / `merge_static_rung.py`.
+  · **`merge_static_rung.py` 는 오탐이 아니라 실제 버그였다** — vista `bank/` 52편에
+    `static_hold_locked`(aim=traj) 303행이 있는데 이 문자열은 `STATIC_PRESETS` 에 없고
+    `static_hold_dont_look` 로 풀린다. 이름 그대로 비교하면 (a) stray 오탐으로 종료코드 3,
+    (b) 멱등성 걷어내기가 그 행을 못 지워 병합 후 정지 단이 두 벌이 된다.
+  · `bank_to_blender_poses.py` 는 **파일 이름·dedup 키를 일부러 적힌 이름 그대로 뒀다** —
+    trumans 뱅크는 `dolly_in`(look_at) 과 `dolly_in_dont_look`(traj) 을 1,324행씩 둘 다 들고
+    있고 정식 이름이 `dolly_in_look_at` 로 같아서, 정식 이름으로 묶으면 두 행이 한 슬롯으로
+    합쳐지고 `<preset>.npz` 경로까지 충돌한다.
+  · `audit_lite_framing.py` 는 후보에서 뺐다 — 그 `preset` 필드는 preset 이름이 아니라 tracking
+    모드/kind (`drift`/`lbm_render`) 다.
+  · 검증: 8개 스크립트 import + snowboard `hole_bank_k6` 4궤적 BEFORE/AFTER 재렌더 (같은 궤적,
+    라벨만 `straight_ease`→`dolly_in`, `rise_reveal`→`crane_up`, `dolly_in`→`dolly_in_look_at`).
 - **`smooth_passes` 가 fit 과 emit 사이에서 어긋나 회전만 조용히 달라지던 것 (D90, 2026-08-31).**
   `fit_hole_ladder.py` 는 `build_poses` 를 `smooth_passes` **없이** 불러 서명 기본값
   **12** (`build_poses.py:525`) 로 뱅크를 구웠는데, `emit_bank.py` 는 자기 CLI 기본값 **4**

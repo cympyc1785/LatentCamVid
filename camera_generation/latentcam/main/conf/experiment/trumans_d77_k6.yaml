@@ -1,0 +1,64 @@
+# @package _global_
+# TRUMANS D77 **부분 코퍼스** arm — 8샤드로 굽는 중인 737편 중 **지금까지 완성된 것만** 모아
+# 먼저 학습을 돌려 보는 arm 이다. 뱅크가 다 구워지면 같은 설정으로 전량 재export 해서
+# `trumans_d77_k6_full`(가칭)을 따로 만든다 — 이 arm 은 그 전까지의 조기 신호용이다.
+#
+# ═══ 어떤 chunk 가 들어갔나 ══════════════════════════════════════════════════════════
+# 2026-08-31 12시 기준 `out_trumans/*/hole_bank_k6_d77/bank.json` 이 있는 chunk 는 172개인데,
+# 그중 **recording 이 통째로 끝난 11개 recording = 163 chunk** 만 넣었다. 진행 중이던
+# `tru_1d19e06d`(8/14) · `tru_1d43e076`(1/18) 은 뺐다 — 반쯤 구워진 recording 을 넣으면
+# 나중에 전량 arm 과 비교할 때 "어느 chunk 가 들어갔나"가 재현이 안 된다.
+#
+#   완성 recording   tru_00add26c 4 / tru_0a761819 16 / tru_0aa05d5a 15 / tru_0ab03928 18
+#                    tru_0ab19ed6 9 / tru_0ab72fdf 14 / tru_0ac97866 20 / tru_0adb88db 19
+#                    tru_1a1e205b 12 / tru_1a8dbd8d 16 / tru_1d076f8c 20
+#
+# ═══ 분할은 recording 단위 ══════════════════════════════════════════════════════════
+# holdout = `tru_0ab19ed6`(9 chunk) + `tru_1a1e205b`(12 chunk) = 21 chunk / 163 = 12.9%.
+# chunk 단위로 자르면 **같은 recording 의 이웃 chunk** 가 train 과 test 에 동시에 들어간다 —
+# 49프레임 슬라이딩이라 사실상 같은 장면이고, 그러면 test 가 새 씬 일반화를 못 잰다.
+# 실측 결과: train 142 scene / 53,449 segment, test 21 scene / 8,222 segment.
+#
+# ═══ epochs 를 200 이 아니라 50 으로 둔 이유 ═════════════════════════════════════════
+# `val_step` 이 step 기준이라 epoch 수는 곧 **총 optimizer step 수**다. batch 8 기준
+#   vista4d_pgt_k6_d77   13,016 / 8 = 1,627 step/epoch  x 200 = 325k step
+#   trumans_d77_k6       53,449 / 8 = 6,681 step/epoch  x  50 = 334k step
+# 즉 50 epoch 이 기존 d77 arm 과 같은 학습량이다. 200 을 그대로 쓰면 4배를 도는 셈이라
+# 다른 arm 과 step 수가 안 맞는다. ckpt 도 같은 비율로 [15, 30] (~100k / ~200k step).
+#
+# 나머지 설정(pose_source · scale_mode · intr_norm · geo_* · anchor_pred_frame0)은
+# `vista4d_pgt_k6_d77.yaml` 과 **한 글자도 다르지 않다** — 바뀐 축은 코퍼스뿐이다.
+exp_name: trumans_d77_k6
+dl3dv_root: /data1/cympyc1785/data/TRUMANS-Lite/latentcam_da3_d77
+meta_csv: meta_trumans.csv
+train_seg_list: /data1/cympyc1785/data/TRUMANS-Lite/latentcam_da3_d77/seg_list_trumans_train.txt
+test_seg_list: /data1/cympyc1785/data/TRUMANS-Lite/latentcam_da3_d77/seg_list_trumans_test.txt
+coverage_blacklist_path: null
+
+pose_source: da3
+target_pose_source: da3_target_poses   # target 만 <scene>/da3/target_poses.npz 로 교체
+scale_mode: avg_scale
+avg_scale_ref: context_first_cam       # 디렉토리 avg_scale_context_first_cam <- scene_graph S
+intr_norm: rel                         # vae_20260302_300 = frame-0-relative-intrinsics ckpt
+cam_dim: 64                            # = 그 ckpt 의 latent_dim
+
+geo_encoder: da3
+geo_cam_embed: null
+geo_latent_cache_dir: null
+geo_posed: true
+geo_shuffle_order: false
+da3_geo_model: da3nested-giant-large
+da3_geo_input_hw: [252, 448]
+da3_geo_layers: last
+geo_view_sampling: context_uniform  # context range = 영상 전체 [0,49) = 소스 chunk 전체
+geo_num_views: 6                    # _even_indices(49,6) = [0,10,19,29,38,48]
+geo_first_view_target_s: true       # view0 = 프레임 s(=0). 이미 첫 픽이라 집합이 안 바뀐다.
+# scene 당 42.5 MB x 163 scene = ~6.9 GB. context view 가 (s,e) 와 무관하게 scene 상수라
+# 캐시가 없으면 같은 DA3 forward 를 segment 328개(53,449/163)마다 되풀이한다.
+geo_raw_cache_dir: /data1/cympyc1785/data/TRUMANS-Lite/latentcam_da3_d77/geo_raw_cache_da3
+da3_cam_token_per_sample: true      # 캐시가 B=1 로 구워지므로 켜야 폴백 경로와 일치한다
+
+anchor_pred_frame0: true
+batch_size: 8
+epochs: 50
+ckpt_at_epochs: [15, 30]

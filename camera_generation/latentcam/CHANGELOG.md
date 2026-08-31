@@ -15,6 +15,29 @@ All notable changes to the latentcam sub-project. Follows [Keep a Changelog](htt
   그만큼 **이 커밋 전까지 track arm 은 한 번도 eval 된 적이 없다**. 자세한 내역은 `FIX.log`.
 
 ### Added
+- **TRUMANS D77 부분 코퍼스 arm — experiment `trumans_d77_k6` (2026-08-31).**
+  8샤드로 굽는 중인 737편 중 **recording 이 통째로 끝난 11개 recording = 163 chunk** 만 모아
+  먼저 돌리는 조기 신호용 arm. 코드 변경은 없고 `conf/experiment/trumans_d77_k6.yaml` 하나 추가.
+  - 바뀐 축은 **코퍼스 하나뿐**이다 — `pose_source`/`target_pose_source`/`scale_mode`/
+    `avg_scale_ref`/`intr_norm`/`cam_dim`/`geo_*`/`anchor_pred_frame0`/`batch_size` 는
+    `vista4d_pgt_k6_d77.yaml` 과 한 글자도 다르지 않다. `dl3dv_root` 를
+    `TRUMANS-Lite/latentcam_da3_d77`, `meta_csv` 를 `meta_trumans.csv` 로 갈아끼운 것뿐.
+  - **반쯤 구워진 recording 은 제외**했다 (`tru_1d19e06d` 8/14, `tru_1d43e076` 1/18).
+    chunk 172개 중 163개만 쓰는 이유 — 전량 arm 과 나중에 비교할 때 "어느 chunk 가
+    들어갔나"가 재현돼야 한다.
+  - **분할은 recording 단위** (holdout `tru_0ab19ed6` 9 + `tru_1a1e205b` 12 = 21 chunk /
+    163 = 12.9%). chunk 단위로 자르면 49프레임 슬라이딩이라 같은 recording 의 이웃 chunk 가
+    train/test 에 동시에 들어가 test 가 새 씬 일반화를 못 잰다.
+    실측 train 142 scene / 53,449 segment, test 21 scene / 8,222 segment.
+  - **`epochs: 50`** — `val_step` 이 step 기준이라 epoch 수 = 총 optimizer step 수다.
+    batch 8 에서 53,449/8 = 6,681 step/epoch × 50 = 334k step 으로, 기존
+    `vista4d_pgt_k6_d77`(1,627 × 200 = 325k) 과 **같은 학습량**이다. 200 을 쓰면 4배를 돈다.
+    `ckpt_at_epochs: [15, 30]` 도 같은 비율(~100k / ~200k step).
+  - `geo_raw_cache_dir` 미리 구움: scene 당 42.5 MB × 163 = **6.92 GB**. context view 가
+    (s,e) 와 무관하게 scene 상수라 캐시가 없으면 같은 DA3 forward 를 segment 328개마다
+    되풀이한다. 캐시가 B=1 로 구워지므로 `da3_cam_token_per_sample: true` 가 필요하다.
+  - seg-list 파일은 `TRUMANS-Lite/latentcam_da3_d77/seg_list_trumans_{train,test}.txt`
+    (데이터 디렉토리라 커밋에 안 들어간다).
 - **DynPose D84 대조군 2종 — experiment `dynpose_d84_k6_nodd` / `dynpose_d84_k6_ddswap` (2026-08-31).**
   기존 `dynpose_d84_k6` 코퍼스에서 **DataDoP 외부 궤적(`dd_*`)의 기여를 가르기 위한** arm 두 개.
   코드 변경은 없고 `conf/experiment/` 에 yaml 두 개를 추가한 것뿐이다 — 둘 다

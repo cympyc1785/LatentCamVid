@@ -15,6 +15,18 @@ All notable changes to the latentcam sub-project. Follows [Keep a Changelog](htt
   그만큼 **이 커밋 전까지 track arm 은 한 번도 eval 된 적이 없다**. 자세한 내역은 `FIX.log`.
 
 ### Added
+- **dynpose `dolly_in_look_at` 단일 preset arm — experiment `dynpose_d84_k6_dionly` (D95,
+  2026-09-01).** dynpose-0000 씬 전량에서 preset 을 **하나로 좁힌** 코퍼스. 코드 변경은
+  `scripts/data/filter_seg_list_by_preset.py` 신규 1개 + hydra config 1개뿐이고, 학습 코드는
+  안 건드렸다 (`dynpose_d84_k6` 위에 `exp_name`/`train_seg_list`/`test_seg_list` 3줄 override).
+  - **이름 함정**: 뱅크 seg 이름에는 `dolly_in` 으로 적혀 있고 그게 D76 이후의
+    `dolly_in_look_at` 이다 (`lbm/presets.py` 의 `LEGACY_AIM_COLLISIONS`). 그래서 필터는
+    `row_preset()` 이 아니라 **seg 이름 문자열**로 걸러야 맞는다 — 필터 스크립트 docstring 에
+    같은 내용을 적어 뒀다.
+  - **코퍼스가 26배 작다**: train 299 / test 37 (전량 arm `dynpose_d84_k6` 는 7,845 / 951).
+    preset 을 하나로 좁히면 anchor 최대 2개 × 씬 수가 상한이라 그렇다. 전량 arm 과 나란히
+    비교할 때 "데이터가 적어서"와 "preset 이 하나라서"를 가르지 못한다는 점을 감안할 것.
+
 - **TRUMANS D77 부분 코퍼스 arm — experiment `trumans_d77_k6` (2026-08-31).**
   8샤드로 굽는 중인 737편 중 **recording 이 통째로 끝난 11개 recording = 163 chunk** 만 모아
   먼저 돌리는 조기 신호용 arm. 코드 변경은 없고 `conf/experiment/trumans_d77_k6.yaml` 하나 추가.

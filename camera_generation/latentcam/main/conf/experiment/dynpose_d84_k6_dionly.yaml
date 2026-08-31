@@ -1,0 +1,43 @@
+# @package _global_
+# DynPose-LBM D84 arm 에서 **`dolly_in_look_at` 궤적 하나만** 남긴 단일-preset arm.
+# `dynpose_d84_k6.yaml` 과 주석 뺀 diff 기준 **정확히 3줄**(exp_name + train/test seg_list)만
+# 다르다. nodd/ddswap 과 같은 방식이다 — 코퍼스 디렉토리 · geo_raw 캐시(11.3 GB) · avg_scale ·
+# prompts.json 을 **그대로 재사용**하고 seg_list 로 세그먼트만 골라낸다. 재export 도 캐시
+# 재생성도 없고, 분할은 원본 리스트를 필터링만 하므로 같은 27편 scene holdout 이 보존된다.
+#
+# 리스트 생성 (재현 가능):
+#   python scripts/data/filter_seg_list_by_preset.py \
+#       --root /data1/cympyc1785/data/DynPose-LBM/latentcam_dynpose \
+#       --prefix seg_list_dynpose --presets dolly_in --max_anchors 2 --suffix dionly
+#
+# ═══ 이름 주의 — `dolly_in` 이 곧 `dolly_in_look_at` 이다 ════════════════════════════════
+# prompts.json 에 적힌 preset 문자열은 `dolly_in` 이다. 정식 이름(`lbm.presets.row_preset`)
+# 으로는 `dolly_in_look_at` 이다 — D76 `LEGACY_AIM_COLLISIONS[("dolly_in","look_at")]` 가
+# 그렇게 접는다. dynpose 뱅크의 `dolly_in` 696 행은 **전량 `aim="look_at"`** 이라 (0 행 예외)
+# 이 필터가 곧 `dolly_in_look_at` 필터다. `aim=free` 인 진짜 `dolly_in` 은 이 코퍼스에 0 행.
+# `dolly_in_look_at` 이라는 문자열로 골라내면 **0 행**이 나온다 (D90 에서 생긴 이름이고
+# D84 코퍼스는 그 전에 구웠다).
+#
+# ═══ anchor 상한 2 ══════════════════════════════════════════════════════════════════════
+# 사용자 요구는 "scene 마다 target 최대 2개". `route_presets.py --num_anchors 2` 로 이미
+# 그렇게 구워져 있어서 **실효 제거 0 세그먼트**다 (뱅크 raw 행 기준으로는 anchor 4개짜리
+# 씬 1편에서 8행이 걸렸는데, export dedup 뒤에는 남아 있지 않다). 필터는 그대로 걸어 둔다 —
+# 코퍼스를 다시 구울 때 조건이 문서로 남아야 한다.
+#
+# ═══ !! 코퍼스가 26배 작다 — 해석 시 주의 ═══════════════════════════════════════════════
+#   d84     train 7,845 / test 951   (scene 239 / 27)
+#   dionly  train   299 / test  37   (scene 182 / 22)
+# epoch 수(200)와 ckpt_at_epochs([50,100])를 d84 와 **같게 뒀다** — 축을 하나만 움직이려는
+# 것이다. 그 대가로 **step 수가 26배 적다**: 299/8 = 37 step/epoch × 200 = 7.4k step
+# (d84 는 980 × 200 = 196k). 즉 이 arm 과 d84 의 차이를 "preset 다양성의 효과"로만 읽으면
+# 안 된다. 학습량이 같이 줄었다. step 을 맞추려면 epochs 를 올려야 하는데, 샘플 299개를
+# 5,000번씩 보게 되므로 그건 과적합 축을 새로 여는 것이다 — 그래서 안 했다.
+# val 37 세그먼트라 prdc `num_splits` 가 자동 축소된다 (smoke 에서 N=16 -> 4 로 준 것과 같다).
+#
+# 그 외 축 정의 · 뱅크 전제 · 분모 · 분할 원칙은 전부 `dynpose_d84_k6.yaml` 주석 그대로다.
+defaults:
+  - dynpose_d84_k6
+
+exp_name: dynpose_d84_k6_dionly
+train_seg_list: /data1/cympyc1785/data/DynPose-LBM/latentcam_dynpose/seg_list_dynpose_dionly_train.txt
+test_seg_list: /data1/cympyc1785/data/DynPose-LBM/latentcam_dynpose/seg_list_dynpose_dionly_test.txt

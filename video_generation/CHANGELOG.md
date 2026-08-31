@@ -7,6 +7,17 @@
 ## [Unreleased]
 
 ### Changed
+- **`presets.md` 를 "가능한 option + preset" 표로 재작성 (2026-08-31).**
+  이전 문서는 D84 코퍼스에 **실현된 19종만** 적고 나머지는 산문 한 문단으로 뭉갰다. 어휘를
+  넓히려면(D85) "지금 뭐가 있고 그중 뭐가 라우터에 안 걸리는가"가 한 표에 보여야 하는데,
+  그게 안 보였다. 이제 `PRESETS` **40종 전량**을 `slot / aim / follow / needs_zoom / targetless /
+  axis / D84 변이·영상 수` 열로 싣고, 라우터가 안 부르는 15종(+`--vertical_fallback` 의존 2종)이
+  `slot=—` 로 드러난다. 집계: 구현 40 / caption 40 / 라우터 도달 23(+2) / D84 실현 19.
+  option 쪽은 `route_presets.py` · `sample_camera_bank.py` · `fit_hole_ladder.py` ·
+  `build_bank_captions.py` 네 스크립트의 손잡이를 **가능한 값 / 기본값 / D84 실제값** 3열로
+  적어, D84 가 `speed`·`tracking`·`tau_ladder` 를 각각 한 값에 못박은 것이 표에서 바로 보인다.
+  산문 절(§0 aim·target 설명, §3 dd 라벨 조합 47종, §4 anchor 통계)은 삭제 — 표에 안 들어가는
+  서술이라 사용자 요청("가능한 option 과 preset 표만")에서 빠진다.
 - **D86: `pan_*` 을 caption-targetless 로 (`targetless` 플래그) (2026-08-31).**
   `configs/caption_presets.json` 의 preset 에 `"targetless": true` 를 붙이면
   `build_bank_captions.py:caption_of` 가 `dd_*` 와 똑같이 `target`/`framing` 을 비운다

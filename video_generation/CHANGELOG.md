@@ -7,6 +7,19 @@
 ## [Unreleased]
 
 ### Changed
+- **D86: `pan_*` 을 caption-targetless 로 (`targetless` 플래그) (2026-08-31).**
+  `configs/caption_presets.json` 의 preset 에 `"targetless": true` 를 붙이면
+  `build_bank_captions.py:caption_of` 가 `dd_*` 와 똑같이 `target`/`framing` 을 비운다
+  (→ `target: none.`). `pan_left` / `pan_right` / `pan_right_zoom_out` 3종에 붙였다.
+  근거는 실측 — pan 748 변이의 `subject_in_frame` median **0.50**, **46.7%** 가 0.5 미만이다.
+  `aim="traj"` 이고 `track_` 도 아니라 궤적이 subject 에 매여 있지 않으므로, target 을 적으면
+  "계속 보인다"가 지키지 못할 약속이 된다. 같은 `aim="traj"` 인 `track_truck_*` 는
+  `follow_gain 1.0` 으로 실제로 subject 를 따라가 `sif` median **1.000** 이라 target 을 유지한다.
+  그래서 판정을 규칙(`aim=="traj" and not track_`)이 아니라 **config 플래그**로 뒀다 — 규칙이면
+  `truck_left`("...sliding sideways past **the subject**")까지 끌려가 문구가 가리킬 곳 없는
+  지칭이 된다. `targetless` preset 의 phrase 에 `subject` 가 들어가면 assert 로 막는다.
+  d84 코퍼스 재생성 실측: 266편 / 변이 12,193, **target 없음 6,578 (53.9%) / 있음 5,615 (46.1%)**
+  (직전 5,798 / 47.8% 에서 pan 748 변이가 넘어옴). `presets.md` §0·§1·§6 도 같이 갱신.
 - **D86: 프롬프트를 마침표로 끊고 target 없음을 `target: none.` 으로 명시 (2026-08-31).**
   `build_bank_captions.py` 의 `prompt_of` 가 두 가지를 바꾼다. ① 절 끝에 **마침표**를 찍는다 —
   이전 `target: person motion: the camera dollies ...` 는 값과 다음 필드 이름 사이에 경계가

@@ -7,6 +7,26 @@
 ## [Unreleased]
 
 ### Added
+- **밀집 LOS — `trumans_scene_probe.py --los_samples / --los_bands / --los_mode`,
+  `bank_to_blender_poses.py --los_samples / --los_bands / --min_los_frac` (D92, 2026-09-01).**
+  기존 시선 판정은 조준점 **3점 OR** (`aim_points`) 이라 "몸 어딘가 한 점이라도 보이나"만 답한다
+  — 반쯤 가린 구도가 `clear_frac 1.00` 으로 통과한다. LBM `occlusion_check`
+  (`cinematographer_quality_worker.py:2541`) 처럼 **45점**을 쏴서 *몇 %가 보이나*를 잰다.
+  `--los_samples 0` (기본) 이면 광선 수·JSON 키·판정이 **전부 예전과 같다** (실측: off/on 두 run 의
+  공통 열이 비트 동일, off run 에 새 키 0개).
+  · 표본은 LBM 처럼 OBB 격자가 아니라 subject **정점**에서 뽑는다 (`dense_aim_points`) — 높이
+    5띠 × 띠마다 방위각 균등 9점. LBM 격자(`lbm_obb_points`, 원문 그대로 이식)는 표본이 상자 안
+    **공기**에 앉을 수 있고, 광선이 아무것도 안 맞으면 LBM 은 그걸 "안 가려짐"으로 센다.
+    a08 49프레임 2궤적 실측 — `miss_frac`(아무것도 안 맞은 광선 비율):
+    OBB 격자 mean **0.272 / 0.356**, median 0.311 / 0.378, max 0.511 vs 정점 mean **0.008 / 0.013**.
+    즉 LBM 은 45발 중 1/3 가까이를 공기에 쏘고 그 발이 분모에 남아, `occlusion_ratio` 임계
+    0.10(human occluder)이 실효 ~0.15 로 느슨해진다. 가림 0인 ACCEPT 궤적에서 "보이는 비율"은
+    정점 0.987 vs OBB 0.644 로 갈린다.
+  · 새 열: 프레임별 `los_frac`/`occluded_frac`/`miss_frac`, path 요약 `min_los_frac`/
+    `mean_los_frac`/`max_occluded_frac`/`max_miss_frac`. `occluded_frac` 은 LBM
+    `occlusion_ratio` 와 **같은 정의**라 직접 비교된다. 후보 격자 경로엔 `los_frac`(최악 프레임).
+  · `--min_los_frac 0`(기본)이면 열만 붙고 아무것도 안 거른다 — 분포를 먼저 보고 임계를 정하라고
+    측정과 게이트를 두 손잡이로 나눴다. 실측 REJECT 궤적 `min_los_frac 0.00` / ACCEPT `0.956`.
 - **`scene_graph/gt_trumans.py` — TRUMANS 전용 GT 중력축·GT 지면 (D88, 2026-08-31).**
   TRUMANS 클립은 우리가 Blender 로 직접 렌더한 것이라 카메라의 **blend world pose 가 디스크에
   남아 있다** (`render_a<NN>/cameras.json` 의 `c2w_opencv`). blend 씬은 z-up 이고
@@ -73,6 +93,25 @@
   (GT 뱅크 714/714 실측 `pose 재현 최대오차 0.000e+00 [위치 전용]`).
 
 ### Fixed
+- **`smooth_passes` 가 fit 과 emit 사이에서 어긋나 회전만 조용히 달라지던 것 (D90, 2026-08-31).**
+  `fit_hole_ladder.py` 는 `build_poses` 를 `smooth_passes` **없이** 불러 서명 기본값
+  **12** (`build_poses.py:525`) 로 뱅크를 구웠는데, `emit_bank.py` 는 자기 CLI 기본값 **4**
+  (`emit_bank.py:455`) 로 되만들었다. `smooth_passes` 를 소비하는 건 `build_poses.py:679` 의
+  `smooth_kf` 가지 **하나뿐**이라, 기본 ease 가 `smoothstep` 이던 D89 까지는 이 불일치가 아무
+  데도 안 나타났다 — `smooth_kf` 를 기본값으로 올린 순간 emit 이 `재구성한 궤적이 poses.npz 와
+  다르다 (최대 7.753e-02)` 로 죽었다.
+  · 증상이 원인을 안 가리킨 이유: **위치 오차가 정확히 `0.000e+00`** 이고 회전만 틀렸으며,
+    그것도 `aim=look_at` 변이에서만 (40 변이 중 22개). 궤적·손잡이 경로가 전부 결백해 보였다.
+  · 고침 3군데 — ⑴ `fit_hole_ladder.py` 에 `--smooth_passes`(기본 **12**) / `--smooth_lambda`
+    (기본 0.5) 를 추가하고 `build_poses` 호출에 명시적으로 넘긴다. ⑵ 두 키를 `bank.json` 의
+    `fixed` 블록에 싣는다 (`fixed` 는 "emit 이 fit 을 정확히 재현하는 데 필요한 값 전량"이
+    설계인데 이 둘만 빠져 있었다). ⑶ `emit_bank.py` 는 이제 **뱅크 값을 먼저** 보고, CLI
+    기본값을 `None` 으로 내려 명시적으로 준 경우에만 덮어쓴다.
+  · `SHAPE_DEFAULTS` 에도 `smooth_passes: 12, smooth_lambda: 0.5` 를 넣었다 — 키가 없는
+    **예전 뱅크**는 fit 이 인자를 안 넘겨 서명 기본값 12 로 구워졌으므로, 폴백은 `emit_bank`
+    의 옛 CLI 기본값 4 가 아니라 12 여야 재현이 맞는다. 실측: 12 면 40/40 변이가 최대오차
+    `0.000e+00`, 4 면 `8.034e-02`.
+  · a08 chunk 재적합(234 변이) 후 emit 재현 최대오차 `0.000e+00` (234/234).
 - **`render_pred_depth_warp.py` reel 누적을 `--reel` 일 때만 하도록 가드 (2026-08-31).**
   이전에는 `--no_reel` 이어도 전 entry 프레임을 메모리에 계속 쌓아 두었다. 689 entry 실행에서
   수십 GB 로 불어나 OOM 이 났다. 이제 `if args.reel:` 안에서만 append 한다. `--reel` 기본

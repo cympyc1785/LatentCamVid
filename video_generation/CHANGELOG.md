@@ -93,6 +93,55 @@
   (GT 뱅크 714/714 실측 `pose 재현 최대오차 0.000e+00 [위치 전용]`).
 
 ### Fixed
+- **`track_*` preset 의 위치 추종률과 조준 추종률이 따로 놀아 subject 가 프레임 밖으로 밀리던 것
+  — `lbm/presets.py::PRESET_TRACKING` / `resolve_tracking()` + 소비처 4곳 (D93, 2026-09-01).**
+  gain 이 두 개인데 한쪽만 켜져 있었다. `PRESET_FOLLOW` (`lbm/presets.py:250`) 는 **위치**
+  추종률로 `track_*` 을 1.0 으로 올린다 (카메라가 subject 변위를 100% 따라간다). 그런데
+  **조준점** 추종률은 `decode/build_poses.py:98` 의 `TRACKING_GAIN`
+  (`world 0.0 / drift 0.6 / lock 1.0`) 이 따로 들고 있고, 뱅크 드라이버
+  (`scripts/run_k6_d77_shard.sh`) 는 `--trackings` 를 안 넘겨 기본값 `drift`(60%) 로 갔다.
+  위치 100% / 조준 60% 로 어긋난 채 49프레임 누적되면 조준점이 subject 뒤로 처진다.
+  · **축 분리 실측** (`out/snowboard/tk_axis2x2`, τ 0.6 · follow_gain 1.0 · anchor `dyn_0` 고정,
+    `--fixed_focal --sweep_deg 45`). `tracking` 만 바꾼 2×2 —
+    `track_pull_out_arc_left`: lock `subject_in_frame` **1.00** / `subject_area_med` **0.067**
+    vs drift **0.40** / **0.002**. `track_crane_up`: lock **1.00** / **0.122** vs drift
+    **0.20** / **0.000**. 같은 표에서 `aim_keyframes` 3↔6 은 `path_len_u`/`view_angle_max_deg`
+    가 소수점까지 동일(0.9671/41.7, 1.4085/59.2) — **궤적을 안 바꾼다.** 즉 단일 축이다.
+  · **영향 범위** — 배포된 `out/*/hole_bank_k6_d77/bank.json` 52편 27,488행 중 track 3,282행,
+    `subject_in_frame < 0.85` 인 행 **213행 (6.5%), 12편**. `fixed.tracking` 은 52편 전부 `drift`.
+  · **`PRESET_FOLLOW` 와 달리 요청값을 덮어쓴다.** sentinel 이 없기 때문이다 — `follow_gain` 은
+    문자열 `"0"` 이 "안 줌"을 뜻해서 명시값이 preset 기본값을 이기지만, `tracking` 은 뱅크 행이
+    전부 `"drift"` 를 명시적으로 들고 있어 "안 준 경우"를 가릴 수가 없다. 대신 끄는 스위치
+    `--no_preset_tracking` 을 둔다.
+  · **기존 동작 보존 실측** — `--no_preset_tracking` 과 D93 이전 코드의 pose 최대차 `0.000e+00`.
+    비-track preset 은 스위치가 켜져 있어도 `max|ΔP| = 0.000e+00` (`pull_out_arc_left`,
+    `crane_up`, `orbit_left`, `truck_left`, `static_hold` 5종). track 계열만 바뀐다
+    (`track_pull_out_arc_left` 9.183e-01, `track_crane_up` 1.254e+00, `track_orbit_left`
+    1.850e+00, `track_hold` 1.147e+00).
+  · **뱅크가 규약을 들고 다닌다** — `sample_camera_bank.py` 는 `preset_tracking` 을 bank.json 에
+    적고, `emit_bank.py` 는 **키가 없으면 `False`** 로 읽는다 (D93 이전 뱅크를 되풀 때 그때 만든
+    궤적이 그대로 나와야 한다). `variant_id` 에도 실제 쓰인 `tracking` 이 들어가고, 행에
+    `tracking_requested` 를 같이 남겨 덮어썼는지 추적된다.
+  · snowboard 전량 재생성(`bank_d93`, 166변이) 실측: track 156행 전부 `drift → lock`,
+    비-track 10행(`static_hold*`) 그대로.
+  · **범위 한계 — `aim="free"` preset 에는 안 듣는다.** `build_poses` 는
+    `tracking_ignored = aim != "look_at"` 이라 D90 targetless preset 은 조준 gain 자체를 안 쓴다.
+    snowboard 19 preset 중 **9개가 `aim="free"`** (`track_truck_left/right`,
+    `track_pedestal_up/down`, `track_dolly_in/out`, `track_hold_dont_look`,
+    `static_hold_dont_look`). 같은 설정 on/off A/B (`ab_d93_on` vs `ab_d93_off`,
+    anchor `dyn_0`, τ 0.35) — `look_at` 계열은 뒤집히고 `free` 계열은 안 움직인다:
+    `track_crane_up` `subject_in_frame` 0.20→**1.00** / area 0.0000→**0.1418**,
+    `track_pull_out_arc_left` 0.40→**1.00** / 0.0000→**0.0867** vs
+    `track_dolly_in` 1.00→1.00 / 0.1916→0.1910, `track_truck_left` 0.40→0.40 / 0.0783→0.0783,
+    `track_truck_right` 1.00→1.00 / 0.1493→0.1492, `track_pedestal_up` 0.80→**0.60** /
+    0.1111→0.1129. `path_len_u` 는 6종 전부 소수점까지 동일 — 위치는 안 건드린다.
+  · 그래서 `track_truck_left` 는 D93 이후에도 **사다리 전 단·anchor 3개 전부**에서 무너진다
+    (`hole_bank_k6_d93` 실측 `subject_in_frame` 0.00~0.08, `subject_area_med` 0.0000,
+    `subject_visible_frac` 0.00, `view_angle_max_deg` 61~76). 옆으로 트럭하면서 조준을 안 고치면
+    subject 가 옆으로 빠지는 게 당연한 결과다 — **`track_*` 인데 `aim="free"` 인 조합 자체가
+    모순**이고, 이건 D93 이 아니라 별건으로 고쳐야 한다.
+  · 소비처: `decode/build_poses.py`(`preset_tracking` 인자 + info 열 2개),
+    `scripts/sample_camera_bank.py`, `scripts/fit_hole_ladder.py`, `scripts/emit_bank.py`.
 - **뱅크를 읽는 쪽이 preset 이름을 안 풀어 라벨·CSV·코퍼스가 궤적과 다른 카메라를 가리키던 것
   — `lbm/presets.py::row_preset()` + 읽기 8곳 (2026-09-01).**
   쓰는 쪽(`sample_camera_bank.py`)은 늘 정식 이름을 적지만, **디스크에 이미 구워진 뱅크**는

@@ -81,6 +81,29 @@
     규칙) — 안 그러면 D99 이전 뱅크 전량이 거짓 stale 판정된다.
 
 ### Added
+- **`CinemaTraj/scripts/run_d99_caption_export.sh` — 두 코퍼스 캡션+export 를 한 드라이버로
+  (D105, 2026-09-01).** vista 와 TRUMANS 는 이미 같은 두 프로그램(`build_bank_captions.py` →
+  `vista4d_bank_to_dl3dv.py`)을 타는데 여태 각자 손으로 호출해 왔다. 캡션 인자를 배열 하나
+  (`CAPTION_ARGS`)로 묶어 두 경로가 **글자 그대로 같은 인자**를 쓰게 한다
+  (`--prompt_fields target,motion`, `--magnitude` 안 넘김 = 부사 없음).
+  · 코퍼스별로 갈리는 건 셋뿐이다 — `--label_map`(TRUMANS 만; blend 오브젝트 이름 →
+    자연어 명사, **`target:` 절의 명사만** 바꾸므로 문장 형식엔 안 닿는다), `--metadata_csv`
+    (`event` 필드 출처인데 학습 프롬프트엔 안 들어간다), export 경로/해상도.
+  · **`--image_scale` 이 코퍼스마다 다르다**: TRUMANS 소스는 960x540, vista 는 1280x720.
+    둘 다 640x360 으로 맞춰야 섞어 학습할 때 `hw_list` 가 안 갈린다 → 0.6666666666666666 / 0.5.
+    리사이즈 목표 (w,h) 는 스케일된 K 의 `cx*2`/`cy*2` 에서 나온다(`scaled_K`).
+  · TRUMANS holdout 은 **recording 단위**(`TRU_TEST`, 기본 `tru_0ab19ed6 tru_1a1e205b`) —
+    chunk 단위로 자르면 49프레임 슬라이딩이라 같은 recording 의 이웃 chunk 가 train/test 에
+    동시에 들어가 test 가 새 씬 일반화를 못 잰다.
+  · **왜 지금 필요했나**: 배포된 d77 TRUMANS 코퍼스의 프롬프트가
+    `target: person. motion: the camera dollies straight forward toward the subject.` 인데
+    그 행의 preset 은 `dolly_in` = D90 이후 `aim="free"`(재조준 안 함)다. 부사 문제가 아니라
+    motion 절의 **의미**가 궤적과 반대였다.
+  · d77 뱅크는 **지금 코드로 재캡션이 안 된다** — 40편 31,520행 중 **12,848행(40.8%)** 이
+    `build_bank_captions.py:184` 의 aim 일치 assert 를 못 넘긴다(전부 D90 이전 `aim="traj"`
+    행: `pan_*`/`truck_*`/`pedestal_*` 각 1,456, `dolly_{in,out}_dont_look` 각 1,456,
+    `static_hold_dont_look` 380, `track_*` 156씩). d99 로 다시 구우면 현재 어휘로 기록되므로
+    자동으로 해소된다 — 재굽기를 고른 또 하나의 이유다.
 - **`CinemaTraj/scripts/run_k6_d99_shard.sh` / `run_trumans_d99_shard.sh` — deroll 켠 뱅크
   샤드 러너 (D105, 2026-09-01).** τ 뱅크 `bank_d99/`, emit 뱅크 `hole_bank_k6_d99/`. 한 폴더에
   두 규약을 안 섞는다는 D96/D97/D98 규칙 그대로 새 폴더에 쓰고 옛 뱅크는 안 건드린다.

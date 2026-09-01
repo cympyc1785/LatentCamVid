@@ -6,6 +6,18 @@
 
 ## [Unreleased]
 
+### Added
+- **`results/20260901_d99_preset_grid/render.sh` — 굽는 중인 d99 뱅크의 preset 격자 프리뷰
+  (D105, 2026-09-01).** `render_bank_videos.py` 는 **고치지 않았다** — anchor 와 사다리 단을
+  고정하고 preset 만 푸는 호출을 드라이버로 감싼 것뿐이다 (스크립트 docstring 의 "같은 강도에서
+  preset N종 = 모양 축"). 축을 안 고정하면 타일 차이에 preset 효과와 τ 효과가 섞인다.
+  · 단 = `hole` 사다리 0.2 (rungs 0.1/0.2/0.35/0.5). 0.1 은 preset 이 서로 안 갈리고,
+    0.35+ 는 궤적보다 구멍이 먼저 보인다.
+  · `--deroll` 을 **안 넘긴다**: d99 뱅크는 이미 deroll 된 pose 를 들고 있다. 그 플래그는 옛
+    뱅크를 렌더 직전에 세우는 용도라 여기 켜면 두 번 돈다.
+  · `GPU=` 로 넘겨야 한다. 스크립트 안의 기본값 `1` 은 **쓰지 말 것** — GPU 1 은 다른 세션이
+    73GB 를 쥐고 있어 `point_cloud.py:146` 에서 OOM 으로 죽는다 (util 0% 여도 메모리는 찼다).
+
 ### Changed
 - **`--deroll` 굽는 기본값을 `True` 로 (D105, 2026-09-01).** D99 가 "검증 후 argparse 기본값 두
   줄만 바꾼다"고 예고한 그 두 줄이다 — `fit_hole_ladder.py:1161`, `sample_camera_bank.py:904`.

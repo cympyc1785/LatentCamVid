@@ -15,6 +15,33 @@ All notable changes to the latentcam sub-project. Follows [Keep a Changelog](htt
   그만큼 **이 커밋 전까지 track arm 은 한 번도 eval 된 적이 없다**. 자세한 내역은 `FIX.log`.
 
 ### Added
+- **`scripts/snowboard_prompt_ab.sh` — `target:` 절 A/B 드라이버 (D104, 2026-09-01).**
+  snowboard 뱅크(`hole_bank_k6`, 77 변이)를 k6 posed 모델(`20260827_051423_vista4d_pgt_k6`,
+  ckpt `last`)로 두 번 돌린다. arm 은 **프롬프트뿐** — `target: <label> motion: ...` vs
+  `motion: ...`. 두 export 의 `target_poses` 는 비트 동일(`|dE|max 0.0`, `|dK|max 0.0`)이라
+  예측 차이는 전부 텍스트 탓이다. snowboard 는 train/test 어느 split 에도 없어서 전용 export
+  + 0줄 `train_seg_list` 를 쓰고, `eval_testset.py --set` 으로 `dl3dv_root`/`train_seg_list`/
+  `test_seg_list` 세 키만 덮는다 (나머지 config 는 학습 그대로).
+  - **결과: `target:` 절은 학습에서 본 라벨에만 도움이 된다.** `subject_in_frame`(center_box
+    0.80) 짝지은 차이 `target − notarget` 은 전체로는 **−0.0954** (W/T/L 25/12/40) 인데
+    앵커별로 부호가 갈린다:
+
+    | anchor | n | 학습 코퍼스 등장 | Δsif | W/T/L | target zero-frame |
+    |---|---|---|---|---|---|
+    | man | 27 | 1060회 (22 씬, 최빈 앵커) | **+0.0597** | 15/2/10 | 12.9 / 49 |
+    | snowboard | 27 | **0회** | **−0.3477** | 1/4/22 | 32.3 / 49 |
+    | helmet | 23 | **0회** | +0.0186 | 9/6/8 | 24.4 / 49 |
+
+    즉 zero-shot 라벨에 `target:` 을 붙이면 도움이 없는 정도가 아니라 **궤적이 무너진다**
+    (snowboard 는 49프레임 중 32.3프레임에 subject 픽셀이 0). 라벨 빈도는
+    `latentcam_da3` train split(46 씬 / 9373 entry / 78 라벨)에서 셌다.
+  - **hole 을 품질로 읽지 말 것**: GT(bank) hole 0.5084 vs target 0.2324 / notarget 0.1867.
+    pred hole 이 낮은 건 좋아서가 아니라 **모델이 뱅크 GT 카메라보다 덜 움직여서**다.
+  - 산출물: `results/20260901_snowboard_prompt_ab/{target,notarget}__last`,
+    `CinemaTraj/results/20260901_snowboard_prompt_ab/{warp/, subject_in_frame.json,
+    target_clause_7cases.mp4}`. 후처리는 기존 `render_pred_depth_warp.py` /
+    `eval_subject_in_frame.py` / `concat_videos.py` 를 **수정 없이** 재사용.
+
 - **dynpose `dolly_in_look_at` 단일 preset arm — experiment `dynpose_d84_k6_dionly` (D95,
   2026-09-01).** dynpose-0000 씬 전량에서 preset 을 **하나로 좁힌** 코퍼스. 코드 변경은
   `scripts/data/filter_seg_list_by_preset.py` 신규 1개 + hydra config 1개뿐이고, 학습 코드는

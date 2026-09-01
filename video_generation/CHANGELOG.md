@@ -52,6 +52,42 @@
     규칙) — 안 그러면 D99 이전 뱅크 전량이 거짓 stale 판정된다.
 
 ### Added
+- **`--deroll` 을 렌더 단계에도 (`CinemaTraj/scripts/{render_bank_videos,bank_to_blender_poses}.py`,
+  D102, 2026-09-01).** D99 의 `--deroll` 은 뱅크를 **굽는** 쪽(`fit_hole_ladder.py`)에만 있어서,
+  그 플래그 이전에 구워진 뱅크를 나중 뱅크와 나란히 놓으면 지평선 기울기가 대조를 덮는다.
+  실측 `tru_0ac97866_a08_s3f0k6` 같은 변이(hole0.35) 의 `max|roll|`:
+
+  | preset | 옛 뱅크(`out_trumans`) | GT 뱅크(`out_trumans_gt`) |
+  |---|---|---|
+  | orbit_left | 21.81° | 0.24° |
+  | truck_left | 14.99° | 0.23° |
+  | pedestal_up | 9.22° | 0.24° |
+  | crane_up | 8.80° | 0.34° |
+  | crane_down | 8.92° | 0.07° |
+
+  · 두 스크립트 모두 **렌더 직전에만** `decode.build_poses.deroll_poses` 를 한 번 돌린다 —
+    뱅크 파일은 안 건드린다. 광축과 위치가 안 바뀌므로 `bank.json` 의 τ / hole / path_len_u 열이
+    그대로 유효하고, `bank_to_blender_poses.py` 쪽은 레이캐스트 게이트 판정(clearance /
+    floor_drop / subject_dist / LOS)도 한 자리도 안 변한다.
+  · `up_world` 는 `render_bank_videos.py` 가 `scene_graph.json:gravity.up_world`,
+    `bank_to_blender_poses.py` 가 blend world 의 `+Z`. **옛 TRUMANS 뱅크의 gravity 는
+    `camera_up_fallback` 이고 GT 대비 25.9° 틀렸다** (`gravity.estimated_error_deg`) — 그래서
+    옛 뱅크를 derolled 렌더해도 *추정된* 수평에 맞춰질 뿐 GT 수평과는 다르다. 이건 D88 이
+    이미 고친 별개 축이라 여기서 섞지 않는다.
+  · 기본 `False` = 예전과 비트 동일. `bank_to_blender_poses.py` 는 `selection.json` 에
+    `deroll` / `deroll_skipped`(시선이 중력축과 평행해 roll 이 정의 안 되는 프레임 수)를 남긴다.
+- **`CinemaTraj/scripts/rank_subject_motion.py` — 코퍼스 entry 를 subject 이동량으로 정렬.**
+  "subject 가 많이 움직이는 경우만 모아서 평가"를 하려면 먼저 그 축이 있어야 한다. 코퍼스
+  `da3/prompts.json` 의 `variant_id` 앞머리로 anchor 를 고르고, 그 노드 track 의 프레임간
+  이동을 누적해 entry 를 줄세운다.
+- **`CinemaTraj/scripts/slice_subject_in_frame.py` — `eval_subject_in_frame.py` 출력에서
+  부분집합만 다시 집계.** sweep 전량을 다시 렌더하지 않고 entry 목록(예: high-motion 상위 N)만
+  골라 같은 표를 낸다.
+- **`CinemaTraj/scripts/bank_to_blender_poses.py --variant_ids` (D102).** 예전에는 preset 마다
+  `tau_max` 최댓단을 자동으로 집었는데, 두 뱅크를 짝지어 비교하려면 **같은 사다리 칸**을
+  못 박아야 한다 (τ 최댓단은 뱅크마다 다른 칸에 앉는다). 비우면 예전 동작과 비트 동일.
+- **`video_generation/scripts/sam3_seg_instances.py`** — 그동안 CHANGELOG 에 안 적혀 있던
+  ACTIVE-4 의 SAM3 text-PCS instance 분할 샤딩 스크립트를 뒤늦게 기록한다.
 - **`CinemaTraj/scripts/eval_subject_in_frame.py` — eval 폴더 여러 벌을 같은 점군에 렌더해
   `subject_in_frame` 을 비교 (D100, 2026-09-01).** `verify.py` 는 `out/<video>/` 한 벌
   (`decision.json` + `poses.npz` + fingerprint)에 묶여 있어서 **모델이 예측한 궤적**에는 못 건다.

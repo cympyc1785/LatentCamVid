@@ -6,6 +6,35 @@
 
 ## [Unreleased]
 
+### Changed
+- **`--deroll` 굽는 기본값을 `True` 로 (D105, 2026-09-01).** D99 가 "검증 후 argparse 기본값 두
+  줄만 바꾼다"고 예고한 그 두 줄이다 — `fit_hole_ladder.py:1161`, `sample_camera_bank.py:904`.
+  d98 뱅크(20,854행)를 preset 별로 세어 보면 roll 을 흘리는 건 `tilt_up`/`tilt_down` 820행씩,
+  `pan_left`/`pan_right` 820행씩 = **3,280행(15.7%)** 이다. `tilt_*` 의 dev 163.88° 를 학습
+  캡션 "tilts upward" 옆에 붙여 놓을 수는 없다.
+  · **재현 폴백 5곳은 그대로 `False`** — `build_poses` 서명 / `fit_hole_ladder.SHAPE_DEFAULTS` /
+    `emit_bank.FIXED_FALLBACK` / `merge_static_rung.DEROLL_FALLBACK`. 이것들은 "키가 없는 옛
+    뱅크"를 되만드는 값이라 뒤집으면 D99 이전 뱅크가 전부 재현이 깨진다.
+  · 새 샤드 드라이버는 기본값에 기대지 않고 `--deroll` 을 **명시적으로** 넘긴다. 뱅크 정체성을
+    기본값에 맡기면 나중에 또 뒤집혔을 때 같은 폴더에 두 규약이 섞인다 (D90 `smooth_passes` 사고).
+- **`configs/caption_presets.json` 을 D90 의미로 맞추고 빠진 5종을 채웠다 (D105, 2026-09-01).**
+  `lbm/presets.py` 의 40종과 config 의 40종이 **이름은 겹치는데 뜻이 어긋나 있었다** — 어긋난
+  채로도 캡션은 조용히 그럴듯하게 나온다.
+  · 빠져 있어서 `build_bank_captions.py:178` assert 가 d98 뱅크 전체를 막던 5종:
+    `dolly_in_look_at` / `dolly_out_look_at_legacy` / `tilt_up` / `tilt_down` /
+    `track_dolly_in_look_at`.
+  · `dolly_in`/`dolly_out`/`track_dolly_in` 은 D90 에서 `aim="free"`(재조준 안 함)가 됐는데
+    문구는 아직 "toward the subject" 였다. 조준 문구를 새 `*_look_at` 이름으로 옮기고,
+    free 쪽에는 이미 config 에 있던 `_dont_look` 문구("along its own axis without re-aiming")를
+    붙였다. 죽은 키 `dolly_in_dont_look`/`dolly_out_dont_look` 은 삭제 —
+    `resolve_preset` 이 그 이름을 `*_look_at` 으로 풀어서 조회에 절대 안 걸린다.
+  · `tilt_up`/`tilt_down` 은 `pan_*` 과 같은 순수 회전 free-moving 이라 `targetless: true`.
+  · **미결로 남긴 것**: `truck_*`/`pedestal_*`/`dolly_in`/`dolly_out` 도 D90 에서 `aim="free"`
+    가 됐는데 아직 target 을 유지한다. d98 뱅크 `subject_visible_frac` 실측(각 820행) —
+    `truck_left` med 0.753 / p25 0.009, `truck_right` 0.754/0.092, `pedestal_down` 0.849/0.563,
+    `pedestal_up` 0.911/0.570 로 이미 targetless 인 `pan_left` 0.865/0.282 보다 truck 쪽이
+    **더 나쁘다**. 바꾸면 학습 캡션의 target 절 분포가 크게 움직이므로 D104 A/B 결과를 보고 정한다.
+
 ### Fixed
 - **중력축 기준 roll 누수 — `--deroll` (D99, 2026-09-01).** TRUMANS 의 arc 계열 카메라가
   기울어지는 원인은 궤적이 아니라 **회전 규약 두 곳**이었다. 둘 다 D98 의 중력축 수정으로는
@@ -52,6 +81,21 @@
     규칙) — 안 그러면 D99 이전 뱅크 전량이 거짓 stale 판정된다.
 
 ### Added
+- **`CinemaTraj/scripts/run_k6_d99_shard.sh` / `run_trumans_d99_shard.sh` — deroll 켠 뱅크
+  샤드 러너 (D105, 2026-09-01).** τ 뱅크 `bank_d99/`, emit 뱅크 `hole_bank_k6_d99/`. 한 폴더에
+  두 규약을 안 섞는다는 D96/D97/D98 규칙 그대로 새 폴더에 쓰고 옛 뱅크는 안 건드린다.
+  두 드라이버가 같은 인자를 넘긴다 (`--aim_keyframes 6 --keyframe_aim auto
+  --keyframe_ease smooth_kf --fixed_focal --deroll`, preset 은 안 넘김 = 어휘 40종 전량) —
+  vista 와 TRUMANS 를 섞어 학습하므로 규약이 갈리면 안 된다.
+  · **TRUMANS 판만 scene graph 를 다시 짓는다 (`--gravity_source gt --no_skip_done`).**
+    deroll 은 중력축 둘레의 roll 을 0 으로 만드는 연산이라 중력축이 틀리면 지평선을 틀린 각도로
+    세운다 — 고치려던 것과 같은 기울어짐을 다시 심는 셈이다. 디스크의 191 chunk graph 는
+    D98 이전 것이고 GT 대비 실측이 `ground_ransac` n=142 median 0.08° / p90 4.17° / max 9.73°,
+    `camera_up_fallback` n=49 median **10.87°** / p90 21.31° / max **26.23°** 다. 191/191 전부
+    blend world (z-up) GT 를 찾을 수 있으므로 추정할 이유가 없다. 옛 graph 는
+    `scene_graph_pre_d99.json` 으로 한 번만 복사한다 (d77 뱅크의 입력이었다).
+    지면(`--ground_source`)은 그대로 pointcloud — 중력만 바꿔야 원인이 하나다.
+    vista 는 D98 에서 이미 52/52 가 GeoCalib 이라 graph 를 다시 안 짓는다.
 - **`CinemaTraj/scripts/compare_aim_timing.py` — 매 프레임 조준 vs keyframe 조준 대조 (2026-09-01).**
   같은 뱅크 변이를 `aim_keyframes=0` / `6+smoothstep` / `6+smooth_kf` 세 arm 으로 되만들어
   회전 타이밍(`rot_ratio`, `accel_p95`)과 조준 오차(`aim_err_*`), 투영 `subject_in_frame` 을 잰다.

@@ -69,6 +69,60 @@
   `aim_err_f0` 17.58° 는 보간 오차가 아니라 keyframe 경로가 frame 0 회전을 **일부러** 소스와
   같게 못 박은 값이다 (배포 뱅크는 `aim_anchor="subject"` 라 everyframe 쪽에는 램프가 안 걸린다).
   `sif` 는 세 arm 모두 1.000 이라 중앙 80% 안에서는 차이가 안 난다.
+
+- **`CinemaTraj/scripts/bank_to_blender_poses.py --aim_arms` — 조준 arm 을 GT 렌더로 보기
+  (D103, 2026-09-01).** 위 표는 세 arm 이 *숫자로* 얼마나 다른지만 말한다. 같은 뱅크 변이를
+  `--aim_arms everyframe,kf6_smoothstep,kf6_smooth_kf` 로 **되만들어** `<preset>__<arm>.npz` 로
+  따로 저장하고 `render.sh` 에 세 줄을 넣어, hole 없는 Blender GT 렌더로 나란히 볼 수 있게 했다.
+  · **비면 예전 동작과 비트 동일** — 뱅크 `poses.npz` 를 그대로 쓴다. 되만들기는 `--aim_arms`
+    를 준 경우에만 돈다.
+  · **arm 사이 위치가 같다는 것을 매번 assert** 한다 (`|Δt| < 1e-6`; 실측 3 preset 전부
+    `0.00e+00`). 세 렌더의 차이가 회전뿐임을 렌더 전에 못 박는 장치다.
+  · **되만들기 자체의 검증**: `kf6_smoothstep` arm 은 배포 뱅크의 설정과 같으므로 뱅크가 저장한
+    회전을 그대로 재현해야 한다 — 실측 `|ΔR| = 0.00e+00`. 나머지 두 arm 의 `|ΔR|` (everyframe
+    1.82e-01, smooth_kf 8.08e-02) 이 조준 설정 때문이라는 근거가 이 0 이다.
+  · **`aim != "look_at"` preset 은 건너뛴다** (사유를 표에 `SKIP aim=traj` 로 찍는다). `traj`
+    에서 `aim_keyframes=0` 은 "매 프레임 조준"이 아니라 **조준 안 함**이라, 가드 없이 돌린 9-preset
+    probe 에서 `truck_left`/`truck_right` 의 everyframe arm 이 `|ΔR| 0.833` — 조준 오차가 아니라
+    preset 회전량 — 을 내고 있었다.
+  · 레이캐스트 게이트는 기본값 그대로 켜 둔다. `tru_0ac97866_a08_s3f0k6` / `dyn_0` 에서
+    `push_in_arc_left`(smoothstep `rot_ratio` 최악 10.37)는 사다리 네 칸이 전부 벽을 뚫어
+    **렌더 불가**였다 — 최악 케이스를 못 보여주는 것은 이 대조의 한계로 기록한다.
+    실제로 렌더한 것은 `s_curve` / `orbit_right` / `crane_down` 3종.
+  · `--aim_arms` 와 `--raycast_solve` 는 동시 사용 금지 (assert).
+
+- **`CinemaTraj/scripts/aim_arm_reel.py` — 조준 arm 렌더 + 프레임별 회전 속도 (D103,
+  2026-09-01).** 렌더 세 줄만 쌓으면 "언제 회전하는가"가 안 보인다 — 세 arm 은 위치가 비트
+  동일이라 구도가 거의 같게 흐르고, 눈으로는 "약간 덜컹거린다" 정도로만 읽힌다. 각 줄 오른쪽에
+  ω(f)=프레임 간 회전각 곡선을 **세 줄 공통 y 축**으로 그리고 현재 프레임에 커서를 얹었다.
+  keyframe 위치(`[0,10,19,29,38,48]`)는 점선으로 표시한다.
+  ω 는 저장된 blend world npz 에서 바로 잰다 — `R_blend[f] = A @ R_bank[f]` 이고 A 가
+  프레임마다 같아서 `R[f]ᵀR[f+1]` 에서 상쇄되므로 뱅크 world 에서 잰 것과 같은 값이다.
+  `tru_0ac97866_a08_s3f0k6` / `dyn_0` 실측 (deg):
+
+  | preset | arm | rot_max | rot_med | rot_ratio | sum_deg | accel_p95 |
+  |---|---|---|---|---|---|---|
+  | s_curve | everyframe | 4.4821 | 3.0276 | 1.4804 | 152.929 | 0.3960 |
+  | s_curve | kf6_smoothstep | 6.4376 | 2.8664 | 2.2459 | 130.816 | 1.5659 |
+  | s_curve | kf6_smooth_kf | 4.3497 | 2.9951 | 1.4523 | 127.770 | 0.4547 |
+  | orbit_right | everyframe | 1.7790 | 1.4299 | 1.2441 | 65.712 | 0.3075 |
+  | orbit_right | kf6_smoothstep | 2.3814 | 1.2517 | 1.9025 | 65.423 | 0.7723 |
+  | orbit_right | kf6_smooth_kf | 1.6090 | 1.4491 | 1.1103 | 64.542 | 0.1059 |
+  | crane_down | everyframe | 1.6392 | 1.1443 | 1.4325 | 54.562 | 0.1892 |
+  | crane_down | kf6_smoothstep | 1.9112 | 1.1420 | 1.6736 | 50.487 | 0.5430 |
+  | crane_down | kf6_smooth_kf | 1.2461 | 1.0248 | 1.2159 | 49.405 | 0.0764 |
+
+  산출물 `models/Planner/CinemaTraj/results/20260901_aim_arms/aim_arms_{s_curve,orbit_right,
+  crane_down}.mp4`.
+
+- **`rot_ratio` 는 정지 조준에서 분모가 0 으로 붕괴한다 (D103 실측, 2026-09-01).** 이 chunk 의
+  `look_at` solved 122 변이를 `rot_ratio = rot_max/rot_med` 로 줄세우면 1~13위가 전부
+  `stat_*` anchor 다 (`stat_6__pull_out_arc_right__hole0.1` 55.68). 그런데 그 행의
+  `rot_med` 는 **0.089°** — 정지 물체를 조준하니 median 회전이 0 에 붙어서 비가 폭발한 것이고,
+  절대 펌핑량(`accel_p95` 1.208)은 상위권과 다르지 않다. 절대 `accel_p95` 로 줄세우면 1위가
+  1.635 (`stat_1__s_curve__hole0.1`) 이고, 이번에 렌더한 `dyn_0 s_curve` 가 1.566 으로 사실상
+  동률 — **최악 케이스를 이미 보고 있다**는 뜻이다.
+  **`rot_ratio` 로 "가장 심한 변이"를 고르지 말 것. 절대량(`accel_p95`, `rot_max`)으로 고른다.**
 - **`CinemaTraj/scripts/viz_tau_shape_topdown.py` — τ vs 궤적 모양 top-down (2026-09-01).**
   `target_tau` 를 직접 훑어 preset 궤적을 되만들고 graph frame G 의 xy 평면에 겹쳐 그린다
   (τ 내림차순 렌더 + frame48 끝점 마커라 호가 어디서 끝나는지 보인다). 아래 축에 요청 τ vs

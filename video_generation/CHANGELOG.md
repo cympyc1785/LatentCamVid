@@ -17,8 +17,35 @@
     뱅크를 렌더 직전에 세우는 용도라 여기 켜면 두 번 돈다.
   · `GPU=` 로 넘겨야 한다. 스크립트 안의 기본값 `1` 은 **쓰지 말 것** — GPU 1 은 다른 세션이
     73GB 를 쥐고 있어 `point_cloud.py:146` 에서 OOM 으로 죽는다 (util 0% 여도 메모리는 찼다).
+- **`results/20260901_d99_preset_grid/render_trumans.sh` — 같은 격자의 TRUMANS 판
+  (D105, 2026-09-01).** 뱅크가 **d77 이다 (d99 가 아니다)** — TRUMANS d99 는 아직 안 구웠고
+  (Vista 5샤드가 GPU 를 다 쓴다) `out_trumans/*/` 에 있는 건 `hole_bank_k6_d77` 뿐이다.
+  그래서 Vista d99 격자와 두 축이 다르다: ① `deroll` 키 자체가 없다(=off) ② `keyframe_ease`
+  가 `smoothstep` (d99 는 `smooth_kf`). 세 번째 렌더가 ①만 떼어서 보여준다 — 같은 뱅크를
+  `--deroll` 로 렌더 직전에 세워 다시 굽는다 (그 플래그의 정확한 용도).
+  · 씬 두 개는 d77 뱅크 188 chunk 의 `path_len_u` 양 끝에서: `tru_1d076f8c_a17` 1.132(보행,
+    preset 34종) / `tru_0adb88db_a02` 0.357(제자리, 30종).
+- **`results/20260901_trumans_preset_blender/poses.sh` — 같은 격자를 depth warp 가 아니라
+  Blender 로 (D105, 2026-09-01).** warp 은 소스 프레임 재투영이라 카메라가 크게 움직이면 화면
+  절반이 hole 이 되고, 그러면 "궤적이 이상한 것"과 "warp 이 못 채운 것"을 못 가른다. TRUMANS 는
+  씬이 `.blend` 로 있으니 렌더러가 정답을 안다 (hole 이 원리적으로 0).
+  · **사다리 칸을 이름으로 못 박는다** (`--variant_ids ...__hole0.2`). 기본 동작은 preset 마다
+    τ 최댓단을 집는데 그러면 preset 사이 강도가 달라져 "모양 축"이 안 된다.
+  · 칸을 고정했으므로 raycast(기본 켜짐)에 걸린 preset 은 **아랫단으로 안 내려가고 드롭**된다.
+    실측 드롭률 `a17` 22/34 · `a02` 22/30 — 뱅크의 depth-shell 충돌 게이트가 통과시킨 카메라를
+    실제 `.blend` mesh 가 기각한 것이다 (D91 격차의 정량). 사유는 `<out>/selection.json`.
+  · 드롭 대신 궤적 크기를 이분법으로 줄이려면 `--raycast_solve` (기본 off).
 
 ### Changed
+- **`scripts/trumans_render_reel.py` 에 `--dirs` / `--name` (D105, 2026-09-01).**
+  `bank_to_blender_poses.py` 가 만드는 `<out>/<preset>/rgb` 레이아웃을 그대로 받게 한 것.
+  기존 경로는 `--work/--tag` 로 `*_<tag>/render_a<NN>` 을 훑고 타일 라벨을 `basename[-3:]` 로
+  잘라 쓰는데, preset 폴더에서는 그 규칙이 `_up`/`eft` 같은 엉뚱한 라벨을 만든다.
+  `load_clip(..., label=)` 를 추가해 라벨을 폴더 이름으로 넘긴다. **두 인자를 안 주면 예전과
+  비트 동일** (49장 미만 폴더 제외 판정도 기존 `render_dirs` 와 같은 기준).
+  · `human_depth` 에 `index`/`depth` 폴더 존재 확인을 넣었다. `--passes rgb` 로만 렌더한 폴더는
+    `objects.json` 은 있는데 두 패스가 없어서 `--overlay` 가 `FileNotFoundError` 로 죽었다
+    (`_source/index`). 이제 `z=-` 로 찍고 넘어간다 — 두 패스가 다 있으면 예전과 비트 동일.
 - **`--deroll` 굽는 기본값을 `True` 로 (D105, 2026-09-01).** D99 가 "검증 후 argparse 기본값 두
   줄만 바꾼다"고 예고한 그 두 줄이다 — `fit_hole_ladder.py:1161`, `sample_camera_bank.py:904`.
   d98 뱅크(20,854행)를 preset 별로 세어 보면 roll 을 흘리는 건 `tilt_up`/`tilt_down` 820행씩,

@@ -7,6 +7,20 @@
 ## [Unreleased]
 
 ### Added
+- **`build_scene_graph.py --subject_source gt` + `gt_trumans.gt_subject()` — TRUMANS subject
+  OBB·조준점을 depth 점군 shell 대신 blend mesh AABB(probe `human_track`)에서 (D106, 2026-09-01).**
+  사용자 지시 "Trumans는 합성데이터니까 최대한 blender 3d mesh를 이용해야해". 왜: 점군은 보이는
+  면만 있는 shell 이라 systematically 작다 — 9편 프레임 정렬 실측: 높이비 median 0.73 (min 0.42),
+  수평비 0.70, 조준점(track center) 오차 median 0.255 m = 키의 16%. 하류가 읽는 것 전부가
+  갈아끼워진다 (`track.center_smooth` = 뱅크 look_at/aim keyframe·follow, `obb.extent`+`track.yaw`
+  = `node_obb_at` 충돌 slack, `viewing_distance.d_ref`). 근거: blend→G 가 `--gravity_source gt`
+  일 때 순수 yaw×1/S 라 blend 축 AABB 가 G 의 OBB 로 정확히 옮겨진다 (assert 로 지킴).
+  기본값 `pointcloud` 면 예전 결과 비트 동일. 노드에 `subject_gt.estimated_aim_err_med_u` 로
+  "추정이 얼마나 틀렸었나"를 박아 둔다 (gravity 의 `estimated_error_deg` 와 같은 규칙).
+- **`scripts/run_trumans_d106_shard.sh` — d99 러너에 `--subject_source gt --ground_source gt`
+  를 더한 재기동 판 (D106, 2026-09-01).** d99 bake 는 canonical 2/188 에서 kill (사용자 지시),
+  pre-GT graph 로 구운 9편 산출물은 wipe. 뱅크 dir 이름은 d99 그대로 (vista d99 와 한 코퍼스),
+  graph 마커만 `.graph_gt_d106`. 188/188 probe 커버리지(human_track 49프레임 + floor_z) 확인.
 - **`results/20260901_d99_preset_grid/render.sh` — 굽는 중인 d99 뱅크의 preset 격자 프리뷰
   (D105, 2026-09-01).** `render_bank_videos.py` 는 **고치지 않았다** — anchor 와 사다리 단을
   고정하고 preset 만 푸는 호출을 드라이버로 감싼 것뿐이다 (스크립트 docstring 의 "같은 강도에서

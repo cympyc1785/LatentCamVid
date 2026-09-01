@@ -7,6 +7,15 @@
 ## [Unreleased]
 
 ### Added
+- **`scripts/run_dynpose_d107_shard.sh` — dynpose 코퍼스 재생성 러너, D84 라우팅 레시피 + d99
+  세팅 (D107, 2026-09-02).** D84 원본 러너는 `/tmp` 에만 있었다 — 이 파일이 영구본이다.
+  유지: anchor 2 + preset 라우터(물체 이동 많으면 track_* 포함) + DataDoP 외부 궤적 4/anchor,
+  τ 씨앗 1.00, hole 사다리 0.20/0.35, 이름 해시 샤딩. 변경 3가지: ① graph 를 GeoCalib auto 로
+  재빌드 — 기존 280 graph 의 53%(149편)가 `camera_up_fallback`(GT 실측 median 10.9° 기움)이라
+  그 위에 deroll 을 걸면 지평선을 틀린 각도로 세운다; ② fit 에 `--deroll` + `smooth_kf`
+  (vista/trumans d99·d106 와 같은 회전 규약 — 세 코퍼스를 섞어 학습); ③ τ 뱅크에도 aim/ease/
+  deroll 플래그 명시. 산출물: `bank_d107` / `hole_bank_d107` / `preset_route_d107.json`,
+  옛 graph 는 `scene_graph_pre_d107.json` 백업.
 - **`build_scene_graph.py --subject_source gt` + `gt_trumans.gt_subject()` — TRUMANS subject
   OBB·조준점을 depth 점군 shell 대신 blend mesh AABB(probe `human_track`)에서 (D106, 2026-09-01).**
   사용자 지시 "Trumans는 합성데이터니까 최대한 blender 3d mesh를 이용해야해". 왜: 점군은 보이는

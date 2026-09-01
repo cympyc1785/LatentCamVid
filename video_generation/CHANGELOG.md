@@ -62,6 +62,13 @@
   `subject_pixel_coverage` / `subject_zero_frames`. subject 노드는 entry 마다 다르므로
   코퍼스 `da3/prompts.json[<entry>]["variant_id"]` 앞머리(`dyn_1__dolly_in__hole0.2` → `dyn_1`)
   로 고른다 — 씬 단위로 고정하면 anchor 2개인 D84 코퍼스에서 절반이 엉뚱한 물체를 잰다.
+  · **`center_box` sweep (`--sweep_hi/--sweep_lo/--sweep_step`, 기본 1.0→0.1 step 0.1).**
+    `subject_in_frame` 은 실루엣 중심 하나에 걸린 임계값이라 상자를 줄인다고 49프레임을 다시
+    렌더할 이유가 없다. `score()` 가 프레임별 중심(`centers`)을 행에 실어 두고 `in_frame_at()`
+    이 사후에 임계만 다시 건다 — 렌더 1회로 전 구간 표가 나온다. `centers[f] is None`
+    (subject 픽셀 0 = 화면 밖이 아니라 **소실**)은 `measure()` 와 똑같이 상자 크기와 무관하게
+    실패로 세므로, **box 1.0 의 값이 곧 `1 − subject 소실 프레임 비율`**이고 거기서부터의
+    하락분만이 순수 구도 성분이다. 표는 stdout + `--out` JSON 의 `sweep` 키에 같이 남는다.
 - **`CinemaTraj/scripts/gendop_release_infer.py --rgbd_fit letterbox` + `letterbox()`
   (D100, 2026-09-01).** `eval.py` 의 center-crop 은 720x1280 을 넣으면 가운데 512x512 만 남겨
   가로 60% 를 버리고, GenDoP 자신의 예시(`assets/examples/text_rgbd`, 208x512 / 288x512)에

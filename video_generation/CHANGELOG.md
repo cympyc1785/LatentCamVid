@@ -52,6 +52,31 @@
     규칙) — 안 그러면 D99 이전 뱅크 전량이 거짓 stale 판정된다.
 
 ### Added
+- **`CinemaTraj/scripts/compare_aim_timing.py` — 매 프레임 조준 vs keyframe 조준 대조 (2026-09-01).**
+  같은 뱅크 변이를 `aim_keyframes=0` / `6+smoothstep` / `6+smooth_kf` 세 arm 으로 되만들어
+  회전 타이밍(`rot_ratio`, `accel_p95`)과 조준 오차(`aim_err_*`), 투영 `subject_in_frame` 을 잰다.
+  위치 채널은 세 arm 이 비트 동일이어야 하므로 `dpos_max` 를 매 행에 찍는다 (실측 전 행 0.0).
+  **`aim=="look_at"` 변이만** 대상이다 — `aim="traj"` 에서 `aim_keyframes=0` 은 "매 프레임 조준"이
+  아니라 **조준 안 함**(`build_poses.py` 마지막 `else`)이라 대조 자체가 성립하지 않는다.
+  TRUMANS 12편 480변이 실측(중앙값):
+
+  | arm | rot_ratio | accel_p95 | aim_err_f0 | aim_err_kf_rest | aim_err_post |
+  |---|---|---|---|---|---|
+  | everyframe | 2.37 | 0.229 | 0.000 | 0.000 | 0.000 |
+  | kf6_smoothstep | 5.01 | 0.698 | 17.582 | 0.000 | 1.323 |
+  | kf6_smooth_kf | 3.48 | 0.231 | 17.582 | 1.747 | 2.174 |
+
+  `aim_err_f0` 17.58° 는 보간 오차가 아니라 keyframe 경로가 frame 0 회전을 **일부러** 소스와
+  같게 못 박은 값이다 (배포 뱅크는 `aim_anchor="subject"` 라 everyframe 쪽에는 램프가 안 걸린다).
+  `sif` 는 세 arm 모두 1.000 이라 중앙 80% 안에서는 차이가 안 난다.
+- **`CinemaTraj/scripts/viz_tau_shape_topdown.py` — τ vs 궤적 모양 top-down (2026-09-01).**
+  `target_tau` 를 직접 훑어 preset 궤적을 되만들고 graph frame G 의 xy 평면에 겹쳐 그린다
+  (τ 내림차순 렌더 + frame48 끝점 마커라 호가 어디서 끝나는지 보인다). 아래 축에 요청 τ vs
+  실측 τ + 방위각 span 을 같이 찍어 포화 지점을 표시한다. `--auto_lo` 가 τ 하한을 `tau_start`
+  위로 올린다 (`tru_00add26c_a01` 실측 0.6332 — 그 아래는 전부 궤적 0).
+  실측으로 드러난 것: orbit 의 τ 반응은 **반경이 아니라 sweep 각**이고, `obs_az_span` 이 좁으면
+  `fit_tau` 배율이 호를 넓히는 대신 원에서 떼어낸다 (`dr/r_max` stat_4 span 235° → 0.65 vs
+  stat_7 span 16.8° → 0.49~0.78, 후자는 top-down 에서 직선으로 보인다).
 - **`--deroll` 을 렌더 단계에도 (`CinemaTraj/scripts/{render_bank_videos,bank_to_blender_poses}.py`,
   D102, 2026-09-01).** D99 의 `--deroll` 은 뱅크를 **굽는** 쪽(`fit_hole_ladder.py`)에만 있어서,
   그 플래그 이전에 구워진 뱅크를 나중 뱅크와 나란히 놓으면 지평선 기울기가 대조를 덮는다.

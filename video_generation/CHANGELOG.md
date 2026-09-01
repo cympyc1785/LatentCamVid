@@ -52,6 +52,34 @@
     규칙) — 안 그러면 D99 이전 뱅크 전량이 거짓 stale 판정된다.
 
 ### Added
+- **`CinemaTraj/scripts/eval_subject_in_frame.py` — eval 폴더 여러 벌을 같은 점군에 렌더해
+  `subject_in_frame` 을 비교 (D100, 2026-09-01).** `verify.py` 는 `out/<video>/` 한 벌
+  (`decision.json` + `poses.npz` + fingerprint)에 묶여 있어서 **모델이 예측한 궤적**에는 못 건다.
+  이쪽은 궤적의 출처를 안 따지고 `test/<name>_transforms_pred.json` 만 받아
+  `--eval_dir LABEL=DIR` 로 arm 을 여러 개 붙인다 (GT 는 `--include_gt` 로 ref 에서 자동 추가).
+  지표 정의는 `verify.py:measure()` 를 **import 해서** 쓴다 (같은 정의를 두 번 안 적는다):
+  `subject_in_frame`(중앙 `center_box` 0.80 안에 실루엣 중심) + 맥락용 `hole_fraction` /
+  `subject_pixel_coverage` / `subject_zero_frames`. subject 노드는 entry 마다 다르므로
+  코퍼스 `da3/prompts.json[<entry>]["variant_id"]` 앞머리(`dyn_1__dolly_in__hole0.2` → `dyn_1`)
+  로 고른다 — 씬 단위로 고정하면 anchor 2개인 D84 코퍼스에서 절반이 엉뚱한 물체를 잰다.
+- **`CinemaTraj/scripts/gendop_release_infer.py --rgbd_fit letterbox` + `letterbox()`
+  (D100, 2026-09-01).** `eval.py` 의 center-crop 은 720x1280 을 넣으면 가운데 512x512 만 남겨
+  가로 60% 를 버리고, GenDoP 자신의 예시(`assets/examples/text_rgbd`, 208x512 / 288x512)에
+  있는 **zero-pad 띠**도 없앤다. 기본값은 `crop` 이라 기존 vista4d 경로는 bit-identical.
+- `CinemaTraj/scripts/gendop_release_infer.py --depth_norm {none,median}` +
+  `--depth_target_median` (D100). 아래 Changed 의 실측으로 **무의미함이 증명**되어 실제
+  실행은 `none`(= `eval.py` 그대로)으로 했다. 스위치는 재확인용으로 남긴다.
+- `CinemaTraj/scripts/gendop_preds_to_eval_dir.py` 의 `--prefix` / `--npz_kind` +
+  `--video` 선택화 (D100). `--video` 를 생략하면 prefix 아래 **전 scene** 을 한 번에 돈다
+  (dynpose val 은 22 scene 37 entry 라 필수). ref 이름은 `<prefix>_<scene>_<idx>_*`,
+  npz 이름은 `<npz_kind>__<scene>__<idx>.npz` 로 따로 잡는다.
+- `CinemaTraj/scripts/dynpose_gendop_inputs.py` — dynpose 코퍼스 entry → GenDoP RGBD 입력
+  (`frame_0000.png` + `frame_depth_0000.npy`) 심기. scene 당 1벌을 만들고 entry 별 symlink 를
+  건다 (같은 scene 의 37 entry 가 같은 frame0 를 본다).
+- `CinemaTraj/scripts/render_pred_depth_warp.py` 의 `--name_prefix` / `--cloud_root` /
+  `--eval_data` / `--corpus_root` — 코퍼스 손잡이 4개. vista4d(`vista4d_<video>_<i>`, `out/`,
+  `Vista4D-Eval-Data`)와 dynpose(`dynpose_<uuid>_<i>`, `out_dynpose/`, `DynPose-LBM`)를
+  같은 스크립트로 돌린다.
 - `decode/build_poses.py` 의 `deroll_poses()` / `_roll_about_forward()` 와
   `build_poses(..., deroll=False)`, `--deroll` / `--no_deroll` CLI 쌍 (D99). 같은 쌍이
   `scripts/sample_camera_bank.py` / `scripts/fit_hole_ladder.py` 에도 있고, 뱅크 `fixed` 블록에
@@ -59,6 +87,25 @@
   `roll_vs_frame0_max_deg` / `deroll` / `deroll_skipped` 를 추가.
 
 ### Changed
+- **릴리즈 `text_rgbd` ckpt 의 RGBD 조건은 우리 입력에서 사실상 무효 — 실측 (D100,
+  2026-09-01).** `--depth_norm none` 과 `median` 이 bit-identical 로 나온 게 발단이었다.
+  `cond_embeds` 를 채널별로(text `[:,:77]` / image `[:,77:334]` / depth `[:,334:]`) 재고,
+  같은 seed 로 뽑은 pose 토큰 301개의 차이를 같이 셌다.
+  · **image 채널은 완전 무반응.** GenDoP 자신의 예시에서 RGB 를 다른 case 로 바꿔도
+    d_img 0.0592 / **tok 0/301**, zeros 0.0499 / 0/301, 가우시안 노이즈 0.0441 / 0/301,
+    우리 RGB 0.1101 / 0/301.
+  · **depth 채널은 depth *내용*이 아니라 zero-pad 띠 기하에 반응한다.** case2→case3 은
+    **같은 288x512 띠**에 다른 씬인데 d_dep 0.0202 / **0/301**. 반면 띠 폭이 다른
+    case2→case1(208x512)은 11.4548 / 58/301, 띠가 아예 없는 우리 720x1280 center-crop 은
+    11.4416 / 83/301, 그 우리 depth 를 **같은 288x512 띠에 레터박스**하면 다시
+    0.0378 / **0/301** 로 돌아온다.
+  · depth 는 스케일 불변(×100 → d_dep 0.0058 / 0/301) — `--depth_norm` 이 무의미한 이유가
+    이것이고, `none`/`median` 이 bit-identical 이던 것도 전부 설명된다.
+  · text 를 바꾸면 d_text 5.4786 / **277/301**. 즉 이 ckpt 는 사실상 text-only 다.
+  → 실행 설정은 `--rgbd_fit letterbox --depth_norm none`. letterbox 는 화각을 안 버리면서
+    depth 토큰을 학습 분포(띠 있음) 안에 둔다. **다만 위 실측대로 조건 신호는 거의 안 바뀌므로,
+    같은 문장을 받은 entry 들 사이의 차이는 대부분 샘플링 잡음이다**
+    (`generate_mode=sample`, `do_sample=True, top_k=10`).
 - **중력축 기본 소스가 `--gravity_source auto` — GeoCalib 사이드카가 있으면 그것, 없으면
   예전 ground RANSAC (D98, 2026-09-01).** `scripts/build_scene_graph.py` 의 새 인자
   `--gravity_source {auto,ransac,gt,geocalib}` (기본 `auto`).

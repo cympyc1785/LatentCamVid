@@ -14,10 +14,17 @@
   진짜 frame-0 잔재는 **G1** 이었다 — `behind_profile` 이 궤적 프레임 하나를 샘플된 소스
   프레임 **전부**에 되쏘아서, frame 0 에 서 있던 사람이 궤적 48프레임의 카메라까지 막았다
   (같은 리포 `render.standoff` 는 `temporal_persistence=False` 로 정반대 규약이었다,
-  `lbm/render.py:105-108`). 플래그를 켜면 `t != plan_frame` 인 소스 프레임에서 **동적 픽셀만**
-  증거에서 빠지고, 정적 표면은 전 프레임 관측을 그대로 쓴다. 시간이 맞는 소스 프레임은
-  `frames` 균등 샘플에 없어도 **추가**한다 (안 그러면 "시간축 정합"이 "동적 충돌 끄기"가 된다).
-  끄면 `dynamic_mask=None` / `plan_frame=None` 이라 예전 경로와 **bit-identical**.
+  `lbm/render.py:105-108`).
+  **채널 분리 (사용자 지시 2026-09-02, "dynamic 을 완전 빼지는 말고 dynamic 의 경우 해당 시간의
+  plan, src 카메라만 매칭해서 이용해서 따로 측정하게 해줘").** `behind_surface_frames(channel=)`
+  가 셋으로 갈린다 — `"all"`(=레거시) / `"static"`(전 소스 프레임, **동적 픽셀 제외**) /
+  `"dynamic"`(**시간이 맞는 소스 프레임 1장만**, **동적 픽셀만**). 게이트가 보는
+  `behind_frac` 은 두 채널의 **합집합**이라 의미가 안 바뀌고, 동적 충돌은 꺼지지 않는다.
+  갈라 놓은 건 진단용 4열: `behind_static_frames/_worst`, `behind_dyn_frames/_worst`
+  (`behind_dyn_worst ≤ 1` — 소스 프레임 1장만 보므로).
+  이전 설계(매칭 프레임을 `frames` 에 **주입**)는 프레임 집합이 arm 마다 달라져 A/B 를
+  오염시켰으므로 폐기했다 — static 채널은 `frames` 를 그대로 쓴다.
+  끄면 `dynamic_mask=None` / `plan_frame=None` / `channel="all"` 이라 예전 경로와 **bit-identical**.
   `lbm/gates.py`(`behind_surface_frames`, `behind_profile`) +
   `scripts/{sample_camera_bank,fit_hole_ladder}.py`.
   **정량 (통제 A/B, `--behind_src_frames 49` 로 양쪽 프레임 집합 고정 후 on/off):**
@@ -47,6 +54,27 @@
   면 D113 이전과 완전히 동일.
 
 ### Added
+- **`CinemaTraj/scripts/audit_scene_scale.py` — 씬 단위 `S` 정의 후보 감사 (2026-09-02).**
+  사용자 지적: "scene scale 은 카메라가 돌아서 다른 공간을 보면 달라질 수도 있을 것 같은데
+  sky 나 dynamic 을 제외한 나머지 depth 들을 다 unproject 해서 첫 카메라나 카메라 centroid 에서의
+  point 거리 median 이 더 적절하지 않음?". 지금 정의(`scene_graph/scale.py:scene_scale`)는
+  frame 0 non-sky **평균 ray length** 하나다. 후보 6종(`S_f0`, `S_f0_nodyn`, `S_frames_mean`,
+  `S_pts_first`, `S_pts_centroid`, 프레임별 산포 `S_t_p05/p50/p95/ratio/drift`)을 같은 영상에서
+  나란히 잰다. **고치지는 않는다** — 바꾸면 뱅크 정체성이 바뀌어 재굽기가 따라온다.
+  전 코퍼스 72편 실측: `S_t_ratio`(한 클립 안 프레임별 최대/최소) p50 **1.0961**,
+  p95 1.8496, max 12.4030, `>1.2` 25.0% / `>1.5` 12.5% / `>2.0` 5.6%.
+  `r_pts_first`(=`S_pts_first/S_f0`) p50 **1.0078**, p05 0.4279, p95 1.7514, max 4.3498.
+  CPU 전용, env `vista4d`. CSV `/tmp/scene_scale_all.csv`.
+- **`CinemaTraj/scripts/audit_tau_axes.py` — 이동량 축 후보 비교 (2026-09-02).**
+  사용자 지시: "tau 이동거리 기준을 object-centric + track, free-moving 을 분리하려는데 각각
+  기준이 될 수 있는 수치들이 뭐가 있을지 후보군들 비교해줘". 계열은 `aim` 으로 가른다
+  (`family_of`: `track_*` → track / `aim=="look_at"` → object / `free`·`traj` → free).
+  축 11종(`tau_source`, `tau_shape`, `path_S`, `net_S`, `rel_sub`, `dr_ref`, `r_ratio`,
+  `az_deg`, `elev_deg`, `rot_deg`, `subtend_ratio`)을 계열 × 축으로 재고, 좋은 축의 조건 셋
+  (`hole_fraction` 과의 Spearman ρ / 씬 간 비교가능성 `cv_between` / 안 죽어 있음 `frac_flat`)
+  을 한 줄에 낸다. `--status solved` 로 사다리가 못 푼 변이를 뺀다.
+  `hole_bank_k6_d99` 52편 12,478 solved 변이 실측 결과는 대화 기록 참조.
+  CPU 전용, env `vista4d`. CSV `/tmp/tau_axes_solved.csv`.
 - **`CinemaTraj/scripts/viz_gravity.py` — GeoCalib 중력방향 오버레이 영상 (2026-09-02).**
   사용자 지시: "lens scene 에서 GeoCalib 으로 나온 중력방향 시각화해줘". `--style plumb` 는
   격자 셀마다 유효(비-sky) 픽셀을 unproject 해서 `up_world` 방향 선분을 긋고, `--style grid` 는

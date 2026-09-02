@@ -6,7 +6,53 @@
 
 ## [Unreleased]
 
+### Added
+- **G1(표면 뒤) 증거 소스를 고르는 `--collision_source {depth,mesh,both}` (D116, 기본 `depth`,
+  2026-09-02).** depth shell 은 **소스 카메라가 본 표면**만 안다 — 소스는 자기 뒤를 안 보므로
+  뒤로 물러나 벽을 뚫는 궤적에서 `behind_frac` 이 **정확히 0.0000** 이다. TRUMANS 는 우리가
+  Blender 에서 렌더한 클립이라 `.blend` 부피 GT 가 있으니 그걸로 직접 잰다.
+  · `mesh` = `.blend` 삼각형 → 5 cm bool 점유격자 → `scipy.ndimage.distance_transform_edt`
+    로 clearance, "안쪽" 판정은 `scipy.ndimage.label` 로 **소스 카메라 중심에서 flood-fill 한
+    도달 성분**의 여집합 (`binary_fill_holes` 는 닫힌 방이 자기 내부를 채워 못 쓴다).
+  · `both` = 두 판의 **위반 프레임 합집합**. 배타 선택이 아닌 이유는 실측이다 —
+    `tru_1d076f8c_a00_s3f0k6` 836변이, 임계 `0.02·S` = 3.9 cm 에서 **depth 130 / mesh 357 /
+    겹침 0**. 어느 한쪽만 쓰면 다른 쪽 위반을 통째로 잃는다. 합집합은 프레임 마스크로 센다
+    (`gates.behind_profile` / `mesh_collision.mesh_behind_profile` 의 detail dict 에 채널별
+    `mask` 추가) — 개수 합은 중복 계상, `max()` 는 과소보고라 **안전 게이트가 느슨해진다**.
+  · 3-way smoke (a00, anchor `dyn_0`, preset 3종, 전부 rc=0): `dolly_out__hole0.5` 의 knob 이
+    depth 3.0(binding `none`) → mesh/both 1.0(binding `collision`), `pull_out_arc_left__hole0.5`
+    3.0 → 0.855, `dolly_in` 은 depth `collision` / mesh `obb` / **both `collision`** — `both` 가
+    mesh 의 상한과 depth 의 판정을 둘 다 살린다.
+  · D47 규약(소스 카메라 자신을 기각하는 임계는 버그다)은 mesh 경로에도 assert 로 강제한다
+    (`behind_context` 에서 소스 중심 전량의 도달성 + clearance > `margin_frac·S`).
+  · 격자 경로 해석은 `lbm/mesh_collision.resolve_mesh_grid` **한 군데**에 둔다 — τ 뱅크와
+    사다리가 다른 G1 으로 굽히면 사다리가 τ 뱅크에서 걸러진 변이를 되살린다. `mesh`/`both`
+    인데 격자가 없으면 **죽는다** (조용히 depth 로 떨어지면 열 이름이 같아서 사후 구분 불가).
+  · 뱅크 provenance: 두 CSV 의 `bank.json` `collision` 블록에 `source` / `mesh_grid` 기록.
+    `sample_camera_bank.py` 는 `--measure_behind` 가 꺼져 있으면(τ 뱅크 기본) `"off"`.
+    `SHAPE_DEFAULTS` 에는 **안 넣는다** — 그 표는 `emit_bank.py` 가 *pose* 를 재현하기 위한
+    것이고 게이트는 pose 를 안 바꾼다.
+  `lbm/mesh_collision.py`(`resolve_mesh_grid`, detail `mask`), `lbm/gates.py`(detail `mask`),
+  `scripts/{sample_camera_bank,fit_hole_ladder}.py`(`--collision_source`/`--mesh_grid`).
+- **`scripts/build_trumans_mesh_grid.py` — TRUMANS chunk → `mesh_grid.npz` (D116).**
+  Blender(`bpy`, `scripts/trumans_export_mesh.py`)와 vista4d(scipy, `lbm.mesh_collision.build_grid`)
+  가 서로 다른 인터프리터라 두 단계인데, 둘 다 `.blend` 경로·프레임 범위·소스 카메라 npz 를
+  알아야 한다 (`tru_<rec8>_a<NN>_<tag>` → recon 폴더). 그 해석을 러너 셸에 손으로 적으면 두
+  벌이 되므로(전례: `min_sweep_deg` 가 15↔30 으로 어긋남) 여기 한 벌만 둔다. 출력은
+  `resolve_mesh_grid` 의 기본 경로 `<output_root>/<video>/mesh_grid.npz`. 중간 삼각형
+  `mesh_gt.npz` 는 `--keep_tris` 없으면 지운다. 비용(a00, 502 objects, 49프레임): Blender
+  export ~2분 + 격자 88.6 s, chunk 당 **1회** (이분법이 몇 번 돌든 격자만 읽는다).
+  실측 격자: `voxel 0.05` / `static_shape (258,304,106)` / `static_occupied 390278` /
+  `reachable 7458013` / `free 7923514` / 13.7 MB.
+
 ### Changed
+- **`--collision_time_match` 기본 off → **on** (D116, 사용자 지시 "일단 켜줘", 2026-09-02).**
+  끄는 쪽은 `--no_collision_time_match` 로 남는다. 위 "G1 충돌 판정에 시간축 정합" 항목의
+  통제 A/B 대로 **순수하게 느슨해지는 방향으로만** 작동한다 (parkour 4/664, snowboard 6/196,
+  감소 0건). 두 러너 셸은 D105 교훈대로 기본값에 맡기지 않고 **명시적으로** 넘긴다
+  (`scripts/run_k6_d115_shard.sh` = `--collision_time_match --collision_source depth`,
+  `scripts/run_trumans_d115_shard.sh` = `--collision_time_match --collision_source both`
+  + mesh 격자 단계 ②-b 추가).
 - **`fit_tau` 이분법이 깎는 대상을 preset 모양에 맞게 (F9, `--orbit_fixed_sweep`, 기본 **켬**,
   2026-09-02).** 증상: `orbit_left` 로 구운 뱅크가 이름만 orbit 이고 실제로는 3° 만 도는
   직선이었다. 원인: `se3.scale_traj(rel, s)` 는 SE(3) **로그 전체**를 s 배 해서 이동과 회전을

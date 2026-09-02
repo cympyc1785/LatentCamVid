@@ -5,6 +5,41 @@ All notable changes to the latentcam sub-project. Follows [Keep a Changelog](htt
 ## [Unreleased]
 
 ### Added
+- **PE-AV video cross-attention — 레이어 순서 `text CA -> video CA -> geo CA` (D117, 2026-09-03).**
+  사용자 지시: "text CA - video emb CA - da3 geo emb CA 순으로 layer를 배치되도록 latentcam 모델
+  수정해줘". 인코더는 `facebook/pe-av-large` (perception_models 리비전,
+  `tools/perception_models/checkpoints/pe-av-large-pm`) 이고 **얼어 있다** — 입력이 소스 영상과
+  캡션뿐이라 학습 중 안 변한다. 그래서 매 step 인코더를 돌리는 대신 `geo_raw_cache_dir` 과 같은
+  방식으로 미리 구워 `__init__` 에서 전량 RAM 에 올린다 (fork 로 worker 가 copy-on-write 공유).
+  · `models/camera_diffusion_model_latent.py` — video CA 는 `self.layers`(레이어당 7 모듈)를
+    10 모듈로 넓히는 게 아니라 **별도 `self.video_layers`** 로 들어간다. 기존 체크포인트의
+    `layers.<i>.<0..6>.*` 키가 한 글자도 안 바뀌어야 하기 때문 — 넓혔으면 인덱스가 밀려서 옛
+    ckpt 가 전부 못 읽힌다. 검증: 옛 state_dict 를 새 모델에 로드 → `unexpected_keys` 0,
+    새 키 30개만 추가되고, `video_emb=None` 이면 출력이 **비트 동일**.
+    FiLM 은 `mod1`(self)/`mod2`(geo) 옆에 `mod3` 를 새로 둔다.
+  · `_build_video_tok()` — arm A 에서 PE-AV text(1024)와 video(1792)를 **각각** hidden 으로
+    투영한 뒤 토큰축으로 잇는다. positional encoding 은 concat **전에 파트별로** 더한다:
+    한 번에 더하면 text 길이가 배치마다 달라져 49 프레임 토큰의 위치가 흔들린다.
+  · `main/cache_peav_embeddings.py` (신규) — video `(T,1792)` scene 파일 + dedup 된 text
+    `(U,L,1024)` 한 파일. **env `vista4d` 에서만 돈다** (latentcam env 에 xformers 가 없어
+    PE-AV import 자체가 실패). 학습은 `.pt` 만 읽으므로 env 가 갈려도 무관.
+    d107 실측: 264 scene / NL 캡션 2,100종 (L=32, max 26 tok) / 390 s.
+  · `main/dataset_dl3dv.py` `_preload_peav()` — 캐시에 없는 scene·segment 가 하나라도 있으면
+    **죽는다**. 조용히 빠지면 그 배치 항목만 `peav_*` 키가 없어 `collate_fn` 의 `torch.stack`
+    에서 터지거나, 더 나쁘게는 일부만 조건이 붙은 채로 학습된다.
+  · config 4키 (전부 기본값이 예전 동작): `peav_video_cache_dir` / `peav_text_cache` /
+    `video_latent_dim`(0=off, 1792=on) / `video_text_in_stream`. `text_encoder: PEAV` 도 추가 —
+    umt5 를 안 띄우고 PE-AV text 를 text CA 로 올린다 (그때 `text_proj` 입력이 4096→1024).
+  · **미지원**: `is_ar` / `per_token_noise`. 트레이너가 assert 로 막는다 (`forward_ar` 는
+    애초에 `cond` 도 concat 하지 않는 별도 경로다).
+- **`main/conf/experiment/dynpose_d117{a_peavvid,b_peavtext}.yaml` — video CA 2-arm (D117, 2026-09-03).**
+  둘 다 d107_k6 와 코퍼스·손실·뷰 샘플링·분모가 같고 PE-AV 줄만 다르다.
+  arm A(hybrid) = text CA umt5(struct 캡션) + video CA `[PE-AV NL text | 49 frame]`;
+  arm B(full PE-AV) = text CA PE-AV(NL 캡션, umt5 제거) + video CA frame 토큰만.
+  캡션이 두 형식인 이유는 실측이다 — target 명사만 스왑한 검색 프로브
+  (`scripts/eval/peav_target_match.py`)에서 우리 코퍼스의 struct 형식이 4형식 중 **꼴찌**
+  (test top1 0.410) 였고 NL 문장이 1등(0.686, chance 0.071) 이었다. PE-AV 쪽에는 NL 을,
+  umt5 쪽에는 기존 struct 를 준다.
 - **`main/conf/experiment/dynpose_d110_k6_dd10.yaml` (D110, 2026-09-02).** D109 와 같은
   dd 10%/preset 90% 비율이지만 **데이터를 버리는 대신 늘려서** 만든다 — 사용자: "이러면 개수가
   부족하잖아 현재 비율 유지하되 추가로 preset (track 포함)을 더 만들어줘". d107 τ뱅크는 그대로

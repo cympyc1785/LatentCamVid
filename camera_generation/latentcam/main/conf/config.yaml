@@ -178,6 +178,10 @@ vae_ckpt_path: /data1/cympyc1785/LatentCamVid/camera_generation/latentcam/checkp
 num_gpus: 1
 num_thread: 8
 num_frames: 49
+# 'T5' (기본) = umt5-xxl 을 여기서 돌려 text CA 에 먹인다 (4096-d).
+# [new 2026-09-03] 'PEAV' = umt5 를 아예 안 띄우고 peav_text_cache 의 PE-AV text tower 토큰
+#   (1024-d) 을 그대로 text CA 로 (arm B). 그러면 캡션도 struct 가 아니라 자연어여야 한다 —
+#   PE-AV 임베딩 공간에서 struct 형식이 4형식 중 꼴찌였다 (peav_target_match.py, 2026-09-03).
 text_encoder: T5
 text_len: 512
 t5_dtype: bfloat16
@@ -458,6 +462,25 @@ geo_latent_cache_dir: null
 # scene 파일 52개를 공유한다 (~2.2 GB). 파일이 없는 scene 은 조용히 on-the-fly 로 떨어진다.
 geo_raw_cache_dir: null
 geo_raw_cache_preload: true   # __init__ 에서 전량 RAM 적재 (fork 로 worker 가 공유; false = 매번 read)
+# [new 2026-09-03] PE-AV (facebook/pe-av-large) 스트림 = "video CA". 레이어 순서는
+# text CA -> **video CA** -> geo CA 이고, video CA 는 self.layers 를 넓히는 게 아니라 별도
+# self.video_layers 로 들어가므로 아래 4개가 전부 기본값이면 모델 state_dict 와 출력이 예전과
+# **비트 동일**하다. 캐시는 main/cache_peav_embeddings.py 가 굽는다 (env vista4d — latentcam
+# env 엔 xformers 가 없어서 PE-AV import 자체가 안 된다). 학습은 캐시만 읽으므로 상관없다.
+#   peav_video_cache_dir -> <dir>/<scene_key>.pt = {'emb': (T,1792) fp16, 'frames': T}.
+#                           PE-AV visual tower 는 프레임당 토큰 1개다 (공간은 내부 pooling).
+#                           geo_raw_cache_dir 과 같은 scene_key 규약 + __init__ 전량 preload.
+#   peav_text_cache      -> 파일 하나 = {'by_name','emb'(U,L,1024),'mask','text','template'}.
+#                           캡션 중복이 심해서 dedup 후 인덱스로 참조한다.
+peav_video_cache_dir: null
+peav_text_cache: null
+# video CA 자체의 on/off 겸 입력 차원. 1792 = pe-av-large visual tower per-frame 토큰.
+# 0 (기본) 이면 video_layers/video_proj/mod3 가 아예 생성되지 않는다.
+video_latent_dim: 0
+# arm A 전용: PE-AV **text** 토큰(1024-d)을 같은 video CA 의 key/value **앞쪽**에 붙인다
+# (`[NL text tokens | 49 frame tokens]`). text CA 는 그대로 umt5 struct 캡션이 맡는다.
+# arm B (text_encoder: PEAV) 는 PE-AV text 가 이미 text CA 로 갔으므로 여기서는 false.
+video_text_in_stream: false
 geo_inseg_span: null          # in-seg sampling span override (null = full segment)
 geo_covis_radius: 2.0         # covisibility retrieval: ball radius
 geo_covis_theta0: 10.0        # covisibility retrieval: min view-angle separation (deg)

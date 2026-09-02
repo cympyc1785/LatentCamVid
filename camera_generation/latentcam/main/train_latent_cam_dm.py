@@ -278,9 +278,26 @@ def build_track_cond(data, t_lat, device, dropout_p=0.0):
     return cond
 
 
+def build_video_cond(data, device):
+    """[new 2026-09-03] PE-AV 스트림(D117 video CA) 을 모델 kwargs dict 로 만든다.
+
+    데이터셋이 `peav_video` 를 안 실어 주면 **빈 dict** 라 model(...) 호출이 글자 그대로
+    예전과 같아진다 (video_latent_dim=0 인 arm 은 이 경로 자체가 no-op).
+    `peav_text` 는 두 arm 에서 쓰임이 다르다 — arm A 는 video CA 의 key/value 앞쪽에 붙고
+    (`video_text_dim>0`), arm B 는 umt5 를 대신해 **text CA** 로 들어간다. 그 갈래는
+    `cfg.video_text_in_stream` 이 정하고, 여기서는 arm A 일 때만 kwargs 에 담는다."""
+    kw = {}
+    if 'peav_video' in data:
+        kw['video_emb'] = data['peav_video'].to(device).float()
+    if kw and getattr(cfg, 'video_text_in_stream', False) and 'peav_text' in data:
+        kw['video_text_emb'] = data['peav_text'].to(device).float()
+        kw['video_text_mask'] = data['peav_text_mask'].to(device).bool()
+    return kw
+
+
 @torch.no_grad()
 def sample(model, scheduler, traj_len, text_emb, text_masks, point_emb, point_mask, generator=None,
-           cond=None):
+           cond=None, video_kw=None):
     """generator: x_T 추첨용 **CPU** torch.Generator. None 이면 전역 RNG (기존 동작).
 
     이걸 넘기면 sampling 이 완전히 결정적이 된다 — cfg.sampling_type='ddim' 의 DDIMScheduler
@@ -300,7 +317,7 @@ def sample(model, scheduler, traj_len, text_emb, text_masks, point_emb, point_ma
             device=device,
         )
         noise_pred = model(x_t, timesteps.float(), text_emb, text_masks, point_emb, point_mask,
-                           cond=cond)
+                           cond=cond, **(video_kw or {}))
         x_t = scheduler.step(noise_pred, t, x_t).prev_sample
     return x_t
 
@@ -497,11 +514,28 @@ def train():
         print(f"(model) target_track_dim={_track_dim}: cam_in input = cam_dim + {_track_dim} | "
               f"train dropout={float(getattr(cfg, 'target_track_dropout', 0.1))} | "
               f"val cond={'null (track 없이)' if getattr(cfg, 'target_track_val_drop', False) else 'track'}")
+    # [new 2026-09-03] D117 video CA. cfg.video_latent_dim=0 (기본) 이면 _vid_kw 가 비어 있어
+    # 모델 구조·state_dict 가 예전과 비트 동일하다. 1792 = PE-AV(pe-av-large) visual tower 의
+    # per-frame 토큰 차원. video_text_in_stream (arm A) 이면 PE-AV text(1024) 가 같은 CA 의
+    # key/value 앞쪽에 붙는다.
+    _vid_kw = {}
+    _vld = int(getattr(cfg, 'video_latent_dim', 0) or 0)
+    if _vld > 0:
+        assert not getattr(cfg, 'is_ar', False) and not getattr(cfg, 'per_token_noise', False), \
+            "video_latent_dim>0 은 표준 diffusion 경로에만 배선되어 있다 (is_ar/per_token_noise 미지원)"
+        _vtd = 1024 if getattr(cfg, 'video_text_in_stream', False) else 0
+        _vid_kw = dict(video_latent_dim=_vld, video_text_dim=_vtd)
+        print(f"(model) video CA: video_latent_dim={_vld} video_text_dim={_vtd} "
+              f"(순서 text CA -> video CA -> geo CA)")
+    # arm B (text_encoder='PEAV') 는 text CA 입력이 umt5 4096 이 아니라 PE-AV 1024 다.
+    if cfg.text_encoder == 'PEAV':
+        _geo_kw['text_dim'] = 1024
+        print("(model) text_encoder=PEAV: text_proj 입력 = 1024 (umt5 미사용)")
     if cfg.point_encoder != 'custom':
-        model = CameraDiffusionModel(cam_dim=cfg.cam_dim, cond_dim=_track_dim, **_geo_kw)
+        model = CameraDiffusionModel(cam_dim=cfg.cam_dim, cond_dim=_track_dim, **_geo_kw, **_vid_kw)
     else:
         model = CameraDiffusionModel(cam_dim=cfg.cam_dim, cond_dim=_track_dim,
-                                     pc_encoder=pc_encoder, **_geo_kw)
+                                     pc_encoder=pc_encoder, **_geo_kw, **_vid_kw)
     
     # Load weights from the (peeked) resume checkpoint. Optimizer/step/epoch are
     # restored after accelerator.prepare() below (full resume only).
@@ -694,8 +728,16 @@ def train():
                     text_embeds, text_masks = text_encoder(text_prompt, device)
                 elif cfg.text_encoder == 'CLIP':
                     text_embeds, text_masks = encode_text_clip(text_encoder, tokenizer, text_prompt, device=device)
+                elif cfg.text_encoder == 'PEAV':
+                    # [new 2026-09-03] arm B: umt5 대신 PE-AV text tower (1024-d) 를 text CA 로.
+                    # 인코더를 여기서 돌리지 않고 데이터셋 캐시를 그대로 쓴다 (frozen + 캡션이
+                    # 세그먼트 상수라 매 스텝 forward 할 이유가 없다). model 의 text_dim 도
+                    # 1024 여야 한다 — 아래 모델 생성부가 cfg.text_encoder 를 보고 맞춘다.
+                    text_embeds, text_masks = data['peav_text'].to(device), data['peav_text_mask'].to(device)
                 text_embeds = text_embeds.float()
                 text_masks = text_masks.bool()
+                # [new 2026-09-03] video CA kwargs. 캐시가 없으면 빈 dict = 기존 호출.
+                _vkw = build_video_cond(data, device)
                 if cfg.use_vae:
                     traj_latents = camera_vae.encode(traj) / cfg.vae_latent_scale
                 else:
@@ -761,7 +803,7 @@ def train():
                     _cond = (None if getattr(cfg, 'target_track_val_drop', False)
                              else build_track_cond(data, traj_len, device))
                     out = sample(model, noise_scheduler, traj_len, text_embeds, text_masks,
-                                 pc_embeds, pc_masks, generator=_g, cond=_cond)
+                                 pc_embeds, pc_masks, generator=_g, cond=_cond, video_kw=_vkw)
 
                 val_loss_latent = F.mse_loss(out, traj_latents, reduction='mean')
                 total_loss_latent += val_loss_latent * B
@@ -996,8 +1038,16 @@ def train():
                     text_embeds, text_masks = text_encoder(text_prompt, device)
                 elif cfg.text_encoder == 'CLIP':
                     text_embeds, text_masks = encode_text_clip(text_encoder, tokenizer, text_prompt, device=device)
+                elif cfg.text_encoder == 'PEAV':
+                    # [new 2026-09-03] arm B: umt5 대신 PE-AV text tower (1024-d) 를 text CA 로.
+                    # 인코더를 여기서 돌리지 않고 데이터셋 캐시를 그대로 쓴다 (frozen + 캡션이
+                    # 세그먼트 상수라 매 스텝 forward 할 이유가 없다). model 의 text_dim 도
+                    # 1024 여야 한다 — 아래 모델 생성부가 cfg.text_encoder 를 보고 맞춘다.
+                    text_embeds, text_masks = data['peav_text'].to(device), data['peav_text_mask'].to(device)
                 text_embeds = text_embeds.float()
                 text_masks = text_masks.bool()
+                # [new 2026-09-03] video CA kwargs. 캐시가 없으면 빈 dict = 기존 호출.
+                _vkw = build_video_cond(data, device)
                 if cfg.use_vae:
                     traj_latents = camera_vae.encode(traj) / cfg.vae_latent_scale
                 else:
@@ -1055,7 +1105,7 @@ def train():
                 _cond = build_track_cond(data, traj_latents.shape[1], device,
                                          dropout_p=float(getattr(cfg, 'target_track_dropout', 0.1)))
                 noise_pred = model(noisy_x, timesteps.float(), text_embeds, text_masks,
-                                   pc_embeds, pc_masks, cond=_cond)
+                                   pc_embeds, pc_masks, cond=_cond, **_vkw)
                 loss = F.mse_loss(noise_pred, noise)
                 
             t5 = time.time()

@@ -94,6 +94,8 @@ class CameraDiffusionModel(nn.Module):
         geo_cam_raw_dim=0,
         geo_cam_embed_dim=128,
         cond_dim=0,
+        video_latent_dim=0,
+        video_text_dim=0,
     ):
         super().__init__()
 
@@ -140,9 +142,38 @@ class CameraDiffusionModel(nn.Module):
             for _ in range(num_layers)
         ])
 
+        # [new 2026-09-03] video CA (D117). PE-AV(pe-av-large) 의 per-frame video token 을
+        # 세 번째 cross-attn 스트림으로 붙인다. 순서는 **text CA → video CA → geo CA**.
+        # 왜 `self.layers` 를 7→10 모듈로 늘리지 않고 별도 ModuleList 를 두는가:
+        #   ① 기존 체크포인트의 state_dict 키(`layers.<i>.<0..6>.*`)가 한 글자도 안 바뀐다.
+        #   ② video_latent_dim=0 이면 이 블록이 아예 생성되지 않아 파라미터 수·forward 경로가
+        #      기존과 비트 동일하다 (프로젝트 규칙: option 분기로 기존 방식 보존).
+        # 블록 구성은 geo 스트림과 같은 [LayerNorm, CrossAttention, FusedMLP] 3종이고,
+        # FiLM 변조기(mod3)도 geo 의 mod2 와 같은 모양으로 따로 둔다.
+        self.video_latent_dim = int(video_latent_dim)
+        # [new 2026-09-03] arm A 전용: PE-AV **text** 토큰을 같은 video CA 의 key/value 로 앞에
+        # 붙인다 (`[NL text tokens | 49 frame tokens]`). PE-AV text 는 1024-d, video 는 1792-d 라
+        # 토큰축 concat 전에 **각각** hidden 으로 투영해야 한다 — 그래서 proj 가 두 개다.
+        # 0 = video 토큰만 (arm B / 기본).
+        self.video_text_dim = int(video_text_dim)
+        if self.video_latent_dim > 0:
+            self.video_proj = nn.Linear(self.video_latent_dim, hidden_dim)
+            if self.video_text_dim > 0:
+                self.video_text_proj = nn.Linear(self.video_text_dim, hidden_dim)
+            self.mod3 = nn.Linear(hidden_dim, hidden_dim * 2)
+            self.video_layers = nn.ModuleList([
+                nn.ModuleList([
+                    nn.LayerNorm(hidden_dim),
+                    CrossAttention(hidden_dim, num_heads),
+                    FusedMLP(hidden_dim, dropout, nn.GELU, hidden_layer_multiplier=4),
+                ])
+                for _ in range(num_layers)
+            ])
+
         self.out = nn.Linear(hidden_dim, cam_dim)
         self.text_cross_attn_weight = None
         self.geo_cross_attn_weight = None
+        self.video_cross_attn_weight = None
 
         self.geo_encoder = geo_encoder
 
@@ -154,8 +185,46 @@ class CameraDiffusionModel(nn.Module):
         d = self.geo_cam_raw_dim
         return torch.cat([geo_emb[..., :-d], self.geo_cam_mlp(geo_emb[..., -d:])], dim=-1)
 
-    def forward(self, x_t, t, text_emb, text_mask, geo_emb=None, geo_mask=None, cond=None):
+    def _build_video_tok(self, video_emb, video_mask, video_text_emb, video_text_mask):
+        """video CA 의 key/value 토큰과 그 padding mask 를 만든다.
+
+        PE-AV video token 은 **소스 프레임당 1개**라 순서가 곧 시간축이다. text/geo 와 같은
+        방식으로 위치 인코딩을 더해 준다 (안 더하면 CA 가 프레임 순서를 못 본다). arm A 에서
+        PE-AV text 토큰이 같이 오면 **각 파트에 따로** PE 를 더한 뒤 토큰축으로 앞에 붙인다 —
+        concat 후에 한 번에 더하면 text 길이가 배치마다 달라져 video 토큰의 위치가 흔들린다.
+
+        반환: (tok (B,L,hidden), key_padding_mask (B,L) bool = True 가 마스킹 대상 | None)
+        """
+        B, device = video_emb.shape[0], video_emb.device
+        vt = self.video_proj(video_emb)
+        vt = vt + positional_encoding(
+            vt.shape[-2], vt.shape[-1], device=device).unsqueeze(0).expand(B, -1, -1)
+        if video_mask is not None:
+            vt = vt * video_mask.unsqueeze(-1)
+        if self.video_text_dim > 0 and video_text_emb is not None:
+            tt = self.video_text_proj(video_text_emb)
+            tt = tt + positional_encoding(
+                tt.shape[-2], tt.shape[-1], device=device).unsqueeze(0).expand(B, -1, -1)
+            if video_text_mask is not None:
+                tt = tt * video_text_mask.unsqueeze(-1)
+            tok = torch.cat([tt, vt], dim=1)
+            if video_text_mask is None and video_mask is None:
+                return tok, None
+            tm = (video_text_mask if video_text_mask is not None
+                  else tt.new_ones(B, tt.shape[1], dtype=torch.bool))
+            vm = (video_mask if video_mask is not None
+                  else vt.new_ones(B, vt.shape[1], dtype=torch.bool))
+            return tok, ~torch.cat([tm, vm], dim=1)
+        return vt, (None if video_mask is None else ~video_mask)
+
+    def forward(self, x_t, t, text_emb, text_mask, geo_emb=None, geo_mask=None, cond=None,
+                video_emb=None, video_mask=None, video_text_emb=None, video_text_mask=None):
         self.text_cross_attn_weight = None
+        # [new 2026-09-03] video CA. `video_latent_dim==0` 이거나 video_emb 가 없으면 이 스트림은
+        # 통째로 건너뛴다 = 기존 경로와 동일.
+        has_video = (self.video_latent_dim > 0) and (video_emb is not None)
+        if has_video:
+            self.video_cross_attn_weight = None
         # geo latent is provided externally (on-the-fly frozen geo_encoder in the
         # training loop); condition on it whenever geo_emb is given.
         has_geo_latent = geo_emb is not None
@@ -190,7 +259,11 @@ class CameraDiffusionModel(nn.Module):
             geo_tok = self.geo_proj(self._lift_geo_cam(geo_emb))
             geo_tok = geo_tok * geo_mask.unsqueeze(-1)
 
-        for norm1, self_attn, text_cross_attn, mlp1, norm2, geo_cross_attn, mlp2 in self.layers:
+        if has_video:
+            video_tok, video_kpm = self._build_video_tok(
+                video_emb, video_mask, video_text_emb, video_text_mask)
+
+        for _li, (norm1, self_attn, text_cross_attn, mlp1, norm2, geo_cross_attn, mlp2) in enumerate(self.layers):
 
             scale1, shift1 = self.mod1(t_embed).chunk(2, dim=-1)
             if not per_token:                          # (B,D)->(B,1,D) broadcast (legacy)
@@ -203,6 +276,18 @@ class CameraDiffusionModel(nn.Module):
             h = self_attn(h)
             h = text_cross_attn(h, text_tok, key_padding_mask=~text_mask)
             h = mlp1(h) + h
+
+            # ── video CA: text CA 다음, geo CA 앞 (사용자 지정 순서) ──────────────────
+            if has_video:
+                vnorm, video_cross_attn, vmlp = self.video_layers[_li]
+                scale3, shift3 = self.mod3(t_embed).chunk(2, dim=-1)
+                if not per_token:
+                    scale3 = scale3.unsqueeze(1)
+                    shift3 = shift3.unsqueeze(1)
+                h = vnorm(h)
+                h = h * (1 + scale3) + shift3
+                h = video_cross_attn(h, video_tok, key_padding_mask=video_kpm)
+                h = vmlp(h) + h
 
             if has_geo_latent:
                 scale2, shift2 = self.mod2(t_embed).chunk(2, dim=-1)
@@ -221,21 +306,28 @@ class CameraDiffusionModel(nn.Module):
                     self.text_cross_attn_weight = text_cross_attn.attn_weight
                     if has_geo_latent:
                         self.geo_cross_attn_weight = geo_cross_attn.attn_weight
+                    if has_video:
+                        self.video_cross_attn_weight = video_cross_attn.attn_weight
                 else:
                     self.text_cross_attn_weight += text_cross_attn.attn_weight
                     if has_geo_latent:
                         self.geo_cross_attn_weight += geo_cross_attn.attn_weight
-            
-            
+                    if has_video:
+                        self.video_cross_attn_weight += video_cross_attn.attn_weight
+
+
         if self.training is False:
             self.text_cross_attn_weight /= len(self.layers)
             if has_geo_latent:
                 self.geo_cross_attn_weight /= len(self.layers)
+            if has_video:
+                self.video_cross_attn_weight /= len(self.layers)
 
         h = h[:, :T, :]
         return self.out(h)# (B, T, 9)
 
-    def forward_ar(self, x_t, t, text_emb, text_mask, geo_emb=None, geo_mask=None, history=None):
+    def forward_ar(self, x_t, t, text_emb, text_mask, geo_emb=None, geo_mask=None, history=None,
+                   video_emb=None, video_mask=None, video_text_emb=None, video_text_mask=None):
         """Chunk-wise AR: denoise the current chunk x_t (B, Cc, cam_dim) conditioned on
         past CLEAN latents `history` (B, Ph, cam_dim) via CAUSAL self-attention over the
         concatenated sequence [history | current], plus text/geo cross-attn. Diffusion
@@ -262,13 +354,18 @@ class CameraDiffusionModel(nn.Module):
         if has_geo_latent:
             geo_tok = self.geo_proj(self._lift_geo_cam(geo_emb)) * geo_mask.unsqueeze(-1)
 
+        has_video = (self.video_latent_dim > 0) and (video_emb is not None)
+        if has_video:
+            video_tok, video_kpm = self._build_video_tok(
+                video_emb, video_mask, video_text_emb, video_text_mask)
+
         # causal self-attn mask: position i attends to positions <= i
         causal = torch.triu(torch.full((L, L), float("-inf"), device=device), diagonal=1)
         # time modulation applies to current chunk positions only (history is clean)
         mod_pos = torch.zeros(1, L, 1, device=device)
         mod_pos[:, n_hist:, :] = 1.0
 
-        for norm1, self_attn, text_cross_attn, mlp1, norm2, geo_cross_attn, mlp2 in self.layers:
+        for _li, (norm1, self_attn, text_cross_attn, mlp1, norm2, geo_cross_attn, mlp2) in enumerate(self.layers):
             s1, sh1 = self.mod1(t_embed).chunk(2, dim=-1)
             s1 = s1.unsqueeze(1); sh1 = sh1.unsqueeze(1)
             h = norm1(h)
@@ -276,6 +373,14 @@ class CameraDiffusionModel(nn.Module):
             h = self_attn(h, attn_mask=causal)
             h = text_cross_attn(h, text_tok, key_padding_mask=~text_mask)
             h = mlp1(h) + h
+            if has_video:
+                vnorm, video_cross_attn, vmlp = self.video_layers[_li]
+                s3, sh3 = self.mod3(t_embed).chunk(2, dim=-1)
+                s3 = s3.unsqueeze(1); sh3 = sh3.unsqueeze(1)
+                h = vnorm(h)
+                h = h * (1 + s3 * mod_pos) + sh3 * mod_pos
+                h = video_cross_attn(h, video_tok, key_padding_mask=video_kpm)
+                h = vmlp(h) + h
             if has_geo_latent:
                 s2, sh2 = self.mod2(t_embed).chunk(2, dim=-1)
                 s2 = s2.unsqueeze(1); sh2 = sh2.unsqueeze(1)

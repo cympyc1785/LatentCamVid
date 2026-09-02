@@ -1,0 +1,68 @@
+# @package _global_
+# D117-a (arm A, hybrid) — **dynpose_d107_k6 와 코퍼스·손실·뷰 샘플링·분모가 전부 같고
+# 모델에 video cross-attention 한 줄이 늘어난 것만 다르다.** 레이어 순서는 사용자 지정대로
+#   text CA (umt5, struct 캡션)  ->  video CA (PE-AV)  ->  geo CA (DA3)
+# 이고, video CA 의 key/value 는 `[PE-AV NL text 토큰 (1024-d) | 49 프레임 토큰 (1792-d)]` 을
+# 각각 hidden 으로 투영해 토큰축으로 이어붙인 것이다.
+#
+# ═══ 왜 text 를 video CA 쪽에도 넣나 ══════════════════════════════════════════════════════
+# PE-AV 는 video-text **대조학습** 모델이라 두 타워의 임베딩이 같은 공간에 정렬돼 있다.
+# target 명사만 스왑한 검색 프로브(scripts/eval/peav_target_match.py, 2026-09-03)에서
+# NL 캡션 top1 = test 0.686 / train 0.379 (chance 0.071 / 0.026) 였다 — "woman" 을 "dog" 로
+# 바꾸면 실제로 다른 영상이 1등이 된다. 그 정렬을 모델이 쓰려면 **같은 CA 안에서** 두 타워가
+# 만나야 한다. text 를 CA 로 따로 빼면 모델이 스스로 매칭을 다시 배워야 한다.
+# 같은 프로브에서 우리 코퍼스의 struct 형식(`target: X. motion: Y.`)은 4형식 중 **꼴찌**
+# (0.410 / 0.279) 였다. 그래서 PE-AV 쪽에는 NL 캡션을, umt5 text CA 에는 기존 struct 캡션을
+# 그대로 준다 — 두 인코더가 각자 잘하는 형식을 받는다.
+#
+# ═══ arm B (dynpose_d117b_peavtext) 와의 차이 ═════════════════════════════════════════════
+# arm B 는 umt5 를 아예 떼고 PE-AV text tower 를 text CA 로 올린다 (video CA 는 프레임 토큰만).
+# 이 arm 은 umt5 를 남긴다. 대조축은 "PE-AV text 를 umt5 **대신** 쓸 수 있나" 하나다.
+#
+# ═══ d107_k6 config 대비 실효 diff ════════════════════════════════════════════════════════
+# exp_name + PE-AV 4줄 (peav_video_cache_dir / peav_text_cache / video_latent_dim /
+# video_text_in_stream). 나머지는 한 글자도 안 바뀐다.
+exp_name: dynpose_d117a_peavvid
+dl3dv_root: /data1/cympyc1785/data/DynPose-LBM/latentcam_dynpose_d107
+meta_csv: meta_dynpose.csv
+train_seg_list: /data1/cympyc1785/data/DynPose-LBM/latentcam_dynpose_d107/seg_list_dynpose_train.txt
+test_seg_list: /data1/cympyc1785/data/DynPose-LBM/latentcam_dynpose_d107/seg_list_dynpose_test.txt
+coverage_blacklist_path: null
+
+pose_source: da3
+target_pose_source: da3_target_poses   # target 만 <scene>/da3/target_poses.npz 로 교체
+scale_mode: avg_scale
+avg_scale_ref: context_first_cam       # 디렉토리 avg_scale_context_first_cam <- scene_graph S
+intr_norm: rel                         # vae_20260302_300 = frame-0-relative-intrinsics ckpt
+cam_dim: 64                            # = 그 ckpt 의 latent_dim
+
+geo_encoder: da3
+geo_cam_embed: null
+geo_latent_cache_dir: null
+geo_posed: true
+geo_shuffle_order: false
+da3_geo_model: da3nested-giant-large
+da3_geo_input_hw: [252, 448]
+da3_geo_layers: last
+
+geo_view_sampling: context_uniform  # context range = 영상 전체 [0,49) = 소스 영상 전체
+geo_num_views: 6                    # _even_indices(49,6) = [0,10,19,29,38,48]
+geo_first_view_target_s: true       # view0 = 프레임 s(=0). 이미 첫 픽이라 집합이 안 바뀐다.
+
+geo_raw_cache_dir: /data1/cympyc1785/data/DynPose-LBM/latentcam_dynpose/geo_raw_cache_da3
+da3_cam_token_per_sample: true      # 캐시가 B=1 로 구워지므로 켜야 폴백 경로와 일치한다
+
+anchor_pred_frame0: true
+
+# ═══ PE-AV video CA (이 arm 의 전부) ══════════════════════════════════════════════════════
+# 캐시는 main/cache_peav_embeddings.py 가 구웠다 (264 scene × 49 토큰, NL 캡션 2,100종).
+# 학습은 .pt 만 읽으므로 latentcam env 에 xformers 가 없어도 된다.
+text_encoder: T5                    # text CA = umt5 (struct 캡션) 유지
+peav_video_cache_dir: /data1/cympyc1785/data/DynPose-LBM/latentcam_dynpose_d107/peav_cache/video
+peav_text_cache: /data1/cympyc1785/data/DynPose-LBM/latentcam_dynpose_d107/peav_cache/text_nl.pt
+video_latent_dim: 1792              # pe-av-large visual tower per-frame 토큰
+video_text_in_stream: true          # PE-AV text(1024) 를 같은 CA 의 key/value 앞에 concat
+
+batch_size: 8
+epochs: 200
+ckpt_at_epochs: [50, 100]

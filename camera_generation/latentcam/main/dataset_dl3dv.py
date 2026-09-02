@@ -341,6 +341,13 @@ class CamDataset(torch.utils.data.Dataset):
         self._geo_raw_mem = {}
         if self.geo_raw_cache_dir is not None and self.geo_raw_cache_preload:
             self._preload_geo_raw()
+        # [new 2026-09-03] PE-AV(video CA, D117) 캐시. 두 키 다 null(기본)이면 이 데이터셋은
+        # 예전과 글자 그대로 같은 dict 를 돌려준다.
+        self._peav_video_mem, self._peav_text = {}, None
+        self.peav_video_cache_dir = getattr(cfg, 'peav_video_cache_dir', None) or None
+        self.peav_text_cache = getattr(cfg, 'peav_text_cache', None) or None
+        if self.peav_video_cache_dir or self.peav_text_cache:
+            self._preload_peav()
 
     # ---- pre-ln DA3 캐시 (scene 키) -----------------------------------------------------
     @staticmethod
@@ -377,6 +384,46 @@ class CamDataset(torch.utils.data.Dataset):
         if badt:
             print(f"[geo raw cache] WARNING: {badt} scene 이 fp32 가 아니라 무시했다 "
                   f"(cache_geo_raw_da3.py 로 다시 구울 것 — 같은 디렉토리에 덮어쓴다)")
+
+    # ---- PE-AV 캐시 (video = scene 키 / text = segment 키) ------------------------------
+    def _preload_peav(self):
+        """`main/cache_peav_embeddings.py` 가 구운 PE-AV 토큰을 __init__ 에서 RAM 에 올린다.
+
+        geo_raw 캐시와 같은 이유로 lazy 가 아니다 — fork 로 뜨는 DataLoader worker 가 tensor
+        storage 를 copy-on-write 로 공유한다. 크기는 geo 쪽의 1/50 수준이다 (video 264 scene
+        × 49 × 1792 fp16 = 46 MB, text 는 중복 제거 후 수천 문장 × 32 × 1024 fp16).
+
+        video 가 scene 키인 근거는 d107 의 전 세그먼트가 frame_idx==(0,49) 라는 것뿐이다.
+        캐시 빌더가 그 불변조건을 assert 하고, 여기서는 miss 를 조용히 넘기지 않는다 — video CA
+        스트림은 배치 안에서 켜졌다 꺼졌다 할 수 없기 때문이다(한 샘플만 빠져도 stack 이 깨진다)."""
+        if self.peav_video_cache_dir:
+            keys = sorted({self.geo_raw_key(s[4]) for s in self.samples})
+            miss = []
+            for k in keys:
+                p = osp.join(self.peav_video_cache_dir, f'{k}.pt')
+                if not osp.exists(p):
+                    miss.append(k)
+                    continue
+                self._peav_video_mem[k] = torch.load(
+                    p, map_location='cpu', weights_only=False)['emb']
+            nb = sum(v.numel() * v.element_size() for v in self._peav_video_mem.values())
+            print(f"[peav] video {len(self._peav_video_mem)}/{len(keys)} scenes "
+                  f"({nb / 1e6:.1f} MB) from {self.peav_video_cache_dir}")
+            if miss:
+                raise FileNotFoundError(
+                    f"[peav] video 캐시가 {len(miss)} scene 비어 있다 (예: {miss[:3]}). "
+                    f"cache_peav_embeddings.py 를 먼저 돌릴 것 — 부분 캐시는 배치를 깨뜨린다")
+        if self.peav_text_cache:
+            c = torch.load(self.peav_text_cache, map_location='cpu', weights_only=False)
+            self._peav_text = c
+            miss = [s[4] for s in self.samples if s[4] not in c['by_name']]
+            print(f"[peav] text {c['emb'].shape[0]} distinct captions "
+                  f"(L={c['text_len']}, template={c['template']}, "
+                  f"{c['emb'].numel() * 2 / 1e6:.1f} MB) from {self.peav_text_cache}")
+            if miss:
+                raise FileNotFoundError(
+                    f"[peav] text 캐시에 {len(miss)} segment 가 없다 (예: {miss[:3]}). "
+                    f"cache_peav_embeddings.py 를 --splits 전체로 다시 돌릴 것")
 
     # ---- pose_source 별 경로/파싱 ------------------------------------------------------
     # 아래 4개가 'transforms' 와 'da3' 의 유일한 차이점이다. 세그먼트 경계와 키('0','1',...)는
@@ -1556,6 +1603,15 @@ class CamDataset(torch.utils.data.Dataset):
         if int(getattr(self.cfg, 'target_track_dim', 0) or 0) > 0:
             out['target_track'] = self._track_cond(
                 scene_idx, data_name.split('_')[-1], extrinsics, norm_scale)
+
+        # [new 2026-09-03] PE-AV video/text 토큰 (D117 video CA). geo 캐시 분기가 아래에서 곧장
+        # return 하므로 **그 앞에서** 붙여야 한다. 켜지 않으면 키 자체가 안 생긴다.
+        if self._peav_video_mem:
+            out['peav_video'] = self._peav_video_mem[self.geo_raw_key(data_name)].float()
+        if self._peav_text is not None:
+            _i = self._peav_text['by_name'][data_name]
+            out['peav_text'] = self._peav_text['emb'][_i].float()
+            out['peav_text_mask'] = self._peav_text['mask'][_i]
 
         # geo encoder input (multi-view images) — only for the geo path; text-only skips it.
         # [new] cache hit short-circuits the whole block: the frozen geo_emb is read straight off

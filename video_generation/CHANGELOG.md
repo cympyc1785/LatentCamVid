@@ -6,7 +6,52 @@
 
 ## [Unreleased]
 
+### Changed
+- **`fit_hole_ladder.py` / `sample_camera_bank.py` — 물리 게이트를 렌더 **앞**으로
+  (D113, `--gate_before_render`, 기본 켬, 2026-09-02).** 사용자 지적: "물리 판정이 실패하면
+  사실 렌더할 필요가 없잖아". `over()` 의 if/elif 체인은
+  `collision(G1) → obb(G5) → ground/elev(G6) → approach(G7) → hole → occlusion` 순인데,
+  앞의 다섯은 재투영과 3×3 곱뿐(**렌더 0회**)이고 `hole` 은 점군 래스터다. 즉 물리 게이트가
+  걸린 knob 의 `hole` 값은 **애초에 소비되지 않는데** 그걸 재려고 렌더를 돌리고 있었다.
+  `measure_trajectory(gate_check=...)` 가 기하 열만 먼저 계산해 걸리면 `hole_*`=`nan` 으로
+  즉시 반환한다 (0.0 을 넣으면 "구멍 없음"으로 읽혀 판정이 조용히 뒤집힌다).
+  기존 산출물이 안 바뀌는 근거: 최종 CSV 행은 `verify_frames` 로 **다시** 재고, 이분법 캐시에서
+  읽는 건 `poses`/`info`/`mult` 뿐이다. 유일한 예외인 사다리 기준점
+  `hole_static = probe(0.0)` 만 `force_render=True` 로 강제한다.
+  **검증(martian-flag 258변이, gate ON vs OFF):** 57열 중 **결정열 54개 전부 동일**, 다른 3열
+  (`subject_visible_min` 181/258 · `subject_visible_frac` 172/258 · `subject_area_med` 121/258,
+  최대차 0.072)은 **같은 설정 2회 재실행에서도 똑같이 흔들리는** 렌더러 비결정성이다
+  (`hole_bank_occl_off` vs `occl_off2` 대조로 확인: 같은 3열, 최대차 0.025, 결정열 0건).
+  절감량은 요약줄 `게이트 선차단 N` 으로 찍는다 (martian-flag 187). `--no_gate_before_render`
+  면 D113 이전과 완전히 동일.
+
 ### Added
+- **`scripts/audit_bank_status.py` — 뱅크 `status`/`binding` 집계 + `clamped_low` 완화 후보
+  목록 (2026-09-02).** 사용자 지시: "clamped_low 만 모아서 나중에 따로 기준점 완화해서
+  돌려볼 수 있게 리스트 만들어줘". 판정은 **이미 기록되고 있었다** — fit 은 탈락 변이를 지우지
+  않고 `status`/`binding` 두 열로 남긴다. 없던 건 그걸 코퍼스 전체로 모아 보는 도구다
+  (렌더 0회). `--relax_list` 로 `clamped_low*` 행만 binding 별로 묶어
+  `bank_relax_candidates_v1` JSON 으로 뽑는다 — 부분 완화 재fit 의 입력.
+  **실측(`out/*/hole_bank_k6_d99`, 52편 30,556변이):** status 는 solved 12478(40.8%) /
+  obb_limited 3021(9.9%) / approach_limited 2880(9.4%) / clamped_low+tau_floor 2265(7.4%) /
+  unreached 2062(6.7%) / elev_limited 2029(6.6%) / ground_limited 1986(6.5%) /
+  shape_limited 1230(4.0%) / collision_limited 1126(3.7%) / static 772(2.5%) /
+  clamped_low 224(0.7%) + tau_floor 변종들. 완화 후보 2489(8.1%) 중
+  **2265(91.0%)가 `+tau_floor`** — 게이트가 아니라 **knob 하한**이 진범이다.
+- **`scripts/viz_g1_collision.py` — G1(behind-surface) 판정 시각화 (2026-09-02).**
+  사용자 지시: "G1 충돌 어떻게 판정된건지 시각화해서 보여줘". 프레임당 왼쪽=플랜 카메라
+  점군 렌더(구멍 마젠타), 오른쪽=소스 probe 13프레임 격자에 카메라 중심 투영점 +
+  `radius_px` 패치 박스 + 판정색 테두리. **관통(pierce, `z > depth+margin`)과
+  여유부족(tight, `clear_frac` 때문에 걸림)을 색으로 가른다** — CSV 의 `behind_frac` 하나로는
+  구분이 안 됐다. **실측(parkour `dyn_0__dolly_in__hole0.5`, behind_frac 0.9796 = 48/49):**
+  `pierce 0(0.0%) / tight 48(7.5%) / clear 70(11.0%) / skip 519(81.5%)` —
+  **관통 0건, 전부 standoff 부족**이고 프레임×소스 637쌍 중 81.5%는 판정 자체가 불가였다.
+- **`models/Planner/CinemaTraj/fix.md` — 미룬 수정 목록 (2026-09-02).** 사용자 지시:
+  "다른 요소들도 다 고치고 난후에 한 번에 같이 적용할 수 있게 고칠 목록들 fix.md 에 기록해줘".
+  8항목(F1 drift 라우팅 / F2 프레임 로컬 스케일 / F3 G1 사유 분리 / F4 judgeable_frac /
+  F5 tau_floor / F6 프레임별 OBB / F7 시간축 절단 / F8 ground_z 앵커) 전부
+  **뱅크 전량 재굽기**를 요구하므로 개별 반영하지 않고 한 판에 적용한다. 항목마다
+  증상/원인/영향범위/실측근거 + 권장 적용 순서.
 - **`scripts/run_dynpose_d110_export.sh` — D110 후처리 체인 (caption → export → dd10 리스트)
   을 스크립트로 고정 (2026-09-02).** D107 때 이 체인을 세션 안에서 손으로 돌렸다가 caption
   단계가 **아직 굽고 있던 샤드를 앞질러서** 2편(`00e9f728` 62변이 / `015b197d` 9변이)이

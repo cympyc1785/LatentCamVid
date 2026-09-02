@@ -7,6 +7,11 @@
 ## [Unreleased]
 
 ### Added
+- **`scripts/run_dynpose_d110_shard.sh` — d107 위에서 hole 사다리 2단→4단 재fit (D110,
+  2026-09-02).** dd 10%/preset 90% 를 서브샘플(D109)로만 만들면 코퍼스가 58% 로 줄어서,
+  대신 fit 사다리를 k6 원래 4단으로 되돌려 preset(track 포함)·dd 변이를 ~2배로 늘린다.
+  graph/route/τ뱅크 는 d107 것 재사용 (사다리는 fit 손잡이라 앞 단계가 안 바뀐다).
+  산출 hole_bank_d110. dd 는 export 후 10% 균등 서브샘플 → 총 ~9.7k 예상.
 - **`scripts/run_dynpose_d107_shard.sh` — dynpose 코퍼스 재생성 러너, D84 라우팅 레시피 + d99
   세팅 (D107, 2026-09-02).** D84 원본 러너는 `/tmp` 에만 있었다 — 이 파일이 영구본이다.
   유지: anchor 2 + preset 라우터(물체 이동 많으면 track_* 포함) + DataDoP 외부 궤적 4/anchor,

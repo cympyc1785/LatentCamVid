@@ -7,6 +7,35 @@
 ## [Unreleased]
 
 ### Changed
+- **`fit_tau` 이분법이 깎는 대상을 preset 모양에 맞게 (F9, `--orbit_fixed_sweep`, 기본 **켬**,
+  2026-09-02).** 증상: `orbit_left` 로 구운 뱅크가 이름만 orbit 이고 실제로는 3° 만 도는
+  직선이었다. 원인: `se3.scale_traj(rel, s)` 는 SE(3) **로그 전체**를 s 배 해서 이동과 회전을
+  같이 줄이는데, `traj.true_orbit` 은 `R = |t|/θ` 로 정의돼 있어 로그를 깎으면 **반경은 그대로고
+  sweep 만** 줄어든다. 고침: sweep 을 고정한 채 `radius`/`dolly`/`lateral` 만 s 배 해서 궤적을
+  **다시 만든다** (`lbm/presets.py:shape_resizer`). `τ ≈ 2·s·R·sin(θ/2)/z_med` 로 s 에 선형이라
+  이분법 단조성은 그대로다. **sweep 에 반응하는 preset 만** 자동 감지해서 적용한다
+  (`sweep` 을 반으로 준 probe 궤적과 비교) — 하드코딩 목록이 아니다.
+  실측 감지 결과 14종: `push_in_arc_left/right`, `pull_out_arc_left/right`, `orbit_left/right`,
+  `s_curve`, `orbit_left_pedestal_up`, `track_orbit_left/right`,
+  `track_push_in_arc_left/right`, `track_pull_out_arc_left/right`. 나머지 29종
+  (dolly/pan/tilt/truck/pedestal/**crane**/static/track_hold 계열)은 `resize=None` 이라
+  **옛 경로 그대로 bit-preserved**. 정량(target τ=0.20, radius 0.6, sweep 45°, span 0.8):
+  `orbit_left` log `scale 0.5312 tau 0.1993 rot 19.12 move 0.2003` → radius
+  `scale 0.5312 tau 0.1970 rot 36.00 move 0.2003` (sweep 이 36°=0.8×45 로 복원, 경로 길이 동일).
+  `push_in_arc_left` rot 13.78 → 18.00. `s_curve` 는 회전이 상쇄되는 구조라 양쪽 0.00.
+  `dolly_in` 은 resizer `None`.
+  `lbm/presets.py`(`shape_resizer`, `fit_tau(..., resize=)`, `tau_info["tau_resize"]`),
+  `decode/build_poses.py`(`orbit_fixed_sweep=`), `scripts/{fit_hole_ladder,sample_camera_bank}.py`
+  (`--orbit_fixed_sweep`/`--no_orbit_fixed_sweep`), `scripts/emit_bank.py`(뱅크의 `fixed` 에서
+  재현, 키 없으면 F9 이전 뱅크라 `False`).
+- **G1 소스 프레임 샘플링 13/7 → **49** (F11, `--behind_src_frames`, 2026-09-02).**
+  13장 샘플링이 성겨서 표면 뒤 후보를 흘려보내고 있었다 — 49 로 올리면 binding 39건이 전부
+  collision 으로 유입된다. `fit_hole_ladder.py` 13 → 49, `sample_camera_bank.py` 7 → 49.
+  사용자 결정: "전체로 해도 시간 얼마 안 걸릴 것 같은데 전체로".
+- **orbit sweep 하한 `--min_sweep_deg` 15 → **20** (F9 후속, 2026-09-02).** 이미 **하한**이지
+  배제 조건이 아니다 (`span_frac = max(orbit_span_frac, min_sweep_deg / obs_az_span)`).
+  argparse 기본만 20 으로 올리고 `SHAPE_DEFAULTS["min_sweep_deg"]` 는 옛 뱅크 재현용으로
+  15.0 을 유지한다. 사용자 결정: "일단 20으로 놔둬보고 돌려보고 결정할게".
 - **`scene_scale` (씬 단위 `S`) 재정의 — frame0 한 장 → 전 프레임 점군 (2026-09-02).**
   사용자 지시: "그냥 scene scale 은 sky 제외 mean of valid points distance from first source
   camera 로 정의하고 사용해줘". 새 기본 `mode="points_first_cam"`: **전 프레임**의 sky 아닌
@@ -87,6 +116,16 @@
   면 D113 이전과 완전히 동일.
 
 ### Added
+- **`scene_graph/scale.py:assert_scale_mode()` — 옛 게이지 그래프로 새 뱅크를 굽는 걸 막는 가드
+  (F2, `--allow_legacy_scale` 로 탈출, 2026-09-02).** 게이트 임계가 전부 `S` 배율이라
+  (`behind_margin_frac·S`, `behind_clear_frac·S`, `obb_clear_floor·S`, `min_ground_clear·S`,
+  가림 `0.02·S`), `S` 정의를 바꾸는 건 임계를 통째로 옮기는 것과 같다. 그런데 그래프 파일에는
+  숫자만 남고 정의가 안 남아서, 옛 그래프로 새 뱅크를 구우면 **씬마다 다른 배율로 임계가
+  어긋난 채 조용히 통과**한다 (옛→새 배율 실측: camel 1.014 / avocado-slice 1.077 /
+  parkour 1.090 / snowboard 1.389). `fit_hole_ladder.py` · `sample_camera_bank.py` 가
+  `load_graph` 직후에 부르고, 확인한 mode 를 `bank.json` 의 `fixed.scale_mode` /
+  manifest 에 기록한다. **디스크의 `scene_graph.json` 53편 전부가 `scale.mode` 키 자체가 없는
+  legacy** 라 이 가드는 전량에서 걸린다 (의도한 동작 — 그래프 재굽기가 선행 조건).
 - **`CinemaTraj/scripts/audit_scene_scale.py` — 씬 단위 `S` 정의 후보 감사 (2026-09-02).**
   사용자 지적: "scene scale 은 카메라가 돌아서 다른 공간을 보면 달라질 수도 있을 것 같은데
   sky 나 dynamic 을 제외한 나머지 depth 들을 다 unproject 해서 첫 카메라나 카메라 centroid 에서의

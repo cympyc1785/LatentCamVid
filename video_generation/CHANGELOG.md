@@ -7,6 +7,27 @@
 ## [Unreleased]
 
 ### Changed
+- **G1(표면 뒤) 충돌 판정에 시간축 정합 (`--collision_time_match`, 기본 **off**, 2026-09-02).**
+  사용자 지적: "물리 판정 기준은 4d point cloud 로 하려면 OBB 도 해당 시간축에 맞는 OBB 로".
+  감사 결과 **OBB 를 쓰는 게이트(G5 `obb_clearance:194` / G6 `elevation_profile:239` /
+  G7 `approach_profile:281`)는 이미 프레임별** `node_obb_at(node, f)` 로 갈라지고 있었다.
+  진짜 frame-0 잔재는 **G1** 이었다 — `behind_profile` 이 궤적 프레임 하나를 샘플된 소스
+  프레임 **전부**에 되쏘아서, frame 0 에 서 있던 사람이 궤적 48프레임의 카메라까지 막았다
+  (같은 리포 `render.standoff` 는 `temporal_persistence=False` 로 정반대 규약이었다,
+  `lbm/render.py:105-108`). 플래그를 켜면 `t != plan_frame` 인 소스 프레임에서 **동적 픽셀만**
+  증거에서 빠지고, 정적 표면은 전 프레임 관측을 그대로 쓴다. 시간이 맞는 소스 프레임은
+  `frames` 균등 샘플에 없어도 **추가**한다 (안 그러면 "시간축 정합"이 "동적 충돌 끄기"가 된다).
+  끄면 `dynamic_mask=None` / `plan_frame=None` 이라 예전 경로와 **bit-identical**.
+  `lbm/gates.py`(`behind_surface_frames`, `behind_profile`) +
+  `scripts/{sample_camera_bank,fit_hole_ladder}.py`.
+  **정량 (통제 A/B, `--behind_src_frames 49` 로 양쪽 프레임 집합 고정 후 on/off):**
+  parkour 664변이 중 status 변경 **4(0.6%)**, binding 이동 0, knob 증가 4 / **감소 0**,
+  `behind_frames` 평균 8.38 → 6.83. snowboard 196변이 중 status 변경 **6(3.1%)**,
+  binding `collision → obb` 6, knob 증가 19 / **감소 0**. **감소가 한 건도 없다** —
+  순수하게 느슨해지는 방향으로만 작동한다. 첫 (미통제) A/B 는 매칭 프레임 주입 때문에
+  프레임 집합이 달라져 parkour 에서 방향이 반대로 나왔었다 — 그건 시간축 정합이 아니라
+  **13장 샘플링이 성기다**는 별개 결함이다 (`fix.md` F11: 13 → 49 로만 바꿔도
+  binding 39건이 전부 collision 으로 유입).
 - **`fit_hole_ladder.py` / `sample_camera_bank.py` — 물리 게이트를 렌더 **앞**으로
   (D113, `--gate_before_render`, 기본 켬, 2026-09-02).** 사용자 지적: "물리 판정이 실패하면
   사실 렌더할 필요가 없잖아". `over()` 의 if/elif 체인은
@@ -26,6 +47,15 @@
   면 D113 이전과 완전히 동일.
 
 ### Added
+- **`CinemaTraj/scripts/viz_gravity.py` — GeoCalib 중력방향 오버레이 영상 (2026-09-02).**
+  사용자 지시: "lens scene 에서 GeoCalib 으로 나온 중력방향 시각화해줘". `--style plumb` 는
+  격자 셀마다 유효(비-sky) 픽셀을 unproject 해서 `up_world` 방향 선분을 긋고, `--style grid` 는
+  `ground_z` 평면에 중력 정렬 격자를 깐다. `--compare cam_up` 으로 폴백(카메라 up)을 같이
+  그려 차이를 눈으로 본다. 지평선(소실선)은 `inv(K).T @ (R_w2c @ up)`.
+  camera-lens 실측: `up_world=[-0.16359,-0.82299,-0.54399]`, conf 0.489, spread 10.222°,
+  `angle_to_cam_up 24.199°`, `angle_to_ransac 18.334°` (`disagrees_with_ransac: true`,
+  ransac inlier 0.2675 / wall plane 0개). **`grid` 는 이 씬에서 쓰지 말 것** —
+  `ground_z=-3.5244 u` × S=2.186 이라 바닥면이 화면 밖이고, RANSAC 지면 자체가 못 믿을 값이다.
 - **`scripts/audit_bank_status.py` — 뱅크 `status`/`binding` 집계 + `clamped_low` 완화 후보
   목록 (2026-09-02).** 사용자 지시: "clamped_low 만 모아서 나중에 따로 기준점 완화해서
   돌려볼 수 있게 리스트 만들어줘". 판정은 **이미 기록되고 있었다** — fit 은 탈락 변이를 지우지

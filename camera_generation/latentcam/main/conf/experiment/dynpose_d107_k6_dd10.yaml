@@ -1,0 +1,53 @@
+# @package _global_
+# D109 — d107 코퍼스에서 **DataDoP 를 10% 로 서브샘플** (preset 90%, track 포함) 한 arm.
+# 사용자 지시: "dd를 10%로 낮추고 preset을 (track 포함) 90%까지 늘린 것도 데이터 따로 만들어줘".
+#
+# 재export 가 아니라 seg_list 필터다 (nodd/ddswap/dionly 와 같은 방식) — 코퍼스 디렉토리 ·
+# geo 캐시 · avg_scale · prompts.json 을 d107 arm 과 **그대로 공유**하므로 paired 비교가 성립.
+# 리스트 생성 (재현 가능, RNG 없음 — dd_* 행을 원래 순서 위 균등 stride 로 서브샘플):
+#     python scripts/data/filter_seg_list_by_preset.py \
+#         --root /data1/cympyc1785/data/DynPose-LBM/latentcam_dynpose_d107 \
+#         --prefix seg_list_dynpose --target_frac_prefix dd_ --target_frac 0.10 --suffix dd10
+#
+# 실측 구성 (d107 전량 arm: dd 48.8% / track 28.4% / 일반 22.9%):
+#     train 4,414  =  track_* 2,434 (55.1%) + 일반 1,539 (34.9%) + dd_* 441 (10.0%)
+#     test    518  =  track_*   267 (51.5%) + 일반   199 (38.4%) + dd_*  52 (10.0%)
+# !! 코퍼스가 d107 전량(7,623)의 58% 다 — d107 arm 과의 격차를 "dd 비율의 효과"로만 읽으면
+# 안 된다. 학습량(step)이 같이 줄었다 (dionly 항목과 같은 주의).
+#
+# d107_k6 대비 실효 diff 3줄: exp_name / train_seg_list / test_seg_list.
+exp_name: dynpose_d107_k6_dd10
+dl3dv_root: /data1/cympyc1785/data/DynPose-LBM/latentcam_dynpose_d107
+meta_csv: meta_dynpose.csv
+train_seg_list: /data1/cympyc1785/data/DynPose-LBM/latentcam_dynpose_d107/seg_list_dynpose_dd10_train.txt
+test_seg_list: /data1/cympyc1785/data/DynPose-LBM/latentcam_dynpose_d107/seg_list_dynpose_dd10_test.txt
+coverage_blacklist_path: null
+
+pose_source: da3
+target_pose_source: da3_target_poses
+scale_mode: avg_scale
+avg_scale_ref: context_first_cam
+intr_norm: rel
+cam_dim: 64
+
+geo_encoder: da3
+geo_cam_embed: null
+geo_latent_cache_dir: null
+geo_posed: true
+geo_shuffle_order: false
+da3_geo_model: da3nested-giant-large
+da3_geo_input_hw: [252, 448]
+da3_geo_layers: last
+
+geo_view_sampling: context_uniform
+geo_num_views: 6
+geo_first_view_target_s: true
+
+geo_raw_cache_dir: /data1/cympyc1785/data/DynPose-LBM/latentcam_dynpose/geo_raw_cache_da3
+da3_cam_token_per_sample: true
+
+anchor_pred_frame0: true
+
+batch_size: 8
+epochs: 200
+ckpt_at_epochs: [50, 100]

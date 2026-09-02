@@ -23,6 +23,10 @@
         --root /data1/cympyc1785/data/DynPose-LBM/latentcam_dynpose \
         --prefix seg_list_dynpose --presets dolly_in --max_anchors 2 --suffix dionly
     python scripts/data/filter_seg_list_by_preset.py ... --exclude_presets_prefix dd_ --suffix nodd
+    # D109: dd_* 가 최종 리스트의 10% 가 되게 서브샘플 (preset 90%). RNG 없이 결정론적 —
+    # 매칭 행을 리스트 순서 그대로 두고 균등 stride 로 뽑아 scene 에 고르게 퍼진다.
+    python scripts/data/filter_seg_list_by_preset.py ... \
+        --target_frac_prefix dd_ --target_frac 0.10 --suffix dd10
 """
 from argparse import ArgumentParser
 from collections import Counter
@@ -40,9 +44,28 @@ def load_segments(root: str, scene: str):
     return list(data.items()) if isinstance(data, dict) else list(enumerate(data))
 
 
+def subsample_to_frac(sel: list, key_to_preset: dict, prefix: str, frac: float):
+    """`prefix` 매칭 행이 최종 리스트의 `frac` 이 되도록 균등 stride 로 서브샘플.
+
+    수식: 비매칭 N개가 (1-frac) 을 차지하므로 매칭은 round(N·frac/(1-frac)) 개.
+    RNG 를 안 쓴다 — 매칭 행의 원래 순서(scene 정렬순) 위에서 균등 간격으로 집으면
+    결정론적이고 scene/preset 에 고르게 퍼진다.
+    """
+    hit = [line for line in sel if key_to_preset[line].startswith(prefix)]
+    rest_n = len(sel) - len(hit)
+    want = min(len(hit), round(rest_n * frac / max(1.0 - frac, 1e-9)))
+    if want <= 0:
+        chosen = set()
+    else:
+        step = len(hit) / want
+        chosen = {hit[int(i * step)] for i in range(want)}
+    return [line for line in sel if not key_to_preset[line].startswith(prefix)
+            or line in chosen], len(hit) - len(chosen)
+
+
 def keep_keys(args, scenes):
-    """조건을 통과한 `<chunk>/<scene>/<seg_key>` 집합 + 통계."""
-    keep, stats = set(), Counter()
+    """조건을 통과한 `<chunk>/<scene>/<seg_key>` → preset dict + 통계."""
+    keep, stats = {}, Counter()
     presets = set(args.presets.split(",")) if args.presets else None
     excl = set(args.exclude_presets.split(",")) if args.exclude_presets else set()
     for scene in scenes:
@@ -66,8 +89,8 @@ def keep_keys(args, scenes):
                 1 for _, e in rows if str(e["variant_id"]).split("__")[0] not in allow)
             rows = [(k, e) for k, e in rows
                     if str(e["variant_id"]).split("__")[0] in allow]
-        for key, _ in rows:
-            keep.add(f"{args.chunk_prefix}/{scene}/{key}")
+        for key, entry in rows:
+            keep[f"{args.chunk_prefix}/{scene}/{key}"] = entry.get("preset", "")
     return keep, stats
 
 
@@ -94,8 +117,16 @@ def main(args):
         with open(src, encoding="utf-8") as file:
             lines = [line.strip() for line in file if line.strip()]
         sel = [line for line in lines if line in keep]
+        sub_dropped = 0
+        if args.target_frac_prefix and args.target_frac > 0:
+            sel, sub_dropped = subsample_to_frac(sel, keep, args.target_frac_prefix,
+                                                 args.target_frac)
         n_scene = len({line.split("/")[1] for line in sel})
-        print(f"{split:<8}{len(lines):>8}{len(sel):>8}{n_scene:>9}")
+        n_hit = sum(1 for line in sel if keep[line].startswith(args.target_frac_prefix)) \
+            if args.target_frac_prefix else 0
+        extra = (f"   {args.target_frac_prefix}* {n_hit} ({n_hit / max(len(sel), 1):.1%}, "
+                 f"뺀 것 {sub_dropped})") if args.target_frac_prefix else ""
+        print(f"{split:<8}{len(lines):>8}{len(sel):>8}{n_scene:>9}{extra}")
         dst = path.join(args.root, f"{args.prefix}_{args.suffix}_{split}.txt")
         if not args.dry_run:
             with open(dst, "w", encoding="utf-8") as file:
@@ -120,5 +151,8 @@ if __name__ == "__main__":
     parser.add_argument("--exclude_presets", default="", type=str)          # 뺄 raw preset (콤마)
     parser.add_argument("--exclude_presets_prefix", default="", type=str)   # 예: dd_
     parser.add_argument("--max_anchors", default=0, type=int)               # scene 당 anchor 상한
+    # D109. prefix 매칭 preset 이 최종 리스트의 이 비율이 되게 서브샘플. 0 = 끔 (예전 동작).
+    parser.add_argument("--target_frac_prefix", default="", type=str)
+    parser.add_argument("--target_frac", default=0.0, type=float)
     parser.add_argument("--dry_run", action="store_true", default=False)
     raise SystemExit(main(parser.parse_args()))

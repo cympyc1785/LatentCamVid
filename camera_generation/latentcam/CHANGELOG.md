@@ -4,6 +4,21 @@ All notable changes to the latentcam sub-project. Follows [Keep a Changelog](htt
 
 ## [Unreleased]
 
+### Added
+- **`filter_seg_list_by_preset.py --target_frac_prefix/--target_frac` — prefix 매칭 preset 을
+  최종 리스트의 지정 비율로 서브샘플 (D109, 2026-09-02).** 사용자 지시 "dd를 10%로 낮추고
+  preset을 (track 포함) 90%까지" 의 데이터 축. RNG 없이 결정론적 — 매칭 행을 리스트 순서
+  위 균등 stride 로 뽑아 scene 에 고르게 퍼진다. 기본값 0 = 예전 동작 비트 동일.
+  산출: `latentcam_dynpose_d107/seg_list_dynpose_dd10_{train,test}.txt`
+  (train 4,414 = track 55.1% + 일반 34.9% + dd 10.0% / test 518 = 51.5/38.4/10.0).
+- **`main/conf/experiment/dynpose_d107_k6_dd10.yaml` (D109, 2026-09-02).** d107_k6 대비
+  실효 diff 3줄 (exp_name + seg_list 2개). 코퍼스 디렉토리·geo 캐시·prompts 는 d107 arm 과
+  공유 — paired 비교 성립. 주의: 코퍼스가 d107 전량의 58% 라 격차를 dd 비율 효과로만 읽지 말 것.
+- **`main/conf/experiment/dynpose_d107_k6.yaml` (D108, 2026-09-02).** d84_k6 대비 실효 diff
+  4줄 (코퍼스 경로). d107 코퍼스 = D84 라우팅 + DataDoP 유지, GeoCalib graph 재빌드 +
+  deroll + smooth_kf (vista/trumans d99·d106 규약 통일). geo 캐시는 d84 것 재사용
+  (키가 scene 이름, 내용물 불변).
+
 ### Fixed
 - **`eval_testset.py` 가 `target_track` arm ckpt 를 못 읽던 것 (2026-08-28).**
   `CameraDiffusionModel(cam_dim=..., **_geo_kw)` 에 `cond_dim` 을 안 넘겨서 `cam_in` 이

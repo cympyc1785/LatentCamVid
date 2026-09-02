@@ -1,0 +1,58 @@
+# @package _global_
+# DynPose-LBM D107 arm — **D84 arm 과 모델·손실·뷰 샘플링·분모가 전부 같고 코퍼스만 d107** 이다.
+# (사용자 지시: "dynpose를 이전에 preset 일부 (물체 이동이 많을 경우 track 포함) + datadop
+#  추가한걸로 다시 만들어줘" → 그 코퍼스로 "하나 학습".)
+#
+# ═══ 코퍼스가 d84 와 무엇이 다른가 (뱅크 굽기 축 3개, run_dynpose_d107_shard.sh) ═════════
+#   ① graph 를 GeoCalib 로 재빌드 — 예전 graph 149/280(53%)가 camera_up_fallback
+#      (GT 실측 median 10.9° 기움). roll=0 의 기준축이 바로 선다.
+#   ② fit/bank 에 --deroll + keyframe_ease smooth_kf — vista/trumans d99·d106 과 같은
+#      회전 규약. d84 는 deroll 없음 + smoothstep 이었다.
+#   ③ 산출 dir bank_d107 / hole_bank_d107 (라우팅·DataDoP 4/anchor·hole Δ[0.20,0.35] 는 유지)
+# 코퍼스 통계 (2026-09-02 실측): 266편 / 변이 11,858 (dedup 전) —
+#   datadop 48.8% / track_* 28.4% / 일반 22.9%,
+#   tau_max median 0.577 (track 0.874 / dd 0.527 / 일반 0.500), subject_in_frame median 1.0.
+#
+# ═══ d84 config 대비 실효 diff ═══════════════════════════════════════════════════════════
+# exp_name / dl3dv_root / train·test_seg_list 4줄. meta_csv 이름은 같고 root 만 바뀐다.
+# holdout 은 **d84 와 같은 27편** (seg_list_dynpose_test.txt 의 scene 집합을 export 에 그대로
+# 넘겼다) — arm 간 비교가 성립하려면 val 씬이 같아야 한다.
+# geo_raw_cache_dir 는 **d84 것을 그대로 쓴다**: 캐시 키가 `dynpose_<uuid>.pt` (scene 이름)
+# 이고 내용물은 소스 프레임 6장([0,10,19,29,38,48])의 DA3 feature + 소스 pose 라 d107 에서
+# 한 글자도 안 바뀌는 입력이다 (뱅크는 target 궤적만 바꾼다).
+exp_name: dynpose_d107_k6
+dl3dv_root: /data1/cympyc1785/data/DynPose-LBM/latentcam_dynpose_d107
+meta_csv: meta_dynpose.csv
+train_seg_list: /data1/cympyc1785/data/DynPose-LBM/latentcam_dynpose_d107/seg_list_dynpose_train.txt
+test_seg_list: /data1/cympyc1785/data/DynPose-LBM/latentcam_dynpose_d107/seg_list_dynpose_test.txt
+coverage_blacklist_path: null
+
+pose_source: da3
+target_pose_source: da3_target_poses   # target 만 <scene>/da3/target_poses.npz 로 교체
+scale_mode: avg_scale
+avg_scale_ref: context_first_cam       # 디렉토리 avg_scale_context_first_cam <- scene_graph S
+intr_norm: rel                         # vae_20260302_300 = frame-0-relative-intrinsics ckpt
+cam_dim: 64                            # = 그 ckpt 의 latent_dim
+
+geo_encoder: da3
+geo_cam_embed: null
+geo_latent_cache_dir: null
+geo_posed: true
+geo_shuffle_order: false
+da3_geo_model: da3nested-giant-large
+da3_geo_input_hw: [252, 448]
+da3_geo_layers: last
+
+geo_view_sampling: context_uniform  # context range = 영상 전체 [0,49) = 소스 영상 전체
+geo_num_views: 6                    # _even_indices(49,6) = [0,10,19,29,38,48]
+geo_first_view_target_s: true       # view0 = 프레임 s(=0). 이미 첫 픽이라 집합이 안 바뀐다.
+
+# d84 캐시 재사용 (위 주석 참조). 파일이 없는 scene 은 조용히 on-the-fly 로 떨어진다.
+geo_raw_cache_dir: /data1/cympyc1785/data/DynPose-LBM/latentcam_dynpose/geo_raw_cache_da3
+da3_cam_token_per_sample: true      # 캐시가 B=1 로 구워지므로 켜야 폴백 경로와 일치한다
+
+anchor_pred_frame0: true
+
+batch_size: 8
+epochs: 200
+ckpt_at_epochs: [50, 100]

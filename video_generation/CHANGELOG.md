@@ -7,6 +7,38 @@
 ## [Unreleased]
 
 ### Changed
+- **`scene_scale` (씬 단위 `S`) 재정의 — frame0 한 장 → 전 프레임 점군 (2026-09-02).**
+  사용자 지시: "그냥 scene scale 은 sky 제외 mean of valid points distance from first source
+  camera 로 정의하고 사용해줘". 새 기본 `mode="points_first_cam"`: **전 프레임**의 sky 아닌
+  유효 depth 픽셀을 world 로 올려 **첫 소스 카메라 중심까지 거리의 평균**. dynamic 은 **안 뺀다**.
+  옛 정의(frame 0 non-sky 평균 ray length)는 `mode="frame0_ray"` 로 남아 있다.
+  왜: 카메라가 돌아 다른 공간을 보면 그 뒤 프레임의 실제 관측 거리가 몇 배가 되는데 frame0 S 는
+  안 따라간다 — `u` 로 표현된 것 전부(OBB extent · 후보 거리 · 게이트 마진 `0.02·S` · τ 임계)가
+  그 프레임들에서만 조용히 어긋난다. 72편 감사(`scripts/audit_scene_scale.py`)에서 프레임별 평균
+  ray length 의 max/min 비가 p50 1.0961 · 12.5% 가 1.5 초과 · 최대 12.4030.
+  **`trumans_to_recon.py:avg_scale_first_cam` 의 `avg_scale` 과 같은 정의**로 통일된 것이다.
+  **실측 옛→새 배율** (stride 4): camel 1.014 · avocado-slice 1.077 · parkour 1.090 ·
+  snowboard 1.389. dynamic 을 포함시킨 효과만 떼면 ×0.93~0.96 (동적 표면이 더 가깝다).
+  **옛 뱅크와는 `u` 눈금이 다르므로 재굽기가 필요하다** — 그래프/캐시에 `scale.mode` 를 싣게
+  했으니 대조 전에 반드시 확인할 것.
+  `scene_graph/scale.py`, `scripts/build_scene_graph.py`(`--scene_scale_mode`,
+  `--scene_scale_stride`), `lbm/cloud.py`(같은 두 인자 + `cloud.npz` meta 에 mode 기록).
+- **`lbm/cloud.py` 의 `scene_scale` 복사본 삭제 → `scene_graph/scale.py` 에서 import.**
+  정의가 두 군데면 한쪽만 고쳐도 아무 에러 없이 게이지가 갈린다 (이번 재정의 때 실제로 위험했다).
+- **G1 을 static / dynamic **채널별로 따로** 판정 (사용자 정정 2026-09-02: "collision 을 static 도
+  하고 dynamic 은 따로 해서 양쪽 다 판정하는 거였어").** 위 채널 분리는 판정을 합집합
+  `behind_frac` 한 열로 했었다 — 이제 `behind_static_frac > max_behind ∨ behind_dyn_frac >
+  max_behind_dyn` 로 **두 채널을 각자의 예산과 비교**한다. 판정식은 새 `behind_over()` **한
+  군데**에만 있고 `over()`(사다리 이분법)·`physical_verdict()`(`--gate_before_render` 의 렌더
+  생략 판정)가 **같은 함수**를 부른다 — 예전엔 `over()` 만 스칼라 비교라 두 판정이 갈릴 수 있었다.
+  이를 위해 `probe()` 의 2번째 반환값을 `behind_frac` 스칼라 → **stats dict 통째**로 바꿨다.
+  새 인자 `--max_behind_frac_dyn` (기본 `None` = `--max_behind_frac` 과 동일).
+  예: 벽은 한 프레임도 허용 안 하되(`--max_behind_frac 0.0`) 지나가는 사람은 조금 봐준다
+  (`--max_behind_frac_dyn 0.1`). **기본값에서는 채널 OR 이 합집합과 수학적으로 동치라 판정이
+  예전과 bit-identical** 이다. `bank.json` 의 `collision` 블록에 `time_match` 와
+  `max_behind_frac_dyn` 을 싣는다 (없으면 뱅크만 보고 두 arm 을 구분할 수 없었다).
+  두 CSV(`sample_camera_bank`, `fit_hole_ladder`)에 `behind_static_frac` / `behind_dyn_frac`
+  열 추가 — 진단이 아니라 **판정에 쓰는 값**이다. 요약의 "남은 위반" 집계도 같은 함수로.
 - **G1(표면 뒤) 충돌 판정에 시간축 정합 (`--collision_time_match`, 기본 **off**, 2026-09-02).**
   사용자 지적: "물리 판정 기준은 4d point cloud 로 하려면 OBB 도 해당 시간축에 맞는 OBB 로".
   감사 결과 **OBB 를 쓰는 게이트(G5 `obb_clearance:194` / G6 `elevation_profile:239` /
@@ -18,9 +50,10 @@
   **채널 분리 (사용자 지시 2026-09-02, "dynamic 을 완전 빼지는 말고 dynamic 의 경우 해당 시간의
   plan, src 카메라만 매칭해서 이용해서 따로 측정하게 해줘").** `behind_surface_frames(channel=)`
   가 셋으로 갈린다 — `"all"`(=레거시) / `"static"`(전 소스 프레임, **동적 픽셀 제외**) /
-  `"dynamic"`(**시간이 맞는 소스 프레임 1장만**, **동적 픽셀만**). 게이트가 보는
-  `behind_frac` 은 두 채널의 **합집합**이라 의미가 안 바뀌고, 동적 충돌은 꺼지지 않는다.
-  갈라 놓은 건 진단용 4열: `behind_static_frames/_worst`, `behind_dyn_frames/_worst`
+  `"dynamic"`(**시간이 맞는 소스 프레임 1장만**, **동적 픽셀만**).
+  ~~게이트가 보는 `behind_frac` 은 두 채널의 합집합~~ → **아래 "G1 을 채널별로 따로 판정"
+  항목으로 대체됨** (사용자 정정: 두 채널을 각자 판정한다).
+  열은 6개: `behind_static_frames/_frac/_worst`, `behind_dyn_frames/_frac/_worst`
   (`behind_dyn_worst ≤ 1` — 소스 프레임 1장만 보므로).
   이전 설계(매칭 프레임을 `frames` 에 **주입**)는 프레임 집합이 arm 마다 달라져 A/B 를
   오염시켰으므로 폐기했다 — static 채널은 `frames` 를 그대로 쓴다.

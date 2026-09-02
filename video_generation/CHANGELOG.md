@@ -7,6 +7,15 @@
 ## [Unreleased]
 
 ### Added
+- **`scripts/run_dynpose_d110_export.sh` — D110 후처리 체인 (caption → export → dd10 리스트)
+  을 스크립트로 고정 (2026-09-02).** D107 때 이 체인을 세션 안에서 손으로 돌렸다가 caption
+  단계가 **아직 굽고 있던 샤드를 앞질러서** 2편(`00e9f728` 62변이 / `015b197d` 9변이)이
+  `captions.json` 없이 export 에서 빠졌다 — `/tmp/d107_export.log` 에 "skipped 2" 경고 한 줄로만
+  남아 export 표만 보면 71 변이가 사라진 걸 못 잡는다. 그래서 ① 러너 PID 와 자식 `fit/emit` 이
+  둘 다 없어질 때까지 막고(d99 때 러너가 죽어도 자식 6개가 살아남은 전례), ② caption 후 뱅크
+  수와 `captions.json` 수가 같은지 assert 해서 어긋나면 export 전에 중단한다. holdout 은 d107 과
+  동일한 27편(`/tmp/d107_test_videos.txt`)이라 d107/d109 arm 과 paired 로 읽힌다.
+  (d107 의 그 2편 captions 는 사후 생성해 뒀다 — 다만 d107 코퍼스는 학습 중이라 재export 안 함.)
 - **`scripts/run_dynpose_d110_shard.sh` — d107 위에서 hole 사다리 2단→4단 재fit (D110,
   2026-09-02).** dd 10%/preset 90% 를 서브샘플(D109)로만 만들면 코퍼스가 58% 로 줄어서,
   대신 fit 사다리를 k6 원래 4단으로 되돌려 preset(track 포함)·dd 변이를 ~2배로 늘린다.

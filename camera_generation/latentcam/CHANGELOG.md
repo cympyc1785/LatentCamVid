@@ -5,6 +5,13 @@ All notable changes to the latentcam sub-project. Follows [Keep a Changelog](htt
 ## [Unreleased]
 
 ### Added
+- **`main/conf/experiment/dynpose_d110_k6_dd10.yaml` (D110, 2026-09-02).** D109 와 같은
+  dd 10%/preset 90% 비율이지만 **데이터를 버리는 대신 늘려서** 만든다 — 사용자: "이러면 개수가
+  부족하잖아 현재 비율 유지하되 추가로 preset (track 포함)을 더 만들어줘". d107 τ뱅크는 그대로
+  두고 hole 사다리만 2단→4단으로 재fit(`run_dynpose_d110_shard.sh`)해 preset·dd 변이가 양쪽 다
+  ~2배가 되므로, dd 를 10% 로 서브샘플해도 총량이 d107 전량(8,512)을 넘는다. d107_k6 대비
+  실효 diff 4줄 (exp_name + 코퍼스 경로 3개). geo 캐시는 d84/d107 과 공유 (키가 scene 이름이고
+  내용은 소스 영상 feature 라 target 뱅크와 무관, scene 집합도 동일). holdout 도 같은 27편.
 - **`filter_seg_list_by_preset.py --target_frac_prefix/--target_frac` — prefix 매칭 preset 을
   최종 리스트의 지정 비율로 서브샘플 (D109, 2026-09-02).** 사용자 지시 "dd를 10%로 낮추고
   preset을 (track 포함) 90%까지" 의 데이터 축. RNG 없이 결정론적 — 매칭 행을 리스트 순서

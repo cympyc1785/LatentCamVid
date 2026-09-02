@@ -1,0 +1,56 @@
+# @package _global_
+# D110 — hole 사다리를 **4단으로 되돌린** dynpose 코퍼스 위에서 dd 10% / preset 90%.
+#
+# D109(`dynpose_d107_k6_dd10`)가 같은 비율을 만들긴 했지만 코퍼스가 d107 전량의 58%(4,414행)로
+# 줄었다 — 사용자: "이러면 개수가 부족하잖아 현재 비율 유지하되 추가로 preset (track 포함)을
+# 더 만들어줘", "비율 유지하려면 dd도 좀 더 추가해도됨". 그래서 데이터를 **버리는 대신 늘렸다**:
+# d107 의 τ뱅크(bank_d107)를 그대로 두고 `hole_ladder` 만 2단(0.20/0.35) → k6 원래 4단
+# (0.10/0.20/0.35/0.50)으로 재fit 했다 (`run_dynpose_d110_shard.sh`). 사다리는 fit 단계의
+# 손잡이라 graph/route/τ뱅크가 안 바뀌고, preset·dd 변이가 **양쪽 다** 늘어 dd 를 10% 로
+# 서브샘플해도 총량이 d107 전량을 넘는다.
+#
+# 리스트 생성 (재현 가능, RNG 없음):
+#     python scripts/data/filter_seg_list_by_preset.py \
+#         --root /data1/cympyc1785/data/DynPose-LBM/latentcam_dynpose_d110 \
+#         --prefix seg_list_dynpose --target_frac_prefix dd_ --target_frac 0.10 --suffix dd10
+#
+# geo 캐시는 d84/d107 arm 과 **공유**한다 — 키가 scene 이름(`dynpose_<uuid>.pt`)이고 내용은
+# 소스 영상의 geo feature 라 target 카메라 뱅크와 무관하다. scene 집합도 같다.
+# holdout 도 d107 과 같은 27편이라 d107/d109 arm 과 paired 로 읽힌다.
+#
+# d107_k6 대비 실효 diff 4줄: exp_name / dl3dv_root / train_seg_list / test_seg_list.
+exp_name: dynpose_d110_k6_dd10
+dl3dv_root: /data1/cympyc1785/data/DynPose-LBM/latentcam_dynpose_d110
+meta_csv: meta_dynpose.csv
+train_seg_list: /data1/cympyc1785/data/DynPose-LBM/latentcam_dynpose_d110/seg_list_dynpose_dd10_train.txt
+test_seg_list: /data1/cympyc1785/data/DynPose-LBM/latentcam_dynpose_d110/seg_list_dynpose_dd10_test.txt
+coverage_blacklist_path: null
+
+pose_source: da3
+target_pose_source: da3_target_poses
+scale_mode: avg_scale
+avg_scale_ref: context_first_cam
+intr_norm: rel
+cam_dim: 64
+
+geo_encoder: da3
+geo_cam_embed: null
+geo_latent_cache_dir: null
+geo_posed: true
+geo_shuffle_order: false
+da3_geo_model: da3nested-giant-large
+da3_geo_input_hw: [252, 448]
+da3_geo_layers: last
+
+geo_view_sampling: context_uniform
+geo_num_views: 6
+geo_first_view_target_s: true
+
+geo_raw_cache_dir: /data1/cympyc1785/data/DynPose-LBM/latentcam_dynpose/geo_raw_cache_da3
+da3_cam_token_per_sample: true
+
+anchor_pred_frame0: true
+
+batch_size: 8
+epochs: 200
+ckpt_at_epochs: [50, 100]

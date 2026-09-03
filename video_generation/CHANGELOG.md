@@ -7,6 +7,48 @@
 ## [Unreleased]
 
 ### Added
+- **캡션 자연어 재설계 + composition 열 (D121, 2026-09-03, 사용자 지시).** 학습 프롬프트가
+  `target: camel. motion: the camera orbits to the left around the subject.` 였다. 세 가지가
+  문제였다 — ① target 이 한 단어라 형제 노드를 못 가린다 ② `motion` 문구의 `{target}` 치환이
+  **어느 문구에도 안 걸리는 no-op** 였다 (`configs/caption_presets.json` 이 리터럴
+  `"the subject"` 를 들고 있었다 — 즉 라벨이 motion 문장에 도달한 적이 없다) ③ framing 이
+  shot scale 한 단어뿐이라 "무엇이 같이 담기는지"가 없다. D117-a PE-AV 프로브에서 구조형이
+  4형식 중 꼴찌였던 것도 같은 자리다.
+  · `build_bank_captions.py --prompt_style nl`(**기본값**) 이 한 문장을 낸다:
+    free-moving/targetless 는 `The camera [adv] [motion].`, object-centric 은
+    `The camera [adv] [motion] around/toward [referring expr], keeping it in [shot scale]
+    [composition].` around/toward 는 preset 문구가 이미 갖고 있어 여기서 다시 안 고른다.
+    `--prompt_style fields` 가 예전 형식을 **문자 단위로** 그대로 만든다.
+  · target 은 `instance_desc.json`(D120) 의 referring expression
+    (`"the larger pale camel walking along the fence"`). 없으면 조용히 라벨로 떨어지되
+    **몇 편이 그랬는지 요약표에 찍는다**. `--no_anchor_desc` 로 예전 경로.
+  · `caption_presets.json` 35개 문구를 `"the subject"` → `{target}` 슬롯으로. 꽂을 말은
+    **형식이** 정한다 (fields = 옛 문자열, nl = referring expr) — fields 에서 문구가 대상을
+    또 부르면 `target:` 절과 중복이다. round-trip 으로 43 preset 전량 복원 확인.
+  · 크기 부사가 3-state 가 됐다: 안 주면 nl 켬 / fields 끔. **`dd_*`(코퍼스 47.8%) 에도
+    붙는다** — 예전에는 `--magnitude` 가 preset 경로에만 걸려 있어 두 부류가 부사 유무로
+    갈렸다. 정지 preset(`axis=="static"`, `move==static`)에는 안 붙인다
+    ("barely holds completely locked off" 는 문장이 아니다).
+  · **composition 열** `in_frame_ids` / `enter_ids` / `exit_ids` —
+    `sample_camera_bank.composition_stats()` 가 anchor 말고 어떤 노드가 화면에 담기는지 /
+    들어오고 나가는지를 잰다. OBB 8꼭짓점을 `T_gw @ pose` 와 **수정 없는** `K_src[f]` 로
+    투영한 bbox 면적비라 **렌더가 0회**다 (`geometry_stats` 와 같은 부류). 꼭짓점 절반이
+    카메라 뒤면 0 으로 친다 (bbox 가 화면 전체로 번진다). 뱅크는 **노드 id 만** 싣는다 —
+    문구는 `instance_desc.json` 이 갖고 있어야 뱅크를 다시 안 굽고 바꿀 수 있다.
+    `fit_hole_ladder.py --composition`(기본 켬, `--composition_min_area 0.004`
+    `--composition_max_nodes 3`) 이 **판정 패스에서만** 붙인다 (이분법 5프레임으로는
+    앞/뒤 1/3 이 2프레임이라 enter/exit 이 무의미). `--no_composition` 이면 열이 빠져
+    예전 뱅크와 같다.
+  · camel 스모크(dyn_0 × {orbit_left, dolly_in_look_at}) 실측:
+    orbit 은 `exit_ids=[dyn_1]` → *"...keeping it in a medium shot that widens to a medium
+    wide shot as the smaller pale camel standing near the fence leaves the frame."*,
+    dolly_in 은 `in_frame_ids=[stat_0, dyn_1, stat_1]` → *"...that tightens to a medium
+    close-up shot with the larger wooden fence ... and the smaller pale camel ... also in
+    frame."* 변화 절이 있으면 "같이 있음" 절은 뺀다 (붙박이라 거의 모든 변이에 같은 말).
+  · `vista4d_bank_to_dl3dv.py` 의 `caption_fields` 가 `target_text`/`framing_nl`/
+    `composition` 을 **있을 때만** 같이 내보낸다 (fields 코퍼스는 예전과 동일).
+  · ⚠ 기존 d99/d115 뱅크에는 composition 열도 `subject_area_seq` 도 없다 — 두 문구는
+    **재굽기 이후에만** 나온다. 캡션 스크립트가 그걸 세어서 경고로 찍는다.
 - **`scripts/describe_instances_vlm.py` — 노드별 referring expression (D120, 2026-09-03).**
   캡션의 target 이 `normalize_label(anchor_label)` 한 단어(`"woman"`, `"camel"`, `"window"`)라
   같은 라벨 노드가 둘 이상이면 문장만으로 어느 쪽인지 못 가른다 (avocado-slice 는 `window` ×2 ·
@@ -69,6 +111,23 @@
   결과: `results/20260903_collision_margin_d118/approach/`.
 
 ### Changed
+- **`describe_instances_vlm.py` — 같은 라벨 형제를 실제로 가르게 (D120-b, 2026-09-03).**
+  초판은 형제가 있다고 **경고만** 했고, camel 두 마리에 대해 VLM 이 두 번 다 
+  `"the camel walking near the wooden fence"` 류를 냈다 — 문장은 다른데 가리키는 근거가 없다.
+  네 가지를 넣었다:
+  · `## MEASURED FACTS` 블록 — 마스크에서 잰 화면 좌우 위치·면적비·깊이 순서를
+    **결정론적으로** 프롬프트에 적는다. 추측할 여지를 없애는 게 목적이라 VLM 이 만들지 않는다.
+  · 형제는 **순차 처리** — 먼저 확정된 형제 문구를 다음 질의에 붙이고, 내용어가 겹치기만
+    하면 위반으로 되돌린다. 병렬로 던지면 서로를 모른 채 같은 말을 낸다.
+  · 내용어 검증기 + `SPATIAL` 가드 — `MEASURED FACTS` 를 넣자 이번엔 반대로 위치·크기
+    **에서만** 문구를 만들어 외양·행위가 통째로 빠졌다 (`"the woman sitting at a table..."`
+    → `"the woman in a striped shirt"`). 구별은 되지만 target 으로는 후퇴라 **공간 어휘 밖
+    내용어를 최소 1개** 요구한다. 상한은 12 → 14 단어.
+  · `fallback_phrase()` — VLM 재질의 3회가 소진돼도 실측만으로 형제와 갈리는 문구를 만든다
+    (면적비 ≥1.5 면 nearer/more distant, 아니면 좌/우). 계획서 §B6 "파이프라인은 절대
+    hard-fail 하지 않는다".
+  실측 camel: `dyn_0` = "the larger pale camel walking along the fence" /
+  `dyn_1` = "the smaller pale camel standing near the fence".
 - **`--min_clearance` 기본값 0.35 → 0.20 m, 6개 스크립트 전부 (D120, 2026-09-03, 사용자 지시).**
   D118 실측에서 0.35 는 이미 충돌 게이트를 통과한 export 행의 **80.6% (258 중 208)** 를 잘라냈고,
   그중 `wall` 단독이 **123 = 47.7%** 였다. 임계 하나가 뱅크 크기를 좌우하고 있었다는 뜻이다.

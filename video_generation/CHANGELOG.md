@@ -7,6 +7,23 @@
 ## [Unreleased]
 
 ### Added
+- **shot scale 시간축 — `subject_area_seq` 열 + `--framing_timeline` 캡션 (D119, 2026-09-03).**
+  캡션의 shot scale 은 `bucket(subject_area_med, framing_buckets)` 한 줄에서 나오는데
+  (`build_bank_captions.py:202`), 그 `subject_area_med` 는 `verify_frames`(기본 13) 프레임
+  면적비를 `np.nanmedian` 으로 접은 **스칼라 하나**였다. push-in 과 pull-out 과 정지가 전부
+  같은 문장이 된다.
+  · `sample_camera_bank.measure_trajectory(area_timeline=True)` 가 접기 전 배열을 그대로
+    싣는다 — `subject_area_seq` / `subject_area_start` / `subject_area_end`. **렌더가 안
+    늘어난다** (이미 모으고 있던 `areas` 를 버리지 않는 것뿐).
+  · `fit_hole_ladder.py --area_timeline`(기본 켬) 은 **판정 패스에서만** 붙인다 — 이분법
+    5프레임으로는 push-in/pull-out 을 못 가른다. `--no_area_timeline` 이면 열이 빠지고 예전
+    뱅크와 같다. `bank.csv` 는 배열 열을 `|` 로 잇는다 (따옴표 없는 writer 라 쉼표를 못 쓴다).
+  · `build_bank_captions.py --framing_timeline`(기본 끔) 이 시작/끝 버킷이 다를 때만
+    `"medium shot tightening to medium close-up"` 으로 바꾼다. 양 끝은 **앞/뒤 3개씩 median**
+    으로 읽는다 — median 이 주던 이상치 보호가 끝점 한 프레임에는 없기 때문이다.
+  · camel 65 변이 실측: `end/start` 가 0.5 배 넘게 벌어지는 변이 **34/65 (52.3%)**, 그중
+    framing 문구가 실제로 바뀌는 것 **28/65 (43.1%)**. 1프레임 튐이 극값인 변이는 7/65 (10.8%)
+    로, 끝 3개 median 이 그걸 걸러낸다. 방향은 preset 과 일치한다 (dolly_in → tightening).
 - **`scripts/trumans_approach_viz.py` — 임계를 고정하고 카메라를 벽으로 전진시키는 시각화
   (D118, 2026-09-03).** 앞서 낸 `run_raycast_threshold_viz.sh` 는 궤적을 고정하고
   `--min_clearance` 를 스윕했는데, 사용자가 원한 건 그 반대였다 — "고정된 값을 가지고 천천히

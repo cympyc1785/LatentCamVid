@@ -7,6 +7,27 @@
 ## [Unreleased]
 
 ### Added
+- **`scripts/run_dynpose_d122_shard.sh` — dynpose 코퍼스를 D121 세팅으로 재생성 (D122,
+  2026-09-03, 사용자 지시 "이 세팅으로 dynpose ... 돌려놔줘").** d110 뱅크(09-02 fit, 266/266)는
+  **56열**이라 `subject_area_seq` / `in_frame_ids` / `enter_ids` / `exit_ids` 가 없다 (d121 vista 는
+  69열). 이 4열이 없으면 D122 캡션의 세 절 — `"a medium shot **that widens to** an extreme wide
+  shot"`(subject_area_seq) / `"... **until she leaves the frame**"`(seq 끝값 0) / `"with X also in
+  frame / as Y **leaves the frame**"`(in_frame/enter/exit_ids) — 이 통째로 못 나온다. 두 열 다
+  판정 패스가 **이미 렌더한** 프레임의 면적과 OBB 8꼭짓점 투영만 쓰므로 **추가 렌더 0회**지만
+  CSV 열이라 재fit 없이는 못 채운다.
+  · d110 대비 실효 diff 는 `--area_timeline --composition` 두 플래그뿐. 사다리
+    (0.10/0.20/0.35/0.50) · graph(`.graph_d107`) · route(`preset_route_d107.json`) ·
+    τ뱅크(`bank_d107`) · ease/deroll/fixed_focal 은 그대로다 → **공유 열은 d110 과 같아야 한다**
+    (한 편 뽑아 대조할 것; d121 vista 가 d116 과 bit-identical 이어야 했던 것과 같은 규칙).
+  · 기본값인 `--orbit_fixed_sweep --min_sweep_deg 20 --behind_src_frames 49
+    --collision_time_match --collision_source depth` 도 **명시**한다 (뱅크 정체성을 argparse
+    기본값에 맡기지 않는다는 D105 규칙).
+  · 앞단으로 `describe_instances_vlm.py` 를 dynpose 265편에 처음 돌린다 —
+    `out_dynpose/*/instance_desc.json` 이 **0건**이었다. 없으면 nl 캡션의 referring expression 이
+    조용히 라벨로 떨어진다.
+  · 후단은 기존 `run_dynpose_d110_export.sh` 체인 그대로 (nl 캡션 → `latentcam_dynpose_d122`
+    export, holdout 은 d107 과 같은 27편 → `filter_seg_list_by_preset.py --target_frac 0.10
+    --suffix dd10`).
 - **캡션 자연어 재설계 + composition 열 (D121, 2026-09-03, 사용자 지시).** 학습 프롬프트가
   `target: camel. motion: the camera orbits to the left around the subject.` 였다. 세 가지가
   문제였다 — ① target 이 한 단어라 형제 노드를 못 가린다 ② `motion` 문구의 `{target}` 치환이

@@ -135,7 +135,15 @@ class Config:
     # Text encoder
     text_encoder = 'T5'  # ['T5', 'CLIP']
     if text_encoder == 'T5':
-        text_len = 512
+        # [2026-09-03] 512 -> 128. 토크나이저가 `padding='max_length'` 라 text_len 은 예산이
+        # 아니라 **고정 패딩 길이**다. 실측 코퍼스 최장이 d121 nl 82 tok / DataDoP 77 tok 라
+        # 512 중 84%가 pad 였고, umT5-xxl 인코더가 매 스텝 그 길이를 통째로 돈다.
+        # 출력은 안 바뀐다: text CA 가 `key_padding_mask=~text_mask` 로 pad 를 빼고
+        # (camera_diffusion_model_latent.py:308), text 에 위치 임베딩이 없으며
+        # (`text_proj` 는 per-token Linear), umT5 도 attention mask 를 받는다.
+        # 기존 ckpt 와 호환된다 — 늘릴 일이 생기면 여기만 올리면 되고, 캡션이 이 값을
+        # 넘으면 `tokenizers.py:49` 의 truncation 이 **조용히** 자른다는 것만 기억할 것.
+        text_len = 128
         t5_dtype = torch.bfloat16
         t5_checkpoint_dir = "/data1/cympyc1785/LatentCamVid/video_generation/models/DiffSynth-Studio/Wan-AI/Wan2.2-TI2V-5B"
         t5_checkpoint_path = 'models_t5_umt5-xxl-enc-bf16.pth'

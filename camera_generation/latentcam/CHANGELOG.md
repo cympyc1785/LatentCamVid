@@ -61,6 +61,24 @@ All notable changes to the latentcam sub-project. Follows [Keep a Changelog](htt
   deroll + smooth_kf (vista/trumans d99·d106 규약 통일). geo 캐시는 d84 것 재사용
   (키가 scene 이름, 내용물 불변).
 
+### Changed
+- **umt5 `text_len` 512 -> 128 (`main/config.py`, `main/config_large.py`, 2026-09-03).**
+  사용자 지시: "128로 바꿔주고". `models/tokenizers.py:49` 가 `padding='max_length',
+  truncation=True, max_length=self.seq_len` 이라 `text_len` 은 **예산이 아니라 고정 패딩 길이**다 —
+  512 로 두면 짧은 캡션도 512 슬롯을 채워 umT5-xxl 인코더가 매 스텝 그 길이를 통째로 돈다.
+  실측 최장은 d121 nl 캡션 82 tok / DataDoP concise 77 tok (n=2,000, p50 40, p99 65) 라
+  512 중 84% 가 pad 였다.
+  **출력은 안 바뀐다** (코드 판독, 수치 확인은 아직): text cross-attention 이
+  `key_padding_mask=~text_mask` 로 pad 를 빼고 (`camera_diffusion_model_latent.py:308`, `:407`,
+  `camera_diffusion_model_base.py:167`, `_attn_sup.py:165`), text 쪽엔 위치 임베딩이 없으며
+  (`text_proj`/`text_ln` 은 per-token), umT5 자신도 attention mask 를 받는다. → `text_len ≥`
+  실제 토큰 수이기만 하면 기존 체크포인트와 호환된다.
+  학습(`config.py`)과 추론(`config_large.py`: `infer_latent_cam_dm.py`/`infer_cam_dm.py`/
+  `eval.py`/`valid_cam_acc.py`)을 **같이** 내렸다 — 둘이 어긋나면 안 된다.
+  `config_vae.py` 는 그대로 512 다: VAE 경로(`train_vae.py`/`infer_vae.py`)는 텍스트를 아예
+  안 읽어 죽은 값이라 건드릴 이유가 없다.
+  주의: 캡션이 128 tok 을 넘으면 `tokenizers.py:49` 의 truncation 이 **조용히** 자른다.
+
 ### Fixed
 - **video CA 를 0 초기화 residual gate 로 붙인다 — `video_gate` (D117, 2026-09-03).**
   D117 두 arm 이 55 / 84 epoch 동안 loss ~1.0 (= eps 예측이 0) 에서 못 빠져나온 **진짜 원인**.

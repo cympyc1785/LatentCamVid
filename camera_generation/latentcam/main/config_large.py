@@ -121,7 +121,10 @@ class Config:
     # Text encoder
     text_encoder = 'T5' # ['T5', 'CLIP']
     if text_encoder == 'T5':
-        text_len = 512
+        # [2026-09-03] 512 -> 128. `config.py` 와 **같이** 내렸다 — 학습은 config.py, 추론
+        # (`infer_latent_cam_dm.py`/`infer_cam_dm.py`/`eval.py`)은 이 파일을 읽으므로 둘이
+        # 어긋나면 안 된다. 근거·안전성은 config.py 의 같은 자리 주석 참조.
+        text_len = 128
         t5_dtype = torch.bfloat16
         t5_checkpoint_dir = '/home/ckd248/data/SCVideo/camera_generation/tools/Wan2.2-TI2V-5B'
         t5_checkpoint_path = 'models_t5_umt5-xxl-enc-bf16.pth'

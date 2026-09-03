@@ -77,7 +77,32 @@ All notable changes to the latentcam sub-project. Follows [Keep a Changelog](htt
   `eval.py`/`valid_cam_acc.py`)을 **같이** 내렸다 — 둘이 어긋나면 안 된다.
   `config_vae.py` 는 그대로 512 다: VAE 경로(`train_vae.py`/`infer_vae.py`)는 텍스트를 아예
   안 읽어 죽은 값이라 건드릴 이유가 없다.
-  주의: 캡션이 128 tok 을 넘으면 `tokenizers.py:49` 의 truncation 이 **조용히** 자른다.
+  코퍼스별 실측 (umT5, `prompt_camera_with_scene_video`; n=샘플 프롬프트 수):
+
+  | 코퍼스 | n | p50 | p99 | max | >128 |
+  |---|---|---|---|---|---|
+  | worldtraj/dynamicverse | 405 | 111 | 198 | **240** | **124 (31%)** |
+  | Scene-Decoupled/da3 | 400 | 22 | 36 | 37 | 0 |
+  | worldtraj/DL3DV | 2,595 | 26 | 47 | 61 | 0 |
+  | DynPose latentcam_dynpose | 8,796 | 17 | 26 | 28 | 0 |
+  | DynPose d107 | 8,512 | 18 | 26 | 28 | 0 |
+  | TRUMANS-Lite d77 | 61,671 | 20 | 25 | 26 | 0 |
+  | TRUMANS-Lite | 260 | 26 | 33 | 33 | 0 |
+  | Vista4D k6_d77 | 13,705 | 18 | 23 | 25 | 0 |
+  | Vista4D latentcam_da3 | 9,950 | 19 | 26 | 28 | 0 |
+  | DataDoP concise | 2,000 | 40 | 65 | 77 | 0 |
+
+  **dynamicverse 만 128 을 넘는다** (scene 서술이 `**Detailed**: ...` 로 길다). 지금 돌리는
+  dynpose/vista/trumans arm 은 전부 안전하지만, worldtraj arm 을 다시 돌릴 거면 그 config 의
+  `text_len` 을 256 이상으로 올려야 한다.
+- **`models/tokenizers.py` — truncation 이 일어나면 경고한다 (2026-09-03).**
+  위 표의 dynamicverse 같은 경우가 **조용히** 잘리는 걸 막는다. "마지막 토큰이 EOS 인가"로는
+  못 잡는다 — HF 는 자르고 **나서** special token 을 붙이므로 잘린 시퀀스도 EOS 로 끝난다
+  (실측). 그래서 attention mask 가 `seq_len` 을 꽉 채운 항목에 한해 truncation 없이 한 번 더
+  토크나이즈해 실제 길이를 재고, 넘으면 `warnings.warn` 한다. 꽉 차는 일 자체가 드물어 상시
+  비용이 아니고, 래치(`_trunc_warned`)로 **프로세스당 한 번만** 뜬다.
+  검증: 21 tok 캡션 경고 0 / 241 tok 캡션 경고 1 (`실제 241 tok` 이 메시지에 찍힘) / 재호출
+  경고 0 (래치) / `seq_len=512` 로는 241 tok 도 경고 0 / 짧은+긴 혼합 배치 경고 1.
 
 ### Fixed
 - **video CA 를 0 초기화 residual gate 로 붙인다 — `video_gate` (D117, 2026-09-03).**

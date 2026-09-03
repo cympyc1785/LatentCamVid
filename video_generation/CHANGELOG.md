@@ -7,6 +7,27 @@
 ## [Unreleased]
 
 ### Added
+- **`scripts/describe_instances_vlm.py` — 노드별 referring expression (D120, 2026-09-03).**
+  캡션의 target 이 `normalize_label(anchor_label)` 한 단어(`"woman"`, `"camel"`, `"window"`)라
+  같은 라벨 노드가 둘 이상이면 문장만으로 어느 쪽인지 못 가른다 (avocado-slice 는 `window` ×2 ·
+  `table` ×2, camel 은 `camel` ×2). SAM3 인스턴스 마스크를 근거로 VLM 에게 **"the ..." 명사구
+  하나**를 받아 `out/<video>/instance_desc.json` (`lbm_instance_desc_v1`) 으로 남긴다.
+  · 노드당 이미지 **1장**: 시간 3등분 구간에서 bbox 면적 최대인 프레임 3개를 골라, 각 프레임을
+    [위=마스크 밖을 0.28 배로 어둡게 한 전체 프레임 + 노란 bbox / 아래=원본 색 tight crop] 2단
+    타일로 만들고 가로로 잇는다. VLM 호출도 노드당 1회.
+  · 검증기: `"the "` 로 시작 · ≤12 단어 · 끝 마침표 없음 · base noun 포함 · `camera/image/frame/
+    photo/video/yellow box/highlight` 금지 · **같은 라벨 형제가 있으면 맨 `"the {label}"` 보다
+    길어야 통과**. 위반 시 `## VALIDATION_ERRORS` 로 최대 3회 재질의(temperature 안 올림).
+  · 기본은 `bank.json.variants` 의 `anchor_id` 집합만 (`--all_nodes` 로 전 노드).
+    실측 avocado-slice 6 / camel 5 노드, repair 2회, 노드당 0.3~0.7 s.
+- **`--mesh_margin_frac` (기본 0.08) — mesh 충돌 판의 독립 임계 (D120, 2026-09-03).**
+  depth 판과 mesh 판이 같은 `--behind_margin_frac` 를 쓰는 동안 **실효 여유가 4배 어긋나
+  있었다**: depth 판은 `cam_z + clear > z + margin` 이라 실효 standoff 가
+  `(behind_clear_frac − behind_margin_frac)·S` = 0.08·S 인데, mesh 판(`mesh_behind_profile`)은
+  `clear_frac` 을 아예 안 받아서 `margin_frac·S` = 0.02·S 였다. `sample_camera_bank.py` /
+  `fit_hole_ladder.py` 양쪽에 손잡이를 넣고 `behind_context → behind dict → _mesh_profile` 로
+  실었다. `None`(=예전) 이면 `margin_frac` 으로 떨어져 **예전 뱅크와 비트 동일**이고, 재현은
+  `--mesh_margin_frac 0.02`. D47 legality assert 도 새 손잡이 기준으로 잰다.
 - **shot scale 시간축 — `subject_area_seq` 열 + `--framing_timeline` 캡션 (D119, 2026-09-03).**
   캡션의 shot scale 은 `bucket(subject_area_med, framing_buckets)` 한 줄에서 나오는데
   (`build_bank_captions.py:202`), 그 `subject_area_med` 는 `verify_frames`(기본 13) 프레임
@@ -46,6 +67,23 @@
   이 호스트 matplotlib 에 한글 폰트가 없어 라벨은 영문이다.
 - **`scripts/run_approach_viz.sh`** — 위 둘의 드라이버 (eye / low × wide / zoom 4벌).
   결과: `results/20260903_collision_margin_d118/approach/`.
+
+### Changed
+- **`--min_clearance` 기본값 0.35 → 0.20 m, 6개 스크립트 전부 (D120, 2026-09-03, 사용자 지시).**
+  D118 실측에서 0.35 는 이미 충돌 게이트를 통과한 export 행의 **80.6% (258 중 208)** 를 잘라냈고,
+  그중 `wall` 단독이 **123 = 47.7%** 였다. 임계 하나가 뱅크 크기를 좌우하고 있었다는 뜻이다.
+  `CLEARANCE_DIRS` 의 **±z 는 그대로 둔다** (사용자 확정) — 바닥/책상 윗면이 먼저 잡히는 건 알고
+  남기는 것이고, 그래서 임계 쪽을 낮춘다. 바뀐 곳: `bank_to_blender_poses.py` ·
+  `trumans_to_recon.py` · `trumans_first_pose_board.py` · `trumans_lite_bank.py` ·
+  `trumans_scene_probe.py` · `trumans_raycast_viz.py`. **앞의 둘은 반드시 같은 값**이어야
+  소스/target 대조가 성립한다 — 한쪽만 바꾸지 말 것. 예전 뱅크 재현은 `--min_clearance 0.35`.
+- **`build_bank_captions.py --framing_timeline` 기본값 False → True (D120, 2026-09-03,
+  사용자 확정).** D119 의 camel 65 변이 실측이 근거다 — median 한 스칼라가 `end/start` 비율
+  `|r−1|>0.5` 인 변이 **52.3%** 를 숨겼고 문구가 실제로 바뀌는 변이가 **43.1%** 였다. dolly_in
+  사다리 4칸이 전부 `"medium close-up"` 한 문장으로 접히던 게 이걸로 갈린다. **뱅크에
+  `subject_area_seq` 가 없으면 조용히 예전 문구로 떨어지므로**, 효과를 보려면 Vista 52편을
+  `--area_timeline` 으로 재굽는 것이 선행이다 (현재 이 열이 있는 뱅크는 camel
+  `hole_bank_k6_d119smoke` 하나뿐). 되돌리려면 `--no_framing_timeline`.
 
 ### Fixed
 - **`run_preset_warp_max_shard.sh` 의 샤드 분배가 실행 중 늘어난 뱅크를 조용히 흘렸다 (FIX-D118,

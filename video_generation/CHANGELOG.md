@@ -6,6 +6,18 @@
 
 ## [Unreleased]
 
+### Fixed
+- **`render_bank_videos.write_video` 가 홀수 치수를 짝수로 패딩한다 (FIX-D118, 2026-09-03).**
+  `macro_block_size=1` 은 imageio 의 자동 패딩을 끄는데 libx264 + yuv420p 은 짝수 치수만 받아서,
+  격자 높이·너비 중 하나라도 홀수면 ffmpeg 가 첫 프레임에서 죽고 올라오는 건 `OSError: Broken
+  pipe` 뿐이다 — 치수가 원인이라는 말이 어디에도 없고, 그때까지 GPU 로 돌린 렌더(변이 16개 ×
+  49프레임, 씬당 ~2분)가 통째로 날아간다. 실측: `--columns 6 --tile_height 225` 가
+  `contact_sheet` 에서 `3*225 + 2*4 = 683` 을 만들어 `friends-restaurant`/`car-roundabout`
+  두 씬 모두 렌더 직후 터졌다. 격자 크기는 타일 크기 × 열 수 × 타일 개수의 곱이라 **호출부에서
+  짝수를 보장할 수가 없어서** writer 안에서 막는다 (아래/오른쪽 1px `np.pad(mode="edge")`,
+  패딩이 걸리면 한 줄 print). 짝수였던 기존 호출은 비트 동일. `render_preset_grid_warp.py` 등
+  이 함수를 import 하는 스크립트가 같이 고쳐진다.
+
 ### Added
 - **G1(표면 뒤) 증거 소스를 고르는 `--collision_source {depth,mesh,both}` (D116, 기본 `depth`,
   2026-09-02).** depth shell 은 **소스 카메라가 본 표면**만 안다 — 소스는 자기 뒤를 안 보므로

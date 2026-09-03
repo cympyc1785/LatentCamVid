@@ -7,6 +7,27 @@
 ## [Unreleased]
 
 ### Added
+- **`scripts/probe_dynpose_scale_mode.sh` — dynpose 게이지를 6편 실측으로 정한다 (D122,
+  2026-09-04, 사용자 지시 "먼저 몇 편으로 차이를 실측").** D122 재fit 이 F2
+  `assert_scale_mode` 로 전량 즉사했다 — dynpose scene_graph 280편은 `scale.mode` 필드
+  **자체가 없어** 기본값 `frame0_ray` 로 읽히는데, vista 는 D115 재굽기 때 52/53 편이
+  `points_first_cam` 으로 갱신됐다. 즉 d107/d110 dynpose 코퍼스는 전부 옛 게이지다.
+  · 그냥 갈아탈 수 없는 이유: 게이트 임계가 전부 S 배율(`behind_margin_frac·S`,
+    `obb_clear_floor·S`, 가림 `0.02·S`)이라 S 정의를 바꾸면 임계가 **씬마다 다른 배율로**
+    옮겨간다. 실측 `r_pts_first = S_pts_first / S_f0` 가 p05 0.560 / p50 1.097 / p95 1.571 로
+    1.0 **양옆에** 걸쳐 있어 "전부 느슨"도 "전부 빡셈"도 아니다.
+  · **arm B 는 재fit 만으로 안 된다.** τ 뱅크(`bank_d107/bank.json`)가 `S` 를 통째로 싣고
+    있고(`S: 0.4363…`) `sample_camera_bank.py:84` 도 `assert_scale_mode` 를 부른다 →
+    graph → route → τ뱅크 → fit **전 체인**을 다시 돌려야 한다. 그래서 arm B 는 D107 러너를
+    통째로 재현하되 `--scene_scale_mode points_first_cam` 만 얹고, 원본을 안 건드리려고
+    `out_dynpose_probe/<V>/` 에서 돈다 (`cloud.npz` / `geocalib_gravity.json` 은 심링크).
+  · arm A 는 옛 게이지 그대로 + `--allow_legacy_scale` → `hole_bank_probeA`.
+    두 arm 의 fit 인자는 D122 세팅으로 동일. 대조 항목은 variant 수 · 사다리 도달단
+    (`target_hole`) · `path_len_u` · `tau_max` · `status`/`binding` 분포.
+- **`scripts/run_k6_d121_shard.sh` — vista 뱅크를 D121 세팅으로 재굽기 (52/52 완료,
+  2026-09-04 00:12).** `hole_bank_k6_d121` = d116 사다리에 `--area_timeline --composition`
+  두 열을 얹은 것(69열). 5샤드, `describe_instances_vlm.py` 52/52 선행.
+  후속 릴은 `results/20260903_vista_preset_warp_d121` (preset별 최대단 depth warp, 4샤드).
 - **`scripts/run_dynpose_d122_shard.sh` — dynpose 코퍼스를 D121 세팅으로 재생성 (D122,
   2026-09-03, 사용자 지시 "이 세팅으로 dynpose ... 돌려놔줘").** d110 뱅크(09-02 fit, 266/266)는
   **56열**이라 `subject_area_seq` / `in_frame_ids` / `enter_ids` / `exit_ids` 가 없다 (d121 vista 는

@@ -7,6 +7,27 @@
 ## [Unreleased]
 
 ### Added
+- **`scripts/run_dynpose_d122_shard.sh` — dynpose 코퍼스를 vista 방식으로 전량 재생성 (D122,
+  2026-09-04, 사용자 지시 "vista 돌렸던 방식으로 다시 돌려 / 유일하게 다른건 preset,
+  datadop 비율").** 위 프로브는 중단하고 게이지를 `points_first_cam` 으로 확정했다.
+  러너는 vista `run_k6_d115_shard.sh`(GRAPH→CLOUD→TAU) + `run_k6_d121_shard.sh`(FIT→EMIT)
+  체인을 그대로 옮기고, 사용자가 지정한 **두 축만** 다르다:
+  · preset 라우팅 `route_presets.py --num_anchors 2 --num_external 4` (DataDoP 비율 정합),
+  · `--external_shapes configs/datadop_shapes.json` 을 τ뱅크·fit 양쪽에 전달.
+  그 외 인자(`--tau_ladder 1.00`, `--aim_keyframes 6 --keyframe_aim auto
+  --keyframe_ease smooth_kf`, `--fixed_focal --deroll`, `--orbit_fixed_sweep
+  --min_sweep_deg 20 --behind_src_frames 49`, `--collision_time_match --collision_source
+  depth`, `--hole_ladder 0.10 0.20 0.35 0.50`, `--area_timeline --composition
+  --composition_min_area 0.004 --composition_max_nodes 3`)는 vista 와 문자 단위로 같다.
+  · **재fit 만으로는 안 되는 이유**: `S` 가 세 군데에 산다 — `scene_graph.json` `scale.S`,
+    `cloud.npz` meta(`lbm/render.py:70` 이 렌더 단위로 읽음), `bank_*/bank.json` 최상위 `S`.
+    그래서 graph·cloud 를 **제자리에서 다시 짓는다**(vista D115 가 한 것과 같은 거래).
+    `scene_graph.json` 은 `scene_graph_pre_d122.json` 으로 백업하지만 `cloud.npz` 는
+    백업하지 않는다(1.4 GB×280 = 380 GB) → d107/d110 **렌더** 재현성은 여기서 끝난다.
+    뱅크 파일 자체는 안 건드리므로 학습에 쓴 카메라는 남는다.
+  · `instance_desc.json` 266편은 재실행 불필요 — 게이지를 바꿔도 node id·label 이 불변
+    (3편 실측 id_same=True, label_diff=0).
+  · `.graph_d122` / `.cloud_d122` 마커로 재실행 시 중복 계산을 막는다.
 - **`scripts/probe_dynpose_scale_mode.sh` — dynpose 게이지를 6편 실측으로 정한다 (D122,
   2026-09-04, 사용자 지시 "먼저 몇 편으로 차이를 실측").** D122 재fit 이 F2
   `assert_scale_mode` 로 전량 즉사했다 — dynpose scene_graph 280편은 `scale.mode` 필드

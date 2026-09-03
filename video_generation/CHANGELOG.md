@@ -6,7 +6,56 @@
 
 ## [Unreleased]
 
+### Added
+- **`scripts/trumans_approach_viz.py` — 임계를 고정하고 카메라를 벽으로 전진시키는 시각화
+  (D118, 2026-09-03).** 앞서 낸 `run_raycast_threshold_viz.sh` 는 궤적을 고정하고
+  `--min_clearance` 를 스윕했는데, 사용자가 원한 건 그 반대였다 — "고정된 값을 가지고 천천히
+  벽으로 이동했을 때 어디쯤에서 collision, clearance 에 걸리는지". 임계 4개를 전부 고정한 채
+  40걸음 전진하며 각 임계가 **처음 걸리는 지점**에 색 기둥을 세운다. 기둥 사이 간격이 곧
+  "게이트를 0.35→0.20 으로 낮추면 벽에 몇 cm 더 붙나"다 (a17 실측 16 cm).
+  · 게이트 함수 `clearance_of()` 를 **그대로** 부르되 수평 4방향만의 `clearance_h` 를 같이
+    기록한다. 두 값이 갈라지는 구간이 곧 바닥/책상 윗면이 게이트를 먹는 구간이다.
+    a17 eye(1.33 m) 45.0% / low(0.90 m) 67.5% of steps.
+  · `--start_height 0.90` 실측: 벽에서 2.116 m 떨어져 있는데도 `0.50` 이 **step 0** 에서 걸린다
+    (아래 침대 면 0.45 m). 임계를 올리면 "벽에 붙는 궤적"이 아니라 "낮은 카메라"가 먼저 잘린다.
+  · 글자는 관측 카메라 회전 행렬을 씌워 billboard 한다. 오일러 손계산(`atan2(-side[1],
+    -side[0]) + pi/2`)은 180도 틀려 거울상으로 나왔다.
+  · 천장은 `--cut_above` 로 `hide_render` — 근평면 컷어웨이는 시선에 수직이라 **수평 천장을
+    못 없앤다** (실측: eye 89개 / low 97개 mesh 제외). `--obs_side {auto,flip}` 로 관측 옆면을
+    손으로 뒤집을 수 있고 `auto` 가 기존 동작이다.
+- **`scripts/plot_approach_clearance.py`** — 위 `approach.json` 을 걸음별 clearance 곡선
+  패널로. 실선 = 게이트 6방향, 점선 = 수평 4방향, 임계선 + 교차점 + 현재 걸음 커서.
+  렌더와 프레임 수가 같아 `stack_videos.py --direction vertical` 로 2줄 영상이 된다.
+  이 호스트 matplotlib 에 한글 폰트가 없어 라벨은 영문이다.
+- **`scripts/run_approach_viz.sh`** — 위 둘의 드라이버 (eye / low × wide / zoom 4벌).
+  결과: `results/20260903_collision_margin_d118/approach/`.
+
 ### Fixed
+- **`run_preset_warp_max_shard.sh` 의 샤드 분배가 실행 중 늘어난 뱅크를 조용히 흘렸다 (FIX-D118,
+  2026-09-03).** 샤드 배정이 `ls -d out/*/<bank>/bank.csv` 의 **인덱스** 나머지라, 실행 도중에
+  뱅크 디렉토리가 하나 생기면 그 뒤 영상이 전부 한 칸씩 밀린다. 실측: `camel` 뱅크가 샤드
+  기동(13:24) 이후 14:02 에 완성되어 세 샤드 어디에도 안 잡혔는데, 세 샤드 모두 `rc=0` /
+  `ALL DONE` 으로 끝나서 로그에는 흔적이 없다 — 결과 폴더 개수(51/52)로만 드러난다.
+  `VIDEOS="camel" bash ... <gpu> 0 1 <out>` 처럼 **이름으로 지목**해 뒤늦게 채울 수 있게
+  `VIDEOS` env override 를 넣었다. 안 주면 기존 동작 그대로다.
+- **`trumans_raycast_viz.py` 가 위반 광선을 화면에서 가장 작은 자국으로 그렸다 (FIX-D118,
+  2026-09-03).** clearance 광선은 `end = position + dir * distance` 로 그려지므로 **길이가 곧
+  위반의 크기**다 — 임계 미달인 0.037 m 위반은 3.7 cm 토막이 되고, 통과 광선은 최대
+  `probe_distance` 1.5 m 짜리 막대다. 끝점 구슬도 전 색이 같은 `thickness*2.2` 라 크기로도
+  안 갈린다. 실측: 900px 렌더에서 **빨강 2 px vs 파랑 353 px** — 찾으려는 것이 안 보인다.
+  · `--near_emphasis {none,ball,stripe,both}` + `--near_ball_scale`(기본 4.0) 추가. `none` 이
+    기존 동작이고 그때 출력은 비트 동일하다. `ball` 은 끝점 구슬만 키우고(빨강 807→5219 px),
+    `stripe` 는 막대를 **임계 길이까지** 늘리며(→1240), `both` 는 둘 다(→7646). 사용자가
+    `both` 를 선택했다. `stripe` 의 막대 길이는 임계값이지 히트 거리가 아니다 — 실제 표면
+    위치는 끝점 구슬이 표시하므로 정보 손실은 없지만 **막대 길이를 거리로 읽으면 안 된다**.
+  · 임계 0.10 vs 0.50 대비가 `both` 에서 빨강 801 px vs 7646 px 로 갈린다 (같은 궤적·같은 뷰).
+- **`run_raycast_threshold_viz.sh` 의 오빗 근평면이 방 안쪽을 잘랐다 (FIX-D118, 2026-09-03).**
+  `trumans_raycast_viz.py` 는 근평면을 `orbit_r - spread*clip_cut` 로 잡는데, 기존
+  `--orbit_scale 3.2 --clip_cut 1.5` 는 그 값을 실내 지오메트리 **한가운데**에 놓아 바닥을
+  가로지르는 검은 띠와 흰 벽만 남겼다 — 처음 렌더한 12편이 전부 이 상태였고, 로그는 전부
+  `rc=0` 이라 아무 신호도 없었다. `2.2 / elev 58 / clip_cut 1.15` 로 바꾸면 천장만 걷히고
+  위에서 내려다보는 컷어웨이가 된다. 오빗·강조 값은 전부 env 로 덮을 수 있다
+  (`ORBIT_SCALE` / `ORBIT_ELEV` / `CLIP_CUT` / `NEAR_EMPH`).
 - **`render_bank_videos.write_video` 가 홀수 치수를 짝수로 패딩한다 (FIX-D118, 2026-09-03).**
   `macro_block_size=1` 은 imageio 의 자동 패딩을 끄는데 libx264 + yuv420p 은 짝수 치수만 받아서,
   격자 높이·너비 중 하나라도 홀수면 ffmpeg 가 첫 프레임에서 죽고 올라오는 건 `OSError: Broken
@@ -19,6 +68,30 @@
   이 함수를 import 하는 스크립트가 같이 고쳐진다.
 
 ### Added
+- **충돌 거리 임계를 숫자와 그림 양쪽으로 재는 도구 3종 (D118, 2026-09-03).** TRUMANS 경로에는
+  이름이 비슷한 거리 손잡이가 **셋** 있고 지금까지 한 값으로 뭉뚱그려 불렸다 —
+  `--behind_margin_frac`(굽기 게이트 임계, `×S`) · `--min_clearance`(레이캐스트 게이트 **임계**,
+  m) · `--probe_distance`(레이캐스트 **광선 길이 상한**, m). 어느 쪽을 움직여야 하는지 답하려면
+  게이트별 곡선이 필요하다.
+  · `scripts/sweep_collision_margin.py` 확장 — `sweep_mesh(rows, margins, solved)` 가 bool 마스크를
+    받아 `solved_keep`/`solved_total`/`solved_keep_frac` 을 낸다. 기존 `통과` 열은 **post-gate
+    뱅크**를 다시 재는 거라 생존율이 아니라 여유분이고, `solved유지` 도 재굽기 생존율의
+    **하한**이다(실제 재굽기는 변이를 버리는 대신 사다리를 줄이므로 비용이 "짧은 궤적"으로 나온다).
+    이 함정 두 개를 docstring 에 명시. 청크 2편 이상이면 POOLED 블록을 찍는다.
+  · `--plot` → `gate_curves.png`. 왼쪽 굽기 게이트(청크별 회색 + pooled 빨강, sub-voxel 구간
+    `axvspan`, 현행 `0.02·S` 파선, 0.35 점선), 오른쪽 레이캐스트 게이트 통과율. **라벨 전부 영문** —
+    이 호스트엔 한글 폰트가 없어서(`fc-list :lang=ko` 0건) 한국어를 쓰면 두부로 렌더된다.
+  · `scripts/run_raycast_threshold_viz.sh` 신규 — 같은 궤적을 `--min_clearance` 만 바꿔 오빗
+    렌더한다(`trumans_raycast_viz.py` 가 임계 미만 clearance 광선을 빨강으로 칠하므로 **어느
+    광선이 어느 값에서 뒤집히는지**가 그대로 보인다). `--ray_stride 48 --orbit_scale 3.2
+    --orbit_elev 32 --clip_cut 1.5` 는 실측으로 고른 값이다 — stride 8 / scale 2.4 는 광선이
+    화면을 덮어 아무것도 안 보였다.
+- **`scripts/run_preset_warp_max_shard.sh` (D118, 2026-09-03).** vista 전 씬 × preset 별 **사다리
+  최대단** depth-warp 릴 샤드 러너. 앞서 손으로 돌릴 때 `target_hole` 정렬 후 **`c[0]`(최소단)**
+  을 집는 버그가 있었다 — 사용자 지적 "이동량들이 작아진 것 같은데". 여기서는 `c[-1]`.
+  anchor 는 `dyn_0` 우선, 없으면 solved 최다 anchor 로 **씬 안에서 고정**한다(씬마다 섞으면 격자
+  차이에 preset 효과와 anchor 효과가 엉킨다). `render_bank_videos.py` 는 `<bank_dir>/<--name>`
+  에 쓰므로 렌더 후 한 폴더로 복사한다.
 - **G1(표면 뒤) 증거 소스를 고르는 `--collision_source {depth,mesh,both}` (D116, 기본 `depth`,
   2026-09-02).** depth shell 은 **소스 카메라가 본 표면**만 안다 — 소스는 자기 뒤를 안 보므로
   뒤로 물러나 벽을 뚫는 궤적에서 `behind_frac` 이 **정확히 0.0000** 이다. TRUMANS 는 우리가

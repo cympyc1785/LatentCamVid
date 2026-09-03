@@ -19,9 +19,18 @@ per-frame 토큰이다. 이 인코더는 학습 내내 frozen 이고 context vie
 여기서 쓰는 `nl` 템플릿은 그 프로브가 잰 것과 **글자 그대로 같아야** 한다 — 다르면 프로브
 결과가 이 캐시에 대한 근거가 아니게 된다.
 
+코퍼스 분기(D121, 2026-09-04): vista d121 은 seg_list 이름이 `seg_list_vista4d_*` 이고, 캡션도
+`caption_fields` 조립이 아니라 **`prompt_camera_with_scene_video.concise` 완성문**을 쓴다 (T5 arm 이
+`dataset_scene_decoupled.py:154` 에서 읽는 바로 그 문자열 — 두 arm 이 같은 텍스트를 봐야 비교가 된다).
+그래서 `--seg_prefix` 와 `--caption_source` 두 손잡이를 뒀고, 기본값은 d107 때와 **글자 그대로 동일**하다.
+
 사용 예시:
   python main/cache_peav_embeddings.py --gpu 1
   python main/cache_peav_embeddings.py --gpu 1 --splits train --no_skip_done
+  # vista d121
+  python main/cache_peav_embeddings.py --gpu 5 --seg_prefix vista4d --caption_source concise \
+    --root .../latentcam_da3_k6_d121 --video_out .../peav_cache/video \
+    --text_out .../peav_cache/text_nl.pt --text_len 0
 """
 
 from argparse import ArgumentParser
@@ -79,11 +88,22 @@ def load_peav(ckpt, device):
     return model, AutoTokenizer.from_pretrained(ckpt)
 
 
-def collect(root, splits):
-    """seg_list 들을 읽어 (scene_key, chunk, seg_key, data_name, label, motion, frame_idx) 를 모은다."""
+def concise_caption(entry):
+    """d121 이후 코퍼스: `prompt_camera_with_scene_video.concise` 를 **그대로** 쓴다.
+
+    이 필드는 `build_bank_captions.py --prompt_style nl` 이 target_text/framing_nl/composition 까지
+    포함해 이미 완성한 자연어 문장이라, 여기서 다시 조립하면 오히려 정보를 깎는다. T5 arm 과
+    글자 단위로 같은 문자열이어야 두 arm 의 차이가 인코더 차이로만 남는다."""
+    pcs = entry.get('prompt_camera_with_scene_video')
+    s = (pcs.get('concise', '') if isinstance(pcs, dict) else (pcs or '')) or ''
+    return s.strip()
+
+
+def collect(root, splits, seg_prefix='dynpose'):
+    """seg_list 들을 읽어 (scene_key, chunk, seg_key, data_name, label, motion, concise, frame_idx) 를 모은다."""
     items, seen = [], set()
     for sp in splits:
-        p = osp.join(root, f'seg_list_dynpose_{sp}.txt')
+        p = osp.join(root, f'seg_list_{seg_prefix}_{sp}.txt')
         for line in open(p):
             s = line.strip()
             if s and s not in seen:
@@ -104,8 +124,15 @@ def collect(root, splits):
             data_name = f"{chunk.replace('/', '_')}_{key}"
             out.append(dict(scene_key=data_name.rsplit('_', 1)[0], chunk=chunk, seg=key,
                             data_name=data_name, label=(e.get('anchor_label') or '').strip(),
-                            motion=cf.get('motion', ''), frame_idx=tuple(e['frame_idx'])))
+                            motion=cf.get('motion', ''), concise=concise_caption(e),
+                            frame_idx=tuple(e['frame_idx'])))
     return out
+
+
+def caption_of(it, source):
+    """`--caption_source` 분기. `fields`(기본) = d107 규칙 조립, `concise` = d121 완성문."""
+    return concise_caption({'prompt_camera_with_scene_video': {'concise': it['concise']}}) \
+        if source == 'concise' else nl_caption(it['label'], it['motion'])
 
 
 # ------------------------------------------------------------------ video
@@ -157,10 +184,11 @@ def build_video(args, model, device, items):
 # ------------------------------------------------------------------ text
 
 def build_text(args, model, tok, device, items):
-    caps = [nl_caption(it['label'], it['motion']) for it in items]
+    caps = [caption_of(it, args.caption_source) for it in items]
     uniq = sorted(set(caps))
     idx = {c: i for i, c in enumerate(uniq)}
-    print(f'[text] {len(items)} segments -> {len(uniq)} distinct NL captions')
+    print(f'[text] {len(items)} segments -> {len(uniq)} distinct captions '
+          f'(source={args.caption_source})')
 
     lens = [len(tok(c)['input_ids']) for c in uniq]
     L = args.text_len or int(max(lens))
@@ -178,7 +206,8 @@ def build_text(args, model, tok, device, items):
     makedirs(osp.dirname(args.text_out), exist_ok=True)
     torch.save({'by_name': {it['data_name']: idx[c] for it, c in zip(items, caps)},
                 'emb': embs, 'mask': masks, 'text': uniq,
-                'template': 'nl', 'text_len': L}, args.text_out)
+                'template': args.caption_source if args.caption_source != 'fields' else 'nl',
+                'text_len': L}, args.text_out)
     print(f'[text] saved {args.text_out}  emb={tuple(embs.shape)} '
           f'({embs.numel() * 2 / 1e6:.1f} MB)  max_tokens={max(lens)}')
     return len(uniq), L, max(lens)
@@ -192,9 +221,12 @@ def main(args):
           f'text_hidden={model.config.text_model.hidden_size} '
           f'nth_text_layer={model.config.nth_text_layer}')
 
-    items = collect(args.root, args.splits.split(','))
+    items = collect(args.root, args.splits.split(','), args.seg_prefix)
     print(f'[data] {len(items)} segments / {len({i["scene_key"] for i in items})} scenes')
-    print(f'[data] 예시 캡션: {nl_caption(items[0]["label"], items[0]["motion"])!r}')
+    print(f'[data] 예시 캡션: {caption_of(items[0], args.caption_source)!r}')
+    if args.caption_source == 'concise':
+        n_empty = sum(1 for it in items if not it['concise'])
+        assert n_empty == 0, f'concise 캡션이 빈 세그먼트 {n_empty}개 — 코퍼스/필드 확인'
 
     nsc = nvid = nskip = 0
     if not args.no_video:
@@ -218,6 +250,9 @@ if __name__ == '__main__':
     p.add_argument('--ckpt', default=PE_CKPT)                        # perception_models 리비전
     p.add_argument('--root', default=CORPUS)                         # d107 코퍼스 루트
     p.add_argument('--splits', default='train,test')                 # 쉼표 구분 seg_list 접미사
+    p.add_argument('--seg_prefix', default='dynpose')                # seg_list_<prefix>_<split>.txt
+    p.add_argument('--caption_source', default='fields',             # fields=d107 조립 / concise=d121 완성문
+                   choices=['fields', 'concise'])
     p.add_argument('--video_out', default=osp.join(CACHE, 'video'))  # 씬당 1파일
     p.add_argument('--text_out', default=osp.join(CACHE, 'text_nl.pt'))
     p.add_argument('--text_len', type=int, default=64)               # 0 = 실측 최대 길이

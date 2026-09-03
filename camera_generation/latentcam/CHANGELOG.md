@@ -5,6 +5,28 @@ All notable changes to the latentcam sub-project. Follows [Keep a Changelog](htt
 ## [Unreleased]
 
 ### Added
+- **`main/conf/experiment/vista4d_d121_{da3,peav}.yaml` — D121 vista 코퍼스 2-arm (2026-09-04).**
+  사용자 지시: "vista 최신 데이터를 train, val 나눠서 da3 encoder만 쓴거랑 ... 두 개를 학습",
+  이어서 "그냥 PE-AV 먼저 학습 돌려놔줘. text, video encoder 다 PE-AV꺼 쓰고".
+  코퍼스는 `latentcam_da3_k6_d121` (씬 52편 / 세그먼트 train 14,975 · test 875). test holdout
+  4편(avocado-slice, bmx-bumps, camel, couple-hug)은 d77 과 **같게** 두어 이전 arm 과 눈금이 맞는다.
+  · arm 1 `vista4d_d121_da3` — text CA umt5, `video_latent_dim: 0` (video CA 블록 자체가 없음).
+  · arm 2 `vista4d_d121_peav` — `text_encoder: PEAV` + `video_latent_dim: 1792`.
+    `peav_in_ln`/`video_gate`/`video_text_in_stream` 은 config.yaml 기본값(true/true/false)이
+    그대로 맞아서 다시 적지 않았다.
+  · `geo_raw_cache_dir` 은 d77/k6 arm 과 **공유**한다 — context 는 소스 영상이라 뱅크와 무관한
+    scene 상수이고, d121 의 52편 이름이 캐시 52 파일과 완전히 일치한다(실측 차집합 0).
+- **`main/cache_peav_embeddings.py` 코퍼스 분기 2개 (2026-09-04).** 기본값이 d107 때와 **글자 그대로
+  같아서** 기존 경로는 손대지 않아도 그대로 돈다.
+  · `--seg_prefix`(기본 `dynpose`) — `seg_list_<prefix>_<split>.txt` 를 읽는다. vista 는 `vista4d`.
+  · `--caption_source {fields,concise}`(기본 `fields`) — `concise` 는 `caption_fields` 를 규칙으로
+    재조립하지 않고 `prompt_camera_with_scene_video.concise` **완성문을 그대로** 굽는다. 이유:
+    T5 arm 이 `dataset_scene_decoupled.py:154` 에서 읽는 문자열과 글자 단위로 같아야 두 arm 의
+    차이가 인코더 차이로만 남는다. D121 캡션은 target_text/framing_nl/composition 까지 담긴
+    완성문이라 재조립하면 오히려 정보가 깎인다. 빈 캡션이 하나라도 있으면 assert 로 죽는다.
+  · 저장 dict 의 `template` 이 `--caption_source` 를 반영한다 (`fields` 는 기존대로 `nl`).
+  · d121 실측: video 52 scene / caption 13,183종 / **L=84** — 기본 `--text_len 64` 로는 assert 에
+    걸린다. `--text_len 0`(실측 최대)으로 구웠다.
 - **PE-AV video cross-attention — 레이어 순서 `text CA -> video CA -> geo CA` (D117, 2026-09-03).**
   사용자 지시: "text CA - video emb CA - da3 geo emb CA 순으로 layer를 배치되도록 latentcam 모델
   수정해줘". 인코더는 `facebook/pe-av-large` (perception_models 리비전,

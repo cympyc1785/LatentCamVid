@@ -481,6 +481,17 @@ video_latent_dim: 0
 # (`[NL text tokens | 49 frame tokens]`). text CA 는 그대로 umt5 struct 캡션이 맡는다.
 # arm B (text_encoder: PEAV) 는 PE-AV text 가 이미 text CA 로 갔으므로 여기서는 false.
 video_text_in_stream: false
+# [new 2026-09-03 / FIX-D117] PE-AV feature 를 proj 앞에서 LayerNorm 한다 (video / video_text /
+# text_encoder=PEAV 의 text_proj). DA3 geo 가 `da3_geo_encoder.self.ln` 을 거치는 것과 같은 자리.
+# 없으면 video_tok std 26 (text part 41) 대 text/geo 0.58 로 CA logit 이 포화해서 학습이
+# loss ~1.0 (eps 예측 0) 에 갇힌다 — D117 두 arm 실패의 원인. umt5 arm 은 이 키와 무관.
+peav_in_ln: true
+# [new 2026-09-03 / FIX-D117] video CA 를 **0 초기화 residual gate** 로 붙인다.
+# 기존 CA 블록은 `h = CA(...)` 로 잔차를 덮어써서(CrossAttention 이 norm(x+a) 를 반환) 스트림
+# 하나당 x_t 성분이 층마다 한 번 더 깎인다. 3번째 스트림을 그렇게 붙였더니 두 arm 이 55/84
+# epoch 동안 loss ~1.0 에 갇혔다. gate=0 이면 시작 시점 출력이 D108 과 비트 동일하고 필요한
+# 만큼만 열린다. false = 예전(덮어쓰기) 동작. video_latent_dim=0 이면 이 키와 무관.
+video_gate: true
 geo_inseg_span: null          # in-seg sampling span override (null = full segment)
 geo_covis_radius: 2.0         # covisibility retrieval: ball radius
 geo_covis_theta0: 10.0        # covisibility retrieval: min view-angle separation (deg)

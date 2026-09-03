@@ -96,6 +96,9 @@ class CameraDiffusionModel(nn.Module):
         cond_dim=0,
         video_latent_dim=0,
         video_text_dim=0,
+        peav_in_ln=True,
+        text_in_ln=False,
+        video_gate=True,
     ):
         super().__init__()
 
@@ -114,6 +117,15 @@ class CameraDiffusionModel(nn.Module):
         self.mod1 = nn.Linear(hidden_dim, hidden_dim * 2)
         self.mod2 = nn.Linear(hidden_dim, hidden_dim * 2)
 
+        # [new 2026-09-03 / FIX] frozen encoder feature 를 bare Linear 에 그냥 먹이면 안 된다.
+        # DA3 geo 는 `da3_geo_encoder.self.ln` (native 3072 위의 학습 LayerNorm, :171/:407) 를
+        # 거친 뒤에야 geo_proj 로 들어간다. umt5 는 출력이 이미 ~unit 이라 LN 없이 통했지만
+        # PE-AV 는 아니다 — 실측 video std 8 / text std 95 · absmax 12928 (d107 캐시).
+        # 이걸 LN 없이 넣으면 video_tok std 26 (text part 41) vs text_tok 0.58 / geo_tok 0.58 로
+        # 45~70배라 CA logit 이 포화하고, D117 두 arm 이 loss ~1.0 (= eps 예측이 0) 에서
+        # 못 빠져나왔다. 기본 True 지만 **video/PEAV 스트림에만** 걸리므로 기존 arm 은 무영향.
+        self.text_in_ln = bool(text_in_ln)
+        self.text_ln = nn.LayerNorm(text_dim) if self.text_in_ln else nn.Identity()
         self.text_proj = nn.Linear(text_dim, hidden_dim)
         # [new] geo_cam_raw_dim > 0 (cfg.geo_cam_embed): geo_emb arrives as
         # (B, M, geo_latent_dim + geo_cam_raw_dim) — the trailing raw dims are the per-context-view
@@ -156,11 +168,30 @@ class CameraDiffusionModel(nn.Module):
         # 토큰축 concat 전에 **각각** hidden 으로 투영해야 한다 — 그래서 proj 가 두 개다.
         # 0 = video 토큰만 (arm B / 기본).
         self.video_text_dim = int(video_text_dim)
+        self.peav_in_ln = bool(peav_in_ln)
         if self.video_latent_dim > 0:
+            self.video_ln = (nn.LayerNorm(self.video_latent_dim) if self.peav_in_ln
+                             else nn.Identity())
             self.video_proj = nn.Linear(self.video_latent_dim, hidden_dim)
             if self.video_text_dim > 0:
+                self.video_text_ln = (nn.LayerNorm(self.video_text_dim) if self.peav_in_ln
+                                      else nn.Identity())
                 self.video_text_proj = nn.Linear(self.video_text_dim, hidden_dim)
             self.mod3 = nn.Linear(hidden_dim, hidden_dim * 2)
+            # [new 2026-09-03 / FIX-D117] video 스트림만 **0 초기화 residual gate** 로 붙인다.
+            # 기존 스트림은 `h = CA(...)` 로 잔차를 **덮어쓴다** (CrossAttention.forward 가
+            # `norm(x + a)` 를 돌려주므로 스트림 하나당 h 가 한 번 더 정규화된다). 스트림이
+            # 2개면 x_t 성분이 층당 대략 1/√2 씩 깎이는데, 3개가 되면 층당 한 번이 더 붙어
+            # num_layers=8 에서 누적 감쇠가 ~11배 더 커진다. 실측이 이걸 그대로 보여줬다:
+            #   · 같은 코드 + video CA off + peav 캐시 로드 → D108 과 step 350 까지 비트 동일
+            #     (250:0.6956 300:0.1774 350:0.1784)
+            #   · text CA 를 PE-AV 로 바꾸고 video CA 만 끔 → 350:0.8483 500:0.2975 700:0.1620
+            #   · video CA 켠 두 arm → 55/84 epoch 동안 loss ~1.0 (= eps 예측이 0) 에서 정체
+            # 즉 데이터 경로도 PE-AV text 도 무죄고, 남는 건 "스트림을 하나 더 덮어쓴 것"뿐이다.
+            # gate=0 이면 **초기 출력이 D108 과 비트 동일**하고 필요한 만큼만 열린다 (DiT/Flamingo
+            # 방식). video_gate=false 면 예전처럼 덮어쓰기 — 기존 D117 ckpt 재현용으로 남긴다.
+            self.video_gate = (nn.Parameter(torch.zeros(num_layers)) if bool(video_gate)
+                               else None)
             self.video_layers = nn.ModuleList([
                 nn.ModuleList([
                     nn.LayerNorm(hidden_dim),
@@ -196,13 +227,13 @@ class CameraDiffusionModel(nn.Module):
         반환: (tok (B,L,hidden), key_padding_mask (B,L) bool = True 가 마스킹 대상 | None)
         """
         B, device = video_emb.shape[0], video_emb.device
-        vt = self.video_proj(video_emb)
+        vt = self.video_proj(self.video_ln(video_emb))
         vt = vt + positional_encoding(
             vt.shape[-2], vt.shape[-1], device=device).unsqueeze(0).expand(B, -1, -1)
         if video_mask is not None:
             vt = vt * video_mask.unsqueeze(-1)
         if self.video_text_dim > 0 and video_text_emb is not None:
-            tt = self.video_text_proj(video_text_emb)
+            tt = self.video_text_proj(self.video_text_ln(video_text_emb))
             tt = tt + positional_encoding(
                 tt.shape[-2], tt.shape[-1], device=device).unsqueeze(0).expand(B, -1, -1)
             if video_text_mask is not None:
@@ -252,7 +283,7 @@ class CameraDiffusionModel(nn.Module):
         t_embed = self.time_proj(t_embed)       # (B,hidden) or (B,T,hidden)
         per_token = (t_embed.dim() == 3)        # per-token FiLM vs broadcast
 
-        text_tok = self.text_proj(text_emb)
+        text_tok = self.text_proj(self.text_ln(text_emb))
         text_tok = text_tok + positional_encoding(text_tok.shape[-2], text_tok.shape[-1], device=device).unsqueeze(0).expand(B, -1, -1)
 
         if has_geo_latent:
@@ -284,10 +315,12 @@ class CameraDiffusionModel(nn.Module):
                 if not per_token:
                     scale3 = scale3.unsqueeze(1)
                     shift3 = shift3.unsqueeze(1)
-                h = vnorm(h)
-                h = h * (1 + scale3) + shift3
-                h = video_cross_attn(h, video_tok, key_padding_mask=video_kpm)
-                h = vmlp(h) + h
+                v = vnorm(h)
+                v = v * (1 + scale3) + shift3
+                v = video_cross_attn(v, video_tok, key_padding_mask=video_kpm)
+                v = vmlp(v) + v
+                # gate=0 초기화 → 학습 시작 시점에 이 스트림은 no-op 이고 잔차가 안 깎인다.
+                h = (h + self.video_gate[_li] * v) if self.video_gate is not None else v
 
             if has_geo_latent:
                 scale2, shift2 = self.mod2(t_embed).chunk(2, dim=-1)
@@ -347,7 +380,7 @@ class CameraDiffusionModel(nn.Module):
         h = h + positional_encoding(L, h.shape[-1], device=device).unsqueeze(0).expand(B, -1, -1)
 
         t_embed = self.time_proj(self.time_mlp(t))
-        text_tok = self.text_proj(text_emb)
+        text_tok = self.text_proj(self.text_ln(text_emb))
         text_tok = text_tok + positional_encoding(text_tok.shape[-2], text_tok.shape[-1], device=device).unsqueeze(0).expand(B, -1, -1)
 
         has_geo_latent = geo_emb is not None
@@ -377,10 +410,11 @@ class CameraDiffusionModel(nn.Module):
                 vnorm, video_cross_attn, vmlp = self.video_layers[_li]
                 s3, sh3 = self.mod3(t_embed).chunk(2, dim=-1)
                 s3 = s3.unsqueeze(1); sh3 = sh3.unsqueeze(1)
-                h = vnorm(h)
-                h = h * (1 + s3 * mod_pos) + sh3 * mod_pos
-                h = video_cross_attn(h, video_tok, key_padding_mask=video_kpm)
-                h = vmlp(h) + h
+                v = vnorm(h)
+                v = v * (1 + s3 * mod_pos) + sh3 * mod_pos
+                v = video_cross_attn(v, video_tok, key_padding_mask=video_kpm)
+                v = vmlp(v) + v
+                h = (h + self.video_gate[_li] * v) if self.video_gate is not None else v
             if has_geo_latent:
                 s2, sh2 = self.mod2(t_embed).chunk(2, dim=-1)
                 s2 = s2.unsqueeze(1); sh2 = sh2.unsqueeze(1)

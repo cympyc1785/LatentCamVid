@@ -62,6 +62,41 @@ All notable changes to the latentcam sub-project. Follows [Keep a Changelog](htt
   (키가 scene 이름, 내용물 불변).
 
 ### Fixed
+- **video CA 를 0 초기화 residual gate 로 붙인다 — `video_gate` (D117, 2026-09-03).**
+  D117 두 arm 이 55 / 84 epoch 동안 loss ~1.0 (= eps 예측이 0) 에서 못 빠져나온 **진짜 원인**.
+  격리 실험 3종으로 좁혔다 (전부 d107 전체 코퍼스, epoch 0, batch 8, 952 step):
+  | 실험 | step 250 | 300 | 350 | 500 | 700 |
+  |---|---|---|---|---|---|
+  | D108 (기준) | 0.6956 | 0.1774 | 0.1784 | — | — |
+  | 신규 코드 + video CA off + **peav 캐시 로드** | 0.6956 | 0.1774 | 0.1784 | — | — |
+  | text CA 를 PE-AV 로 교체 + video CA off | 0.9757 | 0.9537 | 0.8483 | 0.2975 | 0.1620 |
+  | video CA on (LN 만 적용) | 0.9975 | 0.9985 | 0.9898 | 0.9651* | — |
+  즉 **데이터 경로는 D108 과 비트 동일**(dataset 이 배치에 `peav_*` 키를 넣는 것 자체는 무해)
+  이고 **PE-AV text 를 text CA 로 쓰는 것도 정상 학습**한다. 남는 변수는 video CA 스트림 하나.
+  원인은 스케일이 아니라 **잔차 구조**였다 — `CrossAttention.forward` 가 `norm(x + a)` 를
+  돌려주고 각 스트림이 `h = CA(...)` 로 h 를 **덮어쓰기** 때문에, 스트림이 하나 늘 때마다 층당
+  x_t 성분이 한 번 더 정규화로 깎인다. num_layers=8 에서 2스트림 대비 3스트림의 누적 감쇠가
+  ~11배다. → `video_gate=True`(기본) 이면 video 블록만 `h = h + gate[l] * v` 로 붙고
+  `gate` 는 **0 초기화**(DiT/Flamingo 방식)라 학습 시작 시점 출력이 D108 과 **비트 동일**하고
+  (실측 `max|diff| = 0.0`, state_dict 신규 키 107개 중 gate 1개, `unexpected_keys` 0) 필요한
+  만큼만 열린다. `video_gate=False` 는 예전 덮어쓰기 동작 — 기존 D117 ckpt 재현용으로 남긴다.
+  `video_latent_dim=0` 이면 이 키와 무관. (*마지막 칸은 arm B 값)
+- **PE-AV feature 를 projection 앞에서 LayerNorm 한다 — `peav_in_ln` (D117, 2026-09-03).**
+  frozen encoder 출력을 bare `nn.Linear` 에 그냥 먹이고 있었다. DA3 geo 는 그렇지 않다 —
+  `models/da3_geo_encoder.py:171/:407` 의 학습 가능한 `self.ln` (native 3072 위 LayerNorm)을
+  거친 뒤에야 `geo_proj` 로 들어간다. umt5 는 출력이 이미 ~unit 이라 LN 없이도 통했지만 PE-AV 는
+  아니다 — d107 캐시 실측 video std 8 / text std 95 · absmax 12928. 그 결과 `video_tok` std
+  26.15 (text part 41) 대 `text_tok` 0.58 / `geo_tok` 0.58 로 **45~70배** 차이가 나서 video CA
+  logit 이 포화했다.
+  → `camera_diffusion_model_latent.py` 에 `video_ln` / `video_text_ln` / `text_ln` 을 넣고
+  `peav_in_ln`(기본 true) · `text_in_ln`(기본 **false**) 로 분기한다. `text_in_ln` 은
+  `text_encoder: PEAV` 일 때만 트레이너가 켜므로 **umt5 arm 은 파라미터·출력이 그대로**이고,
+  `video_latent_dim=0` 이면 새 키가 아예 생성되지 않는다 (state_dict 신규 키 0 확인).
+  적용 후 `video_tok` std 26.15 → 0.76.
+  **다만 이것만으로 D117 두 arm 의 loss ~1.0 정체는 안 풀렸다** — 원인 규명은 진행 중이고,
+  같은 코드 + `video_latent_dim=0` + 전체 코퍼스 대조군은 D108 과 step 350 까지 **비트 동일**
+  (0/50/…/350 = 1.2942/0.9648/0.9907/1.0239/0.9879/0.6956/0.1774/0.1784) 이라 기존 경로는
+  무손상이다. 확정되면 `FIX.log` 에 기록한다.
 - **`eval_testset.py` 가 `target_track` arm ckpt 를 못 읽던 것 (2026-08-28).**
   `CameraDiffusionModel(cam_dim=..., **_geo_kw)` 에 `cond_dim` 을 안 넘겨서 `cam_in` 이
   `Linear(64, 512)` 로 만들어지고, ckpt 의 `Linear(68, 512)` 와 strict load 에서 shape

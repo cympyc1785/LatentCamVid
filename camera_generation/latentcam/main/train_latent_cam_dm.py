@@ -524,13 +524,20 @@ def train():
         assert not getattr(cfg, 'is_ar', False) and not getattr(cfg, 'per_token_noise', False), \
             "video_latent_dim>0 은 표준 diffusion 경로에만 배선되어 있다 (is_ar/per_token_noise 미지원)"
         _vtd = 1024 if getattr(cfg, 'video_text_in_stream', False) else 0
-        _vid_kw = dict(video_latent_dim=_vld, video_text_dim=_vtd)
+        _vid_kw = dict(video_latent_dim=_vld, video_text_dim=_vtd,
+                       peav_in_ln=bool(getattr(cfg, 'peav_in_ln', True)),
+                       video_gate=bool(getattr(cfg, 'video_gate', True)))
         print(f"(model) video CA: video_latent_dim={_vld} video_text_dim={_vtd} "
+              f"in_ln={_vid_kw['peav_in_ln']} gate={_vid_kw['video_gate']} "
               f"(순서 text CA -> video CA -> geo CA)")
     # arm B (text_encoder='PEAV') 는 text CA 입력이 umt5 4096 이 아니라 PE-AV 1024 다.
     if cfg.text_encoder == 'PEAV':
         _geo_kw['text_dim'] = 1024
-        print("(model) text_encoder=PEAV: text_proj 입력 = 1024 (umt5 미사용)")
+        # [new 2026-09-03 / FIX] PE-AV text 는 std 95 · absmax 12928 (umt5 는 ~unit) 이라
+        # text_proj 앞에 LayerNorm 이 필요하다. umt5 arm 은 text_in_ln=False 라 무영향.
+        _geo_kw['text_in_ln'] = bool(getattr(cfg, 'peav_in_ln', True))
+        print(f"(model) text_encoder=PEAV: text_proj 입력 = 1024 (umt5 미사용) "
+              f"in_ln={_geo_kw['text_in_ln']}")
     if cfg.point_encoder != 'custom':
         model = CameraDiffusionModel(cam_dim=cfg.cam_dim, cond_dim=_track_dim, **_geo_kw, **_vid_kw)
     else:

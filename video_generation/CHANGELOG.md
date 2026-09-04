@@ -144,6 +144,57 @@
     무효화하므로 사용자 승인 후에.
 
 ### Changed
+- **`tracking="drift"` 를 어휘에서 삭제 + 조준 preset 전부 `lock` (D127, 2026-09-04, 사용자 지시
+  "정지한 물체가 target일 때는 track이 필요없고 ... look_at은 drift 없애고 lock을 하는게 맞아 ...
+  물체가 dynamic이라면 track + object centric이 돌아가야하고 이 때도 look_at은 lock이 맞아
+  (track + free-moving일 경우는 예외)" + "drift 옵션은 아예 지워줘").**
+  · `decode/build_poses.py:TRACKING_GAIN` 이 `{"world":0.0, "lock":1.0}` 이 됐다 (`drift` 0.6 삭제).
+  · `lbm/presets.py:PRESET_TRACKING` 의 판정 기준이 이름(`track_`)에서 **`aim=="look_at"`** 으로
+    바뀌었다 — 43 preset 중 22개(비-track 12 + track 10). `aim="free"` 20종은 `tracking_ignored`
+    라 원래 조준 자체가 없다 (= 사용자가 말한 free-moving 예외).
+  · `lbm/presets.py:LEGACY_TRACKING = {"drift": "lock"}` — 디스크의 옛 뱅크 행이 들고 있는
+    `tracking:"drift"` 를 읽는 시점에 승격시킨다. `--no_preset_tracking` 으로도 못 되살린다
+    (그게 "아예 지운다"의 뜻). **옛 뱅크의 drift 궤적은 재현 불가**가 됐다.
+  · 기본값 이동: `fit_hole_ladder.py --tracking` / `lbm/loop.py --tracking` /
+    `build_decision_fallback.py --tracking` = `lock`, `sample_camera_bank.py --trackings` =
+    `["lock"]`. 넷 다 `choices=["world","lock"]` 로 막았다.
+  · **실측** (`results/20260904_tracking_drift_vs_lock/`, parkour 7 preset × 172행, 두 arm 은
+    `--tracking` 하나만 다르다): 동적 anchor `dyn_0` 28행 `subject_in_frame` 0.9670 → **1.0000**
+    (`s_curve` 0.7690 → 1.0000, `subject_area_med` 0.0422 → 0.0583), `tau_max` 0.8761 → 0.9625,
+    `hole_fraction` 0.1659 → 0.1987. 정지 anchor `stat_*` 144행 `subject_in_frame`
+    0.9637 → 0.9637 (**Δ 정확히 0.0000** — 변위가 0 이라 정의상 no-op),
+    `view_angle_max_deg` 13.5994 → 13.2909, `hole` 0.3068 → 0.2937. 172행 중 상태가 바뀐 건 11행
+    (6.4%), `track_orbit_right` 는 비트 동일 (D93 이 이미 lock).
+  · drift 를 지운 이유: 0.6 은 필터가 아니라 **영구 편향**이라 조준점이 끝까지 subject 변위의 40%
+    만큼 뒤처진다. 원래 목적이던 조준 jitter 는 `track.center_smooth`(savgol w=11 p=3) +
+    `--aim_keyframes 6` + `--keyframe_ease smooth_kf` 가 올바른 축에서 처리한다. `--tracking` 이
+    argparse 기본값으로만 존재해서 **한 번도 선택된 적이 없다**는 것도 확인했다.
+- **anchor(=촬영 target) 선별에 표면 제외 + 편당 상한 3 (D127, 2026-09-04, 사용자 지시
+  "static이 너무 많은데 ... main 최대 3개 정도만 해도 될 것 같은데" + "wall, fence, floor 같은건
+  static target에 포함안되는거 맞지?").**
+  · 새 `scene_graph/schema.py:{SURFACE_TOKENS, label_tokens, is_surface_node, anchor_sort_key,
+    pick_main_anchors}` — 한 벌만 두고 `scripts/sample_camera_bank.py:anchor_nodes` 와
+    `scripts/route_presets.py:pick_anchors` 가 **둘 다 이걸 부른다**.
+  · `label_tokens` 는 camelCase 를 쪼갠다 — TRUMANS 라벨이 mesh object 이름이라 `WallInner.022`
+    는 소문자 변환만으로는 `wallinner` 라 어떤 토큰에도 안 걸렸다.
+  · **왜 새로 필요했나**: `extract_static_nouns.py:SURFACE_NOUNS` 는 SAM3 **keyword** 만 걸러서
+    두 군데가 샜다. ① `fence`/`railing`/`window`/`door` 가 그 목록에 없다. ② TRUMANS 그래프는
+    SAM3 를 아예 안 탄다.
+  · **실측** (524편, `min_area_frac` 0.01):
+
+    | 코퍼스 | 편수 | anchor before → after | 편당 | surface 로 빠짐 | 상한으로 빠짐 |
+    |---|---|---|---|---|---|
+    | `out` (Vista) | 53 | 357 → 151 | 6.7 → 2.85 | 38 | 168 |
+    | `out_dynpose` | 280 | 1276 → 764 | 4.6 → 2.73 | 23 | 489 |
+    | `out_trumans` | 191 | 2087 → 565 | 10.9 → 2.96 | **1150 (53%)** | 372 |
+
+    동적 anchor 는 정렬 1순위라 하나도 안 빠졌다 (Vista 80 / dynpose 755 / TRUMANS 191 전량 유지).
+    anchor 가 0 이 되는 편은 dynpose 2편뿐이고 **둘 다 변경 전에도 0** 이었다.
+  · parkour: `dyn_0`(man) + `stat_1`/`stat_2`(building) 만 남고 `railing` ×3 · `fence` ×1 이
+    `surface` 로, `tree` ×2 · `building` ×2 가 `max_anchors` 로 빠진다.
+  · 되돌리는 스위치: `--max_anchors 0`(상한 없음) / `--no_anchor_drop_surfaces`. `--nodes` 로
+    명시한 목록은 예전처럼 필터를 안 탄다.
+  · **아직 뱅크에 적용 안 했다** — 재굽기는 사용자 판단 대기.
 - **`track_truck_left/right` 를 targetless 로 승격할 수 있게 (D123, 2026-09-04, 사용자 지시
   "a로 적용해줘").** `configs/caption_presets.json` 의 두 preset 에 `phrase_targetless` 를 달고
   `scripts/build_bank_captions.py` 에 `--targetless_promote` / `--no_targetless_promote`

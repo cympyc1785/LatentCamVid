@@ -6,6 +6,24 @@
 
 ## [Unreleased]
 
+### Changed
+- **`track_truck_left/right` 를 targetless 로 승격할 수 있게 (D123, 2026-09-04, 사용자 지시
+  "a로 적용해줘").** `configs/caption_presets.json` 의 두 preset 에 `phrase_targetless` 를 달고
+  `scripts/build_bank_captions.py` 에 `--targetless_promote` / `--no_targetless_promote`
+  (**기본 꺼짐**)를 추가했다. 켜면 `promote_targetless()` 가 `phrase_targetless` 를 가진 preset 의
+  `phrase` 를 갈고 `targetless: true` 를 세워, 캡션이 `target`/`framing` 없는 한 절이 된다.
+  · **왜**: 두 preset 은 `follow_gain 1.0` 으로 **위치만** 따라가고 `aim=free` 라 재조준을 안 한다.
+    d122 뱅크 실측 `subject_in_frame` median 이 `track_truck_left` 0.462 (n=912) /
+    `track_truck_right` 0.385 (n=696) 인데 문구는 `tracks alongside {target}` 이었다 —
+    "계속 보인다"는 지키지 못할 약속. 같은 `aim=free` 인 `track_dolly_in/out` 은 1.000 이고
+    `aim=look_at` 인 track_* 도 전부 1.000 이라, `track_` 접두사가 아니라 truck 둘만 문제다.
+  · **기본을 안 바꾼 이유**: 켜면 옛 뱅크를 다시 export 했을 때 캡션이 조용히 달라진다.
+    d121 두 arm 이 지금 옛 문자열로 학습 중이다. 켰는지는 캡션 JSON 헤더
+    `targetless_promoted` 와 요약표에 남는다.
+  · 실측 검증(1편 122변이): 바뀐 변이 8건, 전부 `track_truck_left`. 나머지 114건은 문자 동일.
+  · 미승격으로 남긴 것: `truck_*`/`pedestal_*`/`dolly_in`/`dolly_out` (config `note_targetless`
+    의 **미결** 항목 그대로 — D104 target 절 A/B 대기).
+
 ### Added
 - **`scripts/run_dynpose_d122_shard.sh` — dynpose 코퍼스를 vista 방식으로 전량 재생성 (D122,
   2026-09-04, 사용자 지시 "vista 돌렸던 방식으로 다시 돌려 / 유일하게 다른건 preset,

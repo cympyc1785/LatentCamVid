@@ -19,6 +19,41 @@
     진짜 이동하는 anchor(0.1285 / 0.2071) 대비 10배 약하다. 비트 동일은 아니지만 "follows the
     subject" 캡션을 떠받치기엔 얇다.
   · **`--track_min_drift_u 0` 이면 d121 과 비트 동일.**
+- **`scripts/run_dynpose_d129_{shard,export}.sh` + `configs/dynpose_holdout_scenes.txt` —
+  dynpose 코퍼스를 D128 축으로 재굽고 **DataDoP 10%**(dd10) 리스트까지 (D129, 2026-09-05,
+  사용자 지시 "같은 방식으로 dynpose를 datadop 10% 비율로 해서 데이터 만들어놔줘").
+  **아직 안 돌렸다** — vista D128 캡션·export 검증이 깨끗할 때만 착수한다.**
+  d122 뱅크 manifest 실측으로 6축이 전부 옛 값임을 확인했다: `fixed.tau_ref=auto` /
+  `fixed.tracking=drift` / `axes.anchors=['dyn_0','dyn_1']`.
+  · **`run_dynpose_d122_shard.sh` 는 지금 HEAD 에서 깨져 있다.** `route_presets.py --num_anchors 2`
+    가 D127b 에 `--max_dynamic_anchors`/`--max_static_anchors`(`route_presets.py:332-333`)로
+    바뀌었다. 그대로 돌리면 argparse exit 2 → `$ARGS` 공백 → `FAIL $VIDEO route` 로 **전 씬이
+    조용히 스킵**된다 (크래시가 아니라 밤새 0편 굽는다). d129 러너가 이걸 고친다.
+  · **anchor 상한과 surface drop 은 `sample_camera_bank.py` 가 아니라 `route_presets.py` 에
+    준다.** route 가 `--nodes ...` 를 명시로 넘기고 `sample_camera_bank.py:144-151` 이 그걸 받으면
+    `pick_main_anchors` 를 **호출하기 전에 return** 한다 — 뱅크 쪽에 붙이면 no-op 이다. 실제
+    적용점은 `route_presets.py:82` 이고 surface drop 은 `schema.py:164` 기본 `True` 라 플래그가
+    없다. 280 그래프 실측: 3/3 이면 편당 anchor 평균 **2.91**(dyn 2.70 / stat 0.21, 최대 6),
+    d122 의 flat 2 대비 variant **~1.45배**(23,424 → ~34,000). surface drop 발동은 12/280 편
+    (door 13 / locker door 5 / wall 2 / car 1 / refrigerator door 1 / road 1).
+    `MAXDYN`/`MAXSTAT` 환경변수로 d122 parity(2/0)를 낼 수 있게 열어뒀다.
+  · **`--track_min_drift_u 0.05` 는 dynpose 에서도 no-op 이 아니다** — `sample_camera_bank.py:827-833`
+    이 명시 `--presets` 목록 위에서 돈다. d122 뱅크 실측 `track_*` 6,322 중 **915(14.5%)** 가 빠진다.
+  · **`--tau_ref follow` 는 vista 보다 크게 먹는다** — `dd_*` 도 같은 경로다
+    (`lbm/presets.py:339-345`: 명시 `follow` 가 preset 표를 이긴다). `--tau_ladder 1.00` +
+    anchor 당 dd 슬롯 4개 구조라 follow 아래선 `tau_start`≡0 이라 `tau_saturated` 가 영영 안 걸린다
+    (`decode/build_poses.py:707-709`). `--trackings lock` 은 `dd_*` 궤적을 안 바꾼다
+    (`aim="traj"` → `build_poses.py:651` `tracking_ignored`), 기록 문자열만 바뀐다.
+  · FIT 에 `--behind_clear_src_ratio 0` 을 **명시**한다 (기본값도 0.0이지만 D105).
+  · GRAPH/CLOUD 는 안 돈다 (`.graph_d122`/`.cloud_d122` 마커 요구). `describe_instances_vlm.py`
+    도 안 돈다 — `instance_desc.json` 은 노드 id 키잉이고 graph 를 안 건드린다.
+  · export 는 **새 root** `latentcam_dynpose_d129` 로 판다. d122 root 재사용 금지 —
+    `variant_id` 는 재굽기 전후로 문자열이 같아서 `prompts.json`·seg list·geo 캐시가 miss 0 으로
+    조용히 통과하면서 전부 옛 카메라를 가리킨다.
+  · holdout 27편을 `/tmp/d107_test_videos.txt` 에서 리포 안
+    (`configs/dynpose_holdout_scenes.txt`)으로 옮겼다. d107/d110/d122 와 같은 분할이라야 paired.
+  · dd10 = `filter_seg_list_by_preset.py --target_frac_prefix dd_ --target_frac 0.10 --suffix dd10`.
+    export 스크립트 4단계가 `prompts.json` 을 되읽어 **실제 `dd_*` 비율을 검산해서 찍는다**.
 - **`scripts/run_k6_d128_shard.sh` — D128 뱅크 샤드 러너 (vista 52편).**
   `bank_d128`(τ) / `hole_bank_k6_d128`(fit). d121 대비 바뀐 축 6개를 **전부 명시적으로** 넘긴다
   (D105: 뱅크 정체성을 argparse 기본값에 맡기지 않는다): `--tau_ref follow` ·

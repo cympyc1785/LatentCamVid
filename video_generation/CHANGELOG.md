@@ -6,6 +6,48 @@
 
 ## [Unreleased]
 
+### Added
+- **`scripts/attribute_g1_hits.py` — G1(behind-surface) 히트를 "무슨 표면이냐"로 귀속 (2026-09-04,
+  사용자 질문 "어떤 물체랑 거리가 부족하다는거야?").** `viz_g1_collision.py` 는 어느 (플랜 프레임
+  × 소스 프레임) 쌍이 걸렸는지만 그려주고 대상은 안 알려준다. 두 축으로 귀속한다:
+  ① **seg instance** — 5×5 패치에서 실제로 최소 depth 를 준 픽셀을 되짚어(`hit_pixel`) 그 픽셀을
+  덮는 dyn/stat 인스턴스를 찾는다. 없으면 `unsegmented`.
+  ② **기하** — 표면점을 world→G 로 올려 `ground.ground_z` 와 비교해 `ground`/`below_cam`/`level`.
+  `judge_frame` 은 `viz_g1_collision` 에서 import 한다 — G1 식이 세 군데로 갈라지면 안 된다.
+  · 실측(parkour `dyn_0__dolly_in__hole0.5`, `hole_bank_k6_d121`, `--behind_src_frames 49`):
+    pierce **0건**, tight 51건. 51건 전부 `unsegmented` + `level` — 주자가 따라 이동하는 콘크리트
+    난간이고 노드가 아니다. `(z_cam − z_surf)/S` p50 −0.0674u 로 **관통이 아니라 요구 여유
+    0.10u 미달**이며, `clear_frac` 를 0.05 로 낮추면 히트가 0% 가 된다. 51건 중 48건이 소스
+    frame0 하나에 대한 것이고 히트 픽셀 median (637,361) ≈ 주점 — 플랜 카메라가 frame0 에서
+    0.012u 밖에 안 움직였기 때문이다. **소스 카메라 자신도 자기 G1 을 1/49 프레임에서 위반**한다.
+
+- **floor 마스크로 지면 높이를 재는 경로 (D62 재조준, 2026-09-04, 사용자 지시 "권장대로 해줘").
+  전부 플래그 기본 off — 기존 산출값 동일.**
+  · `scripts/extract_static_nouns.py`: `select()` 가 `(kept, surfaces, dropped)` 를 반환하고
+    `--max_surface_nouns`(기본 **0**)만큼 광역 표면 명사를 `surface` 열로 따로 뺀다. 0 이면
+    `static` 이 예전과 문자 동일(검증: 같은 후보에 대해 `kept` 두 경우 동일).
+  · `scripts/sam3_static_instances.py`: `--nouns_field {static,surface}`(기본 `static`).
+    옛 JSON 엔 `surface` 열이 없으므로 `.get(field, [])` 로 읽어 KeyError 대신 skip 으로 떨어뜨린다.
+    `surface` 로 돌릴 땐 `--output_root .../seg_instances_floor` 로 따로 뺀다.
+  · `scripts/build_scene_graph.py`: `floor_ground_z()` + `--floor_seg_root` / `--floor_quantile`
+    (기본 None / 0.5). floor 픽셀만 올려 median z 를 `build_relations(ground_z_override=...)`
+    로 넘긴다. `--ground_source gt` 가 있으면 GT 가 이긴다. `ground.source` /
+    `ground.pointcloud_ground_z` / `ground.delta_to_pointcloud_u` / `ground.floor_points` 를
+    그래프에 남긴다 — 지면 소스가 조용히 바뀌면 안 된다.
+  · **검증(camel 재빌드, `--floor_seg_root` 를 없는 경로로)**: top-level 13개 키
+    (`nodes`/`edges`/`gravity`/`scale`/…) 가 기존 `out/camel/scene_graph.json` 과 문자 동일.
+    `ground` 만 `source: "pointcloud"` 가 **추가**됐고 `ground_z` 는 −0.0825 로 그대로다.
+  · **OBB 노드로는 안 올린다**: 바닥 상자는 씬 전체를 덮어 `near` 엣지가 전량 걸리고 G5
+    clearance 가 모든 노드의 MIN 이라 후보가 전멸한다. 마스크의 용도는 스칼라 하나뿐이다.
+  · **원래 권장(ground RANSAC 제약)을 버린 이유**: D98 이후 `--gravity_source auto` 가 기본이고
+    GeoCalib 사이드카가 RANSAC 을 대체한다. D122 실측 **280/280 scene 이
+    `gravity.method == "geocalib"`** — 중력축 쪽 RANSAC 은 죽은 경로다. 남은 소비자는
+    `ground.ground_z` 하나이고, 그 품질 실측(280 scene, 최대 동적 노드 `z_lo` vs `ground_z`):
+    발밑 gap p50 0.120u / p90 0.443u, `gap > 0.5*height` **48.6%**, `gap < 0` **8.2%**.
+    (단서: `dyn z_lo` 가 항상 발은 아니다 — 나는 물체·단 위 피사체는 정당하게 뜬다.)
+  · **아직 안 돌린 것**: SAM3 `surface` 실행과 그래프 재빌드. 재빌드는 D122 뱅크를 통째로
+    무효화하므로 사용자 승인 후에.
+
 ### Changed
 - **`track_truck_left/right` 를 targetless 로 승격할 수 있게 (D123, 2026-09-04, 사용자 지시
   "a로 적용해줘").** `configs/caption_presets.json` 의 두 preset 에 `phrase_targetless` 를 달고

@@ -35,6 +35,42 @@
     `fit_hole_ladder` manifest(`min_zcam_frac` / `clear_src_pct` / `source_g1_clear`)에 기록된다.
   · **아직 뱅크에 적용 안 했다.** parkour `hole_bank_f7_on` 대조(`/tmp/check_d123b.py`)에서
     664변이 중 107변이가 판정이 바뀌고 위반 플랜프레임 합계가 63% 준다. 재굽기는 사용자 판단 대기.
+  · **[2026-09-04 정정 — 그 107 / 63% 는 ①+② 합산이고, 공은 거의 전부 ① 이다.]**
+    두 손잡이를 분리 실측했다 (`out/parkour/hole_bank_g1probe_{off,on}`, 옵션 A, 렌더는 fit 내부
+    verify 뿐). 두 arm 은 **현재 코드 그대로** 돌리고 `--behind_clear_src_ratio` 하나만 다르다 —
+    d121 을 대조군으로 쓰면 09-03 21:49 이후의 코드 변경과 섞여서 귀속이 안 된다 (실제로 d121 →
+    현재 off 만으로 91변이가 움직인다).
+    - **① `min_zcam` 단독** (d121 → off; 둘 다 `clear 0.10` 이라 같은 자로 잰 값):
+      91/664 변이 판정 변화, `binding=collision` **236 → 193 (−43)**, 위반 플랜프레임
+      **4,839 → 1,980 (−59.1%)** (f7_on 기준 4,547 → 1,980, −56.5% — 원래 "63%" 가 이것이다).
+      사라진 게 전부 degenerate 투영 히트다. `hole` +27 / `approach` +16 로 가려져 있던 진짜
+      제약이 드러난다.
+    - **② `clear_src_ratio` 단독** (off → on): parkour `g1_src(p10)=1.2218 u` →
+      `clear_frac = 0.02 + 0.3×1.2218 = 0.3865·S`, 절대 0.10 의 **3.9배로 조여진다**.
+      28/664 변이만 바뀌는데 **28건 전부 `push_in_arc_right`(24) / `track_push_in_arc_right`(4)**
+      이고 anchor 7종 × 사다리 4단으로 고르게 퍼져 있다. `d_knob` 은 28건 전부 음수(최대 −1.051).
+      `binding=collision` 193 → 208 (+15), `obb_limited` 12 → 0 (OBB 가 나아진 게 아니라 G1 이
+      먼저 잡아 binding 을 뺏은 것). **`path_len_u < 0.02` 사실상 정지 궤적 198 → 222 (+24).**
+    - **②의 동기가 ①의 버그였을 가능성.** ②를 정당화한 18편 legality 실측은
+      `scripts/probe_g1_reference.py` 인데 **이 스크립트에 `min_zcam` 이 없다**(grep 0건).
+      즉 "parkour 소스가 `clear 0.10` 에서 위반"의 근거인 `g1_min` 은 ①이 고친 바로 그 degenerate
+      투영으로 오염된 값이다 — 소스 pose 를 가까운 소스 프레임에 투영하면 `cam[2]≈0` 이 되는
+      정확히 그 축이다. ① 적용 후 parkour 의 `g1_p10` 은 1.2218 로 임계 0.10 의 12배다.
+      **①을 고친 뒤에도 ②가 필요한지는 아직 측정되지 않았다.**
+    - **② 는 legality 논증이 정당화하는 범위를 넘어선다.** 그 논증은 임계의 *바닥*("소스를
+      기각하지 말 것")만 말하는데 코드는 그 바닥을 *임계 자체*로 쓴다. `source_g1_clear` 가 재는
+      건 "소스 앞이 얼마나 트여 있나"라서, 트인 야외 씬일수록 임계가 커진다 — 실측 두 씬 모두
+      느슨해지는 게 아니라 조여졌다 (parkour 3.9× / TRUMANS `g1_src(p10)=0.6295` → 0.2070, 2.1×).
+      바닥으로만 쓰려면 `clear_frac = min(0.10, margin + β·g1_src)` 형태가 후보다.
+    - 판단 보류. ② 채택 여부는 `probe_g1_reference.py` 에 `min_zcam` 을 넣고 52편 `g1_min` 을
+      다시 재서 "소스를 기각하는 편이 실제로 남아 있나"를 확인한 뒤에 정한다.
+
+- **`scripts/diff_bank_variants.py` — 두 뱅크의 결정열을 변이 단위로 대조 (2026-09-04).**
+  `bank.json` 만 읽고 렌더 0회. `variant_id` 로 조인해 `status`/`binding`/`knob` 이 바뀐 변이를
+  세고, status·binding 분포표 · knob/path_len_u/tau_max/behind_frac 요약 · `path_len_u` 임계별
+  정지 궤적 수 · `|d_knob|` 큰 순 뒤집힘 목록을 낸다. 게이트 임계를 하나 바꿨을 때 "몇 개가
+  실제로 뒤집혔나"를 눈대중 대신 세기 위한 것. 한쪽에만 있는 `variant_id` 는 따로 세서 **뱅크가
+  다른 설정으로 구워진 경우를 임계 효과로 오독하지 않게** 한다. `--out_json` 으로 전량 diff 저장.
 
 - **`scripts/probe_g1_reference.py` — G1 임계의 기준 거리 탐색 (2026-09-04, 사용자 지시 "소스에서
   카메라 거리든 최소 scene-camera 거리든 피사체 shot scale과 피사체까지의 거리든 일관적으로

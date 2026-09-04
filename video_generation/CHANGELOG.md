@@ -7,6 +7,27 @@
 ## [Unreleased]
 
 ### Added
+- **`sample_camera_bank.py --track_min_drift_u`(기본 0.05) — `track_*` 라우팅에만 거는 순변위
+  하한 (D128, 2026-09-05, 사용자 판단 "움직이는 dynamic 물체는 맞지만 위치가 별로 안 움직이는
+  거잖아").**
+  기존 게이트 `--track_dynamic_only`(D77, `:813`)는 `node["moving"]` 하나만 보는데, 그 `moving`
+  은 `path_len_u > 0.05` 라 **제자리 흔들림**(춤·손짓·그네)을 통과시킨다. 그래서 `path_len` 이
+  아니라 **순변위** `center_drift_u = |c[-1] − c[0]|` 로 한 번 더 자른다.
+  · 실측(d121 뱅크): 순변위 ≤0.05u 인 dyn 노드 **49개가 전부** 기존 게이트를 통과했고
+    (`path_len_u` min 0.053 / med 0.108 / max 0.447) 그 위에 `track_*` **2,040 쌍**이 실렸다.
+    그 쌍들의 track vs 비-track 짝 차이는 `|Δpath_len|` med **0.0336** / `|Δτ|` med **0.0210** —
+    진짜 이동하는 anchor(0.1285 / 0.2071) 대비 10배 약하다. 비트 동일은 아니지만 "follows the
+    subject" 캡션을 떠받치기엔 얇다.
+  · **`--track_min_drift_u 0` 이면 d121 과 비트 동일.**
+- **`scripts/run_k6_d128_shard.sh` — D128 뱅크 샤드 러너 (vista 52편).**
+  `bank_d128`(τ) / `hole_bank_k6_d128`(fit). d121 대비 바뀐 축 6개를 **전부 명시적으로** 넘긴다
+  (D105: 뱅크 정체성을 argparse 기본값에 맡기지 않는다): `--tau_ref follow` ·
+  `--track_min_drift_u 0.05` · `--max_dynamic_anchors 3 --max_static_anchors 3` ·
+  `--anchor_drop_surfaces` · `--trackings lock`/`--tracking lock` · `--behind_min_zcam 0.02`.
+  GRAPH/CLOUD 는 안 돈다 — `build_scene_graph.py` 가 d115 와 비트 동일이고 `.graph_s115` /
+  `.cloud_s115` 마커가 52편 전부에 있다.
+  · parkour smoke: anchor 7 → **4**(dyn 1 / stat 3), variant **664 → 398**(60%),
+    `tau_ref` 398/398 follow, `tracking` 398/398 lock, `track_*` 77개(dyn_0 한정).
 - **D123 G1 두 손잡이 — `min_zcam_frac`(degenerate 투영 하한) + `source_g1_clear`(소스 자신의
   여유로 임계를 유도) (2026-09-04, 사용자 질문 "g1_min 자체가 오염돼 있었다는 게 무슨 소리임?"
   + "소스에서 일관적으로 기준이 될 수 있는 거리 조합이 있는지도 찾아봐줘").**
@@ -154,6 +175,22 @@
   **F1 자체는 아직 미적용** — `fix.md` 상태 "제안됨, 미승인" 그대로다.
 
 ### Changed
+- **`--tau_ref` 기본값을 `auto` → `follow` 로 뒤집었다 (`sample_camera_bank.py` +
+  `fit_hole_ladder.py`) (D128, 2026-09-05, 사용자 지시 "tau_ref도 적용해서").**
+  `auto` 는 `track_*` 만 follow 기준이라 나머지 preset 의 τ 는 소스 카메라 기준으로 재였다.
+  D125 parkour 프로브 실측: `auto` → `follow` 로 stat_2/3/6 세 클립의 G1 위반 프레임 비율
+  (`behind`)이 0.347/0.286/0.163 → **전부 0.000**, 대신 `path_len_u` 가 0.254→0.159,
+  0.334→0.143 로 줄었다 (stat_6 은 0.346→0.349 로 유지). **정확성을 사고 다양성을 팔았다.**
+  기존 뱅크(d115~d121)는 전부 `auto` 로 구워졌으므로 재현하려면 `--tau_ref auto` 를 명시할 것.
+- **F1(제자리형 subject 를 `moving=False` 로 in-place 강등)은 구현했다가 기각했다
+  (D128, 2026-09-05, 사용자 판단).**
+  `build_scene_graph.py` 는 d115 와 **비트 동일**로 되돌렸고 `scripts/patch_moving_flag.py` 는
+  삭제했다. 기각 사유: `moving` 은 `scene_graph/schema.py:207` 의 **anchor split key** 이기도
+  하다 (`limit = max_dynamic if moving else max_static`). 여기서 강등하면 그 dyn 노드가
+  `max_static` 버킷으로 넘어가 벽·바닥과 3칸을 다툰다 — 실측으로 `swing` 은 dyn 6개가 전부
+  넘어가 **dynamic anchor 가 0** 이 된다. 제자리에서 움직이는 물체도 dyn 인 건 맞으므로
+  `moving` 은 그대로 두고, 순변위 판정은 위 `--track_min_drift_u` 로 라우팅에만 건다.
+  (측정치 `center_drift_u` 는 D127c 대로 노드에 계속 기록된다 — 숨기면 진단이 안 된다.)
 - **`tracking="drift"` 를 어휘에서 삭제 + 조준 preset 전부 `lock` (D127, 2026-09-04, 사용자 지시
   "정지한 물체가 target일 때는 track이 필요없고 ... look_at은 drift 없애고 lock을 하는게 맞아 ...
   물체가 dynamic이라면 track + object centric이 돌아가야하고 이 때도 look_at은 lock이 맞아

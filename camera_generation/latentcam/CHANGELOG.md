@@ -5,6 +5,33 @@ All notable changes to the latentcam sub-project. Follows [Keep a Changelog](htt
 ## [Unreleased]
 
 ### Added
+- **`main/cache_molmo2_embeddings.py` + `main/conf/experiment/vista4d_d121_molmo2.yaml` — D124,
+  video CA 스트림을 PE-AV 에서 **Molmo2-4B 융합 hidden state** 로 교체 (2026-09-04, 사용자 지시
+  "molmo2 hidden feature를 적당히 shape 맞추고 da3랑 token 개수 맞춰서 resampling해서 CA layer
+  추가해서 text CA, molmo2 CA, da3 CA 순으로 통과되게끔").**
+  · 동기: PE-AV 는 video tower 와 text tower 가 **끝에서 코사인 유사도로만 만나는** dual-encoder 라
+    "이 캡션이 이 영상의 어디를 가리키나"가 토큰 안에 없다. Molmo2 는 vision feature 를 LM 임베딩에
+    더해 넣고 36층 causal self-attn 을 태우는 decoder-only VLM 이다.
+  · 뽑는 자리: `Molmo2Model.last_hidden_state` = `modeling_molmo2.py:1073` 의 `ln_f` 직후,
+    `lm_head` 직전 (사용자 질문 "마지막 decoding stage 전에 video, text attention이 끝난 hidden
+    state 뽑을만한 곳 없어?" 에 대한 답).
+  · 실측 layout (49프레임 clip): prefix 4,312 토큰 / patch 3,969 = 49 × 9×9. 프레임 **안에서만**
+    9×9 → 8×8 평균풀링 → video 3,136 토큰. 캡션 꼬리(캡션 + 고정 probe 문장 + assistant 헤더)는
+    코퍼스 전량 min 31 / p50 78 / **max 100** 토큰이라 `text_len 128` 에서 잘림 0. 합 **3,264**
+    토큰으로 da3 geo 의 3,456 에 맞췄다 (풀링 없이 9×9 를 그대로 쓰면 4,097 로 18% 초과).
+  · dedup 키가 캡션 문자열이 아니라 **(scene_key, caption)** 이다 — 캡션 위치 hidden 은 앞의 영상을
+    다 본 값이라 씬마다 다르다. 캡션만으로 묶으면 13,183 이지만 실제 고유 조합은 **13,679**.
+  · 반대로 patch 위치 hidden 은 chat template 이 `<|video|>` 를 맨 앞으로 hoist + LM 이 causal
+    이라 캡션과 무관하다 → 씬당 1파일. `--verify` 가 두 캡션의 patch hidden 을 실제로 비교해
+    **|Δ|max 0.0000** 을 확인했고, 같은 옵션이 prefix 재사용 경로 vs processor 원본 full forward 의
+    꼬리 hidden 도 **|Δ|max 0.0000** 으로 확인했다.
+  · 효율: 씬당 1회만 ViT(49×729 패치 × 27층)를 태우고 prefix `inputs_embeds` 를 expand 해서
+    캡션 배치를 돌린다 (ViT 재실행 0회). `lm_head` 도 안 태운다 — vocab 151,936 × 4,345 위치는
+    모델 본체보다 FLOP 이 크다.
+- **`video_text_dim` config 키 (`main/conf/config.yaml`) + `train_latent_cam_dm.py:526` 의
+  `_vtd = 1024` 하드코드 제거.** `video_text_in_stream: true` 일 때 CA key/value 앞쪽 text part 의
+  입력 차원을 config 가 정한다. **기본값 1024 = PE-AV text tower 라 D117 arm A 는 비트 동일**하고,
+  D124 만 2560(Molmo2 LM hidden)으로 덮는다. video part 차원은 종전대로 `video_latent_dim`.
 - **`main/conf/experiment/vista4d_d121_da3_t128.yaml` — D123, `vista4d_d121_da3` 에서 `text_len`
   512 → 128 **한 줄만** (2026-09-04, 사용자 지시 "학습 멈추고 text_len을 128로 맞춰서 다시 돌려줘").**
   같은 코퍼스·같은 H100 1장에서 arm 2(PE-AV)가 8.03 min/epoch 인데 da3 arm 은 12.02 min/epoch

@@ -1606,8 +1606,14 @@ class CamDataset(torch.utils.data.Dataset):
 
         # [new 2026-09-03] PE-AV video/text 토큰 (D117 video CA). geo 캐시 분기가 아래에서 곧장
         # return 하므로 **그 앞에서** 붙여야 한다. 켜지 않으면 키 자체가 안 생긴다.
+        # [2026-09-04 / D124] video 는 캐시 dtype(fp16) 그대로 내보낸다. 유일한 소비자인
+        # `train_latent_cam_dm.build_video_cond` 가 `.to(device).float()` 를 하므로 값은 **비트
+        # 동일**하고(fp16 -> fp32 는 손실 없는 확대), host->device 전송이 절반이 된다. PE-AV 는
+        # 프레임당 토큰 1개(49x1792 = 351 KB)라 무영향이지만 Molmo2 는 3136x2560 = 배치당 257 MB
+        # (fp32) 라 매 스텝 PCIe 를 1.2 GB/s 로 먹는다. text 는 그대로 float — arm B
+        # (text_encoder=PEAV) 가 `.float()` 없이 text CA 로 바로 넣기 때문에 dtype 을 바꾸면 안 된다.
         if self._peav_video_mem:
-            out['peav_video'] = self._peav_video_mem[self.geo_raw_key(data_name)].float()
+            out['peav_video'] = self._peav_video_mem[self.geo_raw_key(data_name)]
         if self._peav_text is not None:
             _i = self._peav_text['by_name'][data_name]
             out['peav_text'] = self._peav_text['emb'][_i].float()

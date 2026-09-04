@@ -481,6 +481,11 @@ video_latent_dim: 0
 # (`[NL text tokens | 49 frame tokens]`). text CA 는 그대로 umt5 struct 캡션이 맡는다.
 # arm B (text_encoder: PEAV) 는 PE-AV text 가 이미 text CA 로 갔으므로 여기서는 false.
 video_text_in_stream: false
+# [new 2026-09-04] `video_text_in_stream: true` 일 때 text part 의 **입력 차원**.
+# 1024 (기본) = PE-AV text tower — D117 arm A 와 비트 동일하다. D124 의 Molmo2 arm 은
+# video/text 두 part 가 같은 LM hidden 이라 둘 다 2560 이다. video part 차원은
+# `video_latent_dim` 이 정하고, 이 키는 앞쪽 text part 만 정한다.
+video_text_dim: 1024
 # [new 2026-09-03 / FIX-D117] PE-AV feature 를 proj 앞에서 LayerNorm 한다 (video / video_text /
 # text_encoder=PEAV 의 text_proj). DA3 geo 가 `da3_geo_encoder.self.ln` 을 거치는 것과 같은 자리.
 # 없으면 video_tok std 26 (text part 41) 대 text/geo 0.58 로 CA logit 이 포화해서 학습이

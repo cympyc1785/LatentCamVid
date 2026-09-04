@@ -1,0 +1,76 @@
+# @package _global_
+# D124 — `vista4d_d121_da3_t128.yaml` 에 **Molmo2-4B 스트림**을 얹은 arm.
+# 레이어 순서 text CA(umt5) -> **molmo2 CA** -> geo CA(da3). 나머지는 t128 과 글자 그대로 같다.
+#
+# ═══ 왜 PE-AV 를 갈아치우나 ═══════════════════════════════════════════════════════════════
+# D117-c 의 video CA 는 PE-AV(pe-av-large) 를 먹었는데, PE-AV 는 video tower 와 text tower 가
+# **끝에서 코사인 유사도로만 만나는** dual-encoder 라 "이 캡션이 이 영상의 어디를 가리키나"가
+# 토큰 안에 안 들어 있다. Molmo2-4B 는 vision feature 를 LM 임베딩에 **더해 넣고 36층 causal
+# self-attn 을 태우는** decoder-only VLM 이라, 캡션 위치의 hidden state 는 영상 전체를 보고
+# 나온 값이다. 그걸 그대로 같은 CA 슬롯에 꽂는다 (모델 코드 변경 0 — 슬롯은 차원·길이 불문).
+#
+# ═══ 캐시 (main/cache_molmo2_embeddings.py) ═══════════════════════════════════════════════
+# 뽑는 자리는 `Molmo2Model.last_hidden_state` — `modeling_molmo2.py:1073` 의 `ln_f` 직후,
+# `lm_head` **직전**. 즉 "마지막 decoding stage 전에 video·text attention 이 끝난" 지점.
+#   video  씬당 1파일 (3136, 2560) = 49프레임 x (9x9 -> 8x8 프레임내 평균풀링).
+#          chat template 이 `<|video|>` 를 맨 앞으로 hoist + LM 이 causal 이므로 patch 위치
+#          hidden 은 뒤에 붙는 캡션과 **무관**하다. 실측으로 확인함 (|Δ|max 0.0000).
+#   text   (scene,caption) 조합당 1행 (128, 2560) = 캡션 + 고정 probe 문장 + assistant 헤더
+#          위치의 hidden. 이쪽은 앞의 영상을 다 본 뒤 값이라 **씬마다 다르다** — 그래서
+#          dedup 키가 캡션 문자열(13,183)이 아니라 (scene,caption)(13,679) 이다.
+# 두 part 는 `video_text_in_stream` 으로 같은 CA 의 key/value 에 `[text | video]` 로 붙는다.
+#
+# ═══ 토큰 개수 ═════════════════════════════════════════════════════════════════════════════
+# da3 geo 스트림이 3456 토큰(6뷰 x 576)이다. Molmo2 는 3136 + 128 = **3264** 로 맞췄다
+# (사용자 지시: "da3 랑 token 개수 맞춰서 resampling"). 풀링 없이 9x9 를 그대로 쓰면
+# 3969 + 128 = 4097 로 da3 보다 18% 많아진다. 풀링은 **프레임 안에서만** — 시간축을 섞지 않는다.
+#
+# ═══ 비교 대상 ═════════════════════════════════════════════════════════════════════════════
+# 같은 코퍼스·같은 text_len 128 의 `vista4d_d121_da3_t128`(D123) 이 video CA 없는 대조군이다.
+# D117-c 의 PE-AV arm 은 코퍼스(d107)가 달라서 직접 비교가 안 된다.
+exp_name: vista4d_d121_molmo2
+dl3dv_root: /data1/cympyc1785/data/Vista4D-Eval-Data/latentcam_da3_k6_d121
+meta_csv: meta_vista4d.csv
+train_seg_list: /data1/cympyc1785/data/Vista4D-Eval-Data/latentcam_da3_k6_d121/seg_list_vista4d_train.txt
+test_seg_list: /data1/cympyc1785/data/Vista4D-Eval-Data/latentcam_da3_k6_d121/seg_list_vista4d_test.txt
+coverage_blacklist_path: null
+
+text_len: 128   # umt5 text CA. D123 과 동일 — 캡션 최장 89 토큰이라 잘림 0.
+
+pose_source: da3
+target_pose_source: da3_target_poses
+scale_mode: avg_scale
+avg_scale_ref: context_first_cam
+intr_norm: rel
+cam_dim: 64
+
+geo_encoder: da3
+geo_cam_embed: null
+geo_latent_cache_dir: null
+geo_posed: true
+geo_shuffle_order: false
+da3_geo_model: da3nested-giant-large
+da3_geo_input_hw: [252, 448]
+da3_geo_layers: last
+
+geo_view_sampling: context_uniform
+geo_num_views: 6
+geo_first_view_target_s: true
+
+geo_raw_cache_dir: /data1/cympyc1785/data/Vista4D-Eval-Data/latentcam_da3/geo_raw_cache_da3
+da3_cam_token_per_sample: true
+
+anchor_pred_frame0: true
+
+# ─── Molmo2 CA (기존 PE-AV 슬롯을 그대로 재사용한다) ───────────────────────────────────────
+peav_video_cache_dir: /data1/cympyc1785/data/Vista4D-Eval-Data/latentcam_da3_k6_d121/molmo2_cache/video
+peav_text_cache: /data1/cympyc1785/data/Vista4D-Eval-Data/latentcam_da3_k6_d121/molmo2_cache/text.pt
+video_latent_dim: 2560     # Molmo2 LM hidden — video part (3136 tok)
+video_text_in_stream: true
+video_text_dim: 2560       # 같은 LM hidden — text part (128 tok). 기본 1024 는 PE-AV 값이다.
+peav_in_ln: true           # proj 앞 LayerNorm. FIX-D117 참조 (없으면 CA logit 포화)
+video_gate: true           # 0 초기화 residual gate. FIX-D117 참조 (없으면 loss ~1.0 정체)
+
+batch_size: 8
+epochs: 200
+ckpt_at_epochs: [50, 100]

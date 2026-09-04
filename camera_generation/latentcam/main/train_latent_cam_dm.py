@@ -523,7 +523,10 @@ def train():
     if _vld > 0:
         assert not getattr(cfg, 'is_ar', False) and not getattr(cfg, 'per_token_noise', False), \
             "video_latent_dim>0 은 표준 diffusion 경로에만 배선되어 있다 (is_ar/per_token_noise 미지원)"
-        _vtd = 1024 if getattr(cfg, 'video_text_in_stream', False) else 0
+        # [2026-09-04] text part 차원은 cfg 가 정한다. 기본값 1024 = PE-AV text tower 라
+        # D117 arm A 는 예전과 비트 동일하고, D124 Molmo2 arm 만 2560 으로 덮는다.
+        _vtd = int(getattr(cfg, 'video_text_dim', 1024) or 1024) \
+            if getattr(cfg, 'video_text_in_stream', False) else 0
         _vid_kw = dict(video_latent_dim=_vld, video_text_dim=_vtd,
                        peav_in_ln=bool(getattr(cfg, 'peav_in_ln', True)),
                        video_gate=bool(getattr(cfg, 'video_gate', True)))

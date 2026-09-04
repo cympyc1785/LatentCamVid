@@ -5,6 +5,29 @@ All notable changes to the latentcam sub-project. Follows [Keep a Changelog](htt
 ## [Unreleased]
 
 ### Added
+- **`main/conf/experiment/vista4d_d121_da3_t128.yaml` — D123, `vista4d_d121_da3` 에서 `text_len`
+  512 → 128 **한 줄만** (2026-09-04, 사용자 지시 "학습 멈추고 text_len을 128로 맞춰서 다시 돌려줘").**
+  같은 코퍼스·같은 H100 1장에서 arm 2(PE-AV)가 8.03 min/epoch 인데 da3 arm 은 12.02 min/epoch
+  였다 (ckpt mtime 실측, 둘 다 01:35 시작). 차이 4.0 min/epoch = 0.128 s/step (1,872 step/epoch).
+  · 원인은 `train_latent_cam_dm.py:735` 가 매 스텝 umt5-xxl 인코더를 forward 하는 것이고
+    (PE-AV arm 은 캐시를 읽어서 인코더가 아예 안 돈다), 그 forward 가 **항상 512 토큰**을 돈다 —
+    `models/t5.py:509-512` 가 `seq_len=text_len` 으로 pad 하고 `seq_lens` 를 계산만 한 채
+    `self.model(ids, mask)` 로 전량을 돌린다. umt5-xxl encoder-only = dim 4096 / ffn 10240
+    gated / 24층 = 4.63 B param → `2 × 4.63e9 × (8 × 512)` = 37.9 TFLOP/step, / 0.128 s =
+    296 TFLOPS (H100 bf16 피크 대비 30% MFU). 관측된 delta 가 이 forward 하나로 설명된다.
+  · **왜 128 인가** — 이 코퍼스 고유 캡션 13,183개 전량을 umt5 토크나이저로 재면
+    min 12 / p50 62 / p90 73 / p99 79 / **max 89**. 128 이면 잘리는 캡션이 0개(≤96 에서 이미
+    100%)이고 32 토큰 여유가 남는다. (같은 캡션을 Molmo2(Qwen) 토크나이저로 재면
+    min 10 / p50 57 / p90 67 / p99 73 / max 79 — D124 용 참고.)
+  · 실측 smoke: **4.87 it/s vs 기준 arm 2.60 it/s → 6.4 min/epoch** (예상 9.0 보다 빨랐다).
+    loss 궤적은 기준 arm smoke 와 일치 — step 0 `1.3289`(동일), step 150 `1.0145`(기준 1.0147).
+  · **비교 가능성 주의: 기존 `vista4d_d121_da3` 의 "빠른 판본"이 아니라 새 run 이다.** text CA 의
+    key 개수가 512 → 128 로 바뀐다. 잘린 캡션이 없으니 정보량은 같지만 pad 토큰에 걸리던
+    attention mass 가 사라진다(`text_mask` 로 마스킹되긴 하나 positional encoding 길이가 다르다).
+    peav arm(8.03 min/epoch)과의 대조는 그대로 유효 — 양쪽 다 실제 캡션을 온전히 본다.
+  · 코드 변경 없음. 나머지 전부 `vista4d_d121_da3.yaml` 과 글자 그대로 같다 (주석/공백 제거
+    diff 에서 `exp_name` 과 `text_len` 두 줄만 다른 것을 확인).
+
 - **`main/conf/experiment/vista4d_d121_{da3,peav}.yaml` — D121 vista 코퍼스 2-arm (2026-09-04).**
   사용자 지시: "vista 최신 데이터를 train, val 나눠서 da3 encoder만 쓴거랑 ... 두 개를 학습",
   이어서 "그냥 PE-AV 먼저 학습 돌려놔줘. text, video encoder 다 PE-AV꺼 쓰고".

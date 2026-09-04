@@ -1,0 +1,71 @@
+# @package _global_
+# D123 — `vista4d_d121_da3.yaml` 재실행, **`text_len` 512 -> 128 한 줄만** 다르다.
+#
+# ═══ 왜 바꾸나 ════════════════════════════════════════════════════════════════════════════
+# 같은 코퍼스·같은 H100 1장에서 arm 2(PE-AV)가 8.03 min/epoch 인데 이 arm 은 12.02 min/epoch
+# 였다 (ckpt mtime 실측: da3 epoch50 @11:36, peav epoch50 @08:21 / epoch100 @14:58, 둘 다
+# 01:35 시작). 차이 4.0 min/epoch = 0.128 s/step (1,872 step/epoch).
+#
+# 원인은 `train_latent_cam_dm.py:735` 가 매 스텝 umt5-xxl 인코더를 forward 하는 것이고
+# (PE-AV arm 은 캐시를 읽어서 인코더가 아예 안 돈다), 그 forward 가 **항상 512 토큰**을 돈다:
+# `models/t5.py:509-512` 의 토크나이저가 `seq_len=text_len` 으로 pad 하고, `seq_lens` 를
+# 계산은 하지만 쓰지 않은 채 `self.model(ids, mask)` 로 전량을 돌린다.
+#
+# umt5-xxl encoder-only = dim 4096 / ffn 10240 gated / 24층 = 4.63 B param 이라
+# 2 x 4.63e9 x (8 x 512) = 37.9 TFLOP/step, / 0.128 s = 296 TFLOPS (H100 bf16 피크 대비 30% MFU).
+# 관측된 delta 가 이 forward 하나로 정확히 설명된다.
+#
+# ═══ 왜 하필 128 인가 ═════════════════════════════════════════════════════════════════════
+# 이 코퍼스의 **고유 캡션 13,183개 전량**을 umt5 토크나이저로 재어 보면
+# min 12 / p50 62 / p90 73 / p99 79 / **max 89** 다. 128 이면 잘리는 캡션이 0개이고
+# (<=96 에서 이미 100%) 32 토큰 여유가 남는다. 잘림 없이 인코더 비용만 ~4배 준다
+# (attention 은 seq^2 지만 seq=512 에서도 전체의 ~2% 라 사실상 선형).
+# 예상 9.0 min/epoch = 12.02 - (4.0 x 3/4).
+#
+# ═══ 비교 가능성 주의 ═════════════════════════════════════════════════════════════════════
+# text CA 의 key 개수가 512 -> 128 로 바뀌므로 **`vista4d_d121_da3` 와 비트 동일하지 않다**.
+# 잘린 캡션이 없으니 정보량은 같지만, pad 토큰에 걸리던 attention mass 가 사라진다
+# (`text_mask` 로 마스킹되긴 하나 positional encoding 길이가 달라진다). 즉 이 arm 은
+# 기존 da3 run 의 "빠른 판본"이 아니라 **새 run** 이다. peav arm(8.03 min/epoch)과의 대조는
+# 그대로 유효하다 — 양쪽 다 실제 캡션을 온전히 본다.
+#
+# 나머지 전부 `vista4d_d121_da3.yaml` 과 글자 그대로 같다.
+exp_name: vista4d_d121_da3_t128
+dl3dv_root: /data1/cympyc1785/data/Vista4D-Eval-Data/latentcam_da3_k6_d121
+meta_csv: meta_vista4d.csv
+train_seg_list: /data1/cympyc1785/data/Vista4D-Eval-Data/latentcam_da3_k6_d121/seg_list_vista4d_train.txt
+test_seg_list: /data1/cympyc1785/data/Vista4D-Eval-Data/latentcam_da3_k6_d121/seg_list_vista4d_test.txt
+coverage_blacklist_path: null
+
+text_len: 128   # <- 유일한 실질 변경. conf/config.yaml:186 기본값 512 를 덮는다.
+
+pose_source: da3
+target_pose_source: da3_target_poses   # target 만 <scene>/da3/target_poses.npz 로 교체
+scale_mode: avg_scale
+avg_scale_ref: context_first_cam       # 디렉토리 avg_scale_context_first_cam <- scene_graph S
+intr_norm: rel                         # vae_20260302_300 = frame-0-relative-intrinsics ckpt
+cam_dim: 64                            # = 그 ckpt 의 latent_dim
+
+geo_encoder: da3
+geo_cam_embed: null
+geo_latent_cache_dir: null
+geo_posed: true
+geo_shuffle_order: false
+da3_geo_model: da3nested-giant-large
+da3_geo_input_hw: [252, 448]
+da3_geo_layers: last
+
+geo_view_sampling: context_uniform  # context range = 영상 전체 [0,49) = 소스 영상 전체
+geo_num_views: 6                    # _even_indices(49,6) = [0,10,19,29,38,48]
+geo_first_view_target_s: true       # view0 = 프레임 s(=0). 이미 첫 픽이라 집합이 안 바뀐다.
+
+geo_raw_cache_dir: /data1/cympyc1785/data/Vista4D-Eval-Data/latentcam_da3/geo_raw_cache_da3
+da3_cam_token_per_sample: true   # 캐시는 B=1 로 구워진다 — 켜야 on-the-fly 폴백과 일치
+
+anchor_pred_frame0: true
+
+video_latent_dim: 0   # video CA 블록 자체를 만들지 않는다 (D117 이전과 비트 동일)
+
+batch_size: 8
+epochs: 200
+ckpt_at_epochs: [50, 100]

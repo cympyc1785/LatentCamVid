@@ -7,6 +7,65 @@
 ## [Unreleased]
 
 ### Added
+- **D123 G1 두 손잡이 — `min_zcam_frac`(degenerate 투영 하한) + `source_g1_clear`(소스 자신의
+  여유로 임계를 유도) (2026-09-04, 사용자 질문 "g1_min 자체가 오염돼 있었다는 게 무슨 소리임?"
+  + "소스에서 일관적으로 기준이 될 수 있는 거리 조합이 있는지도 찾아봐줘").**
+  G5/G6/G7 은 전부 임계를 "소스 카메라 **자신의** 여유 × β(<1)" 로 잡아 소스가 정의상 자기
+  게이트를 통과하는데, **G1 만 `clear_frac·S` 라는 씬 상수의 절대 분수**였다. 실측에서 parkour
+  소스 카메라가 배포 `clear_frac=0.10` 에서 1/49 프레임을 자기 G1 로 위반하고 goat 0.1199 /
+  hike 0.1029 로 아슬아슬하다 — 소스를 기각하는 임계는 충돌 판정이 아니라 버그다 (D47 원칙).
+  · **`gates.behind_surface_frames(..., min_zcam_frac=0.0)`** — 플랜 위치 `p` 가 소스 카메라 `t`
+    의 광학 중심에 겹치면 `uv=(K·cam)[:2]/cam[2]` 가 0 에 가까운 수로 나뉘어 **투영 픽셀이 기하가
+    아니라 반올림으로 정해지고**, `cam[2]≈0` 이면 판정식이 `clear > z_surf + margin` 으로 붕괴해
+    p 가 어디 있든 같은 답이 나온다 (플랜이 아니라 소스 카메라 자기 주변에 대한 진술). 하한
+    아래 소스 프레임은 **증언에서 뺀다** — 기각도 통과도 아니고, 남은 프레임들이 판정한다.
+    실측(parkour `hole_bank_f7_on`, 664변이 × 49프레임 = 142,952 판정쌍): G1 히트 9,888쌍의
+    `z_cam` min 0.0002 / p10 0.0041 / p50 0.0374 u. 하한 `0.005·S` 로 히트의 12.2%,
+    `0.02·S` 로 31.9% 가 사라진다 — 씬 하나의 edge case 가 아니라 계통 오차다. 순수 lateral
+    truck 은 자기 시각의 소스 카메라 대비 `z_cam≈0` 이라 **정상 플랜도** 여기 걸린다.
+    `behind_profile` 로도 그대로 내려간다. **기본 0.0 → `1e-6` 분기라 예전과 비트 동일.**
+  · **`sample_camera_bank.source_g1_clear(behind, pct=10.0)`** — 소스 카메라 자신의 G1 여유
+    `min_t (z_surf − z_cam)/S` 의 `pct` 분위(u). 판정에 쓰는 것과 **같은** depth/K/c2w/sky/
+    dynamic/frames/`min_zcam_frac` 을 쓴다 (다른 재료로 바닥을 재면 β 가 뜻을 잃는다).
+    유도식 `clear_frac = margin_frac + β · source_g1_clear`.
+  · **min 이 아니라 p10 인 이유** — min 이 위 degenerate 투영으로 오염돼 있었다. 하한을 켜도
+    분위수 쪽이 안정적이라 분위수로 간다 (CV 근거는 아래 probe 항목).
+  · `sample_camera_bank.py --behind_min_zcam`(기본 0.02) / `fit_hole_ladder.py
+    --behind_clear_src_pct`(기본 10.0) 로 노출. `behind_context()` 반환 dict 와
+    `fit_hole_ladder` manifest(`min_zcam_frac` / `clear_src_pct` / `source_g1_clear`)에 기록된다.
+  · **아직 뱅크에 적용 안 했다.** parkour `hole_bank_f7_on` 대조(`/tmp/check_d123b.py`)에서
+    664변이 중 107변이가 판정이 바뀌고 위반 플랜프레임 합계가 63% 준다. 재굽기는 사용자 판단 대기.
+
+- **`scripts/probe_g1_reference.py` — G1 임계의 기준 거리 탐색 (2026-09-04, 사용자 지시 "소스에서
+  카메라 거리든 최소 scene-camera 거리든 피사체 shot scale과 피사체까지의 거리든 일관적으로
+  기준이 될 수 있는 거리 조합이 있는지도 찾아봐줘").** 후보 기준거리 R 로 나눈 비율 `g1_src / R`
+  이 **씬 사이에서 안 흔들리면** 그 R 이 게이지다 — 변동계수(CV)로 순위를 매긴다 (D51 과 같은 판정).
+  · `g1_src` 는 3D 최단거리(`render.standoff`)가 아니라 **z-depth 차** `z_surf − z_cam` 으로 잰다.
+    G1 이 재는 게 그거라서다. 두 양은 실제로 다르다 — parkour 3D 최근접 0.0326 u vs G1 이 읽는
+    0.0674 u. `time_match=True` 배포 설정과 맞추려고 **static 채널**로 잰다 (동적 채널은 소스
+    pose 에서 항상 공집합 — 플랜 f ↔ 소스 f 는 `z_cam=0` 이라 스킵된다).
+  · **실측 결론 (18편): 외부 게이지는 없다.** 소스 카메라 거리 · 최소 scene-camera 거리 ·
+    피사체 shot scale · 피사체까지 거리와 그 곱/기하평균 조합의 CV 가 전부 0.89~2.10 이라
+    기준이 못 된다. 유일하게 안정적인 건 **G1 자기 분포**였다 — `g1_p10` CV 0.371 /
+    `g1_2nd` 0.396 / `g1_p25` 0.418 vs `g1_p50` 0.534. p10 이 최저라 위 기본값이 됐다.
+
+- **F7 시간축 절단 — `fit_hole_ladder.py --time_truncate` / `--min_move_frac` + `hold_from` 열
+  (2026-09-04, 사용자 지시 "시간축 절단 한거 안한거 돌려서 영상으로 비교해줘").**
+  물리 게이트(G1/G5/G6/G7)에 걸리면 지금까지는 궤적 **크기**만 줄였다. F7 은 그 전에
+  **시간축**으로 잘라 본다 — 게이트에 걸리기 직전 프레임까지만 움직이고 그 뒤로는 **위치만**
+  얼린다(회전=조준은 계속되므로 "밀고 들어가다 멈춰서 계속 따라본다"로 읽힌다).
+  네 게이트가 전부 `poses[:, :3, 3]` 만 보기 때문에 위치만 얼려도 판정이 닫힌다.
+  · `truncate_hold(poses, hold_from)` / `solve_hold_from(...)` — 게이트를 통과하는 **가장 늦은**
+    hold 시작 프레임을 이분법으로 찾는다. 판정은 `geometry_stats` 라 **렌더 0회**.
+    `hold_from >= len(poses)` 면 입력을 그대로(사본조차 안 만들고) 돌려준다.
+  · `retime_info(...)` — 절단 후 **위치에서 나오는 두 값**만 다시 잰다: `path_len_u`(`emit_bank
+    --min_path_len` 이 읽는 필터라 안 고치면 사실상 정지가 된 궤적이 "길이 0.4u" 를 달고 통과)와
+    `tau.tau_max_final`. 공식은 `decode/build_poses.py:889/:924` 와 문자 동일.
+  · `emit_bank.py rebuild()` 가 행의 `hold_from` 을 그대로 되풀어 `poses.npz` 대조 assert 를
+    통과시키고, 같은 `retime_info` 를 불러 canonical meta 와 bank CSV 가 어긋나지 않게 한다.
+  · **기본 off** (`--no_time_truncate` 가 기존 경로). `SHAPE_DEFAULTS["time_truncate"]=False`
+    폴백 + 빈 `hold_from` 칸 → F7 이전 뱅크는 비트 단위로 그대로 재현된다.
+
 - **`scripts/attribute_g1_hits.py` — G1(behind-surface) 히트를 "무슨 표면이냐"로 귀속 (2026-09-04,
   사용자 질문 "어떤 물체랑 거리가 부족하다는거야?").** `viz_g1_collision.py` 는 어느 (플랜 프레임
   × 소스 프레임) 쌍이 걸렸는지만 그려주고 대상은 안 알려준다. 두 축으로 귀속한다:

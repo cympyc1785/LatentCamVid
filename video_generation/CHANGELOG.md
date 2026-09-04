@@ -165,6 +165,16 @@
     0.9637 → 0.9637 (**Δ 정확히 0.0000** — 변위가 0 이라 정의상 no-op),
     `view_angle_max_deg` 13.5994 → 13.2909, `hole` 0.3068 → 0.2937. 172행 중 상태가 바뀐 건 11행
     (6.4%), `track_orbit_right` 는 비트 동일 (D93 이 이미 lock).
+  · **전량 실측** (같은 두 arm 을 parkour **664 변이 전량**으로, 2026-09-05 완료,
+    `results/20260904_tracking_drift_vs_lock/diff_trkall_664.json`): 바뀐 변이 19/664 (2.9%),
+    status 6 · binding 4. 동적 anchor `dyn_0` 148행 `subject_in_frame` 0.7927 → **0.8254**,
+    `subject_area_med` 0.0264 → 0.0280, `hole` 0.1800 → 0.1828, `tau_max` 1.0468 → 1.0632.
+    정지 anchor 516행 `subject_in_frame` 0.8233 → 0.8233 (**Δ 0.0000**), `hole` 0.2598 → 0.2532,
+    `view_angle_max_deg` 11.0924 → 11.0136. 전체 664행 `subject_in_frame` 0.8165 → 0.8238.
+    `dyn_0` 에서 `subject_in_frame` 이 오른 preset 은 4개뿐이고 전부 `aim=look_at` 이다 —
+    `orbit_left` 0.6342 → 1.0000 (area 0.0404 → 0.0968), `orbit_left_pedestal_up` 0.5380 → 1.0000,
+    `s_curve` 0.7690 → 1.0000, `push_in_arc_left` 0.8460 → 1.0000. `aim=free` 계열
+    (`dolly_in`/`pan_*`/`tilt_*`/`truck_*`/`static_hold`/`track_*`)은 전부 무변화 — 설계대로다.
   · drift 를 지운 이유: 0.6 은 필터가 아니라 **영구 편향**이라 조준점이 끝까지 subject 변위의 40%
     만큼 뒤처진다. 원래 목적이던 조준 jitter 는 `track.center_smooth`(savgol w=11 p=3) +
     `--aim_keyframes 6` + `--keyframe_ease smooth_kf` 가 올바른 축에서 처리한다. `--tracking` 이
@@ -192,9 +202,30 @@
     anchor 가 0 이 되는 편은 dynpose 2편뿐이고 **둘 다 변경 전에도 0** 이었다.
   · parkour: `dyn_0`(man) + `stat_1`/`stat_2`(building) 만 남고 `railing` ×3 · `fence` ×1 이
     `surface` 로, `tree` ×2 · `building` ×2 가 `max_anchors` 로 빠진다.
-  · 되돌리는 스위치: `--max_anchors 0`(상한 없음) / `--no_anchor_drop_surfaces`. `--nodes` 로
-    명시한 목록은 예전처럼 필터를 안 탄다.
+  · 되돌리는 스위치: `--max_dynamic_anchors 0` / `--max_static_anchors 0`(그 갈래 상한 없음) /
+    `--no_anchor_drop_surfaces`. `--nodes` 로 명시한 목록은 예전처럼 필터를 안 탄다.
   · **아직 뱅크에 적용 안 했다** — 재굽기는 사용자 판단 대기.
+- **anchor 상한을 동적/정적 **따로** 3개씩 (D127b, 2026-09-05, 사용자 지시 "dynamic target,
+  static target 각각 최대 3개로 해서 가장 main이 되는 애들만 target으로 삼아줘").**
+  · `pick_main_anchors(nodes, min_area_frac, max_dynamic=3, max_static=3, drop_surfaces=True,
+    max_anchors=0)`. 두 소비자의 플래그 이름도 같다 — `sample_camera_bank.py` /
+    `route_presets.py` 의 `--max_dynamic_anchors` · `--max_static_anchors`.
+    `--max_anchors` 는 둘을 적용한 **뒤에** 거는 총합 상한으로 남기고 기본 `0`(끔)으로 내렸다.
+  · **왜 합산 상한 3(D127 최초안)이 틀렸나**: 정렬이 동적 우선이라 동적이 3개인 편에서
+    **정적 anchor 가 0** 이 된다. 그러면 그 편의 모든 변이가 `track_*`+동적 target 이 되고,
+    반대로 동적이 없는 편은 정적만 3개다 — 코퍼스의 동적/정적 target 비율이 씬 구성에 끌려간다.
+    실측: dynpose 280편에서 합산 3 일 때 정적 anchor 총 **6개**, 따로 세면 **59개**.
+  · **실측** (524편, `min_area_frac` 0.01, 표면 제외 on):
+
+    | 코퍼스 | 편수 | anchor before → after | 편당 | 동적 | 정적 | surface | max_dynamic | max_static |
+    |---|---|---|---|---|---|---|---|---|
+    | `out` (Vista) | 53 | 357 → **207** | 3.91 | 80 | 127 | 38 | 16 | 96 |
+    | `out_dynpose` | 280 | 1276 → **814** | 2.91 | 755 | 59 | 23 | 438 | 1 |
+    | `out_trumans` | 191 | 2087 → **705** | 3.69 | 191 | 514 | 1150 | 0 | 232 |
+
+    합산 3 안(151/764/565) 대비 각각 +56 / +50 / +140. 편당은 여전히 2.9~3.9 다 — 동적이 3개
+    넘는 편이 드물어서 상한 3+3=6 에 실제로 닿는 편이 거의 없다. TRUMANS 는 동적이 정확히
+    편당 1개(사람)라 `max_dynamic` 탈락이 0 이다. anchor 0 인 편은 dynpose 2편(변경 전에도 0).
 - **`track_truck_left/right` 를 targetless 로 승격할 수 있게 (D123, 2026-09-04, 사용자 지시
   "a로 적용해줘").** `configs/caption_presets.json` 의 두 preset 에 `phrase_targetless` 를 달고
   `scripts/build_bank_captions.py` 에 `--targetless_promote` / `--no_targetless_promote`

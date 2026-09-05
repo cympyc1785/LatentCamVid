@@ -231,6 +231,17 @@
   **F1 자체는 아직 미적용** — `fix.md` 상태 "제안됨, 미승인" 그대로다.
 
 ### Changed
+- **`render_bank_videos.py` 타일 라벨에 **카메라 출처**와 **target 이름**을 박는다 —
+  `--pose_kind` + 자막의 `anchor_label` (2026-09-05, 사용자 지시 "target이 뭔지, GT인지 pred인지
+  적어줘야지").**
+  릴을 여러 개 늘어놓으면 어느 게 뱅크 pseudo-GT 고 어느 게 모델 예측인지, 그리고 이 카메라가
+  무엇을 겨냥한 것인지 **영상만 보고 못 가른다**. 자막에 있던 건 `dyn_0`/`stat_4` 같은
+  anchor id 뿐이었다.
+  · 제목: `[GT] dolly_in_look_at` / `[EXT] ...` / `[pred] ...`. `--pose_kind auto`(기본)는 뱅크
+    `poses.npz` 면 `GT`, `--poses_npz` 로 외부 파일을 물리면 출처를 모르니 `EXT`. 모델 추론이면
+    `--pose_kind pred` 로 명시한다. `--pose_kind ""` 면 태그가 안 붙어 예전 영상과 라벨이 같다.
+  · 자막: `dyn_0=camel` 처럼 `anchor_id=anchor_label[:16]`. `anchor_label` 열이 없는 옛 뱅크는
+    `row.get` 이 빈 문자열을 돌려주므로 자막이 예전 그대로다.
 - **`route_presets.py --num_external` 기본값 4 → 1 (2026-09-05, 사용자 지시 "1로 해줘").**
   fit 예산이 DataDoP(`dd_*`) 로 새고 있었다. D129 126편 실측: `dd_*` 가 뱅크 21,892행 중
   **13,268행(60.6%)** 인데, 최종 학습 리스트는 `dd10` 서브샘플이라 코퍼스에서 `dd_*` 는 10% 다.

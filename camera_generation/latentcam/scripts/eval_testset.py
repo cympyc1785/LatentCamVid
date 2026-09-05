@@ -115,6 +115,17 @@ def main():
     # arm 에서는 조건 자체가 없으므로 no-op (경고만 찍는다).
     ap.add_argument('--drop-track', action='store_true',
                     help='target_track 조건을 null(전 채널 0)로 강제 — track 없이 추론')
+    # [new 2026-09-05] video CA(D124 molmo2) 계측. 배치마다 프로브 forward 3회가 더 붙으므로
+    # 기본 off — 켜지 않으면 기존 run 의 동작·속도가 그대로다. video_latent_dim=0 인 arm 은
+    # 프로브가 빈 리스트를 돌려주므로 켜도 no-op.
+    ap.add_argument('--probe-video-ca', action='store_true',
+                    help='추론 1건마다 video CA gate/attention 기여도를 video_ca_probe.jsonl 에 기록')
+    ap.add_argument('--probe-timestep', type=int, default=500,
+                    help='프로브를 재는 확산 timestep (샘플/arm 간 비교하려면 고정해야 한다)')
+    # [new 2026-09-05] video CA 를 끄고 추론한다. --drop-track 의 video 판. 같은 ckpt 로
+    # 이 플래그만 켜고 끄면 "video 스트림이 최종 궤적을 얼마나 바꾸나"가 짝지은 비교로 나온다.
+    ap.add_argument('--drop-video', action='store_true',
+                    help='video CA 조건을 빼고 추론 (video_latent_dim=0 arm 과 같은 forward 경로)')
     args = ap.parse_args()
 
     if args.gpu is not None:
@@ -160,6 +171,8 @@ def main():
     from utils.data_utils import out_to_trajectory, make_intrinsics, inverse_camera_matrix
     from utils.eval_utils import run_command_in_dir
     from diffusers import DDPMScheduler, DDIMScheduler
+    # [new 2026-09-05] --probe-video-ca 전용. 이 import 는 os.chdir(MAIN) 뒤라야 잡힌다.
+    from video_ca_probe import video_ca_probe
 
     # -1 = legacy (전역 RNG). 그 외에는 배치별 generator 를 쓴다. 전역 manual_seed 는 dropout
     # 등 나머지 경로를 위해 어느 쪽이든 그대로 건다.
@@ -226,7 +239,21 @@ def main():
     # [fix 2026-08-28] target_track arm(cond_dim>0)은 cam_in 이 Linear(cam_dim+4, hidden) 이라
     # cond_dim 을 안 넘기면 strict load 가 shape mismatch 로 죽는다 (b7cc928 이 이 줄을 빼먹었다).
     # target_track_dim=0 이면 cond_dim=0 = 기존 생성자 호출과 동일.
-    model = CameraDiffusionModel(cam_dim=cfg.cam_dim, cond_dim=_track_dim, **_geo_kw)
+    # [FIX 2026-09-05] video CA arm 의 생성자 인자가 여기 없었다. train_latent_cam_dm.py:521-532
+    # 와 같은 블록이다. 없으면 video_layers/video_gate/mod3 등 107 키가 통째로 안 만들어져
+    # strict load 가 "Unexpected key(s)" 로 죽는다 (= D124 는 이 스크립트로 평가 자체가 불가였다).
+    # video_latent_dim=0 인 arm 은 빈 dict 라 기존 호출과 동일.
+    _vid_kw = {}
+    _vld = int(getattr(cfg, 'video_latent_dim', 0) or 0)
+    if _vld > 0:
+        _vtd = int(getattr(cfg, 'video_text_dim', 1024) or 1024) \
+            if getattr(cfg, 'video_text_in_stream', False) else 0
+        _vid_kw = dict(video_latent_dim=_vld, video_text_dim=_vtd,
+                       peav_in_ln=bool(getattr(cfg, 'peav_in_ln', True)),
+                       video_gate=bool(getattr(cfg, 'video_gate', True)))
+        print(f"(model) video CA: video_latent_dim={_vld} video_text_dim={_vtd} "
+              f"in_ln={_vid_kw['peav_in_ln']} gate={_vid_kw['video_gate']}")
+    model = CameraDiffusionModel(cam_dim=cfg.cam_dim, cond_dim=_track_dim, **_geo_kw, **_vid_kw)
     sd = torch.load(ckpt_path, map_location='cpu')
     sd = sd['model'] if isinstance(sd, dict) and 'model' in sd else sd
     model.load_state_dict(sd, strict=True)              # strict: a shape/name drift must not pass silently
@@ -281,6 +308,9 @@ def main():
     tot_lat = tot_traj = 0.0
     n_seen = 0
     names = []
+    # [new 2026-09-05] 추론 1건 = jsonl 1행. 플래그가 없으면 None 이라 아래 블록이 통째로 꺼진다.
+    probe_fh = open(osp.join(out_dir, 'video_ca_probe.jsonl'), 'w',
+                    encoding='utf-8') if args.probe_video_ca else None
     t0 = time.time()
     with torch.no_grad():
         for step, data in enumerate(tqdm(valid_dataloader, total=args.max_batches or len(valid_dataloader))):
@@ -303,7 +333,9 @@ def main():
                               else [0] * B)
 
             pc_embeds, pc_masks = None, None
-            if 'geo_emb' in data:
+            if 'geo_raw' in data:   # [new 2026-08-29] pre-ln DA3 캐시 (ln/proj 는 ckpt 에서 온다)
+                pc_embeds, pc_masks = T.geo_emb_from_raw_cache(geo_encoder, data, device)
+            elif 'geo_emb' in data:
                 pc_embeds, pc_masks = T.geo_emb_from_cache(data, device)
             elif geo_encoder is not None and 'images' in data:
                 pc_embeds, pc_masks = T.geo_encode(geo_encoder, data, device)
@@ -330,8 +362,23 @@ def main():
                 # 채운다 (camera_diffusion_model_latent.forward:171). 학습 때
                 # target_track_dropout 이 남겨 둔 그 조건이라 미학습 입력이 아니다.
                 _cond = None if args.drop_track else T.build_track_cond(data, traj_len, device)
+                # [FIX 2026-09-05] video CA 조건이 여기서 빠져 있었다. run_validation
+                # (train_latent_cam_dm.py:770) 은 build_video_cond 를 부르는데 이 스크립트는
+                # 안 불러서, D124(molmo2) 처럼 video_latent_dim>0 인 arm 을 이걸로 평가하면
+                # forward 가 has_video=False 로 떨어져 **video CA 스트림을 통째로 건너뛴
+                # 다른 모델**이 평가됐다. video_latent_dim=0 인 arm 은 빈 dict 라 무영향.
+                _vkw = {} if args.drop_video else T.build_video_cond(data, device)
                 out = T.sample(model, noise_scheduler, traj_len, text_embeds, text_masks,
-                               pc_embeds, pc_masks, generator=_g, cond=_cond)
+                               pc_embeds, pc_masks, generator=_g, cond=_cond, video_kw=_vkw)
+                if args.probe_video_ca and probe_fh is not None:
+                    _rows = video_ca_probe(
+                        model, noise_scheduler, traj_latents, text_embeds, text_masks,
+                        pc_embeds, pc_masks, T.build_video_cond(data, device), cond=_cond,
+                        timestep=int(args.probe_timestep), n_frames=int(cfg.num_frames))
+                    for _n, _r in zip(data_name, _rows):
+                        probe_fh.write(json.dumps({'data_name': _n, **_r},
+                                                  ensure_ascii=False) + '\n')
+                    probe_fh.flush()
 
             tot_lat += F.mse_loss(out, traj_latents, reduction='mean').item() * B
             traj_pred = camera_vae.decode(out * cfg.vae_latent_scale) if cfg.use_vae else out
@@ -384,6 +431,10 @@ def main():
                                    "norm_scale": float(scale[i]),
                                    "c2w": g.tolist()}, f)
             names += data_name
+
+    if probe_fh is not None:
+        probe_fh.close()
+        print(f"[probe] {osp.join(out_dir, 'video_ca_probe.jsonl')}")
 
     losses = {'val/loss_latent': tot_lat / n_seen, 'val/loss_traj': tot_traj / n_seen,
               'n_samples': n_seen, 'sampling_sec': round(time.time() - t0, 1)}

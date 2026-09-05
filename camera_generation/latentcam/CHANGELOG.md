@@ -5,6 +5,32 @@ All notable changes to the latentcam sub-project. Follows [Keep a Changelog](htt
 ## [Unreleased]
 
 ### Added
+- **`main/video_ca_probe.py` + `scripts/eval_testset.py --probe-video-ca / --probe-timestep /
+  --drop-video` — video CA 스트림을 **추론 1건마다** 계측 (D130, 2026-09-05, 사용자 지시
+  "video gate가 쓰이고 있는지 validation forward에서 attention이나 gate 같은거 수치 측정해줘.
+  각 inference마다 기록해서 preset마다, scene마다 특성이 있는지도 분석해줘").**
+  · **왜 gate 만 보면 안 되는가**: D124 epoch100 의 `video_gate` 는
+    `[0.0756, -0.0308, -0.0002, -0.0002, 0.0, -0.0004, -0.0003, -0.0]` 로 층 2~7 이 층 0 대비
+    ~300배 작다. 그런데 같은 구간에 `video_proj.weight` norm 이 20.88 → 26.52,
+    `video_text_proj.weight` 가 22.96 → 29.32 로 **커졌다** (`geo_proj.weight` 는 3.58 → 3.45).
+    v 자체가 커졌으면 gate 가 작아도 기여는 유지된다 — 봐야 하는 건 곱
+    `vresid_l{i} = |gate_i|·‖v_i‖ / ‖h_i‖` 다.
+  · attention map 만으로도 안 된다. `geo_attn_probe`(`train_latent_cam_dm.py:142`) 의 docstring
+    이 이미 적어둔 이유 그대로 — softmax 는 **행 합이 항상 1** 이라 "얼마나 쓰는가"가 안 나온다.
+    그래서 인과 delta 두 개를 같이 잰다: `dpred_drop`(스트림 제거) 과
+    `dpred_shuffle`(video 조건만 배치축 roll — 토큰 통계는 그대로 두고 **scene 짝만** 깬다).
+    `dpred_drop` 은 큰데 `dpred_shuffle` 이 0 이면 = 내용과 무관한 bias 로만 쓰고 있다는 뜻.
+  · 그 외 열: `vattn_text_mass`/`vattn_video_mass`(molmo2 text 128 vs 프레임 패치 3136 분할),
+    `vattn_entropy_norm`(1.0 = 어느 프레임도 안 고름), `vattn_frame_peak`/`_idx`,
+    `vattn_frame_token_r`(traj 토큰 인덱스 vs 가중평균 프레임의 Pearson r = 시간축 정렬 독해인가),
+    눈금자로 `text_resid_mean`/`geo_resid_mean`.
+  · **배치 축을 안 접는다** — 행 하나가 추론 1건이라 `data_name` 으로 preset/scene 에 조인된다.
+    노이즈는 `noise_seed=1234`, timestep 은 `--probe-timestep`(기본 500) 한 점 고정 — 안 그러면
+    샘플 간/arm 간 수치가 비교 불가다.
+  · 기본 off. 켜면 배치당 forward 가 3회 더 붙는다. `video_latent_dim=0` arm 은 프로브가 빈
+    리스트를 돌려주므로 켜도 no-op.
+  · `--drop-video` 는 `--drop-track` 의 video 판. 같은 ckpt 로 이 플래그만 켜고 끄면 "video
+    스트림이 최종 궤적을 얼마나 바꾸나"가 짝지은 A/B 로 나온다.
 - **`main/cache_molmo2_embeddings.py` + `main/conf/experiment/vista4d_d121_molmo2.yaml` — D124,
   video CA 스트림을 PE-AV 에서 **Molmo2-4B 융합 hidden state** 로 교체 (2026-09-04, 사용자 지시
   "molmo2 hidden feature를 적당히 shape 맞추고 da3랑 token 개수 맞춰서 resampling해서 CA layer
@@ -194,6 +220,20 @@ All notable changes to the latentcam sub-project. Follows [Keep a Changelog](htt
   경고 0 (래치) / `seq_len=512` 로는 241 tok 도 경고 0 / 짧은+긴 혼합 배치 경고 1.
 
 ### Fixed
+- **`scripts/eval_testset.py` 가 video CA arm 을 평가할 수 없었다 — 두 군데 (FIX-D130,
+  2026-09-05).**
+  1. **모델 생성자에 video CA 인자가 없었다.** `CameraDiffusionModel(cam_dim=..., cond_dim=...,
+     **_geo_kw)` 라 `video_layers`/`video_gate`/`mod3` 등 **107 키가 아예 안 만들어진다**.
+     D124(`vista4d_d121_molmo2`) 를 이 스크립트로 평가하면 `strict=True` 로드가 "Unexpected
+     key(s)" 로 죽는다 — 즉 **D124 는 지금까지 이 경로로 평가 자체가 불가능했다**.
+     `train_latent_cam_dm.py:521-532` 와 같은 `_vid_kw` 블록을 이식했다.
+  2. **`T.sample(...)` 에 `video_kw` 를 안 넘겼다.** 1번을 고쳐도 이게 남으면 조용히 틀린다 —
+     `T.sample` 기본값이 `video_kw=None` → `**(video_kw or {})` = 빈 dict → `forward` 가
+     `has_video=False` 로 떨어져 **video CA 8층을 통째로 건너뛴다**. 학습 쪽
+     `run_validation`(`train_latent_cam_dm.py:770`)은 `build_video_cond` 를 부르므로 wandb val
+     과 이 스크립트가 서로 다른 모델을 재고 있었을 것이다. 예외도 경고도 안 난다.
+  · **영향 범위는 `video_latent_dim > 0` 인 arm 뿐**이다. 그 외 arm 은 `build_video_cond` 가 빈
+    dict 를, `_vid_kw` 가 빈 dict 를 돌려주므로 **기존 testset eval 수치는 전부 그대로 유효**하다.
 - **video CA 를 0 초기화 residual gate 로 붙인다 — `video_gate` (D117, 2026-09-03).**
   D117 두 arm 이 55 / 84 epoch 동안 loss ~1.0 (= eps 예측이 0) 에서 못 빠져나온 **진짜 원인**.
   격리 실험 3종으로 좁혔다 (전부 d107 전체 코퍼스, epoch 0, batch 8, 952 step):

@@ -236,6 +236,13 @@
   릴 복사 경로)에 하드코딩돼 있어 dynpose·trumans 뱅크는 같은 릴로 못 봤다.
   **둘 다 안 주면 붙는 인자가 없어 예전 커맨드와 문자 그대로 같다** (`ROOT=out`, `--eval_data`
   미전달). dynpose 는 `ROOT=out_dynpose EVAL=DynPose-LBM`.
+- **`run_preset_warp_sample.sh` 가 `ROOT`/`EVAL` 을 안쪽 러너에 실제로 넘기게 고쳤다
+  (2026-09-05).** 드라이버가 `ROOT="${4:-out}"` 로 **assign 만** 하고 export 를 안 해서
+  `run_preset_warp_max_shard.sh` 는 자기 기본값 `out` 을 봤다 — dynpose 뱅크를 주면 릴이 전부
+  `EMPTY`(solved 0) 로 조용히 떨어진다. `VIDEOS=... ROOT="$ROOT" EVAL="$EVAL"` 로 env 전달.
+  `EVAL` 을 안 주면 `output_root` 로 추정한다 (`out_dynpose` → `/data1/.../DynPose-LBM`,
+  그 외 → 미전달=렌더러 기본). 추정을 넣은 이유: `--output_root` 만 맞고 `--eval_data` 가
+  기본(Vista4D-Eval-Data)이면 렌더러가 **다른 소스 영상으로 warp** 하는데 rc=0 으로 끝난다.
 - **`--tau_ref` 기본값을 `auto` → `follow` 로 뒤집었다 (`sample_camera_bank.py` +
   `fit_hole_ladder.py`) (D128, 2026-09-05, 사용자 지시 "tau_ref도 적용해서").**
   `auto` 는 `track_*` 만 follow 기준이라 나머지 preset 의 τ 는 소스 카메라 기준으로 재였다.

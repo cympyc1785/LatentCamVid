@@ -5,6 +5,19 @@ All notable changes to the latentcam sub-project. Follows [Keep a Changelog](htt
 ## [Unreleased]
 
 ### Added
+- **`main/conf/experiment/vista4d_d128_da3_t128.yaml` — D128 뱅크를 쓰는 첫 학습 arm (D131,
+  2026-09-05).** D128 뱅크(#165)와 export(#166)는 끝나 있었는데 그걸 참조하는 config 가
+  하나도 없었다 (`main/conf/` grep: d121 16회 / d77 9회 / dynpose_d107 17회 / dynpose_d110 4회 /
+  **k6_d128 0회**). 즉 `tau_ref follow` · `track_min_drift_u` · anchor 3/3 · `drop_surfaces` ·
+  tracking lock 1.0 · `min_zcam` 이 아직 한 번도 학습 신호로 안 들어갔다.
+  · 내용은 `vista4d_d121_da3_t128.yaml`(D123)에서 **코퍼스 경로 3줄 + `exp_name` + `epochs`
+    200→100** 만 다르다. D123 이 그대로 대조군이 된다.
+  · 코퍼스가 작아진다 — train 14,975→9,389 (−37.3%), test 875→592 (−32.3%). 씬 구성은 같지만
+    (train 48 / test 4) **게이트가 걸러낸 부분집합**이라 두 arm 의 testset 평균을 그대로
+    비교하면 분모가 다른 표본 위의 값이다. 대조는 d128 test 592 위에서 두 ckpt 를 짝지어 낼 것.
+  · d128 에는 `molmo2_cache` / `peav_cache` 가 없다 (d121 에만 있다). video CA arm 을 d128 로
+    돌리려면 캐시 재굽기가 선행한다 — 이 arm 은 da3 단독이다.
+  · `geo_raw_cache_dir` 은 소스 프레임 52편이 같아 `latentcam_da3` 공용 캐시를 그대로 쓴다.
 - **`main/video_ca_probe.py` + `scripts/eval_testset.py --probe-video-ca / --probe-timestep /
   --drop-video` — video CA 스트림을 **추론 1건마다** 계측 (D130, 2026-09-05, 사용자 지시
   "video gate가 쓰이고 있는지 validation forward에서 attention이나 gate 같은거 수치 측정해줘.

@@ -262,6 +262,19 @@
     `--pose_kind pred` 로 명시한다. `--pose_kind ""` 면 태그가 안 붙어 예전 영상과 라벨이 같다.
   · 자막: `dyn_0=camel` 처럼 `anchor_id=anchor_label[:16]`. `anchor_label` 열이 없는 옛 뱅크는
     `row.get` 이 빈 문자열을 돌려주므로 자막이 예전 그대로다.
+- **`route_presets.py:169` advance 슬롯을 `dolly_in` → `dolly_in_look_at` (D134, 2026-09-05,
+  사용자 승인).** `dolly_in` 은 `aim="free"` 라 전진하는 동안 subject 를 **다시 안 본다** —
+  다가갈수록 대상이 화각 안에서 커지며 가장자리로 밀리는데 카메라가 가만히 있어서, 전진 preset
+  이 정작 "대상에게 다가간다"는 자기 캡션 문구를 못 지킨다. `dolly_in_look_at` 은 같은 궤적에
+  매 프레임 재조준만 붙인 것이다 (`lbm/presets.py:148,150` — traj lambda 가 글자 그대로 같고
+  `aim` 만 `free`/`look_at`) 라서 이동량·τ 사다리·hole 예산은 그대로다.
+  · recede 는 **안 바꾼다**. 물러나는 동안은 대상이 화면 중앙에 남아 aim 없이도 안 놓치고,
+    한 슬롯만 바꿔야 같은 씬 안에 조준/비조준 두 어휘가 공존한다 (D82 논리와 같다).
+  · `track_dolly_in_look_at` 도 `PRESETS` 에 실재하므로 `tp()` 의 `track_` 승격이 그대로 걸린다
+    (실측: `track_mode=add` 에서 advance 가 bonus 로 뽑히면 `track_dolly_in_look_at`).
+    캡션 문구도 네 이름 전부 `configs/caption_presets.json` 에 있다.
+  · **이미 구운 뱅크에는 소급 안 된다** — d129(dynpose) / d128(vista) / d132(TRUMANS) 는 옛
+    라우팅으로 구워졌다. 다음 재굽기부터 적용된다.
 - **`route_presets.py --num_external` 기본값 4 → 1 (2026-09-05, 사용자 지시 "1로 해줘").**
   fit 예산이 DataDoP(`dd_*`) 로 새고 있었다. D129 126편 실측: `dd_*` 가 뱅크 21,892행 중
   **13,268행(60.6%)** 인데, 최종 학습 리스트는 `dd10` 서브샘플이라 코퍼스에서 `dd_*` 는 10% 다.

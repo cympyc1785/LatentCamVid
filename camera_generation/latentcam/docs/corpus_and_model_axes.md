@@ -43,26 +43,41 @@ grid 밖: **D131** `8kg0j4pb` (vista **d128** / da3) — 코퍼스가 달라 위
 
 ## 1. 모델축 — 지금까지 채워진 칸
 
-### 1-a. vista d121 test 875, `epoch100__seed42`
+### 1-a. vista d121 test 875 — **모델축 3칸 완료**
 
-| metric | D123 (da3) | D124 (da3+molmo2) |
-|---|---|---|
-| captions/precision | 0.5378 | 0.5629 |
-| captions/recall | 0.5163 | 0.5465 |
-| captions/fscore | 0.5214 | 0.5465 |
-| clatr/clatr_score | 23.3159 | 24.4752 |
-| clatr/precision | 0.5383 | 0.5954 |
-| clatr/recall | 0.7246 | 0.7177 |
-| clatr/density | 0.4644 | 0.5520 |
-| clatr/coverage | 0.5131 | 0.5417 |
-| clatr/fcd | 159.8566 | 123.4501 |
+| metric | D123 da3 (`epoch100`) | D133 molmo2 (`last`) | D124 da3+molmo2 (`epoch100`) |
+|---|---|---|---|
+| val/loss_latent | 0.06864738377715861 | 0.0637369708695582 | 0.06397023958393505 |
+| val/loss_traj | 0.010284261889556157 | 0.009883241927783405 | 0.009815332671627403 |
+| captions/precision | 0.5378 | 0.5698 | 0.5629 |
+| captions/recall | 0.5163 | 0.5544 | 0.5465 |
+| captions/fscore | 0.5214 | 0.5529 | 0.5465 |
+| clatr/clatr_score | 23.3159 | 25.0879 | 24.4752 |
+| clatr/precision | 0.5383 | 0.5543 | 0.5954 |
+| clatr/recall | 0.7246 | 0.7429 | 0.7177 |
+| clatr/density | 0.4644 | 0.5109 | 0.5520 |
+| clatr/coverage | 0.5131 | 0.5383 | 0.5417 |
+| clatr/fcd | 159.8566 | **108.1954** | 123.4501 |
+| sampling_sec | 206.6 | 112.2 | 323.4 |
 
-molmo2 를 **얹으면** 9지표 중 8개가 D124 쪽이다 (`clatr/recall` 만 D123 0.7246 > D124 0.7177).
+전 칸 `n_samples: 875`, seed 42, ddim 50 step. **ckpt 기준이 섞여 있다** — D123/D124 는
+`epoch100.pth`(101 epoch 상태), D133 은 `epoch_cap: 100` 이라 `last.pth`(100 epoch)뿐이다.
 
-단, D124 의 video CA 실사용량 계측(D171)에서 `dpred_drop 0.02395` vs `dpred_xscene 0.00462` 였다
-— 영상을 빼면 예측이 움직이는데 **다른 씬 영상으로 바꿔치면 거의 안 움직인다.** 즉 위 이득이
-"영상을 읽어서"인지 "CA 슬롯이 하나 더 있어서"인지 이 두 칸만으로는 안 갈린다. **D133 / D138
-(molmo2 단독)이 그 분해를 위한 칸이다.** 아직 안 끝났다.
+읽기:
+
+- **molmo2 단독(D133)이 da3 단독(D123)을 11지표 전부에서 이긴다.** loss_traj 0.009883 vs
+  0.010284, fscore 0.5529 vs 0.5214, fcd 108.1954 vs 159.8566.
+- **molmo2 단독이 da3+molmo2(D124)도 captions 3개 · clatr_score · recall · fcd 에서 이긴다.**
+  D124 가 이기는 건 clatr/precision(0.5954 vs 0.5543) · density(0.5520 vs 0.5109) ·
+  coverage(0.5417 vs 0.5383) · loss_traj(0.009815 vs 0.009883) 넷.
+- 즉 §1-a 의 D123→D124 이득은 **"molmo2 를 얹어서"가 아니라 상당 부분 "molmo2 로 갈아타서"**
+  다. da3 geo 스트림을 통째로 빼도 성능이 안 떨어지고 오히려 캡션 정합·fcd 는 좋아진다.
+  샘플링도 112.2 s 로 D124(323.4 s)의 1/2.9, D123(206.6 s)의 1/1.8.
+- 단서: D124 의 video CA 실사용량 계측(D171)에서 `dpred_drop 0.02395` vs
+  `dpred_xscene 0.00462` — 영상을 빼면 예측이 움직이는데 **다른 씬 영상으로 바꿔치면 거의 안
+  움직인다.** D133 이 D123 을 이겼다는 것이 "molmo2 가 씬을 읽는다"를 증명하지는 않는다.
+  molmo2 스트림이 나르는 게 씬인지 캡션의 재표현인지는 아직 안 갈렸다 (§4-5).
+- dynpose 축(D137/D138/D141)에서 같은 순서가 재현되는지가 다음 확인점이다.
 
 ### 1-b. 코퍼스 크기 대조 — d128 test 592, leakage 확인 완료
 

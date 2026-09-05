@@ -1,0 +1,83 @@
+# @package _global_
+# D137 — **D129 뱅크 + clamped_low 제외** 코퍼스 위의 da3 단독 arm.
+#
+# ═══ D135(dynpose_d129_da3) 와 무엇이 다른가 ═════════════════════════════════════════════
+# 뱅크(`hole_bank_d129`)·캡션·게이트·preset 라우팅은 **글자 그대로 같다**. 달라진 건
+# export 필터 하나이고 그래서 코퍼스 root 이름만 바뀐다:
+#     latentcam_dynpose_d129  (필터 없음)  ->  latentcam_dynpose_d137  (clamped_low 제외)
+# D135 는 epoch 0 에서 정지시켰다 (사용자 지시 2026-09-06). 학습 결과가 없으므로 D135 와
+# 지표를 비교할 대상 자체가 없다 — 필터 효과를 보려면 d129 root 로 따로 돌려야 한다.
+#
+# ═══ 왜 clamped_low 를 뺐나 ══════════════════════════════════════════════════════════════
+# `fit_hole_ladder.py:513-531` 에서 `clamped_low` 는 "knob 을 하한까지 밀었는데 **하한에서도
+# `over()` 가 여전히 참**" 일 때 찍힌다. 즉 제일 작게 만들어도 게이트를 위반하는 카메라이고,
+# 그 궤적이 그대로 pseudo-GT 로 나갔다. d129 dd10 train 612행 실측:
+#     binding      collision 340 / obb 114 / approach 87 / ground 43 / elev 26 / hole 2
+#     path_len_u   중앙값 0.0330   (solved 는 0.6900 — 5% 도 안 된다)
+# 이름과 달리 τ(hole) 예산 때문에 걸린 건 612건 중 2건뿐이고 나머지는 물리 게이트다. 그리고
+# 사실상 정지 카메라인데 캡션은 `dolly_in`/`s_curve`/`track_dolly_in` 이라고 써 있다 —
+# 텍스트와 실제 이동량이 어긋난 학습 신호가 된다. 사용자 지시: "clamped_low는 정상적인
+# 카메라가 아니다".
+#
+# 필터는 접두사 매칭이라 `clamped_low+tau_floor` 도 같이 빠진다. `+tau_floor` 접미사는
+# `fit_hole_ladder.py:910` 에서 붙는 **직교하는** 표시(=knob 이 소스 시차 위에 올린 하한에
+# 앉았다)라 `solved+tau_floor` 처럼 정상 행에도 붙는다 — 접미사만으로 거르면 안 된다.
+#
+# ═══ 재현 ════════════════════════════════════════════════════════════════════════════════
+#     SKIP_CAPS=1 OUT=<root> DROP=clamped_low \
+#       bash models/Planner/CinemaTraj/scripts/run_dynpose_d129_export.sh
+#     python latentcam/scripts/data/filter_seg_list_by_preset.py --root <root> \
+#       --prefix seg_list_dynpose --target_frac_prefix dd_ --target_frac 0.10 --suffix dd10
+# `DROP=` (빈 값) 이면 필터 없는 d129 코퍼스가 비트 동일하게 다시 나온다.
+#
+# ═══ geo raw 캐시는 d129 것을 그대로 쓴다 ════════════════════════════════════════════════
+# 캐시 키가 scene 이름(`dynpose_<uuid>.pt`)이고 내용은 **소스 영상의 geo feature** 라 target
+# 카메라 뱅크와 무관하다. 필터는 변이만 지우고 씬은 하나도 안 지우므로 267편 그대로 맞는다.
+# 그래서 11.34 GB 를 두 벌 두지 않고 d129 root 밑의 것을 가리킨다 (경로가 root 와 다른 것은
+# 의도한 것이다 — symlink 로 감추면 `du` 로는 공유가 안 보인다).
+#
+# ═══ 대조군 ══════════════════════════════════════════════════════════════════════════════
+# 같은 코퍼스·같은 holdout 27편 위의 `dynpose_d137_molmo2_nogeo`(D138) 가 짝이다. 이번에는
+# D124/D135 때와 달리 molmo2 arm 이 **geo 를 얹은 게 아니라 대체**한다 (사용자 지시) —
+# 그래서 두 arm 의 diff 는 "molmo2 CA 7줄 추가 + geo 5줄 제거" 로, D133 이 vista 축에서
+# 세운 대조와 같은 모양이다.
+exp_name: dynpose_d137_da3
+dl3dv_root: /data1/cympyc1785/data/DynPose-LBM/latentcam_dynpose_d137
+meta_csv: meta_dynpose.csv
+train_seg_list: /data1/cympyc1785/data/DynPose-LBM/latentcam_dynpose_d137/seg_list_dynpose_dd10_train.txt
+test_seg_list: /data1/cympyc1785/data/DynPose-LBM/latentcam_dynpose_d137/seg_list_dynpose_dd10_test.txt
+coverage_blacklist_path: null
+
+text_len: 128   # D123 이후 vista arm 과 동일. 캡션이 D121 자연어 판본이라 잘림 없음.
+
+pose_source: da3
+target_pose_source: da3_target_poses   # target 만 <scene>/da3/target_poses.npz 로 교체
+scale_mode: avg_scale
+avg_scale_ref: context_first_cam       # 디렉토리 avg_scale_context_first_cam <- scene_graph S
+intr_norm: rel                         # vae_20260302_300 = frame-0-relative-intrinsics ckpt
+cam_dim: 64                            # = 그 ckpt 의 latent_dim
+
+geo_encoder: da3
+geo_cam_embed: null
+geo_latent_cache_dir: null
+geo_posed: true
+geo_shuffle_order: false
+da3_geo_model: da3nested-giant-large
+da3_geo_input_hw: [252, 448]
+da3_geo_layers: last
+
+geo_view_sampling: context_uniform  # context range = 영상 전체 [0,49) = 소스 영상 전체
+geo_num_views: 6                    # _even_indices(49,6) = [0,10,19,29,38,48]
+geo_first_view_target_s: true       # view0 = 프레임 s(=0). 이미 첫 픽이라 집합이 안 바뀐다.
+
+# ↓ root 가 d137 인데 경로가 d129 인 것은 위 "geo raw 캐시" 절 참조 (씬 단위라 공유 가능).
+geo_raw_cache_dir: /data1/cympyc1785/data/DynPose-LBM/latentcam_dynpose_d129/geo_raw_cache_da3
+da3_cam_token_per_sample: true   # 캐시는 B=1 로 구워진다 — 켜야 on-the-fly 폴백과 일치
+
+anchor_pred_frame0: true
+
+video_latent_dim: 0   # video CA 블록 자체를 만들지 않는다 (D117 이전과 비트 동일)
+
+batch_size: 8
+epochs: 100          # 실제 집행자는 conf/config.yaml 의 `epoch_cap: 100`.
+ckpt_at_epochs: [50, 100]

@@ -7,6 +7,34 @@
 ## [Unreleased]
 
 ### Added
+- **`scripts/vista4d_bank_to_dl3dv.py --drop_status` — export 단계 status 필터 (D137,
+  2026-09-06, 사용자 지시 "어차피 clamped_low는 정상적인 카메라가 아니니 b로 해줘").**
+  뱅크 변이를 `bank.json` 의 `status` **접두사**로 걸러 코퍼스에 안 내보낸다. 기본값은 빈
+  리스트라 **안 주면 기존 코퍼스가 비트 동일하게 나온다**.
+  · **왜 필요했나**: 지금까지 export 에는 status 필터가 **한 군데도 없었다** — `convert_scene`
+    이 `bank["variants"]` 를 전량 내보내고, 유일한 감축은 pose 비트 동일 dedup 뿐이었다.
+    `status` 는 `prompts.json` 에도 안 실려서 하류에서 거를 수도 없었다.
+  · `clamped_low` 는 `scripts/fit_hole_ladder.py:513-531` 에서 "knob 을 하한까지 밀었는데
+    **하한에서도 `over()` 가 참**" 일 때 찍힌다 = 제일 작게 만들어도 게이트를 위반하는 카메라.
+    d129 `dd10` train 612행 실측: binding 은 `collision` 340 / `obb` 114 / `approach` 87 /
+    `ground` 43 / `elev` 26 / **`hole` 2** — 즉 τ 예산이 아니라 물리 게이트다. `path_len_u`
+    중앙값 **0.0330** (solved 는 0.6900) 인데 캡션은 `dolly_in`(83) / `s_curve`(78) /
+    `dolly_out`(68) 이라고 써 있다. 사실상 정지 카메라에 이동 캡션이 붙은 학습 신호였다.
+  · **접두사 매칭이라야 한다.** `+tau_floor` 접미사는 `fit_hole_ladder.py:910` 에서 붙는
+    **직교하는** 표시(knob 이 소스 시차 위에 올린 하한에 앉음)라 `solved+tau_floor`(d129 470행)
+    처럼 정상 행에도 붙는다. 접미사로 거르면 멀쩡한 카메라가 같이 날아간다.
+  · **필터를 dedup 앞에** 뒀다. 순서가 뒤바뀌면 대표만 clamped_low 인 중복 그룹이 통째로
+    남는다. 60씬 2048 중복 그룹 실측에서 clamped_low 와 아닌 것이 섞인 그룹은 **0** 이라
+    지금 데이터에선 결과가 같지만, 의미상 필터가 먼저다.
+  · 요약표에 `drop` 열 + `status 제외 N / M (%)` 블록과 status 별 히스토그램을 찍는다.
+    d129 뱅크 실측: **6392 / 46425 (13.77%)** 제외 (`clamped_low+tau_floor` 5924 +
+    `clamped_low` 468).
+- **`scripts/run_dynpose_d129_export.sh` 에 `DROP` / `SKIP_CAPS` 환경변수 (D137, 2026-09-06).**
+  `DROP` 기본값 `clamped_low` 를 위 `--drop_status` 로 넘긴다. **`${DROP-...}` 이지
+  `${DROP:-...}` 가 아니다** — `DROP=` 로 빈 문자열을 주면 필터 없는 옛 코퍼스가 그대로 재현된다.
+  `SKIP_CAPS=1` 이면 캡션 재굽기를 건너뛰고 뱅크/캡션 **개수 검산만** 한다 (뱅크가 안 바뀌었으면
+  캡션도 안 바뀐다). 코퍼스 root 는 `latentcam_dynpose_d137` 로 새로 판다 — d129 를 덮어쓰면
+  필터 전/후가 섞인 상태가 생기고 비교 대상이 사라진다.
 - **`scripts/run_trumans_d132_shard.sh` — TRUMANS **3D mesh 충돌** 뱅크 드라이버 (D132,
   2026-09-05, 사용자 지시 "내가 fitting하는거 blender scene에서 3d mesh로 해서 하자고 안했나?
   context video에 안보이는 부분이더라도 충돌, clearnace 같은거 고려해서 전체 scene에 안부딪히도록

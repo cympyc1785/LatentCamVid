@@ -5,6 +5,25 @@ All notable changes to the latentcam sub-project. Follows [Keep a Changelog](htt
 ## [Unreleased]
 
 ### Added
+- **`main/conf/experiment/dynpose_d137_da3.yaml` (D137) + `dynpose_d137_molmo2_nogeo.yaml`
+  (D138) — clamped_low 를 제외한 dynpose 코퍼스 위의 두 arm (2026-09-06).** 사용자 지시
+  "어차피 clamped_low는 정상적인 카메라가 아니니 b로 해줘" + "학습도 molmo2+da3가 아니라
+  molmo2로 해줘".
+  · 코퍼스는 `latentcam_dynpose_d137` — D135 가 쓰던 `latentcam_dynpose_d129` 와 **뱅크·캡션·
+    게이트·preset 라우팅이 글자 그대로 같고** export 필터 하나만 다르다
+    (`vista4d_bank_to_dl3dv.py --drop_status clamped_low`, 근거는 video_generation CHANGELOG).
+    D135 는 epoch 0 에서 정지시켰으므로 **비교할 지표가 없다** — 필터 효과를 보려면 d129 root
+    로 따로 돌려야 한다.
+  · **geo raw 캐시(11.34 GB)는 d129 것을 그대로 가리킨다.** 캐시 키가 씬 이름
+    (`dynpose_<uuid>.pt`)이고 내용은 **소스 영상**의 geo feature 라 target 카메라 뱅크와
+    무관하다. 변이 필터는 씬을 하나도 안 지우므로 267편이 그대로 맞는다. symlink 로 감추면
+    `du` 로 공유가 안 보여서 경로를 그냥 d129 로 뒀다 (config 헤더에 명시).
+  · **D138 은 molmo2 를 geo 위에 얹는 게 아니라 geo 를 대체한다.** 앞서 준비했던
+    `dynpose_d129_molmo2.yaml`(D136, geo+molmo2)은 한 번도 안 돌고 폐기됐다. D133 이 vista 축
+    에서 세운 대조를 dynpose 축으로 옮긴 것이라, 두 arm 의 diff 는 "molmo2 7줄 추가 + geo 5줄
+    제거" 다. 근거는 D124 계측 `dpred_drop 0.02395` vs `dpred_xscene 0.00462`.
+  · 둘 다 `epochs: 100` / `ckpt_at_epochs: [50, 100]` (실제 집행자는 `conf/config.yaml` 의
+    `epoch_cap: 100`). text_len 128 · VAE · `scale_mode` · `intr_norm` · holdout 27편 고정.
 - **`main/conf/experiment/vista4d_d121_molmo2_nogeo.yaml` — molmo2 CA 단독 arm (D133,
   2026-09-05, 사용자 지시 "반대로 da3를 빼고 molmo2만 써서도 학습돌려놔줘").** D124 의 거울상이다.
   · 세 arm 이 같은 코퍼스(d121) · 같은 875 heldout · 같은 text_len 128 위에 놓인다 —

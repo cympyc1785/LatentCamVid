@@ -1,0 +1,87 @@
+# @package _global_
+# D138 — `dynpose_d137_da3.yaml`(D137) 에서 **da3 geo CA 를 빼고 Molmo2-4B 스트림으로 갈아끼운**
+# arm. 레이어 순서 text CA(umt5) -> molmo2 CA. geo CA 없음.
+#
+# ═══ 왜 geo 를 얹는 게 아니라 빼나 (사용자 지시 2026-09-06) ═════════════════════════════════
+# "학습도 molmo2+da3가 아니라 molmo2로 해줘". 앞서 준비했던 `dynpose_d129_molmo2`(D136) 는
+# molmo2 를 geo **위에** 얹는 구성이었고 한 번도 안 돌았다 (코퍼스가 바뀌어 폐기).
+# 이 arm 은 D133(`vista4d_d121_molmo2_nogeo`) 이 vista 축에서 세운 대조를 dynpose 축으로
+# 옮긴 것이다: D124 의 video CA 계측에서 `dpred_drop 0.02395` vs `dpred_xscene 0.00462` 였다
+# — 영상을 빼면 예측이 움직이는데 **다른 씬 영상으로 바꿔치면 거의 안 움직인다**. 즉 이득의
+# 출처가 "영상을 읽어서"인지 "CA 슬롯이 하나 더 있어서"인지 안 갈렸다. geo 를 빼고 molmo2 만
+# 남기면 그 두 해석이 갈린다:
+#   · D137(geo only) 수준을 유지하면 -> molmo2 가 geo 를 대체할 만큼 씬 정보를 나른다
+#   · 크게 떨어지면                  -> molmo2 는 geo 위에 얹힌 여분 용량이었다
+# D137 과 코퍼스·holdout·text_len·VAE·scale_mode·intr_norm·seed 를 전부 고정한다.
+#
+# ═══ 무엇이 꺼지는가 ═══════════════════════════════════════════════════════════════════════
+# `geo_encoder: null` 하나가 세 군데를 동시에 끈다 (D133 헤더와 같은 근거):
+#   · dataset  `dataset_cfg.py:263  geo_enabled = bool(getattr(cfg, 'geo_encoder', None))`
+#              -> context 이미지 로딩 / geo_raw 캐시 / geo cam token 전부 안 탄다
+#   · train    `train_latent_cam_dm.py:482  ... if getattr(cfg, 'geo_encoder', None) else None`
+#              -> 인코더 인스턴스가 안 만들어지고 `_geo_trainable=False` 라 ln/proj 도
+#                 optimizer 에 안 들어간다
+#   · model    `camera_diffusion_model_latent.py:261  has_geo_latent = geo_emb is not None`
+#              -> geo cross-attn 블록을 forward 에서 건너뛴다 (모델 코드 변경 0)
+# `pose_source: da3` / `target_pose_source` 는 **카메라 궤적 자체**의 출처라 그대로 둔다 —
+# geo 스트림과 무관하다.
+#
+# ═══ 캐시 (main/cache_molmo2_embeddings.py) ═══════════════════════════════════════════════
+# d121(vista) 캐시는 **재사용 못 한다** — video part 는 씬당 1파일이고 dynpose 씬은 vista 52편과
+# 겹치지 않는다. text part 는 dedup 키가 (scene_key, caption) 이라 더더욱 그렇다. 그래서
+# d137 코퍼스 루트 밑에 새로 굽는다. 굽는 대상은 **dd10 리스트**다:
+#     python main/cache_molmo2_embeddings.py --gpu <g> \
+#       --root /data1/cympyc1785/data/DynPose-LBM/latentcam_dynpose_d137 \
+#       --seg_prefix dynpose_dd10 --splits train,test
+# `--seg_prefix dynpose_dd10` 이 `seg_list_dynpose_dd10_{train,test}.txt` 를 읽는다
+# (`cache_peav_embeddings.py:106` collect 의 경로 조립). dd10 이 아니라 전량 리스트를 주면
+# 학습에 안 쓰는 변이까지 굽느라 text.pt 가 2.2배로 부푼다.
+#
+# video part 130편은 D136 을 위해 굽다 만 것을 그대로 옮겨 왔다 — **씬당 1파일이고 내용이
+# 소스 영상이라 변이 필터와 무관**하다 (`--skip_done` 기본값이 집어 간다). text part 는
+# 캡션 집합이 줄었으므로 처음부터 다시 굽는다.
+#
+# 뽑는 자리는 `Molmo2Model.last_hidden_state` — `modeling_molmo2.py:1073` 의 `ln_f` 직후,
+# `lm_head` 직전. 즉 "마지막 decoding stage 전에 video·text attention 이 끝난" 지점.
+#   video  씬당 1파일 (3136, 2560) = 49프레임 x (9x9 -> 8x8 프레임내 평균풀링)
+#   text   (scene,caption) 조합당 1행 (128, 2560)
+# 두 part 는 `video_text_in_stream` 으로 같은 CA 의 key/value 에 `[text | video]` 로 붙는다.
+exp_name: dynpose_d137_molmo2_nogeo
+dl3dv_root: /data1/cympyc1785/data/DynPose-LBM/latentcam_dynpose_d137
+meta_csv: meta_dynpose.csv
+train_seg_list: /data1/cympyc1785/data/DynPose-LBM/latentcam_dynpose_d137/seg_list_dynpose_dd10_train.txt
+test_seg_list: /data1/cympyc1785/data/DynPose-LBM/latentcam_dynpose_d137/seg_list_dynpose_dd10_test.txt
+coverage_blacklist_path: null
+
+text_len: 128   # D137 과 동일.
+
+pose_source: da3
+target_pose_source: da3_target_poses
+scale_mode: avg_scale
+avg_scale_ref: context_first_cam
+intr_norm: rel
+cam_dim: 64
+
+# ─── geo (da3) 스트림 제거 ────────────────────────────────────────────────────────────────
+geo_encoder: null          # ← D137 은 'da3'. 이 한 줄이 dataset/train/model 세 군데를 끈다.
+geo_posed: false           # geo 가 없으므로 무의미하지만, true 로 두면 나중에 이 config 를
+                           #   읽는 사람이 "posed geo 를 쓴다"로 오독한다.
+geo_cam_embed: null
+geo_latent_cache_dir: null
+geo_raw_cache_dir: null    # geo_enabled=False 면 dataset_cfg.py:472 에서 어차피 안 읽지만,
+                           #   경로가 남아 있으면 캐시를 쓴다고 오독된다.
+
+anchor_pred_frame0: true
+
+# ─── Molmo2 CA (기존 PE-AV 슬롯을 그대로 재사용한다) ───────────────────────────────────────
+peav_video_cache_dir: /data1/cympyc1785/data/DynPose-LBM/latentcam_dynpose_d137/molmo2_cache/video
+peav_text_cache: /data1/cympyc1785/data/DynPose-LBM/latentcam_dynpose_d137/molmo2_cache/text.pt
+video_latent_dim: 2560     # Molmo2 LM hidden — video part (3136 tok)
+video_text_in_stream: true
+video_text_dim: 2560       # 같은 LM hidden — text part (128 tok). 기본 1024 는 PE-AV 값이다.
+peav_in_ln: true           # proj 앞 LayerNorm. FIX-D117 참조 (없으면 CA logit 포화)
+video_gate: true           # 0 초기화 residual gate. FIX-D117 참조 (없으면 loss ~1.0 정체)
+
+batch_size: 8
+epochs: 100          # 실제 집행자는 conf/config.yaml 의 `epoch_cap: 100`.
+ckpt_at_epochs: [50, 100]

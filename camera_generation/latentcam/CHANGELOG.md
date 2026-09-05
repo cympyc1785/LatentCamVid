@@ -4,6 +4,23 @@ All notable changes to the latentcam sub-project. Follows [Keep a Changelog](htt
 
 ## [Unreleased]
 
+### Changed
+- **`docs/corpus_and_model_axes.md` §1-a / §4-2 갱신 (2026-09-06).**
+  · §1-a: D133(molmo2 단독)을 d121 test 875 에서 `last.pth` 로 평가해 vista 행 3칸을 채웠다.
+    읽기가 뒤집힌다 — molmo2 단독이 da3 단독(D123)을 11지표 전부에서 이기고, da3+molmo2(D124)
+    에게 captions 3개·`clatr_score`·`clatr/recall`·`fcd`(108.1954 vs 123.4501) 를 이긴다.
+    D124 가 이기는 건 `clatr/precision`·`density`·`coverage`·`loss_traj` 넷. 즉 D123→D124
+    이득의 상당 부분은 "얹어서"가 아니라 **"갈아타서"** 다.
+  · §4-2: dynpose 수직 preset 0건의 원인을 **확정**했다. 게이트 기각이 아니라 **preset 선택
+    경로가 다르다** — vista 샤드는 `route_presets.py` 를 안 부르고 `sample_camera_bank.py:1184`
+    의 `--presets default=None (= 전량)` 으로 어휘 전량을 굽는 반면, dynpose 샤드는
+    `route_presets.py --emit args` 의 슬레이트만 굽는다. 그 슬레이트의 수직 슬롯은
+    `route_presets.py:189-192` 에서 `grav == "ground_ransac"` 이거나 `--vertical_fallback`
+    (`:343` `default=False`, dynpose 샤드가 안 넘김) 일 때만 생기는데, dynpose 278 씬의
+    `gravity_method` 가 **278/278 `geocalib`** 이라 `vertical_dropped: true` 가 278/278.
+    **중력축 품질 문제가 아니다** — vista 도 `geocalib` 52 / `ground_ransac` 1 이라 같은
+    라우팅을 태웠으면 똑같이 0건이었다. 처방과 비용은 문서 §4-2.
+
 ### Added
 - **`scripts/eval/corpus_axis_compare.py` + `docs/corpus_and_model_axes.md` (D142) — 데이터축
   코퍼스 계측기와 2×3 그리드 분석 문서 (2026-09-06).** 사용자 지시 "데이터셋이나 모델

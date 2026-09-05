@@ -262,12 +262,36 @@ goals.md 중기목표 2(복합 카메라)·3(시작 구도)은 코퍼스 상태�
 
 - 근거: §2-a. `pedestal_up/down` `crane_up/down` `orbit_left_pedestal_up` 이 vista 19.4%,
   dynpose **0.0%**.
-- 원인 후보: dynpose 라우팅(`route_presets`)이 수직 슬롯을 안 쓰거나, 중력축/지면 게이트가
-  in-the-wild dynpose 씬에서 전부 기각. **어느 쪽인지 먼저 확인해야 한다** — 후자면 게이트
-  임계 문제이고, 전자면 라우팅 한 줄이다.
-- 처방: 라우팅이면 슬롯 추가. 게이트면 dynpose 씬의 `gravity.confidence` 분포부터 본다
-  (GeoCalib fallback 0.3 이 많으면 수직 preset 이 통째로 죽는 게 정상 동작이다).
-- 비용: 확인 1~2h, 라우팅 수정이면 재굽기 1회.
+- **원인 확정 (2026-09-06) — 게이트 기각이 아니라 라우팅 경로가 다르다.** 두 코퍼스는 preset 을
+  고르는 방식 자체가 다르다:
+  - vista(`run_k6_d128_shard.sh:69`)는 `route_presets.py` 를 **아예 안 부른다.**
+    `sample_camera_bank.py` 에 `--presets` 를 안 주고, 그 기본값이
+    `sample_camera_bank.py:1184  parser.add_argument("--presets", nargs="*", default=None)  # None = 전량`
+    이라 **preset 어휘 전량**을 굽는다. 수직 5종이 여기 다 들어 있다.
+  - dynpose(`run_dynpose_d129_shard.sh:83`)는 `route_presets.py --emit args` 로 받은
+    `$ARGS`(= `--presets <슬레이트>`)를 넘긴다. 즉 씬당 라우팅된 슬레이트만 굽는다.
+  - 그 슬레이트에서 수직 슬롯은 `route_presets.py:189-192` 한 곳에서만 나온다:
+    ```python
+    if grav == "ground_ransac":
+        slots.append(("vertical", tp("vertical", "crane_up")))
+    elif allow_vertical_fallback:
+        slots.append(("vertical", tp("vertical", "pedestal_up")))
+    ```
+    `--vertical_fallback` 은 `route_presets.py:343` 에서 `default=False` 이고 dynpose 샤드가
+    안 넘긴다. 그리고 dynpose 278 씬의 `gravity_method` 는 **278/278 이 `geocalib`** 이라
+    첫 조건도 거짓 → `vertical_dropped: true` 가 **278/278**, 슬레이트에 수직 preset 이 있는
+    씬 **0/278**. (실측: `out_dynpose/*/preset_route_d129.json`)
+- **중력축 품질 문제가 아니다.** vista 도 `out/*/scene_graph.json` 기준 `geocalib` 52 / `ground_ransac` 1
+  이라 **vista 를 route_presets 에 태웠으면 똑같이 0건이 나왔을 것**이다. 차이는 씬이 아니라 경로다.
+- 처방(둘 중 하나, 재굽기 1회):
+  - (a) dynpose 샤드에 `--vertical_fallback` 추가 → `pedestal_up` **한 슬롯**만 생긴다.
+    `crane_down`/`pedestal_down`/`orbit_left_pedestal_up` 은 route 가 애초에 못 내는 이름이라
+    vista 와 같은 수직 어휘가 안 된다.
+  - (b) `route_presets.py:189-192` 의 수직 슬롯을 up/down 쌍으로 늘리거나, dynpose 도
+    vista 처럼 `--presets` 없이(전량) 굽는다. **vista 와 어휘를 맞추려면 이쪽이다.**
+    다만 전량으로 가면 씬당 변이 수가 크게 늘어 dd10 리스트 기준을 다시 잡아야 한다.
+- 비용: 재굽기 1회(dynpose 278 씬). §4-3(코퍼스 합치기)보다 **뒤**에 한다 — 합치기가 수직
+  어휘를 vista 쪽에서 이미 공급하므로, 이 수정의 이득이 합친 뒤에는 줄어든다.
 
 ### 4-3. [데이터] 두 코퍼스 합치기 — 지금 근거가 가장 강한 "추가 학습"
 

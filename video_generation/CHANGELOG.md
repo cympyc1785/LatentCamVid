@@ -231,6 +231,22 @@
   **F1 자체는 아직 미적용** — `fix.md` 상태 "제안됨, 미승인" 그대로다.
 
 ### Changed
+- **`route_presets.py --num_external` 기본값 4 → 1 (2026-09-05, 사용자 지시 "1로 해줘").**
+  fit 예산이 DataDoP(`dd_*`) 로 새고 있었다. D129 126편 실측: `dd_*` 가 뱅크 21,892행 중
+  **13,268행(60.6%)** 인데, 최종 학습 리스트는 `dd10` 서브샘플이라 코퍼스에서 `dd_*` 는 10% 다.
+  그 10% 의 **절대 개수를 정하는 건 비-dd 행 수**이므로
+  (`round(N_nondd·0.1/0.9)`, `camera_generation/latentcam/scripts/data/filter_seg_list_by_preset.py`
+  의 `subsample_to_frac`), dd 를 더 구워도 **쓰는 양은 안 늘고 버리는 양만 는다** — 280편
+  외삽으로 필요량 약 920행 대 굽는 양 약 10,700행, 12배 과잉.
+  · 비용이 4배가 아니라 그 이상 붙는 이유: `pick_external` 은 **anchor 마다** `num` 개를 뽑는데
+    `sample_camera_bank` 는 preset 을 **합집합**으로 받아 (anchor × preset) 격자를 전부 돈다.
+    anchor 6개 씬이면 dd preset 24종 × anchor 6 × hole 사다리 4단이 통째로 fit 에 들어간다.
+  · 1 로 내려도 다양성은 안 죽는다 — `pick_external` 씨앗이 `(video, node_id)` 라 anchor·씬마다
+    다른 shape 을 뽑고 라벨 47종 커버리지는 코퍼스 전체에서 유지된다. 남는 dd 도 여전히 dd10
+    필요량의 약 3배라 stride 서브샘플이 고를 여지가 있다.
+  · **진행 중인 D129 에는 영향이 없다.** 옛 굽기 스크립트(`run_dynpose_d{107,122,129}_shard.sh`,
+    `probe_dynpose_scale_mode.sh`)는 `--num_external 4` 를 **명시**로 넘긴다 — 그 run 이 실제로
+    무엇으로 돌았는지의 기록이라 안 건드렸다.
 - **`run_preset_warp_max_shard.sh` 에 `ROOT`/`EVAL` 환경변수 override 를 열었다 (2026-09-05).**
   `out` 이 4군데(리스트 glob / variant 고르는 인라인 python / `render_bank_videos.py` 인자 /
   릴 복사 경로)에 하드코딩돼 있어 dynpose·trumans 뱅크는 같은 릴로 못 봤다.

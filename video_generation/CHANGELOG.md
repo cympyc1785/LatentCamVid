@@ -359,6 +359,19 @@
     의 **미결** 항목 그대로 — D104 target 절 A/B 대기).
 
 ### Fixed
+- **`run_preset_warp_max_shard.sh` 가 `bank.json` 의 `fixed_focal` 을 읽어 렌더에 반영한다
+  (2026-09-05, 사용자 지적 "snowboard가 떨리는데").**
+  릴이 `render_bank_videos.py --fixed_focal`(기본 **False**, `:319`)을 안 넘겨서, **뱅크는
+  frame0 고정 K 로 구워졌는데 렌더만 프레임별 DA3 K** 를 썼다. 규약 불일치라 카메라 궤적과
+  무관한 화각 떨림이 나온다. snowboard 실측(`scene_graph.json` 49프레임): `fx=fy` 가
+  1184.99~1262.46 로 **진폭 6.99%**, 프레임간 최대 점프 28.55 px → 화면 가장자리가 median
+  3.41 / **최대 14.94 px/frame** 움직인다 (`cx`/`cy` 는 상수라 떨림은 전적으로 focal).
+  플래그를 하드코딩하지 않고 **뱅크 기록을 따르게** 했다 — `bank.json` top-level `fixed_focal`
+  이 그 뱅크의 K 규약에 대한 유일한 근거이고(`fit_hole_ladder.py:1167-1169` 주석), 옛날
+  프레임별 K 로 구운 뱅크는 예전 그대로 렌더된다. RENDER 로그에 `focal=` 을 찍는다.
+  · **뱅크 pose 와 export 코퍼스는 영향 없다** — `vista4d_bank_to_dl3dv.py:131` 이 `K[0]` 을
+    전 프레임에 repeat 한다. 영향은 릴(시각화)뿐이고 `results/20260903_vista_preset_warp_d121`
+    과 `results/20260905_d128_preset_warp` 가 그 상태로 구워져 있다.
 - **`run_k6_d128_shard.sh` FIT 에 `--behind_clear_src_ratio 0` 을 명시로 못박았다 (D128,
   2026-09-05).** 첫 실행 때 argparse 기본값(0.3)에 기대고 있었는데, 같이 켠
   `--behind_min_zcam 0.02` 와 만나면 소스 재투영이 전부 `z_floor` 아래로 떨어져

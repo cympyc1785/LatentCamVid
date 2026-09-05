@@ -5,6 +5,20 @@ All notable changes to the latentcam sub-project. Follows [Keep a Changelog](htt
 ## [Unreleased]
 
 ### Added
+- **`peav_seg_list_only` — PE-AV/molmo2 캐시 커버리지 검사를 seg-list 안으로 좁히는 옵션
+  (D138, 2026-09-06).** `main/dataset_dl3dv.py` 에 `_peav_scope()` 를 추가하고
+  `_preload_peav` 의 video 키 집합 / text miss 검사가 그 범위만 보게 했다.
+  `main/conf/config.yaml` 기본값 `false` = **예전과 글자 그대로 같은 검사**.
+  · 왜: 데이터셋은 `prompts.json` 을 전량 열거하고(dynpose d137 = 24371 seg) `base.py` 가
+    **그 다음에** seg-list 로 `Subset` 을 뜬다. dd10 처럼 리스트가 코퍼스의 부분집합이면
+    (10857 / 24371 = 44.5%) 학습이 한 번도 안 건드리는 세그먼트까지 캐시에 있어야 한다고
+    우기며 `FileNotFoundError` 로 죽는다. 캐시를 전량으로 다시 굽는 건 오답이다 — text.pt 가
+    2.2배(5.9 → ~13 GB)로 부풀고 증분은 전부 죽은 행이다. 상세는 `FIX.log` FIX-D138.
+  · 켜도 바뀌는 것은 **검사 범위뿐**이다. `self.samples` / 인덱스 캐시 / 배치 구성은 그대로고,
+    검사에서 빠진 세그먼트는 `Subset` 에도 안 들어가므로 `__getitem__` 이 도달할 수 없다
+    (도달하면 예전처럼 KeyError 로 시끄럽게 죽는다).
+  · `dynpose_d137_molmo2_nogeo.yaml`(D138) 이 `true` 로 켠다. vista d121 arm(D124/D133)은
+    seg-list 가 전량이라 두 집합이 같아서 기본값 그대로다.
 - **`main/conf/experiment/dynpose_d137_da3.yaml` (D137) + `dynpose_d137_molmo2_nogeo.yaml`
   (D138) — clamped_low 를 제외한 dynpose 코퍼스 위의 두 arm (2026-09-06).** 사용자 지시
   "어차피 clamped_low는 정상적인 카메라가 아니니 b로 해줘" + "학습도 molmo2+da3가 아니라

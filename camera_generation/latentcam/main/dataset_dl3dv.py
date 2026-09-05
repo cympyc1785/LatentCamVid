@@ -386,6 +386,31 @@ class CamDataset(torch.utils.data.Dataset):
                   f"(cache_geo_raw_da3.py 로 다시 구울 것 — 같은 디렉토리에 덮어쓴다)")
 
     # ---- PE-AV 캐시 (video = scene 키 / text = segment 키) ------------------------------
+    def _peav_scope(self):
+        """캐시 커버리지 검사의 **대상 샘플**을 고른다.
+
+        [new 2026-09-06, D138] `peav_seg_list_only: true` 면 train/test seg-list 에 실제로
+        등장하는 세그먼트로 좁힌다. 데이터셋은 prompts.json 을 전량 열거하고(dynpose d137 =
+        24371 seg) base.py 가 **그 다음에** seg-list 로 Subset 을 뜨기 때문에, dd10 처럼
+        리스트가 코퍼스의 부분집합이면 학습이 한 번도 안 건드리는 세그먼트까지 캐시에 있어야
+        한다고 우기게 된다 (D138 smoke: 226 segment miss, 전량 dd10 밖). 캐시를 전량으로
+        다시 구우면 text.pt 가 2.2배(5.9 -> ~13 GB)로 부푸는데 그 증분은 전부 죽은 행이다.
+
+        기본값 false 면 예전과 글자 그대로 같은 검사다 (seg-list 를 안 쓰는 arm 도 그대로)."""
+        if not getattr(self.cfg, 'peav_seg_list_only', False):
+            return self.samples, ""
+        ids = set()
+        for k in ('train_seg_list', 'test_seg_list'):
+            p = getattr(self.cfg, k, None)
+            if p:
+                with open(p) as f:
+                    ids.update(ln.strip() for ln in f if ln.strip())
+        if not ids:
+            return self.samples, ""
+        _seg_key = type(self).seg_key
+        used = [s for s in self.samples if _seg_key(s[4]) in ids]
+        return used, (f"  [seg_list_only] {len(used)}/{len(self.samples)} sample 만 검사")
+
     def _preload_peav(self):
         """`main/cache_peav_embeddings.py` 가 구운 PE-AV 토큰을 __init__ 에서 RAM 에 올린다.
 
@@ -396,8 +421,11 @@ class CamDataset(torch.utils.data.Dataset):
         video 가 scene 키인 근거는 d107 의 전 세그먼트가 frame_idx==(0,49) 라는 것뿐이다.
         캐시 빌더가 그 불변조건을 assert 하고, 여기서는 miss 를 조용히 넘기지 않는다 — video CA
         스트림은 배치 안에서 켜졌다 꺼졌다 할 수 없기 때문이다(한 샘플만 빠져도 stack 이 깨진다)."""
+        scope, scope_note = self._peav_scope()
+        if scope_note:
+            print(f"[peav]{scope_note}")
         if self.peav_video_cache_dir:
-            keys = sorted({self.geo_raw_key(s[4]) for s in self.samples})
+            keys = sorted({self.geo_raw_key(s[4]) for s in scope})
             miss = []
             for k in keys:
                 p = osp.join(self.peav_video_cache_dir, f'{k}.pt')
@@ -416,7 +444,7 @@ class CamDataset(torch.utils.data.Dataset):
         if self.peav_text_cache:
             c = torch.load(self.peav_text_cache, map_location='cpu', weights_only=False)
             self._peav_text = c
-            miss = [s[4] for s in self.samples if s[4] not in c['by_name']]
+            miss = [s[4] for s in scope if s[4] not in c['by_name']]
             print(f"[peav] text {c['emb'].shape[0]} distinct captions "
                   f"(L={c['text_len']}, template={c['template']}, "
                   f"{c['emb'].numel() * 2 / 1e6:.1f} MB) from {self.peav_text_cache}")

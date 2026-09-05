@@ -484,6 +484,12 @@ geo_raw_cache_preload: true   # __init__ 에서 전량 RAM 적재 (fork 로 work
 #                           캡션 중복이 심해서 dedup 후 인덱스로 참조한다.
 peav_video_cache_dir: null
 peav_text_cache: null
+# [new 2026-09-06, D138] 캐시 커버리지 검사를 train/test_seg_list 안의 세그먼트로 좁힌다.
+# 데이터셋은 prompts.json 을 전량 열거하고 base.py 가 **그 다음에** seg-list 로 Subset 을 뜬다.
+# dd10 처럼 리스트가 코퍼스의 부분집합이면(dynpose d137: 10857 / 24371) 학습이 한 번도 안
+# 건드리는 세그먼트까지 캐시에 있어야 한다고 우기며 FileNotFoundError 로 죽는다.
+# false(기본) = 예전과 글자 그대로 같은 검사.
+peav_seg_list_only: false
 # video CA 자체의 on/off 겸 입력 차원. 1792 = pe-av-large visual tower per-frame 토큰.
 # 0 (기본) 이면 video_layers/video_proj/mod3 가 아예 생성되지 않는다.
 video_latent_dim: 0

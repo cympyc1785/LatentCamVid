@@ -359,6 +359,25 @@
     의 **미결** 항목 그대로 — D104 target 절 A/B 대기).
 
 ### Fixed
+- **`CloudRenderer` 를 프레임별 DA3 K 로 띄우던 나머지 6곳에 `--fixed_focal`(기본 **True**) 를
+  달았다 (2026-09-05, 아래 릴 수정의 후속 감사).** 릴 버그를 고치면서 `CloudRenderer(` 18곳을
+  전수 감사했더니 5곳은 `fixed_focal=True` 하드코딩, 7곳은 인자로 받고 있었는데 **6곳이 아무것도
+  안 넘겨 기본 `False`(프레임별 K)로 돌고 있었다**. 릴만의 문제가 아니었다.
+  · `verify.py` / `scripts/audit_bank_geometry.py` — **지표를 뱅크와 다른 카메라 모델로 재고
+    있었다.** `hole_fraction` / `subject_in_frame` 이 궤적과 무관한 화각 떨림으로 흔들린다.
+  · `scripts/viz_g1_collision.py` — `renderer.K_src` 를 그림뿐 아니라 **G1 판정에도** 쓰므로
+    규약이 어긋나면 충돌 판정 자체가 달라진다.
+  · `scripts/build_candidate_board.py` / `lbm/loop.py` — VLM 이 보는 board·before/after 타일에
+    연산 효과와 화각 떨림이 섞인다. `LoopRunner` 는 `getattr(args, "fixed_focal", True)` 라
+    이 인자가 없는 호출자(`run_lbm_lite.py`)도 그대로 돈다.
+  · `scripts/probe_near_depth_repeat.py` — 이미 `bank.json` 을 읽고 있어서 플래그 대신
+    **`bank["fixed_focal"]` 을 그대로 따라가게** 했다 (뱅크 수치 재현이 목적이라 K 가 다르면
+    비교가 성립하지 않는다).
+  기본값을 **True** 로 잡은 이유: 이 6곳은 전부 *새로 푼* pose(뱅크·결정·후보)를 렌더하므로
+  pose 를 푼 K 와 같아야 한다. 프레임별 K 가 맞는 건 `lbm/render.py` 의 자기 일관성 검사
+  하나뿐이고 거기만 기본 `False` 를 유지한다. 전부 `--no_fixed_focal` 로 예전 동작으로 되돌린다.
+  검증: 6개 스크립트 `--help` rc=0, `CloudRenderer(fixed_focal=)` 실측 — snowboard `fx` 가
+  False 에서 1179.684~1262.462(진폭 6.99%), True 에서 1184.992 상수(0.00%).
 - **`run_preset_warp_max_shard.sh` 가 `bank.json` 의 `fixed_focal` 을 읽어 렌더에 반영한다
   (2026-09-05, 사용자 지적 "snowboard가 떨리는데").**
   릴이 `render_bank_videos.py --fixed_focal`(기본 **False**, `:319`)을 안 넘겨서, **뱅크는

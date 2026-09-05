@@ -134,6 +134,23 @@ All notable changes to the latentcam sub-project. Follows [Keep a Changelog](htt
   (키가 scene 이름, 내용물 불변).
 
 ### Changed
+- **학습을 100 epoch 에서 끊는다 — `epochs` 기본값 2000 -> 100 + 새 상한 `epoch_cap: 100`
+  (`main/conf/config.yaml`, `main/train_latent_cam_dm.py`, 2026-09-05).** 사용자 지시
+  "학습들도 100epoch되면 꺼주고 이후 돌리는 학습들도 다 100epoch만 돌도록해줘".
+  · 기본값만 낮추면 **부족하다** — `conf/experiment/*.yaml` **73개가 `epochs` 를 덮고 있고
+    그 중 19개가 200** 이다. 그걸 다시 돌리면 기본값을 무시하고 조용히 200 을 간다. 그래서
+    epoch 루프 위에 `_epochs = min(cfg.epochs, cfg.epoch_cap)` 상한을 하나 더 뒀다.
+  · `epoch_cap: null` 이면 상한 없음 = **예전 동작 그대로**. 잘릴 때만 `[epoch_cap] cfg.epochs=200
+    -> 100` 을 main process 에서 찍는다 (조용히 안 자른다).
+  · 옛 experiment yaml 의 `epochs: 200` 은 **그 run 이 실제로 무엇으로 돌았는지의 기록**이라
+    건드리지 않았다. 지금까지도 비교에 쓰인 건 항상 `ckpt_at_epochs: [50, 100]` 의 epoch100 이다.
+  · 검증: hydra resolve 실측 — `vista4d_d121_molmo2` / `dynpose_d110_k6_dd10` 둘 다
+    `epochs=200 epoch_cap=100 -> effective=100`.
+  · 같은 지시로 돌던 arm 2개를 SIGINT(Ctrl+C 와 동일 신호)로 정지했다: D123
+    `20260904_165917_vista4d_d121_da3_t128`(ol2mue8s, Epoch 148) / D124
+    `20260904_185554_vista4d_d121_molmo2`(w5ygw8ii, Epoch 101). **둘 다 `epoch100.pth` 가
+    디스크에 있다** (da3_t128 09-05 06:33 / molmo2 09-05 12:49). 종료는 `KeyboardInterrupt`
+    후 wandb 정상 마감, 잔여 worker 0, GPU 1·2 반납 확인.
 - **umt5 `text_len` 512 -> 128 (`main/config.py`, `main/config_large.py`, 2026-09-03).**
   사용자 지시: "128로 바꿔주고". `models/tokenizers.py:49` 가 `padding='max_length',
   truncation=True, max_length=self.seq_len` 이라 `text_len` 은 **예산이 아니라 고정 패딩 길이**다 —

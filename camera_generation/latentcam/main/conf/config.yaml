@@ -9,7 +9,17 @@ random_seed: 42
 lr: 0.0001
 batch_size: 8
 accum_steps: 1
-epochs: 2000
+# [2026-09-05] 사용자 지시 "이후 돌리는 학습들도 다 100epoch만 돌도록해줘". 기본값을
+# 2000 -> 100 으로 낮춘다. 지금까지 arm 들은 experiment yaml 에서 `epochs: 200` 으로 덮고
+# 100/200 두 지점 ckpt 를 남겼는데(`ckpt_at_epochs: [50, 100]`), 실제로 비교에 쓰인 건 항상
+# epoch100 이었다. **새 experiment yaml 에서는 `epochs` 를 덮지 말 것** — 덮으면 이 기본값이
+# 무력화된다. 옛 experiment yaml 의 `epochs: 200` 은 그 run 이 실제로 무엇으로 돌았는지의
+# 기록이라 건드리지 않는다 (재실행할 때만 지우면 된다).
+epochs: 100
+# 위 `epochs` 를 experiment yaml 이 덮어도 **여기서 다시 자른다** (train_latent_cam_dm.py 의
+# epoch 루프). experiment yaml 73개가 `epochs` 를 덮고 있어서(19개가 200) 기본값만으로는
+# 재실행 때 조용히 200 을 간다. `null` 이면 상한 없음 = 예전 동작 그대로.
+epoch_cap: 100
 save_epoch: 10
 val_step: 5000
 val_max_batches: 20

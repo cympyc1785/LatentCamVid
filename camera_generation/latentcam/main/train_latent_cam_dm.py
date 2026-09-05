@@ -985,7 +985,15 @@ def train():
             }, os.path.join(ckpt_dir, "resume.pth"))
         model.train()
 
-    for epoch in range(start_epoch, cfg.epochs):
+    # [new 2026-09-05] 사용자 지시 "이후 돌리는 학습들도 다 100epoch만 돌도록해줘".
+    # `conf/config.yaml` 의 기본값만 100 으로 낮추면 부족하다 — experiment yaml 73개가
+    # `epochs` 를 덮고 있고(그 중 19개가 200) 그걸 다시 돌리면 조용히 200 을 간다. 그래서
+    # **cfg.epochs 위에 상한을 하나 더** 둔다. `epoch_cap: null` 이면 상한 없음 = 예전 동작 그대로.
+    _cap = getattr(cfg, 'epoch_cap', None)
+    _epochs = cfg.epochs if _cap is None else min(cfg.epochs, int(_cap))
+    if _epochs != cfg.epochs and accelerator.is_main_process:
+        print(f"[epoch_cap] cfg.epochs={cfg.epochs} -> {_epochs} (epoch_cap={_cap})")
+    for epoch in range(start_epoch, _epochs):
         pbar = tqdm(train_dataloader)
         model.train()
         total_loss = torch.tensor(0.0, device=accelerator.device)

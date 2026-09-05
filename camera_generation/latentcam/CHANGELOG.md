@@ -234,6 +234,17 @@ All notable changes to the latentcam sub-project. Follows [Keep a Changelog](htt
      과 이 스크립트가 서로 다른 모델을 재고 있었을 것이다. 예외도 경고도 안 난다.
   · **영향 범위는 `video_latent_dim > 0` 인 arm 뿐**이다. 그 외 arm 은 `build_video_cond` 가 빈
     dict 를, `_vid_kw` 가 빈 dict 를 돌려주므로 **기존 testset eval 수치는 전부 그대로 유효**하다.
+- **`dpred_shuffle` 이 대조군 구실을 못 하고 있었다 — `dpred_xscene` 추가 (FIX-D130c,
+  2026-09-05).** `video_ca_probe` 의 `dpred_shuffle` 은 video 조건을 배치축 `roll(1)` 로 바꿔
+  치는데, eval 배치가 seg 순서라 **roll 짝의 99.3% (875 중 869) 가 같은 scene 의 이웃 seg** 다.
+  같은 씬 49프레임 클립은 molmo2 임베딩이 거의 같으므로 이 값이 작은 건 모델 성질이 아니라
+  배치 구성의 결과다 — 실측 전량 평균 0.00161 을 "video 내용을 안 본다"로 읽으면 틀린다.
+  · 수정: `video_ca_probe(..., video_kw_alt=...)` 와 열 `dpred_xscene`. `eval_testset.py` 가
+    scene 별 video 조건을 1건씩 모아 두고 **현재 배치와 다른 scene** 것을 넘긴다. 첫 씬은
+    비교 대상이 없으므로 본 루프 전에 두 번째 씬이 나올 때까지만 미리 훑어 씨앗 1건을 심는다
+    (GPU forward 없이 로더만 돈다).
+  · `dpred_shuffle` 은 지우지 않았다. 열이 틀린 게 아니라 **판정에 쓰면 안 되는** 열이라,
+    probe / analyze 양쪽 docstring 에 그 뜻을 적고 표의 기본 열에서만 뺐다.
 - **video CA 를 0 초기화 residual gate 로 붙인다 — `video_gate` (D117, 2026-09-03).**
   D117 두 arm 이 55 / 84 epoch 동안 loss ~1.0 (= eps 예측이 0) 에서 못 빠져나온 **진짜 원인**.
   격리 실험 3종으로 좁혔다 (전부 d107 전체 코퍼스, epoch 0, batch 8, 952 step):

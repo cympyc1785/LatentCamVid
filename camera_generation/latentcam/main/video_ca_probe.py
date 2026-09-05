@@ -26,9 +26,14 @@ gate 가 0 근처에 머문 채로도 loss 는 멀쩡히 내려간다. D124 epoc
   vattn_frame_token_r  traj 토큰 인덱스 vs attention 가중 평균 프레임의 Pearson r.
                        1에 가까우면 "토큰 t 가 소스 프레임 ~4t 를 본다" = 시간축 정렬 독해
   dpred_drop           video 스트림을 통째로 끈 예측과의 상대 거리. 스트림 총 기여의 직접 지표
-  dpred_shuffle        video 조건만 배치축으로 roll(1) 했을 때의 상대 거리. 토큰 통계는 그대로
-                       두고 **scene 짝만** 깨므로, 0 이면 모델이 video 내용을 안 본다
-                       (dpred_drop 은 크고 dpred_shuffle 이 0 이면 = 내용 무관 bias 로만 쓴다)
+  dpred_shuffle        video 조건만 배치축으로 roll(1) 했을 때의 상대 거리.
+                       **주의 — 이 열 하나로는 판정 못 한다.** eval 은 seg 순서대로 배치를 묶어서
+                       roll(1) 짝의 99.3%(875 중 869)가 **같은 scene 의 이웃 seg** 다. 같은 씬의
+                       49프레임 클립은 molmo2 임베딩이 거의 같으므로 이 값이 작은 건 당연하고,
+                       "내용을 안 본다"의 근거가 못 된다. 판정은 아래 `dpred_xscene` 으로 한다.
+  dpred_xscene         video 조건을 **다른 scene** 것으로 갈아끼웠을 때의 상대 거리
+                       (`video_kw_alt` 를 준 경우에만). dpred_drop 과 비슷하면 video 를 내용으로
+                       쓰는 것이고, 0 에 가까우면 내용 무관 bias 로만 쓰는 것이다.
 
 사용 예시:
     from video_ca_probe import video_ca_probe
@@ -58,7 +63,7 @@ def _pearson(a, b):
 
 @torch.no_grad()
 def video_ca_probe(raw_model, scheduler, z, text_emb, text_mask, geo_emb, geo_mask, video_kw,
-                   cond=None, timestep=500, n_frames=49, noise_seed=1234):
+                   cond=None, timestep=500, n_frames=49, noise_seed=1234, video_kw_alt=None):
     """샘플별 dict 의 리스트(길이 B)를 돌려준다. video 스트림이 없는 arm 이면 빈 리스트.
 
     노이즈는 `noise_seed` 로 고정한다 — 샘플 간/arm 간 수치를 비교하려면 x_t 가 같은 규칙으로
@@ -185,6 +190,22 @@ def video_ca_probe(raw_model, scheduler, z, text_emb, text_mask, geo_emb, geo_ma
                                     cond=cond, **shuf))
             for b in range(B):
                 rows[b]['dpred_shuffle'] = float(d_sh[b])
+
+        # [new] 진짜 내용 검사. roll(1) 은 같은 scene 이웃 seg 라 거의 안 깨진다 (docstring 참조).
+        # 호출부가 **다른 scene** 의 video 조건을 넘겨주면 그걸로 갈아끼워 본다.
+        if video_kw_alt:
+            alt = {}
+            for k, v in video_kw.items():
+                a = video_kw_alt.get(k)
+                if torch.is_tensor(v) and torch.is_tensor(a):
+                    # 다른 scene 표본이 1개뿐이어도 되게 배치축으로 펼친다. 토큰 수는 arm 고정.
+                    alt[k] = a[:1].to(v.device, v.dtype).expand_as(v).contiguous()
+                else:
+                    alt[k] = v
+            d_x = _dpred(raw_model(x_t, ts.float(), text_emb, text_mask, geo_emb, geo_mask,
+                                   cond=cond, **alt))
+            for b in range(B):
+                rows[b]['dpred_xscene'] = float(d_x[b])
 
         for b in range(B):
             rows[b]['probe_timestep'] = int(timestep)

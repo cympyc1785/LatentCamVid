@@ -311,6 +311,24 @@ def main():
     # [new 2026-09-05] 추론 1건 = jsonl 1행. 플래그가 없으면 None 이라 아래 블록이 통째로 꺼진다.
     probe_fh = open(osp.join(out_dir, 'video_ca_probe.jsonl'), 'w',
                     encoding='utf-8') if args.probe_video_ca else None
+    # scene -> 그 scene 의 video 조건 1건. dpred_xscene 의 "다른 scene" 표본을 여기서 꺼낸다.
+    # 본 루프에서만 채우면 **첫 씬 전체가 결측**이 된다 (배치가 seg 순서라 씬이 연속). 그래서
+    # 두 번째 씬이 나올 때까지만 미리 한 번 훑어서 씨앗 1건을 심는다 (GPU forward 없음).
+    _xscene_bank = {}
+    if probe_fh is not None:
+        _sc0 = None
+        for _d in valid_dataloader:
+            _n0 = _d['data_name'][0]
+            _s = _n0[:_n0.rfind('_')]
+            if _sc0 is None:
+                _sc0 = _s
+            elif _s != _sc0:
+                _vk = T.build_video_cond(_d, device)
+                if _vk:
+                    _xscene_bank[_s] = {k: v[:1].detach().clone()
+                                        for k, v in _vk.items() if torch.is_tensor(v)}
+                print(f"[probe] xscene seed = {_s} (첫 씬 {_sc0} 의 대조 표본)")
+                break
     t0 = time.time()
     with torch.no_grad():
         for step, data in enumerate(tqdm(valid_dataloader, total=args.max_batches or len(valid_dataloader))):
@@ -371,10 +389,20 @@ def main():
                 out = T.sample(model, noise_scheduler, traj_len, text_embeds, text_masks,
                                pc_embeds, pc_masks, generator=_g, cond=_cond, video_kw=_vkw)
                 if args.probe_video_ca and probe_fh is not None:
+                    _pvkw = T.build_video_cond(data, device)
+                    # [new] 배치는 seg 순서라 probe 안의 roll(1) 짝이 거의 항상 같은 scene 이다.
+                    # 내용 의존성을 재려면 **다른 scene** 조건이 필요하므로 씬별로 1건씩 모아 두고
+                    # 현재 배치의 씬과 다른 것을 하나 골라 넘긴다.
+                    _sc = data_name[0][:data_name[0].rfind('_')]
+                    if _pvkw and _sc not in _xscene_bank:
+                        _xscene_bank[_sc] = {k: v[:1].detach().clone()
+                                             for k, v in _pvkw.items() if torch.is_tensor(v)}
+                    _alt = next((v for k, v in _xscene_bank.items() if k != _sc), None)
                     _rows = video_ca_probe(
                         model, noise_scheduler, traj_latents, text_embeds, text_masks,
-                        pc_embeds, pc_masks, T.build_video_cond(data, device), cond=_cond,
-                        timestep=int(args.probe_timestep), n_frames=int(cfg.num_frames))
+                        pc_embeds, pc_masks, _pvkw, cond=_cond,
+                        timestep=int(args.probe_timestep), n_frames=int(cfg.num_frames),
+                        video_kw_alt=_alt)
                     for _n, _r in zip(data_name, _rows):
                         probe_fh.write(json.dumps({'data_name': _n, **_r},
                                                   ensure_ascii=False) + '\n')

@@ -8,7 +8,10 @@
   vresid_mean     ||gate_i * v_i|| / ||h_i|| 의 층 평균 = video 스트림의 잔차 기여율
                   (`text_resid_mean` / `geo_resid_mean` 이 같은 정의의 눈금자)
   dpred_drop      video 조건을 빼면 예측이 얼마나 변하나 (스트림 총 기여)
-  dpred_shuffle   video 조건만 배치축으로 roll — **scene 짝만** 깬다. 0 이면 내용을 안 본다는 뜻
+  dpred_shuffle   video 조건만 배치축으로 roll. **판정에 쓰지 말 것** — 배치가 seg 순서라
+                  roll 짝의 99.3% 가 같은 scene 이웃 seg 다 (거의 같은 영상을 갈아끼운 셈)
+  dpred_xscene    **다른 scene** 의 video 조건으로 갈아끼웠을 때의 변화. 내용 의존성은 이걸로 본다.
+                  첫 씬은 비교 대상이 아직 없어 결측이다 (bank 가 lazy)
   vattn_video_mass  molmo2 text 128 토큰이 아니라 프레임 패치 3136 쪽으로 간 attention 질량
 
 집계는 **평균과 함께 분산·표본수를 같이 낸다**. preset 별 표본이 한 자릿수인 칸이 흔하고,
@@ -29,7 +32,7 @@ CORPUS_DEFAULT = "/data1/cympyc1785/data/Vista4D-Eval-Data/latentcam_da3_k6_d121
 
 # 이 열들만 표로 낸다. 순서가 곧 표의 열 순서다.
 METRICS = ["vresid_mean", "text_resid_mean", "geo_resid_mean",
-           "dpred_drop", "dpred_shuffle",
+           "dpred_drop", "dpred_shuffle", "dpred_xscene",
            "vattn_video_mass", "vattn_entropy_norm", "vattn_frame_peak",
            "vattn_frame_token_r"]
 
@@ -155,7 +158,7 @@ def main():
             print(f"  {m:22s} n={s['n']:5d}  mean {s['mean']:9.5f}  sd {s['sd']:9.5f}  "
                   f"med {s['med']:9.5f}  [{s['min']:9.5f}, {s['max']:9.5f}]")
 
-    small = ["vresid_mean", "dpred_drop", "dpred_shuffle", "vattn_video_mass",
+    small = ["vresid_mean", "dpred_drop", "dpred_xscene", "vattn_video_mass",
              "vattn_entropy_norm", "vattn_frame_token_r"]
     t_preset = group_table(rows, "preset", METRICS, args.min_n)
     t_scene = group_table(rows, "scene", METRICS, args.min_n)
@@ -167,7 +170,7 @@ def main():
     print_table("aim 별", t_aim, small)
 
     print("\n== 연속량과의 상관 (Pearson r)")
-    for a in ["vresid_mean", "dpred_drop", "dpred_shuffle", "vattn_entropy_norm"]:
+    for a in ["vresid_mean", "dpred_drop", "dpred_xscene", "vattn_entropy_norm"]:
         for b in ["tau_max", "hole_fraction", "subject_area_med"]:
             r, n = corr(rows, a, b)
             if r is not None:

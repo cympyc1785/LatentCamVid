@@ -7,6 +7,27 @@
 ## [Unreleased]
 
 ### Added
+- **`scripts/pick_warp_sample_scenes.py` + `scripts/run_preset_warp_sample.sh` — 뱅크 재굽기 뒤
+  **표준 확인 절차**를 형식화했다 (2026-09-05, 사용자 지시 "앞으로 돌리는거 끝나면 저렇게
+  dynamic subject 움직이는거 두개정도 움직이지 않는거 2개 정도해서 preset별 depth warp
+  비교영상 만들어서 보여주는거 형식화해줘").**
+  움직이는 subject 2편 + 안 움직이는 subject 2편을 골라 preset 별 **사다리 최대단** depth-warp
+  릴을 굽고 한 폴더에 모은다.
+  · **왜 두 버킷인가**: preset 의 실패 모드가 subject 이동 여부로 갈린다. 움직이는 쪽은
+    `track_*` 가 켜져 **추종·조준**을 시험하고, 안 움직이는 쪽은 track 이
+    `--track_min_drift_u 0.05` 게이트에서 잘려나가 순수 object-centric 만 남아 **hole·벽 뚫기**를
+    시험한다. d128 실측으로 확인된다 — moving 표본(street-turn / couch-sit)은 track preset
+    12/11개, static 표본(room-argue / cows)은 **0개**. 한쪽만 보면 나머지 절반이 조용히 깨진
+    채로 학습에 들어간다.
+  · 버킷 경계는 `scene_graph.json` 의 `center_drift_u` 를 `--drift_thresh`(기본 0.05,
+    `--track_min_drift_u` 와 **같은 값**)로 자른다. 두 값이 어긋나면 버킷이 실제 뱅크와 안 맞는다.
+  · **RNG 없음.** 1순위 preset 다양성(내림) / 2순위 drift(움직이는 쪽 큰 순, 안 움직이는 쪽
+    작은 순) / 3순위 이름. 재굽기 전후로 같은 표본이 나와야 before/after 를 짝지어 본다 —
+    `center_drift_u` 는 `build_scene_graph.py` 산출물이라 축을 바꿔도 안 변한다.
+  · anchor 선택 규칙은 릴 러너(`dyn_0` 우선, 없으면 solved 행 최다)와 **일부러 같게** 복제했다.
+    여기서 분류한 subject 와 릴에 찍히는 subject 가 다르면 버킷이 거짓말이 된다.
+  · d128 기본 표본: moving `street-turn`(drift 0.0674, preset 30) / `couch-sit`(0.1581, 28),
+    static `room-argue`(0.0095, 18) / `cows`(0.0332, 18).
 - **`sample_camera_bank.py --track_min_drift_u`(기본 0.05) — `track_*` 라우팅에만 거는 순변위
   하한 (D128, 2026-09-05, 사용자 판단 "움직이는 dynamic 물체는 맞지만 위치가 별로 안 움직이는
   거잖아").**
@@ -210,6 +231,11 @@
   **F1 자체는 아직 미적용** — `fix.md` 상태 "제안됨, 미승인" 그대로다.
 
 ### Changed
+- **`run_preset_warp_max_shard.sh` 에 `ROOT`/`EVAL` 환경변수 override 를 열었다 (2026-09-05).**
+  `out` 이 4군데(리스트 glob / variant 고르는 인라인 python / `render_bank_videos.py` 인자 /
+  릴 복사 경로)에 하드코딩돼 있어 dynpose·trumans 뱅크는 같은 릴로 못 봤다.
+  **둘 다 안 주면 붙는 인자가 없어 예전 커맨드와 문자 그대로 같다** (`ROOT=out`, `--eval_data`
+  미전달). dynpose 는 `ROOT=out_dynpose EVAL=DynPose-LBM`.
 - **`--tau_ref` 기본값을 `auto` → `follow` 로 뒤집었다 (`sample_camera_bank.py` +
   `fit_hole_ladder.py`) (D128, 2026-09-05, 사용자 지시 "tau_ref도 적용해서").**
   `auto` 는 `track_*` 만 follow 기준이라 나머지 preset 의 τ 는 소스 카메라 기준으로 재였다.

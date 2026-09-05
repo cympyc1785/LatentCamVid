@@ -7,6 +7,44 @@
 ## [Unreleased]
 
 ### Added
+- **`scripts/fit_hole_ladder.py` 의 `suspect` 열 + `scripts/vista4d_bank_to_dl3dv.py
+  --drop_suspect` — "게이트가 막은 게 아닌데 수치가 나쁜" 변이 진단 태그 (D140, 2026-09-06,
+  사용자 지시 "충돌, subject in frame 같은 수치가 의도와 다르게 preset과 첫 카메라가 놓인
+  상황을 봤을 때 불가능한 상황이 아닌데도 안좋게 나오면 일단 clamped_low처럼 인식할 수
+  있게끔 해두고").**
+  · **`status` 와 직교하는 새 축이다.** `status` 는 이분법이 어떻게 끝났는지(`solved` /
+    `clamped_low` / `<gate>_limited`), `binding` 은 `over()` 에서 **처음** 걸린 게이트다.
+    둘 다 "게이트가 막았다"만 말한다. 이번 태그는 그 반대 — **게이트를 다 통과했는데도**
+    캡션과 기하가 어긋난 행을 잡는다. 그래서 `status` 를 덮어쓰지 않는다: 덮어쓰면 어느
+    게이트가 물렸는지가 지워지고 `binding` 과 어긋난다.
+  · 태그 3종 (`|` 로 이어 붙임, 빈 칸 = 정상):
+    ① `aim_free_subject_lost` — `aim == "free"` 인데 `subject_in_frame < 0.85`.
+       같은 뱅크 안 대조가 근거다. TRUMANS d132 `aim=look_at` n=3241 → 0.85 미만 **0.0%**
+       (p10 = 1.000) vs `aim=free` n=2681 → **36.2%** (p10 = 0.462). VISTA d128 은
+       look_at 4.5% vs free 54.1% (p10 = 0.077). 즉 게이트가 아니라 **조준을 안 한 것**이다.
+    ② `static_start_collision` — `behind_frac > 0` 인데 `status == "static"` 이거나
+       `path_len_u < 0.02`. 손잡이가 inert 라 이분법이 줄일 게 없고, 위반은 **시작 pose**
+       에서 온다. d132 24행 전부 `track_hold`/`static_hold`/`*_look_at` 이 `knob = 0.1000`
+       (하한) 에 앉아 있고 `behind_static_frac == behind_frac`, `behind_dyn_frac = 0`.
+       `tru_00add26c_a18` static_hold 는 `behind_frac = 1.000` (49프레임 전부 벽 안).
+    ③ `motion_preset_no_motion` — 이동 preset 인데 `path_len_u < 0.02`,
+       **단 `binding` 이 `hole`/`none`/빈칸일 때만**. 게이트가 막아서 못 움직인 건 이미
+       `status` 가 말하므로 뺀다. d132 48 chunk 실측 0행(259행 전부 elev/collision/obb 구속),
+       VISTA d128 에서는 살아 있다.
+  · 임계 3개는 `--suspect_in_frame 0.85` / `--suspect_behind 0.0` / `--suspect_path_len 0.02`
+    로 노출. `--no_suspect` 면 열이 빈 칸이라 **D139 이전 뱅크와 같다**.
+  · **판정이 아니라 진단이다** — 궤적·게이트·이분법에 영향이 없다. 실측 검증(chunk
+    `tru_00add26c_a01`, 148 변이): `poses.npz` 최대 절대차 **0.0**, `variant_id` 순서 동일,
+    `knob`/`status`/`binding` 전부 동일. 다른 필드는 렌더 측정값 6개
+    (`subject_area_seq` 최대차 0.0063, `subject_visible_frac` 0.0236,
+    `subject_visible_min` 0.0351, `subject_area_end` 0.0042, `subject_area_med` 0.0021,
+    `near_depth` 0.0742) 만 흔들리는데, 이건 splatting 래스터라이저의 GPU 비결정성이지
+    D140 변경분이 아니다 (d132 는 GPU 2, 검증은 GPU 4).
+  · export 쪽 `--drop_suspect` 는 `--drop_status` 와 **다른 축**이라 별도 플래그다. 태그
+    하나짜리 행의 대부분이 `status == "solved"` 라 status 필터에 안 걸린다 (d132 1022행 중
+    solved 572). `suspect` 열은 목록이므로 접두사가 아니라 **토큰** 매칭 — 접두사로 하면
+    `aim_free_subject_lost` 가 두 번째 토큰일 때 못 잡는다. 기본값 빈 리스트라 안 주면
+    기존 코퍼스와 비트 동일하고, `suspect` 열이 없는 예전 뱅크에서도 no-op 이다.
 - **`scripts/vista4d_bank_to_dl3dv.py --drop_status` — export 단계 status 필터 (D137,
   2026-09-06, 사용자 지시 "어차피 clamped_low는 정상적인 카메라가 아니니 b로 해줘").**
   뱅크 변이를 `bank.json` 의 `status` **접두사**로 걸러 코퍼스에 안 내보낸다. 기본값은 빈

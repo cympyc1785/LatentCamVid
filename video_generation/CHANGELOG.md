@@ -325,6 +325,17 @@
   · 미승격으로 남긴 것: `truck_*`/`pedestal_*`/`dolly_in`/`dolly_out` (config `note_targetless`
     의 **미결** 항목 그대로 — D104 target 절 A/B 대기).
 
+### Fixed
+- **`run_k6_d128_shard.sh` FIT 에 `--behind_clear_src_ratio 0` 을 명시로 못박았다 (D128,
+  2026-09-05).** 첫 실행 때 argparse 기본값(0.3)에 기대고 있었는데, 같이 켠
+  `--behind_min_zcam 0.02` 와 만나면 소스 재투영이 전부 `z_floor` 아래로 떨어져
+  `source_g1_clear` 가 **증거 0 으로 assert** 한다. 6편(avocado-slice / basketball-four /
+  bed-shopping / bmx-bumps / breakdance / camel)이 FIT rc=1 로 날아갔다
+  (`video_generation/FIX.log` 2026-09-05). ② `clear_src_ratio` 는 아직 채택 보류 축이라 값 0 이
+  맞고, **D105 원칙(뱅크 정체성을 argparse 기본값에 맡기지 않는다)대로 명시**한다. 러너 상단
+  주석에도 축 ⑥ 아래에 근거를 남겼다. 재-스윕 6편 전부 rc=0 → **52/52 canonical, 0 skipped**.
+  `run_dynpose_d129_shard.sh` 는 처음부터 명시로 짜여 있다.
+
 ### Added
 - **`scripts/run_dynpose_d122_shard.sh` — dynpose 코퍼스를 vista 방식으로 전량 재생성 (D122,
   2026-09-04, 사용자 지시 "vista 돌렸던 방식으로 다시 돌려 / 유일하게 다른건 preset,

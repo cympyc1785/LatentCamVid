@@ -1,0 +1,73 @@
+# @package _global_
+# D141 — dynpose d137 코퍼스의 **da3 geo CA + Molmo2 CA 동시** arm.
+# 레이어 순서 text CA(umt5) -> molmo2 CA -> geo(da3) CA.
+#
+# ═══ 왜 이 arm 이 필요한가 (2x3 그리드의 빈 칸) ═══════════════════════════════════════════
+# 사용자 지시(2026-09-06): "데이터 측면에서 vista(scene 적고 preset 많음), dynpose(scene 많고
+# preset 적음) 을 비교하고 모델 측면에서 da3 vs molmo2 vs da3+molmo2 를 비교".
+#
+#                     da3          molmo2        da3+molmo2
+#   vista  d121       D123         D133          D124
+#   dynpose d137      D137         D138          **이 arm (D141)**
+#
+# vista 축은 세 칸이 다 찼는데 dynpose 축은 da3(D137)/molmo2(D138) 둘뿐이라, "molmo2 를 얹는
+# 이득이 코퍼스에 따라 달라지는가"를 물을 수 없다. 이 arm 이 그 상호작용 항을 채운다.
+#
+# ═══ D137 / D138 과의 차이 ════════════════════════════════════════════════════════════════
+# D137(geo only) 에 D138 의 molmo2 블록을 그대로 얹은 것이다 (= vista 축에서 D123 -> D124 와
+# 같은 조작). 코퍼스·holdout·text_len·VAE·scale_mode·intr_norm·seed 는 D137/D138 과 전부 같다.
+#   · vs D137 : molmo2 CA 블록 추가 (video 3136 tok + text 128 tok, dim 2560)
+#   · vs D138 : geo(da3) CA 블록 추가 (`geo_encoder: da3` 및 딸린 키들)
+#
+# ═══ 캐시 ═════════════════════════════════════════════════════════════════════════════════
+# 두 캐시를 **그대로 재사용**한다 — 새로 굽는 것 없음.
+#   · geo raw : d129 루트의 geo_raw_cache_da3 (D137 과 동일 경로; 씬 키 기준이라 코퍼스 재굽기와 무관)
+#   · molmo2  : d137 루트의 molmo2_cache/{video,text.pt} (D138 이 구운 것, dd10 리스트 기준)
+# molmo2 캐시가 dd10 리스트만 덮으므로 D138 과 같이 `peav_seg_list_only: true` 가 필요하다
+# (안 켜면 dd10 밖 세그먼트가 캐시에 없다고 죽는다 — FIX-D138 참조).
+exp_name: dynpose_d137_da3_molmo2
+dl3dv_root: /data1/cympyc1785/data/DynPose-LBM/latentcam_dynpose_d137
+meta_csv: meta_dynpose.csv
+train_seg_list: /data1/cympyc1785/data/DynPose-LBM/latentcam_dynpose_d137/seg_list_dynpose_dd10_train.txt
+test_seg_list: /data1/cympyc1785/data/DynPose-LBM/latentcam_dynpose_d137/seg_list_dynpose_dd10_test.txt
+coverage_blacklist_path: null
+
+text_len: 128   # D137 / D138 과 동일.
+
+pose_source: da3
+target_pose_source: da3_target_poses
+scale_mode: avg_scale
+avg_scale_ref: context_first_cam
+intr_norm: rel
+cam_dim: 64
+
+# ─── geo (da3) 스트림 — D137 에서 글자 그대로 복사 ─────────────────────────────────────────
+geo_encoder: da3
+geo_cam_embed: null
+geo_latent_cache_dir: null
+geo_posed: true
+geo_shuffle_order: false
+da3_geo_model: da3nested-giant-large
+da3_geo_input_hw: [252, 448]
+da3_geo_layers: last
+geo_view_sampling: context_uniform
+geo_num_views: 6                    # _even_indices(49,6) = [0,10,19,29,38,48]
+geo_first_view_target_s: true
+geo_raw_cache_dir: /data1/cympyc1785/data/DynPose-LBM/latentcam_dynpose_d129/geo_raw_cache_da3
+da3_cam_token_per_sample: true
+
+anchor_pred_frame0: true
+
+# ─── Molmo2 CA — D138 에서 글자 그대로 복사 ───────────────────────────────────────────────
+peav_video_cache_dir: /data1/cympyc1785/data/DynPose-LBM/latentcam_dynpose_d137/molmo2_cache/video
+peav_text_cache: /data1/cympyc1785/data/DynPose-LBM/latentcam_dynpose_d137/molmo2_cache/text.pt
+peav_seg_list_only: true   # 캐시는 dd10(10857 seg), 데이터셋은 prompts.json 전량(24371). FIX-D138.
+video_latent_dim: 2560     # Molmo2 LM hidden — video part (3136 tok)
+video_text_in_stream: true
+video_text_dim: 2560       # 같은 LM hidden — text part (128 tok). 기본 1024 는 PE-AV 값이다.
+peav_in_ln: true           # proj 앞 LayerNorm. FIX-D117 참조 (없으면 CA logit 포화)
+video_gate: true           # 0 초기화 residual gate. FIX-D117 참조 (없으면 loss ~1.0 정체)
+
+batch_size: 8
+epochs: 100          # 실제 집행자는 conf/config.yaml 의 `epoch_cap: 100`.
+ckpt_at_epochs: [50, 100]

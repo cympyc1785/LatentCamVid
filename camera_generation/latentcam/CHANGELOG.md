@@ -5,6 +5,33 @@ All notable changes to the latentcam sub-project. Follows [Keep a Changelog](htt
 ## [Unreleased]
 
 ### Added
+- **`scripts/eval/corpus_axis_compare.py` + `docs/corpus_and_model_axes.md` (D142) — 데이터축
+  코퍼스 계측기와 2×3 그리드 분석 문서 (2026-09-06).** 사용자 지시 "데이터셋이나 모델
+  개선해야할 사항들 있으면 다방면으로 분석해서 정리해놔줘".
+  · 스크립트는 `<root>/<batch>/<hash>/da3/prompts.json`(= `pose_source: da3` arm 이 실제로 읽는
+    파일; `<scene>/prompts.json` 이 **아니다**)을 seg-list 범위에서만 집계한다. 내는 것:
+    규모/씬수, preset 다양성과 **계열 분해**(`dd_*` / `track_*` / 그 외), aim 분포,
+    게이트 분위수, **게이트 꼬리 카운트**, **`track_*` × `aim` 교차표**(캡션이 추종을 주장하는
+    비율 / 프레이밍을 약속하는 비율). `--corpus <이름>=<root>:<seg_prefix>` 를 반복해 나란히 본다.
+  · 왜 계열 분해가 필요한가: 전체 uniq preset 은 dynpose 202 > vista 40 이라 사용자 framing
+    ("dynpose 는 preset 적음")과 반대로 읽힌다. 그런데 202 중 181 이 `dd_*` one-off 로
+    세그먼트의 10.0% 만 덮는다 — 빼면 실효 어휘가 vista 40 vs dynpose 21 로 뒤집힌다.
+  · 문서에 실린 주요 실측: 수직 이동 preset(`pedestal_*`/`crane_*`)이 vista 19.4% / dynpose
+    **0.0%**; `subject_in_frame < 0.85` 가 vista_d121 27.2% / dynpose_d137 41.4%;
+    `track_*`+`aim=free` 3897 seg 이 `in_frame<0.5` 31.7~38.2% 인데 캡션은 100% 추종을
+    주장(79~87% 는 프레이밍까지 약속) — task #134 의 크기를 처음 정량화한 값이다.
+- **`main/conf/experiment/dynpose_d137_da3_molmo2.yaml` (D141) — 데이터축 × 모델축 2×3
+  그리드의 빈 칸 (2026-09-06).** 사용자 지시 "데이터 측면에서 vista(scene 적고 preset 많음),
+  dynpose(scene 많고 preset 적음) 을 비교하고 모델 측면에서 da3 vs molmo2 vs da3 + molmo2 를
+  비교". vista d121 은 da3(D123)/molmo2(D133)/da3+molmo2(D124) 세 칸이 다 찼는데 dynpose
+  d137 은 da3(D137)/molmo2(D138) 둘뿐이라 **"molmo2 를 얹는 이득이 코퍼스에 따라 달라지는가"**
+  라는 상호작용 항을 물을 수 없었다.
+  · 주석 제거 후 diff 기준, D137 대비 **molmo2 블록만** 추가되고 D138 대비 **geo(da3) 블록만**
+    추가된다 (`exp_name` 제외 나머지 키 전부 동일). D123→D124 와 같은 조작을 dynpose 축에
+    옮긴 것이다.
+  · 캐시는 새로 굽지 않는다 — geo raw 는 D137 과 같은 d129 경로(씬 키 기준이라 코퍼스
+    재굽기와 무관), molmo2 는 D138 이 구운 d137 루트 캐시. 후자가 dd10 리스트만 덮으므로
+    `peav_seg_list_only: true` 를 같이 켠다.
 - **`peav_seg_list_only` — PE-AV/molmo2 캐시 커버리지 검사를 seg-list 안으로 좁히는 옵션
   (D138, 2026-09-06).** `main/dataset_dl3dv.py` 에 `_peav_scope()` 를 추가하고
   `_preload_peav` 의 video 키 집합 / text miss 검사가 그 범위만 보게 했다.

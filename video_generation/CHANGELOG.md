@@ -7,6 +7,26 @@
 ## [Unreleased]
 
 ### Added
+- **`scripts/run_trumans_d132_shard.sh` — TRUMANS **3D mesh 충돌** 뱅크 드라이버 (D132,
+  2026-09-05, 사용자 지시 "내가 fitting하는거 blender scene에서 3d mesh로 해서 하자고 안했나?
+  context video에 안보이는 부분이더라도 충돌, clearnace 같은거 고려해서 전체 scene에 안부딪히도록
+  fitting 한 sequence에 대해서만 해주고 target은 우선 man만 해서 돌려주고 렌더 보여줘").**
+  D128 축 위에서 두 가지만 바꾼다: ① `fit_hole_ladder.py --collision_source both` 로 depth
+  shell 뿐 아니라 **`.blend` 씬 mesh** 와의 충돌까지 본다 — context 영상에 안 보이는 벽·가구도
+  막힌다. ② `--nodes dyn_0` / `--anchors dyn_0` 로 target 을 **사람 하나**로 고정한다.
+  · 3단계 TAU(`sample_camera_bank.py`) -> FIT(`fit_hole_ladder.py --collision_time_match`) ->
+    EMIT, EMIT 은 FIT rc==0 일 때만 돈다. 기본값 `TAU=bank_d132` / `BANK=hole_bank_k6_d132` /
+    `EASE=smooth_kf`. 인자 `<gpu> <shard_id> <num_shards> <video_list> <log_dir>`.
+  · 48 chunk 4샤드 실측 — 변이 6794 중 `solved` **1327**, `collision_limited` **2813 (41.4%)**,
+    `approach_limited` 815, `clamped_low+tau_floor` 808, `obb_limited` 241, `elev_limited` 235,
+    `static` 182, `shape_limited` 179, `collision_limited+tau_floor` 90, `clamped_low` 64,
+    `ground_limited` 23, `elev_limited+tau_floor` 17. solved 0 인 chunk 1/48,
+    solved/chunk 중앙값 28 (최소 3 / 최대 42). mesh 게이트가 실제로 물고 있다.
+  · **`bank.csv` 에는 depth-vs-mesh 분해 열이 없다** — `behind_static_*`/`behind_dyn_*` 는
+    static/dynamic 채널 분해지 충돌 소스 분해가 아니다. 그래서 depth-only 대조군은 별도 뱅크
+    (`hole_bank_k6_d132depth`)로 따로 구웠다.
+  · 릴: `results/20260905_d132_preset_warp` — moving `a15`(drift 0.084, preset 22 / track 8) ·
+    `a09`(0.230, 21/8), static `a07`(0.017, 12/0) · `a03`(0.038, 12/0).
 - **`scripts/pick_warp_sample_scenes.py` + `scripts/run_preset_warp_sample.sh` — 뱅크 재굽기 뒤
   **표준 확인 절차**를 형식화했다 (2026-09-05, 사용자 지시 "앞으로 돌리는거 끝나면 저렇게
   dynamic subject 움직이는거 두개정도 움직이지 않는거 2개 정도해서 preset별 depth warp
@@ -386,6 +406,21 @@
     의 **미결** 항목 그대로 — D104 target 절 A/B 대기).
 
 ### Fixed
+- **`scripts/run_dynpose_d129_export.sh` 1단계가 캡션 0 편을 **rc=0 으로** 굽던 것 (FIX-D129-a,
+  2026-09-05).** `build_bank_captions.py --videos all` 은 영상 목록을 `--metadata_csv` 에서
+  만드는데(`:687`) 기본값이 Vista4D 것(`:55 METADATA_DEFAULT`)이라, dynpose UUID 와 교집합이
+  0 이 되어 `videos=[]` -> captions 0 으로 조용히 끝났다. 파일이 없는 게 아니라 **다른 코퍼스의
+  목록**을 쓴 것이라 예외가 안 난다. d110 export 스크립트가 이 인자를 안 넘겼고 d129 가 그대로
+  물려받았다 (`hole_bank_d110` 도 captions 0 으로 남아 있다).
+  · 조치: 목록을 metadata 가 아니라 **뱅크 산출물에서 직접** 뽑아 명시적으로 넘긴다 —
+    `VIDS=$(ls -d out_dynpose/*/$HOLE/bank.json | cut -d/ -f2)`. `--videos` 가 명시되면
+    `:701` 이 `events.get(video, "")` 라 metadata 에 행이 없어도 KeyError 가 안 난다.
+  · dynpose `metadata.csv` 는 `video,dynamic` 뿐이라 `prompt` 열이 없다 — 이 파일은 dynpose 에서
+    영상 목록 말고는 아무 일도 안 한다 (event 가 전부 빈 문자열). 그래서 목록의 출처를 바꾸는
+    것이 의미 손실 없이 안전하다.
+  · 덤: dynpose metadata 를 넘겼어도 265/267 이었다. `00e9f728-…` / `015b197d-…` 두 편은
+    metadata 에 행 자체가 없는데 recon 은 있다. 뱅크에서 세면 267 로 맞아 `NB == NC` 게이트가
+    제 값을 한다. 수정 후 실측 **267/267 OK 전량 일치**.
 - **`CloudRenderer` 를 프레임별 DA3 K 로 띄우던 나머지 6곳에 `--fixed_focal`(기본 **True**) 를
   달았다 (2026-09-05, 아래 릴 수정의 후속 감사).** 릴 버그를 고치면서 `CloudRenderer(` 18곳을
   전수 감사했더니 5곳은 `fixed_focal=True` 하드코딩, 7곳은 인자로 받고 있었는데 **6곳이 아무것도

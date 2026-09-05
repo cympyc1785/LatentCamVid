@@ -5,6 +5,25 @@ All notable changes to the latentcam sub-project. Follows [Keep a Changelog](htt
 ## [Unreleased]
 
 ### Added
+- **`main/conf/experiment/vista4d_d121_molmo2_nogeo.yaml` — molmo2 CA 단독 arm (D133,
+  2026-09-05, 사용자 지시 "반대로 da3를 빼고 molmo2만 써서도 학습돌려놔줘").** D124 의 거울상이다.
+  · 세 arm 이 같은 코퍼스(d121) · 같은 875 heldout · 같은 text_len 128 위에 놓인다 —
+    D123 `text CA + geo CA` / D124 `text CA + molmo2 CA + geo CA` / **D133 `text CA + molmo2 CA`**.
+  · **왜 필요한가**: D124 video CA 계측(#171, n=875)이 `dpred_drop 0.02395` 인데
+    `dpred_xscene 0.00462` 였다 — 영상을 빼면 예측이 움직이는데 **다른 씬 영상으로 바꿔치면
+    그 1/5 밖에 안 움직인다**. D124 의 이득이 "영상을 읽어서"인지 "CA 슬롯이 하나 더 있어서"인지
+    이 arm 이 가른다. geo 없이 D123 수준을 유지하면 전자, 크게 떨어지면 후자다.
+  · D124 대비 바뀐 줄은 geo 계열뿐이다: `geo_encoder: da3 → null`, `geo_posed: true → false`,
+    `geo_raw_cache_dir: <경로> → null`, da3 전용 키(`da3_geo_model` / `da3_geo_input_hw` /
+    `da3_geo_layers` / `geo_view_sampling` / `geo_num_views` / `geo_first_view_target_s` /
+    `da3_cam_token_per_sample`) 삭제. molmo2 5줄과 나머지는 글자 그대로 같다.
+  · **코드 변경 0.** `geo_encoder: null` 한 줄이 이미 있던 세 분기를 동시에 탄다 —
+    `main/dataset_cfg.py:263` `geo_enabled = bool(getattr(cfg, 'geo_encoder', None))`,
+    `main/train_latent_cam_dm.py:482` `build_geo_encoder(cfg) ... if ... else None`,
+    `models/camera_diffusion_model_latent.py:261` `has_geo_latent = geo_emb is not None`.
+    smoke 로그에 geo 관련 줄이 한 줄도 안 찍히는 것으로 확인했다.
+  · `pose_source: da3` / `target_pose_source: da3_target_poses` 는 **카메라 궤적 자체**의
+    출처라 그대로 둔다 — geo 스트림과 무관하다.
 - **`main/conf/experiment/vista4d_d128_da3_t128.yaml` — D128 뱅크를 쓰는 첫 학습 arm (D131,
   2026-09-05).** D128 뱅크(#165)와 export(#166)는 끝나 있었는데 그걸 참조하는 config 가
   하나도 없었다 (`main/conf/` grep: d121 16회 / d77 9회 / dynpose_d107 17회 / dynpose_d110 4회 /

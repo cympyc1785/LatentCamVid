@@ -1,0 +1,65 @@
+# @package _global_
+# D133 — `vista4d_d121_molmo2.yaml`(D124) 에서 **da3 geo CA 스트림만 제거**한 arm.
+# 레이어 순서 text CA(umt5) -> molmo2 CA. geo CA 없음.
+#
+# ═══ 왜 이 arm 인가 ═══════════════════════════════════════════════════════════════════════
+# D123(text CA + geo CA) 대비 D124(text CA + molmo2 CA + geo CA)는 recall 을 뺀 전 지표에서
+# 앞섰지만, video CA 계측(`results/20260905_d124_video_ca_probe/report.txt`, n=875)에서
+# `dpred_drop 0.02395` vs `dpred_xscene 0.00462` 였다 — 영상을 빼면 예측이 움직이는데 **다른
+# 씬 영상으로 바꿔치면 거의 안 움직인다**. 즉 molmo2 스트림이 씬-무관 bias 로 쓰였을 가능성이
+# 있고, 그 경우 이득의 출처는 "영상을 읽어서"가 아니라 "CA 슬롯이 하나 더 있어서"다.
+# 이 arm 은 그 두 해석을 가른다: geo 를 빼고 molmo2 만 남겼을 때
+#   · D123(geo only) 수준을 유지하면  -> molmo2 가 geo 를 대체할 만큼의 씬 정보를 나른다
+#   · 크게 떨어지면                    -> D124 의 이득은 geo 위에 얹힌 여분 용량이었다
+# D124 의 거울상이므로 코퍼스(d121)·text_len(128)·VAE·scale_mode·intr_norm·seed 를 전부 고정한다.
+#
+# ═══ 무엇이 꺼지는가 ═══════════════════════════════════════════════════════════════════════
+# `geo_encoder: null` 하나가 세 군데를 동시에 끈다:
+#   · dataset  `dataset_cfg.py:263  geo_enabled = bool(getattr(cfg, 'geo_encoder', None))`
+#              -> context 이미지 로딩 / geo_raw 캐시 / geo cam token 전부 안 탄다
+#   · train    `train_latent_cam_dm.py:482  ... if getattr(cfg, 'geo_encoder', None) else None`
+#              -> 인코더 인스턴스가 안 만들어지고 `_geo_trainable=False` 라 ln/proj 도 optimizer
+#                 에 안 들어간다
+#   · model    `camera_diffusion_model_latent.py:261  has_geo_latent = geo_emb is not None`
+#              -> geo cross-attn 블록을 forward 에서 건너뛴다 (모델 코드 변경 0)
+# `pose_source: da3` / `target_pose_source` 는 **카메라 궤적 자체**의 출처라 그대로 둔다 —
+# geo 스트림과 무관하다.
+exp_name: vista4d_d121_molmo2_nogeo
+dl3dv_root: /data1/cympyc1785/data/Vista4D-Eval-Data/latentcam_da3_k6_d121
+meta_csv: meta_vista4d.csv
+train_seg_list: /data1/cympyc1785/data/Vista4D-Eval-Data/latentcam_da3_k6_d121/seg_list_vista4d_train.txt
+test_seg_list: /data1/cympyc1785/data/Vista4D-Eval-Data/latentcam_da3_k6_d121/seg_list_vista4d_test.txt
+coverage_blacklist_path: null
+
+text_len: 128   # umt5 text CA. D123/D124 와 동일 — 캡션 최장 89 토큰이라 잘림 0.
+
+pose_source: da3
+target_pose_source: da3_target_poses
+scale_mode: avg_scale
+avg_scale_ref: context_first_cam
+intr_norm: rel
+cam_dim: 64
+
+# ─── geo (da3) 스트림 제거 ────────────────────────────────────────────────────────────────
+geo_encoder: null          # ← D124 는 'da3'. 이 한 줄이 dataset/train/model 세 군데를 끈다.
+geo_posed: false           # geo 가 없으므로 무의미하지만, true 로 두면 나중에 이 config 를
+                           #   읽는 사람이 "posed geo 를 쓴다"로 오독한다.
+geo_cam_embed: null
+geo_latent_cache_dir: null
+geo_raw_cache_dir: null    # geo_enabled=False 면 dataset_cfg.py:472 에서 어차피 안 읽지만,
+                           #   경로가 남아 있으면 캐시를 쓴다고 오독된다.
+
+anchor_pred_frame0: true
+
+# ─── Molmo2 CA (D124 와 글자 그대로 동일) ─────────────────────────────────────────────────
+peav_video_cache_dir: /data1/cympyc1785/data/Vista4D-Eval-Data/latentcam_da3_k6_d121/molmo2_cache/video
+peav_text_cache: /data1/cympyc1785/data/Vista4D-Eval-Data/latentcam_da3_k6_d121/molmo2_cache/text.pt
+video_latent_dim: 2560     # Molmo2 LM hidden — video part (3136 tok)
+video_text_in_stream: true
+video_text_dim: 2560       # 같은 LM hidden — text part (128 tok). 기본 1024 는 PE-AV 값이다.
+peav_in_ln: true           # proj 앞 LayerNorm. FIX-D117 참조 (없으면 CA logit 포화)
+video_gate: true           # 0 초기화 residual gate. FIX-D117 참조 (없으면 loss ~1.0 정체)
+
+batch_size: 8
+epochs: 200                # 실제 집행자는 conf/config.yaml 의 `epoch_cap: 100`.
+ckpt_at_epochs: [50, 100]

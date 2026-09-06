@@ -25,8 +25,26 @@
   **기본값은 `--pose_length 30 --strict_pose_length`** 라 인자 없이 부르면 예전과
   bit-identical 이다 (non-degenerate 일 때 `token[:usable] == token[:-1]`).
 
-  d121 test 앞 8 entry 실측: `n_poses hist {49: 8}`, `degenerate 0` — 릴리즈 ckpt 는 30 에서
-  안 끊고 49 를 끝까지 뽑는다.
+  d121 test 앞 8 entry 실측: `n_poses hist {49: 8}`, `degenerate 0`.
+  **다만 8 entry 로는 부족했다** — 875 전량에서는 166 번째(`avocado-slice/165`)가 EOS 를 내고
+  GenDoP 내부 assert 로 죽었다. 아래 `--forbid_eos` 항목 참조.
+
+- **`gendop_release_infer.py` 에 `--forbid_eos` / `--no_forbid_eos` (D156, 2026-09-07).**
+  `--pose_length 49` 전량 실행이 166/875 에서 `core/models.py:359
+  assert np.all(tokens >= 0)` 로 죽었다. `:324-329 prefix_allowed_tokens_fn` 이 `1+10N`
+  위치마다 `eos_token_id=2` 를 후보에 넣고 `:358` 이 `output_ids - 3` 을 하므로 **EOS 가
+  나온 자리가 -1** 이 된다. 학습 길이(30)에서는 `max_new_tokens` 에 항상 먼저 걸려 EOS 가
+  안 나오지만, 49 로 넘겨 요구하면 일부 entry 가 실제로 EOS 를 낸다.
+  `--no_strict_pose_length` 는 `model.generate()` **리턴 뒤**의 가드라 이 assert 를 못 막는다.
+
+  `core.utils.monkey_patch_transformers()` 가 이미 갈아끼운
+  `PrefixConstrainedLogitsProcessor.__call__` 위에 한 겹 더 씌워 EOS 열을 -inf 로 만든다
+  (`forbid_eos_in_logits()`). **GenDoP 리포는 0 줄 수정.** 후보 `range(3, 260)` 257 개는
+  그대로라 "빈 후보" ValueError 는 안 난다. config.json 에 `forbid_eos` 기록.
+
+  기본값은 auto — `pose_length == 30` 이면 off 라 예전 경로 무변경 (실측: 같은 3 entry 를
+  30 으로 재실행하면 c2w 완전 일치). 49 면 on. 죽던 3 entry 가 `n_poses hist {49: 3}`,
+  `degenerate 0` 으로 통과.
 
 - **`gendop_release_eval.py` 에 게이지 통일 옵션 `--n_poses` / `--resample` / `--fps` /
   `--align_len` / `--out_name` (D156, 2026-09-07, 사용자 지시 "우리 모델이 학습한걸

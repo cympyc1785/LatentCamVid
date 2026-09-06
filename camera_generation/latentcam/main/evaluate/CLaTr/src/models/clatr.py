@@ -346,12 +346,17 @@ class CLaTr(TEMOS):
             plot_dict = {**traj_plots[0].figures, **latent_plots}
             for plot_name, raw_plot in plot_dict.items():
                 raw_plot.canvas.draw_idle()
-                plot_data = np.frombuffer(
-                    raw_plot.canvas.tostring_rgb(), dtype=np.uint8
-                )
-                plot_data = plot_data.reshape(
-                    raw_plot.canvas.get_width_height()[::-1] + (3,)
-                )
+                # canvas.tostring_rgb() 는 matplotlib 3.10 에서 삭제됐다(3.8 deprecate).
+                # 있으면 그대로 쓰고, 없으면 RGBA 버퍼에서 알파를 떼어 같은 (H,W,3) 을 만든다.
+                if hasattr(raw_plot.canvas, "tostring_rgb"):
+                    plot_data = np.frombuffer(
+                        raw_plot.canvas.tostring_rgb(), dtype=np.uint8
+                    )
+                    plot_data = plot_data.reshape(
+                        raw_plot.canvas.get_width_height()[::-1] + (3,)
+                    )
+                else:
+                    plot_data = np.asarray(raw_plot.canvas.buffer_rgba())[..., :3]
                 caption = f"[Epoch {self.current_epoch}]"
                 caption += (
                     f" {sent[0]}"
@@ -458,15 +463,19 @@ class CLaTr(TEMOS):
             sample_dict = {}
             mask = masks[index].to(bool)
 
-            ref_se3 = [x for x in ref_matrices[index][mask].numpy()]
+            # float64 로 넘긴다. evo 의 euler_from_matrix 는
+            # `numpy.array(M, dtype=float64, copy=False)` 를 쓰는데, float32 를 주면
+            # dtype 변환에 복사가 필요해 numpy 2 에서 ValueError 로 죽는다
+            # (numpy 1.x 에서는 조용히 복사했다). 여기서 이미 float64 면 복사가 없다.
+            ref_se3 = [x for x in ref_matrices[index][mask].double().numpy()]
             sample_dict["ref_sample"] = PosePath3D(poses_se3=ref_se3)
             colormaps.append("Greens")
 
-            t_se3 = [x for x in text_matrices[index][mask].numpy()]
+            t_se3 = [x for x in text_matrices[index][mask].double().numpy()]
             sample_dict["t_sample"] = PosePath3D(poses_se3=t_se3)
             colormaps.append("Blues")
 
-            m_se3 = [x for x in traj_matrices[index][mask].numpy()]
+            m_se3 = [x for x in traj_matrices[index][mask].double().numpy()]
             sample_dict["m_sample"] = PosePath3D(poses_se3=m_se3)
             colormaps.append("Reds")
 

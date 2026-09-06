@@ -5,6 +5,22 @@ All notable changes to the latentcam sub-project. Follows [Keep a Changelog](htt
 ## [Unreleased]
 
 ### Added
+- **`scripts/prepare_clatr_vista.py` + `main/evaluate/CLaTr/configs/dataset/standardization/vista49.yaml`
+  — CLaTr 을 우리 vista 코퍼스로 학습할 수 있게 (D153, 2026-09-06).** 지금까지 caption 지표를
+  **E.T./ArtTraj 로 학습된 ckpt** 로 재 왔다. 그 config 는 `num_cams: 120` 에 shift_std
+  ~[1.13, 1.19, 1.59] 인데 우리 target 궤적은 49프레임이고 실측 shift_std 가
+  [0.389, 0.082, 0.226] 이다 — 텍스트-궤적 정합이 아니라 게이지 불일치를 재고 있었다.
+  · prep 은 `--stage json|clip|all` 단일 드라이버. `da3/target_poses.npz` 의 extrinsics 는
+    OpenCV **w2c** 라 `inv` → `[:, :3, 1:3] *= -1` (OpenCV→OpenGL) 두 단계를 밟는다 —
+    `main/prepare_clatr_data.py` 와 같은 변환. 캡션은
+    `prompts.json['<idx>']['prompt_camera_with_scene_video']['concise']`.
+  · split 은 원본의 95/5 랜덤이 아니라 **코퍼스 자신의** `seg_list_vista4d_{train,test}.txt`
+    를 쓴다. 학습 arm 들과 test entry 가 어긋나면 지표를 서로 대조할 수 없다.
+    결과 train 9,389 / test 592 / 발산·결측 0, 궤적 길이 전부 49.
+  · vista49.yaml 의 `norm_*`/`shift_*` 는 우리 train split 실측값이다. **현재는 안 쓰인다** —
+    `trajectory_dataset.py:43` 이 `self.standardize = False` 로 못 박아 뒀다. 그래도 남의
+    코퍼스 숫자를 물려두면 나중에 켤 때 조용히 틀리므로 우리 값을 적었다. 실제로 바뀌는
+    축은 `num_cams` 120→49 (padding 길이) 하나다.
 - **`main/conf/experiment/vista4d_d128_molmo2{,_nogeo}.yaml` — d128 코퍼스의 molmo2 두 셀
   (D152, 2026-09-06).** d121 축에는 모델 3셀(da3 / molmo2_nogeo / da3+molmo2)이 다 있는데
   d128 축에는 `vista4d_d128_da3_t128`(D131) 하나뿐이라, "molmo2_nogeo 가 제일 낫다"가
@@ -380,6 +396,18 @@ All notable changes to the latentcam sub-project. Follows [Keep a Changelog](htt
   경고 0 (래치) / `seq_len=512` 로는 241 tok 도 경고 0 / 짧은+긴 혼합 배치 경고 1.
 
 ### Fixed
+- **CLaTr 학습이 wandb 를 켜면 epoch 0 validation 끝에서 죽었다 — 신버전 의존성 두 건
+  (FIX-D153, 2026-09-06).** 둘 다 `main/evaluate/CLaTr/src/models/clatr.py` 의
+  **validation 궤적 플롯 경로**에 있다. 이 경로는 logger 가 있을 때만 돌기 때문에
+  `WANDB_MODE=disabled` smoke 가 통째로 건너뛰었다 — "smoke 는 wandb 끄고" 규칙의 사각지대.
+  1. `draw_traj_plots` 가 float32 pose 를 evo 에 넘겼다. `evo/core/transformations.py:1145`
+     의 `numpy.array(M, dtype=float64, copy=False)` 는 dtype 변환에 복사가 필요한데 numpy 2
+     는 그걸 `ValueError: Unable to avoid copy` 로 만든다 (numpy 1.x 는 조용히 복사했다).
+     → `.numpy()` 를 `.double().numpy()` 로 (ref/t/m 3곳). 플롯을 끄는 대신 dtype 을 맞춘
+     이유는, 끄면 evo 가 정상인 환경에서도 산출물이 조용히 사라지기 때문.
+  2. `canvas.tostring_rgb()` 는 matplotlib 3.8 deprecate / **3.10 삭제** (여기 3.10.8).
+     → `hasattr` 로 갈라 없으면 `np.asarray(canvas.buffer_rgba())[..., :3]`. 구버전 mpl 은
+     기존 경로 그대로.
 - **`scripts/eval_testset.py` 가 video CA arm 을 평가할 수 없었다 — 두 군데 (FIX-D130,
   2026-09-05).**
   1. **모델 생성자에 video CA 인자가 없었다.** `CameraDiffusionModel(cam_dim=..., cond_dim=...,

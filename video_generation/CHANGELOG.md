@@ -7,6 +7,20 @@
 ## [Unreleased]
 
 ### Added
+- **`CinemaTraj/scripts/eval_dir_to_gendop_npz.py` — latentcam eval 폴더를 GenDoP 캡션
+  harness 입력으로 (D156, 2026-09-07, 사용자 질문 "caption 지표는 어떻게 재야 공정하게
+  잴 수 있어?").** `gendop_release_eval.py` 는 npz 디렉토리(`latentcam__<scene>__<name>.npz`
+  의 `c2w`) 위에서 재는데 우리 arm 은 eval JSON(`<run>/test/*_transforms_pred.json`) 만
+  남긴다. 그래서 지금까지 우리 arm 과 GenDoP arm 이 **서로 다른 harness** 로 측정됐다.
+  이 스크립트가 JSON → npz 로 옮겨 네 arm 을 한 harness 에 올린다. `transform_matrix` 는
+  OpenGL c2w 이고 `gendop_release_eval.opencv_like_identity` 가 OpenGL 을 그대로 분절기에
+  넣으므로 **변환 없이** 옮긴다 (GenDoP npz 와 같은 게이지).
+
+  `--which ref` 로 GT 를 뽑으면 **harness 자기검증**이 된다 — d121 test 875 entry 실측
+  `pooled F 0.9673 / frame match 0.9693`. 1.0 이 아닌 3% 는 GT 태그가 th 0.05 로 구워진
+  반면 이 harness 는 DataDoP 컨벤션(static 0.02 / diff 0.4)으로 재태깅하기 때문이고,
+  이 값이 **이 게이지의 천장**이다. 천장 없이 arm 수치만 보면 안 된다.
+
 - **`gendop_release_infer.py` 에 native 생성 길이 손잡이 `--pose_length` /
   `--strict_pose_length` (D156, 2026-09-07, 사용자 지시 "직접 49프레임 추론하도록해줘").**
   기존에는 30 포즈를 뽑고 하류(`gendop_preds_to_eval_dir.py --src_poses 30 --n_poses 49`,

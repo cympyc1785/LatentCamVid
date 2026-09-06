@@ -160,6 +160,36 @@
   재현할 때의 근거 기록이다. 첫 사용처는 `configs/bank/d150S.json` / `d150L.json`.
 
 ### Fixed
+- **`gendop_release_infer.py` — 0 quaternion 이 회전 3×3 을 통째로 NaN 으로 만들던 것
+  (D156, 2026-09-07).** GenDoP 는 포즈당 10 토큰 중 앞 4 개가 quaternion 이고 `decode_tokens`
+  가 `coords[:, :7] / (0.5*bins) - 1` (bins=256) 로 역양자화한다. 회전 4 토큰이 **전부 bin
+  128** 이면 `q = (0,0,0,0)` 이 되고, `/data1/cympyc1785/pipeline/GenDoP/core/utils.py:209
+  quaternion_to_matrix` 가 0 노름으로 나눠 그 프레임 회전이 전부 NaN 이 된다. NaN 은 npz →
+  eval_dir JSON → 렌더러까지 살아남아 `Vista4D/utils/point_cloud/point_cloud.py:8` 의
+  `torch.inverse` 가 `linalg.inv: ... singular` 로 죽는다.
+
+  `decode_tokens` 가 그 프레임을 **직전 프레임 회전으로 이어붙인다** — 0 quaternion 은
+  "회전 정보 없음"이지 "회전 0" 이 아니라서 identity 로 박으면 궤적이 튄다. 첫 프레임이면
+  identity. 때운 프레임 수를 npz `n_zero_quat` / config.json `zero_quat_entries` / 요약
+  `zero_quat` 에 남기고, 반환 직전 `np.all(np.isfinite(out))` assert 를 건다.
+  **`det` 로는 못 잡는다** — NaN 블록의 `np.linalg.det` 는 NaN 이고 임계값 비교가 항상
+  False 라 특이행렬 검사를 그대로 통과한다. 포즈 검사는 `isfinite` 를 먼저.
+
+  d121 test 875 entry 실측: `--pose_length 49` text arm 3 건(`avocado-slice/25` f32·33 /
+  `bmx-bumps/42` f37 / `camel/323` f35), rgbd arm 0 건. 30 포즈 런은 0 건이라 예전 결과는
+  영향 없다. 가드가 `model.generate()` **뒤**라 토큰은 안 건드리고, translation 토큰은
+  따로라 유한했으므로 이미 나온 npz 3 개는 직전 프레임 회전 복사로 제자리 수리했다
+  (재추론과 bit-identical). GenDoP 리포는 여전히 0 줄 수정.
+
+- **`tmp/d156/run_gendop_d121.py` — `--eval_data` 규약이 스크립트마다 달라 score 가 한 번도
+  성공한 적이 없던 것 (D156, 2026-09-07).** `dynpose_gendop_inputs.py:74` 는
+  `<eval_data>/recon_and_seg/<scene>` 로 join 하는데, `eval_subject_in_frame.py` 가 타는
+  `CinemaTraj/scene_graph/io.py:88 load_scene` 은 `<eval_data>/eval_data/recon_and_seg/<video>`
+  로 "eval_data" 를 한 번 더 붙인다. 드라이버가 상수 하나를 양쪽에 넘겨
+  `.../Vista4D-Eval-Data/eval_data/eval_data/...` 가 됐고 `ValueError: Could not open video
+  file` 로 죽었다. `EVAL_DATA`(inputs 용) / `EVAL_DATA_PARENT`(score 용)로 갈랐다.
+  **30 포즈 런의 `subject_in_frame.json` 도 같은 이유로 생긴 적이 없다** — 다시 돌려야 한다.
+
 - **`CinemaTraj/scripts/extract_static_nouns.py` — `prompt` 열이 없는 코퍼스에서 KeyError
   (D149, 2026-09-06).** `read_prompts` 가 `row["prompt"]` 로 직접 인덱싱했는데 DynPose-LBM 의
   `metadata.csv` 는 `video,dynamic` 두 열뿐이다 (`extend_dynpose_metadata.py` 의 `FIELDS`).

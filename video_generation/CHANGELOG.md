@@ -6,7 +6,56 @@
 
 ## [Unreleased]
 
+### Fixed
+- **`CinemaTraj/scripts/route_presets.py` — 세로 슬롯(crane/pedestal)이 전량 조용히 빠지던 것
+  (D147, 2026-09-06).** 슬롯 게이트가 `grav == "ground_ransac"` 이었는데 D98 이 gravity 를
+  GeoCalib 로 옮기면서 그 이름이 한 번도 안 나오게 됐다 — 실측으로 dynpose 280/280,
+  vista 52/53 이 `geocalib` 이다. vista 는 라우팅을 안 타고 preset 을 전량 열거해서 안 걸렸지만
+  dynpose 는 이 함수를 타므로 `dd10` 코퍼스 10,857 행에 crane/pedestal 이 **0건**이었다.
+  `--vertical_gravity`(기본 `ground_ransac,geocalib`)로 신뢰할 gravity 방법을 목록으로 받게 했다.
+  함수 기본값은 `("ground_ransac",)` 로 옛 동작을 그대로 재현하고, 새 동작은 CLI 기본값이다
+  (D143 과 같은 규약). reasons 에 `vertical_gravity_ok` 열을 추가했다. 옛 동작 재현은
+  `--vertical_gravity ground_ransac`. **이 수정은 뱅크를 다시 구워야 산출물에 반영된다** —
+  D145 의 880편 굽기에서 들어간다.
+
 ### Added
+- **`CinemaTraj/scripts/run_dynpose_d147_caption_export.sh` — dynpose 프레이밍 약속 위반 캡션을
+  고친 별도 코퍼스 (D147, 2026-09-06).** D143 이 vista d121/d128 에 넣은
+  `--framing_min_in_frame 0.85` 게이트를 dynpose d137 뱅크에도 적용한다 (그때는 D137/D141 이
+  그 코퍼스로 학습 중이라 뺐다). d137 배포 캡션 헤더에는 `framing_min_in_frame` 필드 자체가
+  없다 — D143 이전 코드로 구운 것이다. 실측: dd10 10,857 행 중 `subject_in_frame < 0.85` 가
+  4,570(42.1%)이고 그중 3,225(코퍼스의 29.7%)가 여전히 framing 절을 달고 있었다. 뱅크 전량
+  46,425 변이 기준으로는 6,312(13.6%)에서 절이 빠진다. 기존 루트를 덮지 않고
+  `latentcam_dynpose_d137c147` 을 새로 판다(~14 GB) — 제자리에서 갈면 D137/D141 의 학습 캡션과
+  재평가 캡션이 어긋난다. 캡션만 바꿨으므로 `seg_list_dynpose_{,dd10_}{train,test}.txt` 와
+  `meta_dynpose.csv` 가 d137 과 **글자 그대로** 같아야 하고, 스크립트 마지막 단계가 그걸
+  `cmp` 로 확인한다. `--videos` 는 `all` 이 아니라 뱅크에서 직접 뽑는다 (FIX-D129-a).
+
+- **`CinemaTraj/scripts/{run_dynpose_d145_nouns.sh,extend_dynpose_metadata.py}` — dynpose
+  코퍼스를 267 → 880 편으로 넓히기 위한 앞단 2종 (D145, 2026-09-06).**
+  - `run_dynpose_d145_nouns.sh`: 명사 없는 600편의 VLM 명사 추출 드라이버. `extract_nouns_vlm.py`
+    는 **끝날 때 한 번만** json 을 쓰므로(그 파일 :215-229) 600편 단일 프로세스는 590편째 예외
+    하나에 전부 날아간다. 스크립트는 안 고치고 `--merge` 로 25편씩 끊어 부른다 — 손실 단위가
+    600 → 25 편. 매 batch 전에 이미 들어간 `(video, multi)` 를 빼므로 재실행하면 이어서 간다.
+  - `extend_dynpose_metadata.py`: `vlm_nouns.json` → `DynPose-LBM/metadata.csv` 행 추가.
+    `sam3_seg_instances.py:69` 가 그 csv 를 읽고 없으면 `assert not missing` 으로 죽는다.
+    **`dynamic` 열에는 VLM 의 dynamic 명사만 넣고 static 은 버린다.** 이 csv 로 들어온 명사는
+    `scene_graph/io.py:101` 에서 전부 `kind="dyn"` 이 되지만(dynpose 에는 `seg_instances_static`
+    이 없다), 앵커 버킷을 가르는 건 `kind` 가 아니라 `moving`(`path_len_u > 0.05`)이라
+    안 움직이는 dyn 노드는 `--max_static_anchors` 버킷으로 넘어간다
+    (`sample_camera_bank.py:810,823` 의 실측 주석: "484 노드 중 moving=True 124개, 전부
+    kind='dyn'; dyn 이어도 52개는 안 움직인다"). 즉 wall/floor/pillar 를 넣으면 그게 그대로
+    **static target 후보**가 된다 — 사용자가 금지한 것이다. 게다가 기존 279행은 저자 라벨의
+    비-이동 물체(chair/shelf/box)만 그 버킷에 넣으므로, 신규 600편에만 VLM static 명사를
+    넣으면 코퍼스 절반의 static 앵커 수가 달라진다. static 명사는 버리지 않고 사이드카
+    `metadata_provenance_d145.json` 에 남겨 두어, 나중에 `sam3_static_instances.py` 로
+    별도 `seg_instances_static` 트리를 만들 때 재료로 쓴다.
+    csv 스키마(`video,dynamic`)는 그대로 두고
+    provenance(저자 라벨 279행 vs VLM 신규)도 그 사이드카에 적는다. 쓰기 전 타임스탬프 백업.
+  - `run_dynpose_d145_sam3.sh`: 확장된 csv 로 SAM3 인스턴스 분할을 GPU 샤딩해 돌리는 런처.
+    `sam3_seg_instances.py` 가 이미 `--num_shards/--shard_id/--skip_done` 을 갖고 있어
+    스크립트는 안 고친다. `--videos` 를 안 넘기는 게 의도다 — 목록을 안 주면 csv 전량을 쓰고
+    (`:70`) `--skip_done` 이 `masks.npz` 있는 기존 279편을 건너뛰므로 결과적으로 신규분만 돈다.
 - **`scripts/build_bank_captions.py --framing_min_in_frame` / `--no_framing_on_free` +
   `scripts/run_d143_caption_export.sh` — 프레이밍 약속을 못 지킨 변이에서 그 절만 빼는
   캡션 게이트 (D143, 2026-09-06, 사용자 지시 "5번은 고쳐야할 것 같아. 지금 학습 안돌리는

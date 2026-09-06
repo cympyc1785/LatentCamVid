@@ -7,6 +7,39 @@
 ## [Unreleased]
 
 ### Added
+- **`CinemaTraj` framing 게이트를 절 종류별 임계로 — `--framing_exit_min_in_frame`
+  (D154, 2026-09-06, 사용자 지시 "텍스트가 실제 framing 과 다르게 만들어졌던 부분").**
+  `build_bank_captions.py` 의 `framing_dropped()` 가 `framing_parts()` 의 `way` 를 읽어
+  `exit` 절("... until the subject leaves the frame")에만 별도 임계를 적용한다. 기본
+  0.05 (`--framing_min_in_frame 0.85` 는 그대로).
+
+  **왜 필요한가**: D143 의 단일 임계는 `exit` 절을 같이 지웠다. 그 절은 대상이 나간다고
+  **이미 말하고 있으므로** `subject_in_frame` 이 낮은 게 거짓이 아니라 정확한 서술이다.
+  vista d128 train 9,389 entry 실측 — framing 약속 8,395건을 절 종류로 가르면:
+
+  | 절 종류 | n | in_frame<0.85 | =0 |
+  |---|---|---|---|
+  | `plain` "keeping it in a medium shot" | 3,182 | 220 (6.9%) | 84 |
+  | `change` "... tightening to a close-up" | 4,178 | 597 (14.3%) | 71 |
+  | `exit` "... until the subject leaves the frame" | 1,035 | **1,026 (99.1%)** | 105 |
+
+  0.85 일괄이면 1,843건이 빠지는데 그중 1,026건(56%)이 정직했던 `exit` 이다. 실제로 못
+  지키는 약속은 `plain`+`change` 의 817건뿐이다. `exit` 은 in_frame≈0 일 때만 뺀다 —
+  그때는 "medium shot 으로 담고 있다가"라는 **앞부분**이 거짓이라서다.
+  `--no_framing_on_free` 는 3,714건(39.6%)을 지우는데 0.85 적용 후 잔여 위반이 129건뿐이라
+  비용 대비 얻는 게 없어 기각했다 (기본 꺼짐 유지).
+
+  **검증** (d128 뱅크 52편 17,836 변이): `--framing_exit_min_in_frame 0.85` 로 부르면
+  `captions_d143.json` 과 **비트 동일 (다른 것 0건)**. 기본값(0.05)에서는 D143 이 지운
+  2,760건 중 1,363건(전부 `exit`)이 되살아나고, D143 이 안 지운 걸 새로 지우는 건 0건이다.
+  결과 캡션에 남은 framing 약속 13,215건 중 **비-exit 이면서 in_frame<0.85 는 0건**,
+  `exit` 이면서 in_frame<0.05 도 0건.
+
+  **적용 범위** (사용자 확정): 굽는 중인 **D151 뱅크에만** 적용한다. 도는 arm 3개
+  (D131 / D152 두 arm)와 CLaTr 코퍼스가 쓰는 `latentcam_da3_k6_d128` 은 건드리지 않는다 —
+  그 코퍼스는 9/5 09:19 에 D143 **이전** `captions.json` 에서 export 됐고 (D143 산출물
+  `captions_d143.json` 은 9/6 11:00 로 그 뒤다), 지금 갈아엎으면 학습 중인 3개가 깨진다.
+
 - **`CinemaTraj` τ 손잡이 하한 `--tau_knob_min` + `configs/bank/d151.json` (D151/F5, 2026-09-06).**
   `fit_hole_ladder.py` 의 `KNOB_RANGE["tau"]` 하한 0.02 를 CLI 로 뺐다. **기본값이 그대로 0.02
   라 인자를 안 주면 예전 뱅크와 비트 동일**이다 (camera-lens 32행 대조: 결정열 불일치 0,

@@ -122,6 +122,66 @@ def _hf_snapshot(model_name, hf_home):
 
 
 # --------------------------------------------------------------------------- #
+# per-view resampler (D144)
+# --------------------------------------------------------------------------- #
+class PerViewResampler(nn.Module):
+    """(B,V,P,C_native) -> (B,V,R,D). view **안에서만** P 개 patch 를 R 개 latent 로 줄인다.
+
+    왜 필요한가
+    -----------
+    molmo2 arm 은 49프레임 × 64토큰 = 3136 토큰이고 da3 arm 은 6뷰 × 576패치 = 3456 토큰이다
+    (`main/cache_molmo2_embeddings.py:261` 이 그 예산 일치를 명시한다). 두 arm 이 같은 토큰
+    예산을 쓰지만 **줄이는 축이 다르다** — molmo2 는 프레임을 다 보고 프레임 안에서 평균풀링,
+    da3 는 프레임을 6장으로 솎아 낸다. 즉 "49프레임 전체가 주는 추가 정보"가 da3 쪽에만 없다.
+    이 모듈은 da3 를 molmo2 와 **같은 축**으로 옮긴다: 49뷰를 전부 넣고 뷰 안에서 576 -> 64 로
+    줄여 49*64 = 3136 토큰, molmo2 의 video 토큰 수와 정확히 같게 만든다.
+
+    molmo2 의 `adaptive_avg_pool2d` (9x9 -> 8x8, `cache_molmo2_embeddings.py:151-159`) 를
+    **학습되는** Perceiver cross-attention 으로 바꾼 것이다. 고정 풀링이 아니라 latent query 가
+    뽑아 가므로 어느 패치를 남길지를 학습이 정한다.
+
+    **프레임을 섞지 않는다** — molmo2 의 pool 과 같은 제약이다 (그 파일 :17 "프레임을 섞지
+    않는다"). B*V 로 접어 cross-attention 을 돌리므로 view 간 정보는 이 단계에서 안 흐른다.
+    view 사이의 대응은 이미 DA3 백본의 cross-view attention 이 풀어 놓았고, 여기서 또 섞으면
+    "프레임당 토큰 R개" 라는 예산 해석이 깨진다.
+
+    `kv_in` (C_native -> D) 이 먼저 오는 이유: 줄이기 전 토큰이 B*49*576 = 28224 개라 그
+    폭(3072)에서 attention 을 돌리면 메모리가 감당이 안 된다. 전 토큰을 한 번 만지는 최소
+    비용이 Linear 하나이고, 그 뒤는 전부 D(=768) 에서 돈다. 이러면 바깥
+    `GeoEncoder.proj` (3072->768) 는 `nn.Identity` 가 되므로 (native == out_dim) 파라미터가
+    새로 생기는 게 아니라 **자리를 옮긴 것**에 가깝다.
+    """
+
+    def __init__(self, in_dim, dim=768, n_latents=64, heads=8, layers=1, mlp_ratio=4.0):
+        super().__init__()
+        self.n_latents = int(n_latents)
+        self.dim = int(dim)
+        self.kv_in = nn.Linear(int(in_dim), self.dim)
+        self.latents = nn.Parameter(torch.randn(self.n_latents, self.dim) * 0.02)
+        self.ln_kv = nn.LayerNorm(self.dim)
+        self.blocks = nn.ModuleList()
+        for _ in range(int(layers)):
+            self.blocks.append(nn.ModuleDict(dict(
+                ln_q=nn.LayerNorm(self.dim),
+                attn=nn.MultiheadAttention(self.dim, int(heads), batch_first=True),
+                ln_m=nn.LayerNorm(self.dim),
+                mlp=nn.Sequential(nn.Linear(self.dim, int(self.dim * mlp_ratio)), nn.GELU(),
+                                  nn.Linear(int(self.dim * mlp_ratio), self.dim)),
+            )))
+        self.ln_out = nn.LayerNorm(self.dim)
+
+    def forward(self, t):
+        B, V, P, _ = t.shape
+        kv = self.ln_kv(self.kv_in(t.reshape(B * V, P, -1)))
+        q = self.latents.unsqueeze(0).expand(B * V, -1, -1).to(kv.dtype)
+        for blk in self.blocks:
+            qn = blk['ln_q'](q)
+            q = q + blk['attn'](qn, kv, kv, need_weights=False)[0]
+            q = q + blk['mlp'](blk['ln_m'](q))
+        return self.ln_out(q).view(B, V, self.n_latents, self.dim)
+
+
+# --------------------------------------------------------------------------- #
 # encoder
 # --------------------------------------------------------------------------- #
 class DA3SceneEncoder(nn.Module):
@@ -137,7 +197,9 @@ class DA3SceneEncoder(nn.Module):
     def __init__(self, repo_path, model_name='da3nested-giant-large', ckpt_path=None,
                  hf_home=None, input_hw=None, layers='last', layer_fuse='concat',
                  norm='ln', ref_view_strategy='saddle_balanced', debug=False,
-                 keep_cam_dec=False, cam_token_per_sample=False):
+                 keep_cam_dec=False, cam_token_per_sample=False,
+                 resampler=None, resampler_dim=768, resampler_tokens=64,
+                 resampler_heads=8, resampler_layers=1):
         super().__init__()
         self.keep_cam_dec = bool(keep_cam_dec)
         self.cam_token_per_sample = bool(cam_token_per_sample)
@@ -169,6 +231,21 @@ class DA3SceneEncoder(nn.Module):
 
         # cat_token 두 반쪽(un-normed local_x | normed x)의 스케일 차이를 여기서 맞춘다.
         self.ln = nn.LayerNorm(native) if str(norm or 'ln') == 'ln' else nn.Identity()
+
+        # [new 2026-09-06, D144] per-view resampler. None(기본)이면 아래 from_raw 가 예전 경로를
+        # 글자 그대로 탄다 — 기존 arm 의 state_dict 와 출력이 비트 동일하다.
+        self.resample = None
+        if resampler:
+            if str(resampler) != 'perceiver':
+                raise ValueError(f"geo_resampler: 'perceiver' 만 구현되어 있다 (got {resampler!r})")
+            self.resample = PerViewResampler(native, dim=int(resampler_dim),
+                                             n_latents=int(resampler_tokens),
+                                             heads=int(resampler_heads),
+                                             layers=int(resampler_layers))
+            self.out_dim = int(resampler_dim)
+            _r = sum(p.numel() for p in self.resample.parameters())
+            print(f"(geo_encoder/da3) resampler perceiver: {native} -> {resampler_dim} "
+                  f"x {resampler_tokens} tok/view ({_r / 1e6:.1f} M, trainable)")
 
         self.register_buffer('_mean', torch.tensor(_IMAGENET_MEAN).view(1, 3, 1, 1),
                              persistent=False)
@@ -403,8 +480,14 @@ class DA3SceneEncoder(nn.Module):
         """`encode_raw` 의 결과(또는 그 캐시) -> tokens (B, V*P, out_dim).
 
         학습되는 `ln` 이 여기 걸린다 — 캐시 경로에서도 gradient 가 살아 있어야 하므로
-        `no_grad` 를 걸지 않는다."""
-        return einops.rearrange(self.ln(t), 'b v p c -> b (v p) c')
+        `no_grad` 를 걸지 않는다.
+
+        resampler 가 켜져 있으면 view 안에서 P -> R 로 줄여 (B, V*R, resampler_dim) 을 낸다
+        (D144). 꺼져 있으면(기본) 예전 그대로 (B, V*P, native)."""
+        t = self.ln(t)
+        if self.resample is None:
+            return einops.rearrange(t, 'b v p c -> b (v p) c')
+        return einops.rearrange(self.resample(t), 'b v r c -> b (v r) c')
 
     def forward(self, images, cam_token=None):
         """images (B,V,3,H,W) float [0,1] (정규화 전) -> tokens (B, V*P, out_dim)."""

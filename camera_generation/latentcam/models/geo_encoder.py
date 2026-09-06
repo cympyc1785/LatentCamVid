@@ -215,6 +215,13 @@ class _DA3Backend(nn.Module):
             norm=getattr(cfg, 'da3_geo_norm', 'ln'),
             debug=bool(getattr(cfg, 'da3_geo_debug', False)),
             cam_token_per_sample=bool(getattr(cfg, 'da3_cam_token_per_sample', False)),
+            # [new 2026-09-06, D144] null(기본)이면 resampler 를 만들지 않는다 -> 기존 arm 과
+            # state_dict / 출력이 비트 동일.
+            resampler=getattr(cfg, 'geo_resampler', None) or None,
+            resampler_dim=int(getattr(cfg, 'geo_resampler_dim', 768)),
+            resampler_tokens=int(getattr(cfg, 'geo_resampler_tokens', 64)),
+            resampler_heads=int(getattr(cfg, 'geo_resampler_heads', 8)),
+            resampler_layers=int(getattr(cfg, 'geo_resampler_layers', 1)),
         )
         self.out_dim = self.net.out_dim
         self.camera_encoding_dim = self.net.camera_encoding_dim

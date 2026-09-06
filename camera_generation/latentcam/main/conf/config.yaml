@@ -472,6 +472,21 @@ geo_latent_cache_dir: null
 # scene 파일 52개를 공유한다 (~2.2 GB). 파일이 없는 scene 은 조용히 on-the-fly 로 떨어진다.
 geo_raw_cache_dir: null
 geo_raw_cache_preload: true   # __init__ 에서 전량 RAM 적재 (fork 로 worker 가 공유; false = 매번 read)
+# [new 2026-09-06, D144] geo 토큰 per-view resampler. null = OFF = 예전 경로와 **비트 동일**
+# (모듈 자체를 안 만들므로 state_dict 키도 안 늘어난다).
+#   'perceiver' -> models/da3_geo_encoder.PerViewResampler 가 (B,V,P,3072) 을 (B,V,R,D) 로
+#                  줄인다. **view 를 섞지 않는다** — molmo2 의 프레임 내 avg-pool 과 같은 제약.
+# 왜: da3 arm 은 49프레임에서 6뷰만 솎아 쓰고(576패치 x 6 = 3456 토큰) molmo2 arm 은 49프레임을
+# 전부 보되 프레임당 64토큰으로 풀링한다(3136 토큰). 토큰 예산은 같은데 "전 프레임을 본다"는
+# 축이 da3 쪽에만 없었다. geo_num_views=49 + geo_resampler_tokens=64 로 두면 49*64 = 3136 으로
+# molmo2 의 video 토큰 수와 정확히 같아지고 두 arm 이 같은 축에서 비교된다.
+# resampler_dim == geo_latent_dim 이면 GeoEncoder.proj 가 nn.Identity 가 된다 (파라미터가 새로
+# 생기는 게 아니라 3072->768 Linear 가 resampler 의 kv_in 으로 자리를 옮기는 것).
+geo_resampler: null
+geo_resampler_dim: 768
+geo_resampler_tokens: 64      # view 당 latent 수 R
+geo_resampler_heads: 8
+geo_resampler_layers: 1
 # [new 2026-09-03] PE-AV (facebook/pe-av-large) 스트림 = "video CA". 레이어 순서는
 # text CA -> **video CA** -> geo CA 이고, video CA 는 self.layers 를 넓히는 게 아니라 별도
 # self.video_layers 로 들어가므로 아래 4개가 전부 기본값이면 모델 state_dict 와 출력이 예전과

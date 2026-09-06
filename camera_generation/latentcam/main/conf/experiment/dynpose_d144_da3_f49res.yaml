@@ -1,0 +1,84 @@
+# @package _global_
+# D144 — **da3 에 49프레임을 전부 넣고 resampler 로 토큰 수를 molmo2 와 맞춘 arm.**
+# 사용자 지시 2026-09-06: "gpu하나는 da3에 49프레임을 넣되 resampler를 달아서 token수를 줄이는
+# 방식으로 molmo2랑 비교하게 학습 돌려놓고".
+#
+# ═══ 무엇을 고치는 실험인가 ═══════════════════════════════════════════════════════════════
+# D137(da3) 과 D138(molmo2) 은 토큰 예산은 같은데 **줄이는 축이 다르다**:
+#     D137 da3      6뷰 x 576패치 = 3456 토큰   <- 49프레임 중 6장만 본다 (프레임 솎기)
+#     D138 molmo2  49프레임 x 64 = 3136 토큰   <- 전 프레임을 보고 프레임 안에서 avg-pool
+#     D144 (여기)  49뷰 x 64      = 3136 토큰   <- 전 프레임을 보고 프레임 안에서 **학습 풀링**
+# `main/cache_molmo2_embeddings.py:261` 이 `(da3 geo = 3456)` 을 찍는 데서 보이듯 예산 일치는
+# 원래 의도된 것이었고, 남아 있던 비대칭은 "49프레임 전체가 주는 추가 정보"가 da3 쪽에만
+# 없다는 것 하나였다. 이 arm 이 그 하나만 바꾼다 — D138 대비 차이가 "molmo2 CA 대신 da3 CA"
+# 로 좁혀지므로 D137 vs D138 (9/11 지표에서 molmo2 우세) 의 원인이 인코더인지 프레임 수인지
+# 를 가른다.
+#
+# resampler 는 molmo2 의 `adaptive_avg_pool2d`(9x9 -> 8x8, 그 파일 :151-159) 를 학습되는
+# Perceiver cross-attention 으로 바꾼 것이고, **프레임을 섞지 않는다**는 제약은 같다
+# (`models/da3_geo_encoder.PerViewResampler`).
+#
+# ═══ D137 대비 diff (그 외는 글자 그대로 같다) ════════════════════════════════════════════
+#   geo_num_views      6 -> 49          (_even_indices(49,49) = [0..48] = 소스 전 프레임)
+#   geo_resampler      null -> perceiver / geo_resampler_tokens 64
+#   geo_raw_cache_dir  geo_raw_cache_da3 -> geo_raw_cache_da3_f49  (V 가 다르면 다른 캐시다)
+# 코퍼스(d137 root) · 캡션 · seg_list · holdout 27편 · text_len · scale_mode 는 D137/D138 과
+# 동일하다. 즉 셋이 같은 test 1129 세그먼트 위에서 바로 비교된다.
+#
+# geo_first_view_target_s 는 true 로 둔다 — 이 코퍼스는 scene 이 정확히 49프레임이고 segment 가
+# 항상 s=0 이라 `_sample_geo_context_uniform` 이 [0..48] 를 그대로 돌려준다 (치환이 no-op).
+# 캐시 빌더(`scripts/data/cache_geo_raw_da3.py:scene_plan`) 가 scene 안에서 geo_idxs 가
+# 상수인지 다시 검사하므로 이 가정이 깨지면 그 scene 은 굽히지 않고 티가 난다.
+#
+# ═══ 캐시 ═════════════════════════════════════════════════════════════════════════════════
+#   scene 당 49 * 576 * 3072 * 4 B = 347 MB, 267 scene -> ~90 GB (fp32 — bf16/fp16 으로 내리면
+#   on-the-fly 경로와 ||d||/||a|| 1.8e-3 만큼 갈린다, cache_geo_raw_da3.py docstring).
+#   굽는 법:
+#     CUDA_VISIBLE_DEVICES=<gpu> EXP=dynpose_d144_da3_f49res \
+#       OUT=/data1/cympyc1785/data/DynPose-LBM/latentcam_dynpose_d129/geo_raw_cache_da3_f49 \
+#       python scripts/data/cache_geo_raw_da3.py
+exp_name: dynpose_d144_da3_f49res
+dl3dv_root: /data1/cympyc1785/data/DynPose-LBM/latentcam_dynpose_d137
+meta_csv: meta_dynpose.csv
+train_seg_list: /data1/cympyc1785/data/DynPose-LBM/latentcam_dynpose_d137/seg_list_dynpose_dd10_train.txt
+test_seg_list: /data1/cympyc1785/data/DynPose-LBM/latentcam_dynpose_d137/seg_list_dynpose_dd10_test.txt
+coverage_blacklist_path: null
+
+text_len: 128
+
+pose_source: da3
+target_pose_source: da3_target_poses
+scale_mode: avg_scale
+avg_scale_ref: context_first_cam
+intr_norm: rel
+cam_dim: 64
+
+geo_encoder: da3
+geo_cam_embed: null
+geo_latent_cache_dir: null
+geo_posed: true
+geo_shuffle_order: false
+da3_geo_model: da3nested-giant-large
+da3_geo_input_hw: [252, 448]
+da3_geo_layers: last
+
+geo_view_sampling: context_uniform
+geo_num_views: 49                   # _even_indices(49,49) = [0..48] = 소스 영상 전 프레임
+geo_first_view_target_s: true       # s=0 이라 no-op (위 주석 참조)
+
+geo_resampler: perceiver            # view 안에서 576 -> 64. 49*64 = 3136 = molmo2 video 토큰 수
+geo_resampler_tokens: 64
+geo_resampler_dim: 768              # = geo_latent_dim -> GeoEncoder.proj 는 Identity 가 된다
+geo_resampler_heads: 8
+geo_resampler_layers: 1
+
+geo_raw_cache_dir: /data1/cympyc1785/data/DynPose-LBM/latentcam_dynpose_d129/geo_raw_cache_da3_f49
+da3_cam_token_per_sample: true
+
+anchor_pred_frame0: true
+
+video_latent_dim: 0
+
+batch_size: 8
+epochs: 100
+ckpt_at_epochs: [50, 100]

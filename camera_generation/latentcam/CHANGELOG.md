@@ -5,6 +5,25 @@ All notable changes to the latentcam sub-project. Follows [Keep a Changelog](htt
 ## [Unreleased]
 
 ### Added
+- **`models/da3_geo_encoder.PerViewResampler` — da3 geo 토큰을 view **안에서** P→R 로 줄이는
+  학습형 Perceiver 풀링 (D144, 2026-09-06, 사용자 지시 "gpu하나는 da3에 49프레임을 넣되
+  resampler를 달아서 token수를 줄이는 방식으로 molmo2랑 비교하게 학습 돌려놓고").**
+  molmo2 의 `adaptive_avg_pool2d`(9x9→8x8) 자리를 cross-attention 으로 바꾼 것이고,
+  **프레임을 섞지 않는다**는 제약은 같다. 이걸로 세 arm 의 토큰 예산이 정렬된다:
+        D137 da3       6뷰 × 576  = 3456 tok  (프레임 솎기)
+        D138 molmo2   49프레임 × 64 = 3136 tok  (프레임 안 avg-pool)
+        D144 da3      49뷰 × 64   = 3136 tok  (프레임 안 학습 풀링)
+  · 배선: `main/conf/config.yaml` 에 `geo_resampler{,_dim,_tokens,_heads,_layers}` 5키 신설.
+    `geo_resampler: null`(기본)이면 resampler 를 **아예 만들지 않고** `from_raw` 가 예전
+    코드를 글자 그대로 탄다 — 기존 da3 arm 과 state_dict·출력이 비트 동일하다.
+  · `resampler_dim: 768` 은 `geo_latent_dim` 과 같아서 `GeoEncoder.proj` 가 Identity 가
+    된다. 즉 3072→768 Linear 이 `proj` 에서 `PerViewResampler.kv_in` 으로 **옮겨간** 것이라
+    추가 파라미터는 ~7.14 M (실측 trainable 2.366208 M → 9.506304 M).
+  · 실측 프로브: `from_raw` 출력 (1,3456,768) → (1,3136,768), `backend.out_dim` 3072 → 768.
+- **`main/conf/experiment/dynpose_d144_da3_f49res.yaml` (신규).** D137 대비 바뀐 줄은
+  `geo_num_views 6→49` · `geo_resampler null→perceiver` · `geo_raw_cache_dir` 뿐.
+  49뷰 pre-ln 캐시는 `scripts/data/cache_geo_raw_da3.py` 로 새로 구웠다
+  (267 scene / 92.60 GB / 1.27 s/scene, scene 당 (49,576,3072) fp32 = 347 MB).
 - **`scripts/eval/corpus_axis_compare.py --framing_scope` — 게이트를 "프레이밍을 책임질 수
   있는" 부분집합에서만 재는 필터 (D143, 2026-09-06, 사용자 지시 "aim이 follow인 것들이나
   target이 없는 free moving은 물체의 subject in frame 율이 낮은 건 당연해 이것들 제외한

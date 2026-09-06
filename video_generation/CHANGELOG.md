@@ -6,7 +6,41 @@
 
 ## [Unreleased]
 
+### Added
+- **`CinemaTraj` τ 분모 선택 `--tau_denom` (D150, 2026-09-06).** 사용자 지시: "z_med 는 이전에
+  전체 프레임에서 sky 제외 유효한 depth 의 첫 카메라로부터의 거리의 평균으로 하기로 했잖아.
+  적용해줘." `scene_graph/scale.py` 에 `TAU_DENOM_MODES` + `tau_denominator(graph, mode)` 를
+  두어 **그래프에서 τ 분모를 꺼내는 창구를 하나로** 만들고, `decode/build_poses.py` 의
+  `z_med = float(graph["scale"]["z_med_frame0"])` 한 줄을 그 창구로 바꿨다 (τ 가 실제로
+  계산되는 유일한 지점). `sample_camera_bank.py` / `fit_hole_ladder.py` 에 `--tau_denom`,
+  `SHAPE_DEFAULTS["tau_denom"]`, `fixed.tau_denom` 을 추가했고 `bank.json` 의 `z_med` 가 선택된
+  분모를 싣는다. `emit_bank.py` 는 `fixed.tau_denom` 을 따르고, 잘린 행의 τ 재계산도 그래프가
+  아니라 `extra["info"]["z_med"]` 에서 읽는다 — 그래프를 다시 읽으면 S 로 구운 뱅크의 일부
+  행만 옛 게이지로 되돌아가는데 pose diff assert 로는 안 잡힌다.
+  **기본값은 `z_med_frame0`(옛 정의)** 이다. τ 분모는 뱅크 정체성이라, 기본값을 뒤집으면
+  진행 중인 D149 굽기가 코퍼스 중간에 정의를 갈아탄다. `S` 채택 여부는 D150 파일럿
+  (`S/z_med_frame0` 상위 vista 6편, `hole_bank_k6_d150S`) 으로 정한다.
+  실측 배율 `S/z_med_frame0` — vista 53편 p50 1.426 / p90 3.940 / max 29.854,
+  dynpose 280편 p50 1.171 / p90 2.404, trumans 191편 p50 1.106 / p90 1.280.
+
+- **`CinemaTraj/scripts/run_bank.py` — 뱅크 체인 단일 python 드라이버 (2026-09-06).**
+  `scripts/run_*_dNN_shard.sh` 가 23개까지 늘어난 것을 끝낸다. `graph→cloud→route→tau→fit→emit`
+  실행 로직은 이 파일 하나에 두고, 세대 차이는 `configs/bank/<gen>.json` 에 **뱅크 정체성을
+  이루는 플래그 전량**으로 적는다 (`--video`/`--output_root`/`--bank_dir` 은 드라이버가 붙인다).
+  config 의 `"extends"` 는 한 축만 다른 대조 세대를 위한 얕은 병합이고, 리스트를 반쯤 물려받지
+  않도록 최상위 키 단위로만 덮는다. 샤딩(`--num_shards/--shard_id`)·`--skip_done`·단계 선택
+  (`--stages`)·GPU 0~4 assert 포함. 기존 bash 러너는 **지우지 않는다** — 이미 구워진 세대를
+  재현할 때의 근거 기록이다. 첫 사용처는 `configs/bank/d150S.json` / `d150L.json`.
+
 ### Fixed
+- **`CinemaTraj/scripts/extract_static_nouns.py` — `prompt` 열이 없는 코퍼스에서 KeyError
+  (D149, 2026-09-06).** `read_prompts` 가 `row["prompt"]` 로 직접 인덱싱했는데 DynPose-LBM 의
+  `metadata.csv` 는 `video,dynamic` 두 열뿐이다 (`extend_dynpose_metadata.py` 의 `FIELDS`).
+  vista 는 9열이라 안 걸렸다. `row.get("prompt", "")` 로 바꾸고, 그 값을 실제로 쓰는
+  `--source prompt` 분기에 명시적 assert 를 넣었다 — 빈 문자열을 그냥 흘리면 정적 명사가
+  0개가 되어 **정적 트리가 통째로 비는데 로그는 정상으로 보인다**. `--source vlm`(D149 가 쓰는
+  경로)은 prompt 를 안 읽으므로 영향 없고, vista 동작은 글자 그대로 같다.
+
 - **`CinemaTraj/scripts/route_presets.py` — 세로 슬롯(crane/pedestal)이 전량 조용히 빠지던 것
   (D147, 2026-09-06).** 슬롯 게이트가 `grav == "ground_ransac"` 이었는데 D98 이 gravity 를
   GeoCalib 로 옮기면서 그 이름이 한 번도 안 나오게 됐다 — 실측으로 dynpose 280/280,
@@ -19,6 +53,26 @@
   D145 의 880편 굽기에서 들어간다.
 
 ### Added
+- **`CinemaTraj/scripts/run_dynpose_d149_shard.sh` — dynpose 880편 앞단까지 vista 방식으로
+  전면 재굽기 (D149, 2026-09-06).** 사용자 지시: "detection은 VLM 사용한걸로 해주고 static
+  트리도 추가해줘. dd는 일단 그럼 빼주고 vista 돌린거랑 일관성 있게 dynpose돌려줘" +
+  "유일하게 vista랑 다른건 모든 preset별로 하는게 아니라 slot별로 일부만 fitting한다는거야".
+  d129 대비 4축: ① detection 을 VLM 명사로 통일(옛 279편은 배포 annotation 명사였다 —
+  한 코퍼스에 탐지 어휘가 두 종류였다) ② `seg_instances_static` 추가 — vista 는 80편이 있고
+  그래프가 자동으로 읽는데(`build_scene_graph.py:540`) dynpose 는 디렉토리 자체가 없어서
+  static 노드가 0 이었다. `vlm_nouns.json` 의 `static` 절반은 d145 때 이미 뽑아 뒀고 쓰이지
+  않고 있었다 ③ `--gravity_source auto` → `geocalib`(d148 이 880/880 사이드카를 채웠다)
+  ④ `--num_external 0` — dd_* 제외로 라우팅 preset 29 → 14.
+  d129 의 `--tau_ladder 1.00` 은 vista 기본값 `0.10 0.20 0.35 0.60 1.00` 로 **되돌린다** —
+  사다리는 hole 뱅크 크기를 곱하지 않고(실측 vista TAU 321→hole 258, d129 TAU 58→hole 220)
+  "이 (anchor,preset) 이 어느 세기에서든 통과하나"를 묻는 역할이라, 단일단이면 τ=1.0 에서
+  죽는 조합이 통째로 사라진다. 나머지 TAU/FIT 플래그는 `run_k6_d128_shard.sh` 와 문자 단위로
+  같다. GRAPH/CLOUD 를 다시 돈다(①②③ 이 전부 그래프 입력) — 새 마커 `.graph_d149`/
+  `.cloud_d149`, 옛 그래프는 `scene_graph_pre_d149.json` 으로 1회 백업.
+  anchor 상한 3/3 은 `route_presets.py` 에 준다 — 뱅크에 주면 no-op 이고, 버킷을 가르는 건
+  id 접두사가 아니라 `moving` 이다. ② 로 static 노드가 생기므로 `--max_static_anchors 3` 이
+  **처음으로 실제 일을 한다**.
+
 - **`CinemaTraj/scripts/run_dynpose_d147_caption_export.sh` — dynpose 프레이밍 약속 위반 캡션을
   고친 별도 코퍼스 (D147, 2026-09-06).** D143 이 vista d121/d128 에 넣은
   `--framing_min_in_frame 0.85` 게이트를 dynpose d137 뱅크에도 적용한다 (그때는 D137/D141 이
@@ -402,6 +456,16 @@
   **F1 자체는 아직 미적용** — `fix.md` 상태 "제안됨, 미승인" 그대로다.
 
 ### Changed
+- **작업 규약 4종을 `CLAUDE.md` 에 명문화하고 `/tmp` 사용을 중단한다 (2026-09-06, 사용자 지시).**
+  넷 다 "조용히 새는" 종류라 규약으로 못 박아야 하는 것들이다 —
+  ① **실행은 Claude 가 끝까지** 한다. 사용자에게 명령어를 넘기지 않고, 넘겨야 할 형태면 계획을 바꾼다.
+  ② **임시 파일은 `/tmp` 가 아니라 `<repo>/tmp/<작업>/`**. `/tmp` 는 시스템이 임의로 비울 수 있어
+     scene 목록·로그가 **없어진 줄도 모르고** 사라진다. `.gitignore` 에 `/tmp/` 추가.
+  ③ **bash 지양, python 우선**. bash 드라이버는 "python 하나를 인자만 바꿔 부르는 래퍼"가 되기 쉽고
+     실험(dNN)마다 복붙되어 몇 줄만 다른 파일이 쌓인다. 다단계 파이프라인은 python 드라이버 +
+     `--stage` 로, 실험별 차이는 새 스크립트가 아니라 설정으로 표현한다.
+  ④ **산출물은 압축적으로**. 로그 전량 tee 금지(학습 수치의 원본은 wandb), 세대별 뱅크는 최신 +
+     실제 대조에 쓰는 것만 유지, 중간 산출물 삭제는 **목록·근거 보고 후 승인받고** 한다.
 - **`render_bank_videos.py` 타일 라벨에 **카메라 출처**와 **target 이름**을 박는다 —
   `--pose_kind` + 자막의 `anchor_label` (2026-09-05, 사용자 지시 "target이 뭔지, GT인지 pred인지
   적어줘야지").**

@@ -7,6 +7,28 @@
 ## [Unreleased]
 
 ### Added
+- **`CinemaTraj/configs/bank/d157_dynpose.json` — dynpose 875편을 최신 vista 게이지로 재굽기
+  (D157, 2026-09-07, 사용자 지시 "gpu 2개 이상 남으면 최신 vista 방식으로 dynpose도 돌려줘").**
+  D149 는 러너 스크립트(`run_dynpose_d149_shard.sh`)만 있고 **실제로는 한 편도 안 돌았다**
+  (`.graph_d149` 0/884). 그 사이 vista 가 d150S→d151 로 τ 분모를 `z_med_frame0` → `S` 로
+  옮겼으므로 d149 를 그대로 돌리면 굽자마자 vista 와 게이지가 어긋난 코퍼스가 된다. 그래서
+  d149 config 를 따로 두지 않고 처음부터 d151 게이지로 굽는다.
+
+  **D149 에서 가져온 축** — ① detection 을 VLM 명사로 통일(`seg_instances` 877편 재검출
+  완료), ② static 트리 추가(`seg_instances_static` 846편), ③ `--gravity_source geocalib`
+  (사이드카 880/880), ④ `--num_external 0` (dd_* 제외). ①②③ 이 전부 그래프 입력이라
+  `.graph_d122` 를 재사용할 수 없어 GRAPH/CLOUD 도 돈다 (`.graph_d157`/`.cloud_d157`).
+  **D151 에서 가져온 축** — tau/fit 양쪽 `--tau_denom S`, fit `--tau_knob_min 0.005`.
+  vista(d151) 와 다른 곳은 데이터 위치 + preset 라우팅(route 단계) + GRAPH/CLOUD 실행
+  여부뿐이다. anchor 상한 3/3 은 route 에 준다 — 뱅크에 주면 no-op 이다
+  (`sample_camera_bank.py:144-151` 이 route 의 `--nodes` 를 받으면 `pick_main_anchors` 전에
+  return 한다).
+
+  smoke 1편 실측: preset 14종(`--num_external 0` 의도대로), `hole_bank_d157` 129 변이
+  (solved 70 / approach_limited 16 / elev_limited 12 / obb_limited 12 / shape_limited 8 /
+  unreached 6 / static 5), `clamped_low` 0. 그래프에 `stat_0 table` 이 잡혀 **dynpose 에서
+  static 노드가 처음으로 생겼다** — `--max_static_anchors 3` 이 처음 일을 한다.
+
 - **`CinemaTraj/scripts/eval_dir_to_gendop_npz.py` — latentcam eval 폴더를 GenDoP 캡션
   harness 입력으로 (D156, 2026-09-07, 사용자 질문 "caption 지표는 어떻게 재야 공정하게
   잴 수 있어?").** `gendop_release_eval.py` 는 npz 디렉토리(`latentcam__<scene>__<name>.npz`
@@ -174,6 +196,18 @@
   재현할 때의 근거 기록이다. 첫 사용처는 `configs/bank/d150S.json` / `d150L.json`.
 
 ### Fixed
+- **`CinemaTraj/scripts/run_bank.py` — `--eval_data` 를 그걸 안 받는 단계에도 붙이던 것
+  (D157, 2026-09-07).** `_base_args` 가 config 의 `eval_data` 를 **모든 단계에** 붙였는데
+  `route_presets.py` 와 `emit_bank.py` 에는 그 argparse 인자가 없다 (둘 다 `output_root`
+  아래 산출물만 읽는다). 그래서 `unrecognized arguments: --eval_data` 로 rc=2 다.
+  **vista 세대(d150/d151)는 config 의 `eval_data` 가 `null` 이라 이 경로를 한 번도 안
+  밟았고**, dynpose/trumans 처럼 데이터 위치를 지정하는 세대에서만 터진다 — 즉 드라이버가
+  vista 전용으로 굳어 있었다. 옛 bash 러너(`run_dynpose_d149_shard.sh`)는 route/emit 호출에
+  손으로 `--eval_data` 를 안 넘겨서 차이가 안 드러났다. `STAGE_TAKES_EVAL_DATA =
+  {"graph","cloud","tau","fit"}` 를 두고 `_base_args(..., stage=...)` 가 그 집합일 때만
+  붙인다. D157 smoke 1편으로 실측 확인 (GRAPH 124.4s / CLOUD 29.8s / ROUTE 0.4s /
+  TAU 84.1s / FIT 484.4s / EMIT 11.8s, 전부 rc=0).
+
 - **`gendop_release_infer.py` — 0 quaternion 이 회전 3×3 을 통째로 NaN 으로 만들던 것
   (D156, 2026-09-07).** GenDoP 는 포즈당 10 토큰 중 앞 4 개가 quaternion 이고 `decode_tokens`
   가 `coords[:, :7] / (0.5*bins) - 1` (bins=256) 로 역양자화한다. 회전 4 토큰이 **전부 bin

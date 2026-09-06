@@ -7,6 +7,31 @@
 ## [Unreleased]
 
 ### Added
+- **`CinemaTraj` τ 손잡이 하한 `--tau_knob_min` + `configs/bank/d151.json` (D151/F5, 2026-09-06).**
+  `fit_hole_ladder.py` 의 `KNOB_RANGE["tau"]` 하한 0.02 를 CLI 로 뺐다. **기본값이 그대로 0.02
+  라 인자를 안 주면 예전 뱅크와 비트 동일**이다 (camera-lens 32행 대조: 결정열 불일치 0,
+  `poses.npz` md5 동일). `main()` 이 `KNOB_RANGE` 를 **한 번** 갈아끼우므로 탐색 경계
+  (`solve_knob`) · `lo_override` · `knob_floor` 열 · `bank.json` 의 `knob_range`/`tau_floor_rule`
+  이 전부 같은 값을 읽는다. 기본값은 갈리기 전 값을 `TAU_KNOB_MIN_DEFAULT` 로 따로 잡아둬,
+  한 프로세스에서 파서를 두 번 만들어도 기본값이 앞 실행 인자로 흘러가지 않는다.
+  **왜 필요한가**: D150 에서 τ 분모를 `S` 로 바꾸자 `S/z_med` 가 큰 씬에서 `clamped_low` 가
+  대량 발생했다 (martian-flag 93/258, camera-lens 50/172, parkour 94/320, snow-dog 28/258).
+  그 행들은 기하학적으로 불가능한 게 아니라 손잡이 하한 0.02 에서 이분법이 멈춘 것이다.
+  **채택값 0.005 의 근거** — 하한 스윕 7값 × 6씬 × 32행(`tmp/d151`)에서 "물리 위반
+  (`behind_frames>0 ∨ obb_slack<0 ∨ below_ground_frames>0`) 이 0 이 되는 가장 큰 하한":
+  martian-flag 0.005 / camera-lens 0.01 / snow-dog 0.01 / parkour 0.01 / hike 0.02(이미 0).
+  ① 0.005 아래로는 아무것도 새로 안 풀리고 `motion_preset_no_motion` suspect 만 는다
+  (snow-dog 3→6@0.005→8@0.002) — 정지 궤적을 아닌 척 내보내는 쪽으로 넘어간다.
+  ② 임계 0.005/0.01/0.01/0.01 이 `S/z_med` 29.85/12.68/9.26/5.69 와 무상관이라 **씬 스케일
+  함수가 아니라 상수** (`0.02·z_med/S` 안 기각).
+  ③ 안전성 — "위반 행이 export 가능해진" 셀이 7×6 전부에서 0/N 이라, 하한을 내려도
+  `DROP=clamped_low` 필터를 나쁜 행이 통과하지 않는다.
+  woman-phone 은 48/48 이 어떤 하한에서도 안 풀리는데, 이건 τ 문제가 아니라
+  `src_ground_clear = −0.0082` — **소스 카메라 자체가 추정 지면 아래**라 지면 게이트 기준선이
+  음수인 별개 결함이다 (D149 880편에서 유병률 측정 예정).
+  `configs/bank/d151.json` 은 d150S 와 `--tau_knob_min 0.005` 한 줄만 다르고 나머지 축은 문자
+  단위로 같다 (`--tau_denom S`, `.graph_s115`/`.cloud_s115` 재사용, GRAPH/CLOUD 는 안 돈다).
+
 - **`CinemaTraj` τ 분모 선택 `--tau_denom` (D150, 2026-09-06).** 사용자 지시: "z_med 는 이전에
   전체 프레임에서 sky 제외 유효한 depth 의 첫 카메라로부터의 거리의 평균으로 하기로 했잖아.
   적용해줘." `scene_graph/scale.py` 에 `TAU_DENOM_MODES` + `tau_denominator(graph, mode)` 를

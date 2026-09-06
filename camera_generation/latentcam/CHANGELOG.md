@@ -5,6 +5,17 @@ All notable changes to the latentcam sub-project. Follows [Keep a Changelog](htt
 ## [Unreleased]
 
 ### Added
+- **`main/conf/experiment/vista4d_d128_molmo2{,_nogeo}.yaml` — d128 코퍼스의 molmo2 두 셀
+  (D152, 2026-09-06).** d121 축에는 모델 3셀(da3 / molmo2_nogeo / da3+molmo2)이 다 있는데
+  d128 축에는 `vista4d_d128_da3_t128`(D131) 하나뿐이라, "molmo2_nogeo 가 제일 낫다"가
+  **모델축 사실인지 d121 코퍼스 한정인지**가 안 갈렸다. 이 두 arm 이 d128 안에서 나머지
+  두 셀을 채운다. d124/d133 대비 바뀌는 줄은 코퍼스 경로 3줄 + molmo2 **text** 캐시 1줄뿐.
+  · **video 캐시는 d121 것을 그대로 쓴다.** molmo2 video 캐시는 씬당 1파일이고 두 코퍼스가
+    같은 52편·같은 49프레임을 본다. 가정이 아니라 실측 — d128 root 로 다시 구운
+    `vista4d_avocado-slice.pt` 가 d121 것과 `torch.equal` **비트 동일**(`|Δ|max 0.0`)이었다.
+    text 캐시는 dedup 키가 `(scene_key, caption)` 이라 코퍼스마다 달라 d128 판을 새로 구웠다
+    (9,981 segment / 52 scene / 131 (scene,caption) pair).
+  · 코퍼스간 평균 비교 금지 — test entry 가 875(d121) → 592(d128) 로 달라진다.
 - **`models/da3_geo_encoder.PerViewResampler` — da3 geo 토큰을 view **안에서** P→R 로 줄이는
   학습형 Perceiver 풀링 (D144, 2026-09-06, 사용자 지시 "gpu하나는 da3에 49프레임을 넣되
   resampler를 달아서 token수를 줄이는 방식으로 molmo2랑 비교하게 학습 돌려놓고").**

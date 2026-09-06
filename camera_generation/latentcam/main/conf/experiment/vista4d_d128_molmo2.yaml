@@ -1,0 +1,71 @@
+# @package _global_
+# D152 — `vista4d_d121_molmo2.yaml`(D124) 을 **d128 코퍼스로** 옮긴 arm.
+# 레이어 순서 text CA(umt5) -> molmo2 CA -> geo CA(da3). D124 와 다른 것은 코퍼스 3줄 +
+# molmo2 **text** 캐시 경로 1줄뿐이다.
+#
+# ═══ 왜 도나 ═════════════════════════════════════════════════════════════════════════════
+# d121 축에서는 2x3 의 세 모델 셀(da3 / molmo2_nogeo / da3+molmo2)이 전부 있는데 d128 축에는
+# `vista4d_d128_da3_t128`(D131) 하나뿐이었다. 코퍼스 간 eval 평균은 test entry 수가 달라
+# 비교가 안 되므로(아래), **d128 안에서 모델 3셀을 다시 채워야** 모델축 결론이 코퍼스에
+# 의존하는지 아닌지를 가를 수 있다. 이 arm 이 그 중 da3+molmo2 셀이다.
+#
+# ═══ video 캐시는 d121 것을 그대로 쓴다 ══════════════════════════════════════════════════
+# molmo2 video 캐시는 **씬당 1파일**(`vista4d_<video>.pt`)이고 d121/d128 은 같은 52편 영상의
+# 같은 49프레임(`meta_vista4d.csv` num_images 49, chunk = `vista4d/<video>` 전체)을 본다.
+# 실측으로 대조함 — d128 root 로 다시 구운 `vista4d_avocado-slice.pt` 가 d121 것과
+# `torch.equal` 로 **비트 동일**이었다. 그래서 `peav_video_cache_dir` 만 d121 을 가리킨다.
+# text 캐시는 dedup 키가 `(scene_key, caption)` 이라 코퍼스마다 캡션 집합이 다르면 달라진다
+# — 이쪽은 d128 root 로 새로 구웠다.
+#
+# ═══ 대조군 ══════════════════════════════════════════════════════════════════════════════
+# 같은 코퍼스·같은 text_len 128 의 `vista4d_d128_da3_t128`(D131) 이 video CA 없는 대조군,
+# `vista4d_d128_molmo2_nogeo` 가 geo 없는 거울상이다. d121 축의 세 arm 과는 test entry 수가
+# 875 -> 592 로 달라 **평균 비교 금지** — 코퍼스축 비교는 같은 test list 위에서 짝지어 잰다.
+exp_name: vista4d_d128_molmo2
+dl3dv_root: /data1/cympyc1785/data/Vista4D-Eval-Data/latentcam_da3_k6_d128
+meta_csv: meta_vista4d.csv
+train_seg_list: /data1/cympyc1785/data/Vista4D-Eval-Data/latentcam_da3_k6_d128/seg_list_vista4d_train.txt
+test_seg_list: /data1/cympyc1785/data/Vista4D-Eval-Data/latentcam_da3_k6_d128/seg_list_vista4d_test.txt
+coverage_blacklist_path: null
+
+text_len: 128   # umt5 text CA. D123/D124/D131 과 동일 — 캡션 최장 89 토큰이라 잘림 0.
+
+pose_source: da3
+target_pose_source: da3_target_poses
+scale_mode: avg_scale
+avg_scale_ref: context_first_cam
+intr_norm: rel
+cam_dim: 64
+
+geo_encoder: da3
+geo_cam_embed: null
+geo_latent_cache_dir: null
+geo_posed: true
+geo_shuffle_order: false
+da3_geo_model: da3nested-giant-large
+da3_geo_input_hw: [252, 448]
+da3_geo_layers: last
+
+geo_view_sampling: context_uniform
+geo_num_views: 6
+geo_first_view_target_s: true
+
+# 소스 프레임은 d121 과 같은 52편이라 geo raw 캐시를 그대로 재사용한다
+# (캐시 키는 scene/frame 이고 코퍼스 판본과 무관하다).
+geo_raw_cache_dir: /data1/cympyc1785/data/Vista4D-Eval-Data/latentcam_da3/geo_raw_cache_da3
+da3_cam_token_per_sample: true
+
+anchor_pred_frame0: true
+
+# ─── Molmo2 CA (기존 PE-AV 슬롯을 그대로 재사용한다) ───────────────────────────────────────
+peav_video_cache_dir: /data1/cympyc1785/data/Vista4D-Eval-Data/latentcam_da3_k6_d121/molmo2_cache/video
+peav_text_cache: /data1/cympyc1785/data/Vista4D-Eval-Data/latentcam_da3_k6_d128/molmo2_cache/text.pt
+video_latent_dim: 2560     # Molmo2 LM hidden — video part (3136 tok)
+video_text_in_stream: true
+video_text_dim: 2560       # 같은 LM hidden — text part (128 tok). 기본 1024 는 PE-AV 값이다.
+peav_in_ln: true           # proj 앞 LayerNorm. FIX-D117 참조 (없으면 CA logit 포화)
+video_gate: true           # 0 초기화 residual gate. FIX-D117 참조 (없으면 loss ~1.0 정체)
+
+batch_size: 8
+epochs: 100
+ckpt_at_epochs: [50, 100]

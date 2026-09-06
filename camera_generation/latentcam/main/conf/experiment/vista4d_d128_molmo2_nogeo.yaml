@@ -1,0 +1,58 @@
+# @package _global_
+# D152 — `vista4d_d121_molmo2_nogeo.yaml`(D133) 을 **d128 코퍼스로** 옮긴 arm.
+# 레이어 순서 text CA(umt5) -> molmo2 CA. geo CA 없음.
+#
+# ═══ 왜 이 arm 인가 ═══════════════════════════════════════════════════════════════════════
+# d121 축에서 molmo2_nogeo 가 fscore 최고였다. 그게 **모델축 사실**인지 **d121 코퍼스에서만
+# 그런 것**인지가 안 갈린다 — d128 은 게이트가 더 세서 train 14,975 -> 9,389 entry 로 줄었고
+# 그 줄어든 부분이 정확히 "물리적으로 나쁜 변이"라, geo 스트림의 값어치가 코퍼스에 따라
+# 달라질 수 있다. 이 arm 이 그 교호작용을 잰다.
+#
+# ═══ 무엇이 꺼지는가 (D133 과 동일) ═══════════════════════════════════════════════════════
+# `geo_encoder: null` 하나가 세 군데를 동시에 끈다:
+#   · dataset  `dataset_cfg.py:263  geo_enabled = bool(getattr(cfg, 'geo_encoder', None))`
+#   · train    `train_latent_cam_dm.py:482  ... if getattr(cfg, 'geo_encoder', None) else None`
+#   · model    `camera_diffusion_model_latent.py:261  has_geo_latent = geo_emb is not None`
+# `pose_source: da3` / `target_pose_source` 는 **카메라 궤적 자체**의 출처라 그대로 둔다.
+#
+# ═══ video 캐시는 d121 것을 그대로 쓴다 ══════════════════════════════════════════════════
+# 씬당 1파일이고 d121/d128 은 같은 52편·같은 49프레임이다. d128 root 로 다시 구운
+# `vista4d_avocado-slice.pt` 가 d121 것과 `torch.equal` 비트 동일임을 실측했다.
+# text 캐시는 `(scene_key, caption)` 키라 코퍼스마다 다르므로 d128 판을 새로 구웠다.
+exp_name: vista4d_d128_molmo2_nogeo
+dl3dv_root: /data1/cympyc1785/data/Vista4D-Eval-Data/latentcam_da3_k6_d128
+meta_csv: meta_vista4d.csv
+train_seg_list: /data1/cympyc1785/data/Vista4D-Eval-Data/latentcam_da3_k6_d128/seg_list_vista4d_train.txt
+test_seg_list: /data1/cympyc1785/data/Vista4D-Eval-Data/latentcam_da3_k6_d128/seg_list_vista4d_test.txt
+coverage_blacklist_path: null
+
+text_len: 128   # umt5 text CA. D123/D124/D131/D133 과 동일.
+
+pose_source: da3
+target_pose_source: da3_target_poses
+scale_mode: avg_scale
+avg_scale_ref: context_first_cam
+intr_norm: rel
+cam_dim: 64
+
+# ─── geo (da3) 스트림 제거 ────────────────────────────────────────────────────────────────
+geo_encoder: null          # ← 이 한 줄이 dataset/train/model 세 군데를 끈다.
+geo_posed: false           # geo 가 없으므로 무의미하지만, true 로 두면 오독된다.
+geo_cam_embed: null
+geo_latent_cache_dir: null
+geo_raw_cache_dir: null    # geo_enabled=False 면 어차피 안 읽지만, 경로가 남으면 오독된다.
+
+anchor_pred_frame0: true
+
+# ─── Molmo2 CA (D124/D133 과 글자 그대로 동일, text 캐시 경로만 d128) ────────────────────
+peav_video_cache_dir: /data1/cympyc1785/data/Vista4D-Eval-Data/latentcam_da3_k6_d121/molmo2_cache/video
+peav_text_cache: /data1/cympyc1785/data/Vista4D-Eval-Data/latentcam_da3_k6_d128/molmo2_cache/text.pt
+video_latent_dim: 2560     # Molmo2 LM hidden — video part (3136 tok)
+video_text_in_stream: true
+video_text_dim: 2560       # 같은 LM hidden — text part (128 tok). 기본 1024 는 PE-AV 값이다.
+peav_in_ln: true           # proj 앞 LayerNorm. FIX-D117 참조 (없으면 CA logit 포화)
+video_gate: true           # 0 초기화 residual gate. FIX-D117 참조 (없으면 loss ~1.0 정체)
+
+batch_size: 8
+epochs: 100
+ckpt_at_epochs: [50, 100]

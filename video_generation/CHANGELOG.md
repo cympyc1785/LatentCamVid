@@ -7,6 +7,57 @@
 ## [Unreleased]
 
 ### Added
+- **`gendop_release_infer.py` 에 native 생성 길이 손잡이 `--pose_length` /
+  `--strict_pose_length` (D156, 2026-09-07, 사용자 지시 "직접 49프레임 추론하도록해줘").**
+  기존에는 30 포즈를 뽑고 하류(`gendop_preds_to_eval_dir.py --src_poses 30 --n_poses 49`,
+  `eval_batch.py:462 pose_normalize(..., 49)`)에서 49 로 **리샘플**했다. 생성 길이 자체는
+  `core/options.py:39 pose_length` 가 정하고 그게 `core/models.py:331
+  max_new_tokens = 10*pose_length+1` 과 `:333 num_tokens` 로 들어가며,
+  `prefix_allowed_tokens_fn` 이 EOS 를 `1+10N` 위치에서만 허용하므로 이 값이 곧 생성 길이
+  상한이다. `--pose_length 49` 면 모델이 49 스텝 궤적을 **직접** 만든다.
+
+  상한일 뿐이라 모델이 30 에서 EOS 를 낼 수 있다. 그때 예전 `decode_tokens` 는 전량을
+  static 폴백으로 버렸는데(`degenerate`), `--no_strict_pose_length` 를 주면 **10의 배수만큼
+  살려서 디코드**하고 실제 길이를 `n_poses` 에 적는다. 안 그러면 "49 를 요구했더니 전부 정지"가
+  된다. npz 에 `n_poses` 필드, config.json 에 `pose_length`/`strict_pose_length`/`n_poses_hist`
+  추가.
+
+  **기본값은 `--pose_length 30 --strict_pose_length`** 라 인자 없이 부르면 예전과
+  bit-identical 이다 (non-degenerate 일 때 `token[:usable] == token[:-1]`).
+
+  d121 test 앞 8 entry 실측: `n_poses hist {49: 8}`, `degenerate 0` — 릴리즈 ckpt 는 30 에서
+  안 끊고 49 를 끝까지 뽑는다.
+
+- **`gendop_release_eval.py` 에 게이지 통일 옵션 `--n_poses` / `--resample` / `--fps` /
+  `--align_len` / `--out_name` (D156, 2026-09-07, 사용자 지시 "우리 모델이 학습한걸
+  기준으로 하고싶은데 49프레임 10fps로 통일해줘").**
+  기존 경로는 30 native pose 를 `fps 7.5` 로 분절한 뒤 **라벨만** 49 로 늘렸다. 그러면
+  `smoothing_window_size=18` 이 pred 궤적의 60%(18/30) 를, GT 궤적의 37%(18/49) 를 덮어
+  두 쪽의 평활 정도가 다르다. `--n_poses 49 --fps 10` 은 **분절 전에** pose 를 49 로
+  리샘플해 양쪽을 37% 로 맞춘다.
+
+  **기본값은 예전 그대로** (`--n_poses 0` = 리샘플 없음, `--fps 7.5`) 라 인자 없이 부르면
+  bit-identical 이다.
+
+  **`--resample` 은 `slerp` 가 기본이고 `index` 는 쓰지 말 것** — d121 test 875 entry
+  (`pred_gendop_text`) 실측:
+
+  | 게이지 | P | R | F | frame match |
+  |---|---|---|---|---|
+  | native 30 / fps 7.5 (기존 기본값) | 0.2529 | 0.1123 | 0.1279 | 0.1123 |
+  | 49 **index-pick** / fps 10 | 0.2480 | **0.0633** | **0.0526** | 0.0633 |
+  | 49 **slerp** / fps 10 (채택) | 0.2831 | 0.1049 | 0.1230 | 0.1049 |
+
+  index-pick 30→49 는 48 step 중 19개가 중복 프레임이 되어 속도 0 이 되고,
+  `segmentation.smooth_segments` 가 window 19 안의 **최빈값**을 고르므로 그 40% 짜리
+  static 표가 mode 를 가져간다 — 궤적이 아니라 리샘플러가 라벨을 만든다. recall 이
+  0.112→0.063 으로 반토막나는 게 그 신호다. slerp 는 native30 대비 F 0.128→0.123 으로
+  거의 안 움직이므로 게이지 교체가 점수를 옮기지 않는다는 확인도 된다.
+
+  같이: d121 코퍼스 test 875 entry 에 GT `_tag.json` 을 **49 native pose / fps 10** 으로
+  구웠다 (`caption_cameras_datadop.py --sets latentcam --no_llm --num_poses 0 --fps 10`,
+  출력은 `<scene>/da3/captions_gendop/`). 코드 변경 없이 인자만으로 되는 경로다.
+
 - **`CinemaTraj` framing 게이트를 절 종류별 임계로 — `--framing_exit_min_in_frame`
   (D154, 2026-09-06, 사용자 지시 "텍스트가 실제 framing 과 다르게 만들어졌던 부분").**
   `build_bank_captions.py` 의 `framing_dropped()` 가 `framing_parts()` 의 `way` 를 읽어

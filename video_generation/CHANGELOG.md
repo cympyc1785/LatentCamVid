@@ -7,6 +7,42 @@
 ## [Unreleased]
 
 ### Added
+- **`scripts/build_bank_captions.py --framing_min_in_frame` / `--no_framing_on_free` +
+  `scripts/run_d143_caption_export.sh` — 프레이밍 약속을 못 지킨 변이에서 그 절만 빼는
+  캡션 게이트 (D143, 2026-09-06, 사용자 지시 "5번은 고쳐야할 것 같아. 지금 학습 안돌리는
+  데이터셋 먼저 고쳐줘"; 태스크 #134).**
+  · **무엇이 모순이었나.** `aim="free"` preset 은 시작 pose 의 회전을 49프레임 내내 들고
+    간다 — **한 번도 재조준하지 않는다**. 그런데 캡션의 framing 절("keeping it in a medium
+    shot")은 대상을 프레임에 유지하겠다는 약속이다. 그 절을 막는 게이트는
+    `configs/caption_presets.json` 의 `targetless` 플래그뿐이었고 그건 `pan_*`/`tilt_*` 5개에만
+    붙어 있어서, `aim="free"` 인 나머지 15 preset(`truck_*` `pedestal_*` `dolly_*`
+    `static_hold` `static_zoom_in` `track_hold` `track_truck_*` `track_dolly_*`
+    `track_pedestal_*`)이 그대로 통과했다. vista d121 train 실측: `track_*`∧`aim=free`
+    1,415 변이 중 `subject_in_frame < 0.5` 가 448(31.7%)인데 캡션 프레이밍 약속은
+    1,121(79.2%).
+  · **preset 축이 아니라 변이 축으로 갈랐다** (`--framing_min_in_frame`, 기본 0.85 =
+    그 변이의 실측 `subject_in_frame` 이 임계 미만이면 framing/composition 절을 뺀다).
+    preset 이름으로 뭉뚱그리면 두 방향으로 틀린다 — vista d121 train, `aim=free` 만,
+    `subject_in_frame` median / `<0.85` 비율:
+        dolly_out       1.000 / 19.4%   track_dolly_out  1.000 /  4.8%
+        track_hold      1.000 / 10.8%   static_hold      1.000 / 20.8%
+        truck_left      0.538 / 69.1%   track_truck_left 0.385 / 78.8%
+    자기 축으로 물러나는 `dolly_out` 계열은 재조준 없이도 대상이 중앙에 남는데 preset 축
+    규칙은 그걸 같이 버리고, 반대로 `aim=look_at` 도 2.9% 는 프레임을 놓치는데 그건 아예
+    못 잡는다. preset 축 규칙도 `--no_framing_on_free` 로 남겨 뒀다 (기본 꺼짐).
+  · **motion 절과 target 은 그대로 둔다.** `track_*` 의 "tracks {target}" 은 follow_gain 1.0
+    으로 실제 병진 추종을 하므로 참이다. 비-track 의 "sliding sideways past {target}" 도
+    참이다(지나친다고 말하지 유지한다고 말하지 않는다). 거짓인 건 프레이밍 약속뿐이라
+    그 절만 뺀다. `nl` 형식에서는 composition 절도 같이 빠진다 — 그건 framing 뒤에만 붙는다.
+  · D140 의 `suspect: aim_free_subject_lost` 와 **같은 현상의 다른 처방**이다. 저건 변이를
+    export 에서 **버리고**(`--drop_suspect`), 이건 변이를 **남기고 캡션만 참으로 만든다**.
+    d121/d128 뱅크에는 `suspect` 열 자체가 없어(D140 이전에 구움) 그쪽 손잡이를 못 쓴다.
+  · 캡션 파일 헤더에 `framing_on_free` / `framing_min_in_frame` / `framing_dropped` 를 남긴다.
+    `framing_dropped` 는 **게이트 적중 수가 아니라 실제로 문장이 바뀐 수**다 — 이미 targetless
+    인 preset 은 게이트가 걸려도 캡션이 그대로라, 적중 수를 적으면 효과가 부풀려진다
+    (camel/d128 에서 적중 96 : 실제 변화 54).
+  · `--framing_min_in_frame 0` 이 옛 동작이고, 그 값으로 구우면 배포된 d121/d128 캡션이
+    **비트 동일**하게 재현된다 (camel/snowboard/parkour 로 확인).
 - **`scripts/fit_hole_ladder.py` 의 `suspect` 열 + `scripts/vista4d_bank_to_dl3dv.py
   --drop_suspect` — "게이트가 막은 게 아닌데 수치가 나쁜" 변이 진단 태그 (D140, 2026-09-06,
   사용자 지시 "충돌, subject in frame 같은 수치가 의도와 다르게 preset과 첫 카메라가 놓인

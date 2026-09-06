@@ -93,6 +93,32 @@ def preset_family(p):
     return 'LBM preset'
 
 
+def framing_scope_keep(e, scope):
+    """`--framing_scope` 필터. subject_in_frame 을 **책임질 수 있는** 세그먼트만 남긴다.
+
+    사용자 지시(2026-09-06): "aim 이 follow 인 것들이나 target 이 없는 free moving 은 물체의
+    subject in frame 율이 낮은 건 당연해 이것들 제외한 preset 들만 재줘."
+
+    두 축을 각각 거른다 — 이 코퍼스에서 둘은 **독립**이다:
+      · `track_*` preset = **병진 추종**(follow). 카메라가 subject 를 따라 이동한다.
+      · `aim` = **회전 조준**. `look_at` 만이 매 프레임 subject 를 다시 겨냥한다.
+        `free` 는 조준 자체가 없고(= target 없는 free moving), `traj` 는 궤적 접선을 본다
+        (`aim_keyframes=0` 이면 조준 안 함). 둘 다 프레이밍을 약속할 수단이 없다.
+    그래서 `aimed_nontrack` 은 `aim == 'look_at'` 이고 `track_*` 도 `dd_*` 도 아닌 것만 남긴다
+    (`dd_*` 는 DataDoP 유래 one-off 라 subject 개념 자체가 없다).
+    `aimed` 는 track 여부를 안 보고 `aim == 'look_at'` 만 본다 — `track_look_at` 처럼 추종 +
+    조준을 둘 다 하는 preset 은 프레이밍을 약속할 수단이 있으므로 남길 근거가 있다.
+    """
+    if scope == 'all':
+        return True
+    if (e.get('aim') or '') != 'look_at':
+        return False
+    if scope == 'aimed':
+        return True
+    p = e.get('preset') or ''
+    return not (p.startswith('track_') or p.startswith('dd_'))
+
+
 def read_seg_ids(root, prefix, split):
     """seg-list 를 읽어 {'<batch>/<hash>/<seg>'} 집합으로 돌려준다."""
     names = {'train': ['train'], 'test': ['test'], 'both': ['train', 'test']}[split]
@@ -219,6 +245,10 @@ def main():
                     help='corpus_axis.json 이 떨어질 디렉토리')
     ap.add_argument('--top_preset', type=int, default=14,
                     help='표에 찍을 preset 상위 개수 (json 에는 전량 들어간다)')
+    ap.add_argument('--framing_scope', default='all',
+                    choices=['all', 'aimed', 'aimed_nontrack'],
+                    help='게이트를 어느 부분집합에서 잴지. all=전량(기존 동작, 기본), '
+                         'aimed=aim==look_at 만, aimed_nontrack=거기서 track_*/dd_* 도 제외')
     a = ap.parse_args()
 
     summaries = []
@@ -234,13 +264,21 @@ def main():
                   f'(예: {no_json[:3]})')
         if no_entry:
             print(f'[warn] {name}: prompts.json 에 엔트리 없는 seg {no_entry}')
-        summaries.append(summarize(name, root, rows))
+        n_all = len(rows)
+        if a.framing_scope != 'all':
+            rows = [r for r in rows if framing_scope_keep(r, a.framing_scope)]
+            print(f'[scope] {name}: {a.framing_scope} -> {len(rows)}/{n_all} seg '
+                  f'({100 * len(rows) / max(n_all, 1):.1f}%) 남김')
+        s = summarize(name, root, rows)
+        s['framing_scope'] = a.framing_scope
+        s['n_seg_before_scope'] = n_all
+        summaries.append(s)
 
     W = max(len(s['name']) for s in summaries) + 2
     def row(lbl, vals):
         print(f'  {lbl:26s} ' + ' '.join(f'{v:>{W}}' for v in vals))
 
-    print(f'\n=== 코퍼스 규모 (split={a.split}) ' + '=' * 40)
+    print(f'\n=== 코퍼스 규모 (split={a.split}, scope={a.framing_scope}) ' + '=' * 26)
     row('', [s['name'] for s in summaries])
     row('seg (학습 대상)', [s['n_seg'] for s in summaries])
     row('scene', [s['n_scene'] for s in summaries])
@@ -308,7 +346,8 @@ def main():
             row(f'  aim={k} {lbl}', vals)
 
     makedirs(a.out, exist_ok=True)
-    op = path.join(a.out, f'corpus_axis_{a.split}.json')
+    suffix = '' if a.framing_scope == 'all' else f'_{a.framing_scope}'
+    op = path.join(a.out, f'corpus_axis_{a.split}{suffix}.json')
     with open(op, 'w') as f:
         dump({'split': a.split, 'corpora': summaries}, f, indent=2, ensure_ascii=False)
     print(f'\nout -> {op}')

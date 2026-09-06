@@ -258,6 +258,60 @@ goals.md 중기목표 2(복합 카메라)·3(시작 구도)은 코퍼스 상태�
   전량 적용하면 `aim` 축이 붕괴한다.
 - 검증: 재생성 후 이 문서의 §2-c 표를 그대로 재측정 (`corpus_axis_compare.py`).
 
+**해소됨 (D143, 2026-09-06) — B 를 채택하되 판정을 preset 축이 아니라 변이 축으로.**
+`build_bank_captions.py --framing_min_in_frame 0.85` (기본값): 그 변이의 실측
+`subject_in_frame` 이 임계 미만이면 framing 절(그리고 `nl` 형식의 composition 절)을 뺀다.
+`--no_framing_on_free` 로 preset 축(=`aim=free` 전량) 규칙도 남겼지만 기본은 꺼짐.
+
+*왜 preset 축이 아닌가* — `aim=free` 라고 다 깨지지 않는다. vista d121 train, `aim=free` 만,
+`subject_in_frame` median / `<0.85` 비율:
+
+| preset | median | <0.85 | | preset | median | <0.85 |
+|---|---|---|---|---|---|---|
+| `dolly_out` | 1.000 | 19.4% | | `track_dolly_out` | 1.000 | 4.8% |
+| `track_hold` | 1.000 | 10.8% | | `static_hold` | 1.000 | 20.8% |
+| `pedestal_down` | 0.923 | 48.7% | | `dolly_in` | 0.923 | 49.0% |
+| `truck_left` | 0.538 | 69.1% | | `track_truck_left` | 0.385 | 78.8% |
+
+자기 축으로 물러나는 `dolly_out` 계열은 재조준 없이도 대상이 중앙에 남는다 — preset 이름으로
+뭉뚱그리면 멀쩡한 신호를 버린다. 반대로 `aim=look_at` 도 2.9% 는 프레임을 놓치는데(아래 §4-1a)
+preset 축으로는 그쪽을 아예 못 잡는다.
+
+*무엇을 남기나* — motion 절과 target 은 그대로다. `track_*` 의 "tracks {target}" 은
+follow_gain 1.0 으로 실제 참이고, 비-track 의 "sliding sideways past {target}" 도 참이다.
+거짓인 건 프레이밍 약속뿐이라 그 절만 뺀다.
+
+*적용 범위* — 학습을 안 돌리는 vista 두 뱅크에만 적용했다 (사용자 지시). 기존 루트는 완료된
+런의 학습 캡션이라 **덮지 않고** 새 루트를 팠다. 기하(seg_list / meta_csv)는 원본과 비트 동일함을
+`run_d143_caption_export.sh` 의 `check_same` 으로 확인:
+
+| 새 루트 | 뱅크 | seg (train/test) | 프롬프트 변경 |
+|---|---|---|---|
+| `latentcam_da3_k6_d121c143` | `hole_bank_k6_d121` | 14975 / 875 (원본과 동일) | 3948/15850 (24.9%) |
+| `latentcam_da3_k6_d128c143` | `hole_bank_k6_d128` | 9389 / 592 (원본과 동일) | 2049/9981 (20.5%) |
+
+dynpose d137 은 **미적용** — D137/D141 이 그 코퍼스로 학습 중이다. 학습이 끝나면 같은 드라이버로.
+
+### 4-1a. [남은 문제] dynpose 의 프레이밍 실패는 aim/track 으로 설명되지 않는다
+
+사용자 지시("aim이 follow인 것들이나 target이 없는 free moving은 ... 당연해 이것들 제외한
+preset들만 재줘")대로 `corpus_axis_compare.py --framing_scope` 로 다시 쟀다.
+`subject_in_frame < 0.85` 비율, split=train:
+
+| 범위 | vista_d121 | vista_d128 | dynpose_d137 |
+|---|---|---|---|
+| `all` (전량) | 27.2% | 26.4% | 41.4% |
+| `aimed` (`aim==look_at`) | 2.9% | 2.8% | 17.6% |
+| `aimed_nontrack` (+`track_*`/`dd_*` 제외) | 3.1% | 2.5% | 17.0% |
+
+남는 세그먼트: 6015/14975(40.2%) · 3998/9389(42.6%) · **955/9728(9.8%)**.
+
+**vista 는 사용자의 읽기가 그대로 맞다** — follow/targetless 를 빼면 27.2% → 3.1% 로 무너진다.
+**dynpose 는 아니다** — 41.4% → 17.0% 에서 멈춘다. 즉 dynpose 에는 aim/track 이 설명하지 못하는
+잔차가 따로 있고, 그건 §4-2(라우팅)·§4-4(`dd_*` one-off)와 같은 뿌리일 가능성이 크다:
+`aimed_nontrack` 에서 dynpose 는 955 seg 중 `s_curve` 하나가 62.0% 를 먹고, 씬은 195개인데
+seg/scene median 이 3 이다. 진단 우선순위는 §4-2 다음.
+
 ### 4-2. [데이터] dynpose 에 수직 이동 preset 이 0건
 
 - 근거: §2-a. `pedestal_up/down` `crane_up/down` `orbit_left_pedestal_up` 이 vista 19.4%,
@@ -359,7 +413,11 @@ goals.md 중기목표 2(복합 카메라)·3(시작 구도)은 코퍼스 상태�
 1. 4개 학습(D133 / D137 / D138 / D141) 100 epoch 완료 대기 → `last.pth` 로 각 코퍼스 테스트셋
    페어드 eval. **eval 은 한 번에 1개만** (/data1 Lustre).
 2. 2×3 표를 이 문서 §1 에 채운다. 채워진 칸만 가지고 결론 쓰지 않는다.
-3. 4-1(캡션 프레이밍 절 제거) → 캡션 재생성 → §2-c 재측정.
+3. ~~4-1(캡션 프레이밍 절 제거) → 캡션 재생성 → §2-c 재측정.~~ **완료 (D143, 2026-09-06)** —
+   vista 두 뱅크에 적용해 새 루트 `latentcam_da3_k6_d121c143` / `..._d128c143` 를 뽑았다.
+   dynpose d137 은 학습 중이라 미적용. 재측정은 §4-1a.
+3-a. dynpose 학습(D137/D141)이 끝나면 같은 드라이버로 d137 캡션 재생성 + 재export.
+3-b. §4-1a 의 dynpose 잔차(17.0%) 진단 — §4-2 다음 순위.
 4. 4-2 확인(라우팅인지 게이트인지).
 5. 그리드 결론 나온 뒤 4-3(합침 arm) 1개 추가 학습.
 6. 4-6(`subject_in_frame` 로깅)은 4-3 arm 부터 적용.

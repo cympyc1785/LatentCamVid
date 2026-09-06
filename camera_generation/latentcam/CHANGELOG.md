@@ -4,6 +4,27 @@ All notable changes to the latentcam sub-project. Follows [Keep a Changelog](htt
 
 ## [Unreleased]
 
+### Added
+- **`scripts/eval/corpus_axis_compare.py --framing_scope` — 게이트를 "프레이밍을 책임질 수
+  있는" 부분집합에서만 재는 필터 (D143, 2026-09-06, 사용자 지시 "aim이 follow인 것들이나
+  target이 없는 free moving은 물체의 subject in frame 율이 낮은 건 당연해 이것들 제외한
+  preset들만 재줘").** 세 값 — `all`(기존 동작, 기본) / `aimed`(`aim == "look_at"` 만) /
+  `aimed_nontrack`(거기서 `track_*`·`dd_*` 도 제외). `track_*` 은 병진 추종이고 `aim` 은
+  회전 조준이라 **독립 축**이므로 둘을 따로 건다.
+  · 실측 (split=train, `subject_in_frame < 0.85` 비율):
+        범위               vista_d121      vista_d128     dynpose_d137
+        all (전량)          27.2%           26.4%           41.4%
+        aimed                2.9%            2.8%           17.6%
+        aimed_nontrack       3.1%            2.5%           17.0%
+    남는 세그먼트는 `aimed_nontrack` 에서 6015/14975(40.2%) · 3998/9389(42.6%) ·
+    955/9728(9.8%).
+  · **읽기**: vista 는 사용자의 "당연하다"가 그대로 성립한다 — follow/targetless 를 빼면
+    27.2% → 3.1% 로 무너진다. **dynpose 는 아니다** — 41.4% → 17.0% 에서 멈춘다. 즉
+    dynpose 의 프레이밍 실패는 aim/track 으로 설명되지 않는 잔차가 따로 있다.
+    (같은 범위에서 dynpose 는 955 seg 중 `s_curve` 하나가 62.0% 를 먹는다 — 씬은 195개인데
+    seg/scene median 이 3 이다.)
+  · 코퍼스별 test set 이 다르므로(vista 875 / dynpose 1129) **행 간 비교는 여전히 금지**다.
+
 ### Changed
 - **`docs/corpus_and_model_axes.md` §1-a / §4-2 갱신 (2026-09-06).**
   · §1-a: D133(molmo2 단독)을 d121 test 875 에서 `last.pth` 로 평가해 vista 행 3칸을 채웠다.

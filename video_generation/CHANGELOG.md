@@ -253,6 +253,23 @@
   (`--stages`)·GPU 0~4 assert 포함. 기존 bash 러너는 **지우지 않는다** — 이미 구워진 세대를
   재현할 때의 근거 기록이다. 첫 사용처는 `configs/bank/d150S.json` / `d150L.json`.
 
+### Changed
+- **GenDoP 판독값을 raw output 으로 (`run_gendop_eval.py --raw`, `eval_collision_rate.py`
+  CORPORA; 2026-09-07 사용자 지시 "앞으로 raw output 그대로 써주고 metric들도 이에 맞춰서
+  다시 표 만들어줘").** `gendop_preds_to_eval_dir.py` 는 기본으로 GenDoP 의
+  `rmax = max_f |rel[f,:3,3]|` 를 **GT 것으로 바꿔 심는다** — 그러면 최대 변위가 GT 와
+  정확히 같아지고, 충돌률·`subject_in_frame` 처럼 **절대 크기에 반응하는 지표는 GenDoP 이
+  아니라 GT 를 재게 된다**. d121 p49 기준 실측 확대율(GT/GenDoP) median 은
+  text 2.6929 / rgbd 2.4827 / gdstyle 2.4551 로, 렌더된 GenDoP 궤적은 모델이 실제로 낸 것보다
+  ~2.5배 컸다.
+  · `run_gendop_eval.py` 에 `eval_suffix(pose_length, text_tag, rescale)` 를 넣어 `--raw` 면
+    산출물이 `eval_dir_..._raw` / `subject_in_frame..._raw.json` 으로 갈린다. infer 산출물
+    (`pred_*`)은 rescale 과 무관하므로 **추론을 다시 돌리지 않는다**.
+  · 기본값은 `--rescale` 로 두어 **예전 런과 비트동일**하다 (집 규칙: 기존 작동 구조는
+    option 분기로 유지). rescale 판본은 확대가 지표를 얼마나 움직였는지 보는 대조군으로 남긴다.
+  · `eval_collision_rate.py` 의 `vista_d121` gendop arm 3개를 `_raw` 폴더로 돌리고
+    `gendop_gdstyle_p49` arm 을 추가했다. 결과는 `results/20260907_d159_collision_raw/`.
+
 ### Fixed
 - **`CinemaTraj/scripts/gendop_release_infer.py --eval_dir_prefix` — `--text_from_eval_dir` 의
   파일명 접두사가 `vista4d` 로 하드코딩돼 있었다 (D158, 2026-09-07).** eval 폴더는 코퍼스

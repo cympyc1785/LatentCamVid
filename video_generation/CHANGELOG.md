@@ -7,6 +7,26 @@
 ## [Unreleased]
 
 ### Added
+- **`render_pred_depth_warp.py --caption_dir LABEL=DIR` — arm 이 **실제로 받은** 조건 텍스트를
+  eval 폴더 밖에서 읽는다 (2026-09-07, 사용자 지시 "gdstyle은 text가 move forward 이래야하는거
+  아니야?").** 열 라벨을 `load_condition_text(eval_dir, name)` 로만 뽑고 있었는데 GenDoP
+  gdstyle arm 의 입력은 `results/20260906_d156_gendop_d121/text_gendop_style/` 이고 eval 폴더의
+  `<name>_caption.json` 은 **대조용으로 복사된 우리 d121 캡션**이다 — 궤적·렌더는 맞고 라벨
+  문자열만 틀린 종류라 영상만 보면 안 들킨다. `--caption_dir` 의 라벨이 `--eval_dir` 에 있는지
+  assert 하고, 안 주면 종전대로 eval 폴더에서 읽는다 (기존 런과 동일).
+- **`slice_subject_in_frame.py` — `--json` 다중 입력 + `--group_scene` + `--group_meta FIELD`
+  (2026-09-07, 사용자 지시 "subject in frame도 scene 별로 표 만들어주고 preset type 중
+  free-moving (no anchor)인거랑 object-centric (with anchor)인거 분리해서 표 만들어줘봐").**
+  arm 을 GPU 두 장에 나눠 돌리면 결과 JSON 이 갈리고 `gt` 열이 양쪽에 들어 있어 그냥 합치면
+  두 번 세어진다 — `(scene, entry, arm)` 중복은 먼저 준 파일을 남기고 개수를 print 한다.
+  씬별 / `prompts.json` 필드별 그룹은 split 파일을 손으로 만들 이유가 없어 플래그로 뒀다
+  (`--group_meta aim` → `aim=free` free-moving / `aim=look_at` object-centric).
+  · 실측 (warp_1to1, center_box 0.80, n=875): **arm 간 격차가 거의 전부 `aim=look_at`(415) 에
+    있다.** `aim=free`(460) 은 gt 0.6406 / d133 0.6430 / d124 0.6406 / d123 0.6345 /
+    gd_rgbd 0.5918 / gd_style 0.6295 로 gt 와 우리 3 arm 이 사실상 동률인데, `aim=look_at` 은
+    gt 0.9218 vs d133 0.7219 / d124 0.6937 / d123 0.6636 / gd_rgbd 0.5695 / gd_style 0.4923.
+  · 씬별로는 bmx-bumps(220) 만 우리가 gendop 보다 낮다 (d123 0.3212 / d133 0.3436 /
+    d124 0.3446 vs gd_rgbd 0.4262 / gd_style 0.4312, gt 0.6535).
 - **`gendop_preds_to_eval_dir.py --no_scale_token` + `run_gendop_eval.py --no_scale_token`
   — scale 토큰을 되나눠 **공식 배포 판본**과 크기를 맞춘다 (2026-09-07, 사용자 지시 "적용
   안한게 공식 배포 버전인 것 같으니 적용 안하고 다시 metric 측정해줘").** 배포 `eval.py:233`

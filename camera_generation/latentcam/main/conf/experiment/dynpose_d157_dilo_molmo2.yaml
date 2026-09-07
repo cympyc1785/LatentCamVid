@@ -1,0 +1,64 @@
+# @package _global_
+# D163 — `dynpose_d157_dilo_da3.yaml` 에서 **da3 geo CA 를 빼고 Molmo2-4B 스트림으로 갈아끼운**
+# arm. 레이어 순서 text CA(umt5) -> molmo2 CA. geo CA 없음.
+# 3-arm 세트의 둘째 칸. 코퍼스·holdout·text_len·VAE·scale_mode·intr_norm·seed 는 세 arm 전부 같다.
+#
+# ═══ 무엇이 꺼지는가 ═══════════════════════════════════════════════════════════════════════
+# `geo_encoder: null` 하나가 세 군데를 동시에 끈다 (D133/D138 헤더와 같은 근거):
+#   · dataset  `dataset_cfg.py:263  geo_enabled = bool(getattr(cfg, 'geo_encoder', None))`
+#   · train    `train_latent_cam_dm.py:482  ... if getattr(cfg, 'geo_encoder', None) else None`
+#   · model    `camera_diffusion_model_latent.py:261  has_geo_latent = geo_emb is not None`
+# `pose_source: da3` / `target_pose_source` 는 **카메라 궤적 자체**의 출처라 그대로 둔다.
+#
+# ═══ 캐시 — video 는 d137 것을 공유, text 는 새로 굽는다 ═══════════════════════════════════
+# video part 는 씬당 1파일이고 내용이 **소스 영상**이라 뱅크·preset 필터와 무관하다. d137 이
+# 구워 둔 267편 중 dilo 166편이 160편 들어 있었고 나머지 6편만 붙였다.
+# text part 는 dedup 키가 `(scene_key, caption)` 인데 D157 캡션은 D137 과 다르다(뱅크가 다르다)
+# — 그래서 **d157 루트 밑에 새로 굽는다**. 구운 명령:
+#     python main/cache_molmo2_embeddings.py --gpu <g> \
+#       --root /data1/cympyc1785/data/DynPose-LBM/latentcam_dynpose_d157 \
+#       --seg_prefix dynpose_dilo --splits train,test \
+#       --video_out .../latentcam_dynpose_d137/molmo2_cache/video \
+#       --text_out  .../latentcam_dynpose_d157/molmo2_cache/text.pt
+# `--seg_prefix dynpose_dilo` 가 `seg_list_dynpose_dilo_{train,test}.txt` 를 읽는다.
+exp_name: dynpose_d157_dilo_molmo2
+dl3dv_root: /data1/cympyc1785/data/DynPose-LBM/latentcam_dynpose_d157
+meta_csv: meta_dynpose.csv
+train_seg_list: /data1/cympyc1785/data/DynPose-LBM/latentcam_dynpose_d157/seg_list_dynpose_dilo_train.txt
+test_seg_list: /data1/cympyc1785/data/DynPose-LBM/latentcam_dynpose_d157/seg_list_dynpose_dilo_test.txt
+coverage_blacklist_path: null
+
+text_len: 128
+
+pose_source: da3
+target_pose_source: da3_target_poses
+scale_mode: avg_scale
+avg_scale_ref: context_first_cam
+intr_norm: rel
+cam_dim: 64
+
+# ─── geo (da3) 스트림 제거 ────────────────────────────────────────────────────────────────
+geo_encoder: null          # ← da3 arm 은 'da3'. 이 한 줄이 dataset/train/model 세 군데를 끈다.
+geo_posed: false           # geo 가 없으므로 무의미하지만, true 로 두면 오독된다.
+geo_cam_embed: null
+geo_latent_cache_dir: null
+geo_raw_cache_dir: null    # geo_enabled=False 면 어차피 안 읽지만 경로가 남으면 오독된다.
+
+anchor_pred_frame0: true
+
+# ─── Molmo2 CA (기존 PE-AV 슬롯을 그대로 재사용한다) ───────────────────────────────────────
+peav_video_cache_dir: /data1/cympyc1785/data/DynPose-LBM/latentcam_dynpose_d137/molmo2_cache/video
+peav_text_cache: /data1/cympyc1785/data/DynPose-LBM/latentcam_dynpose_d157/molmo2_cache/text.pt
+# 캐시는 dilo 리스트만 구웠는데(707 seg) 데이터셋은 prompts.json 을 전량 열거한다.
+# 이 플래그가 커버리지 검사를 위 두 seg_list 안으로 좁힌다 — 안 켜면 dilo 밖 세그먼트가
+# 캐시에 없다고 죽는다 (FIX-D138).
+peav_seg_list_only: true
+video_latent_dim: 2560     # Molmo2 LM hidden — video part (3136 tok)
+video_text_in_stream: true
+video_text_dim: 2560       # 같은 LM hidden — text part (128 tok). 기본 1024 는 PE-AV 값이다.
+peav_in_ln: true           # proj 앞 LayerNorm. FIX-D117 참조 (없으면 CA logit 포화)
+video_gate: true           # 0 초기화 residual gate. FIX-D117 참조 (없으면 loss ~1.0 정체)
+
+batch_size: 8
+epochs: 100          # 실제 집행자는 conf/config.yaml 의 `epoch_cap: 100`.
+ckpt_at_epochs: [50, 100]

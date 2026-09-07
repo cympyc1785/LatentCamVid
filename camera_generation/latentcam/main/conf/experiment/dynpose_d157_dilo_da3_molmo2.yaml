@@ -1,0 +1,54 @@
+# @package _global_
+# D163 — d157 dilo 코퍼스의 **da3 geo CA + Molmo2 CA 동시** arm.
+# 레이어 순서 text CA(umt5) -> molmo2 CA -> geo(da3) CA. 3-arm 세트의 셋째 칸.
+#
+# 앞의 두 arm 에서 글자 그대로 합친 것이라 diff 는 블록 두 개뿐이다:
+#   · vs dynpose_d157_dilo_da3    : molmo2 CA 블록 추가 (video 3136 tok + text 128 tok, dim 2560)
+#   · vs dynpose_d157_dilo_molmo2 : geo(da3) CA 블록 추가 (`geo_encoder: da3` 및 딸린 키들)
+# 캐시는 둘 다 재사용 — 새로 굽는 것 없음.
+exp_name: dynpose_d157_dilo_da3_molmo2
+dl3dv_root: /data1/cympyc1785/data/DynPose-LBM/latentcam_dynpose_d157
+meta_csv: meta_dynpose.csv
+train_seg_list: /data1/cympyc1785/data/DynPose-LBM/latentcam_dynpose_d157/seg_list_dynpose_dilo_train.txt
+test_seg_list: /data1/cympyc1785/data/DynPose-LBM/latentcam_dynpose_d157/seg_list_dynpose_dilo_test.txt
+coverage_blacklist_path: null
+
+text_len: 128
+
+pose_source: da3
+target_pose_source: da3_target_poses
+scale_mode: avg_scale
+avg_scale_ref: context_first_cam
+intr_norm: rel
+cam_dim: 64
+
+# ─── geo (da3) 스트림 — dynpose_d157_dilo_da3 에서 복사 ────────────────────────────────────
+geo_encoder: da3
+geo_cam_embed: null
+geo_latent_cache_dir: null
+geo_posed: true
+geo_shuffle_order: false
+da3_geo_model: da3nested-giant-large
+da3_geo_input_hw: [252, 448]
+da3_geo_layers: last
+geo_view_sampling: context_uniform
+geo_num_views: 6                    # _even_indices(49,6) = [0,10,19,29,38,48]
+geo_first_view_target_s: true
+geo_raw_cache_dir: /data1/cympyc1785/data/DynPose-LBM/latentcam_dynpose_d129/geo_raw_cache_da3
+da3_cam_token_per_sample: true
+
+anchor_pred_frame0: true
+
+# ─── Molmo2 CA — dynpose_d157_dilo_molmo2 에서 복사 ───────────────────────────────────────
+peav_video_cache_dir: /data1/cympyc1785/data/DynPose-LBM/latentcam_dynpose_d137/molmo2_cache/video
+peav_text_cache: /data1/cympyc1785/data/DynPose-LBM/latentcam_dynpose_d157/molmo2_cache/text.pt
+peav_seg_list_only: true   # 캐시는 dilo(707 seg), 데이터셋은 prompts.json 전량. FIX-D138.
+video_latent_dim: 2560     # Molmo2 LM hidden — video part (3136 tok)
+video_text_in_stream: true
+video_text_dim: 2560       # 같은 LM hidden — text part (128 tok). 기본 1024 는 PE-AV 값이다.
+peav_in_ln: true           # proj 앞 LayerNorm. FIX-D117 참조 (없으면 CA logit 포화)
+video_gate: true           # 0 초기화 residual gate. FIX-D117 참조 (없으면 loss ~1.0 정체)
+
+batch_size: 8
+epochs: 100          # 실제 집행자는 conf/config.yaml 의 `epoch_cap: 100`.
+ckpt_at_epochs: [50, 100]

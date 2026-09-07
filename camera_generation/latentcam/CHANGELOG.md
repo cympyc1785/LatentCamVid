@@ -5,6 +5,29 @@ All notable changes to the latentcam sub-project. Follows [Keep a Changelog](htt
 ## [Unreleased]
 
 ### Added
+- **`main/conf/experiment/dynpose_d157_dilo_{da3,molmo2,da3_molmo2}.yaml` — `dolly_in_look_at`
+  단일 preset 코퍼스 위의 3-arm 모델축 비교 (D163, 2026-09-07, 사용자 지시 "scene 늘려서 dolly
+  in look at 만 학습했을 때 da3 vs molmo2 vs da3+molmo2를 비교하고 싶은데" → "지금 181씬으로
+  3-arm 돌린다").** preset 축을 없애면 남는 변이 축이 τ(hole 사다리)와 anchor 둘뿐이라, 세 arm 의
+  차이가 "preset 어휘를 외웠나" 가 아니라 "씬을 읽고 대상 쪽으로 들어가나" 로 좁혀진다.
+  · 코퍼스 `latentcam_dynpose_d157` — D157 뱅크가 875편 중 187편까지 구워진 **중간 상태**를
+    부분 export 한 것 (`CinemaTraj/scripts/run_dynpose_d163_export.sh`, `--skip_done` 으로 나중에
+    증분). `filter_seg_list_by_preset.py --presets dolly_in_look_at --suffix dilo`.
+  · 실측 규모 `통과 707 / 14301` → **train 645 (scene 149) / test 62 (scene 17)**. 짝이 되는
+    이전 실험 D95(`dynpose_d84_k6_dionly`, da3 단독) 의 train 299 / test 37 대비 2.2배이고
+    **scene 수는 오히려 적다** — 187편 중 178편이 d129 의 267편과 겹친다.
+  · 캐시는 전부 공유 + 증분: geo raw 는 d129 루트(160편 hit, 6편 추가), molmo2 video 는 d137
+    루트(160편 hit, 6편 추가), molmo2 text 만 d157 루트에 새로 (`(scene_key, caption)` 키라
+    캡션이 바뀌면 재사용 불가).
+
+### Fixed
+- **`scripts/data/cache_geo_raw_da3.py` — `is_done` 의 동일성 비교에서 `meta['exp']` 제외
+  (D163).** `exp` 는 설정이 아니라 "누가 처음 구웠나" 라벨인데 비교에 들어가 있어서, 캐시
+  디렉토리를 공유하는 새 arm 이 붙을 때마다 내용이 **비트 동일한** 파일 전량(dilo 기준 160개,
+  6.8 GB)을 다시 구워 덮어썼다. 그 디렉토리를 읽고 있는 다른 학습(D160)이 반쯤 쓰인 파일을
+  `torch.load` 하다 죽을 수 있다. 진짜 설정 7개(da3 모델/입력 해상도/layers/posed/num_views/
+  image_hw/first_view)와 dtype 은 그대로 전부 비교한다. 캐시 공유는 `dynpose_d137_da3.yaml` 이
+  d129 루트를 가리키는 것처럼 이미 정상 사용법이다.
 - **`main/conf/experiment/dynpose_d137c147_da3_{dd10,nodd}.yaml` — DataDoP 비율 ablation 을
   **캡션이 최신인** dynpose 코퍼스 위에서 다시 (D160, 2026-09-07, 사용자 지시 "fitting 끝난
   최신 dynpose 기준 caption 만 최신 형태로 바꾼 걸로 dd10 와 nodd da3 로 학습").** 같은 질문을

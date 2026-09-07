@@ -107,14 +107,23 @@ def is_done(path, meta):
     """이미 구워졌나. **존재만으로는 부족하다** — dtype 과 meta 까지 맞아야 한다.
 
     존재만 봤다가 dtype 을 bf16 -> fp32 로 바꾼 뒤 skip-done 이 낡은 파일을 그대로 살려 두는
-    사고를 냈다. 설정을 바꾸면 그냥 다시 돌리면 덮어쓰도록 여기서 판정한다."""
+    사고를 냈다. 설정을 바꾸면 그냥 다시 돌리면 덮어쓰도록 여기서 판정한다.
+
+    단 `meta['exp']` 는 **비교에서 뺀다** (D163). 이건 설정이 아니라 "누가 처음 구웠나" 라벨이고,
+    캐시 키가 scene 이라 여러 experiment 가 같은 디렉토리를 공유하는 게 정상 사용법이다
+    (`dynpose_d137_da3.yaml` 이 d129 루트의 캐시를 가리키는 것이 그 예). 라벨까지 비교하면
+    새 arm 이 붙을 때마다 내용이 **비트 동일한** 파일 수백 개를 덮어쓰고, 그 디렉토리를 읽고
+    있는 다른 학습이 반쯤 쓰인 파일을 torch.load 하다 죽는다. 진짜 설정(da3 모델/입력 해상도/
+    layers/posed/num_views/image_hw/first_view) 은 그대로 전부 비교한다."""
     if not osp.exists(path):
         return False
     try:
         c = torch.load(path, map_location='cpu', weights_only=False)
     except Exception:
         return False
-    return c['raw'].dtype == torch.float32 and c.get('meta') == meta
+    old = dict(c.get('meta') or {}); old.pop('exp', None)
+    new = dict(meta); new.pop('exp', None)
+    return c['raw'].dtype == torch.float32 and old == new
 
 
 def main():

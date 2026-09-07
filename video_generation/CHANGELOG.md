@@ -98,6 +98,19 @@
     1~12개에 얹혀 있다.
   · `--knn_r 0.012089` 로 임계를 고정해 재실행했더니 `gt` 의 kNN rate 만 0.0103 -> 0.0114 로
     움직였다 (출력에 찍힌 반올림값을 되먹인 탓, 나머지 8 arm 은 전부 동일). 인용할 때 주의.
+- **`eval_collision_rate.py` — scene 별 재집계 `--per_scene` (기본 on, 2026-09-07, 사용자 지시
+  "scene별로도 뽑아줘").** 코퍼스 평균은 엔트리 수가 많은 씬이 끌고 가고, 씬마다 점군 밀도와
+  소스 시차가 달라 같은 `knn_r` 이 씬별로 다른 엄격도로 작동한다. arm 요약 로직을
+  `summarize(pool)` 로 뽑아 전체와 씬별이 **같은 코드 경로**를 타게 하고 (CSV 재집계 스크립트를
+  따로 두면 본 표와 갈린다), JSON 에 `by_scene` 블록 + 씬별 print 표를 추가했다. 기존 두 표와
+  `summary` 블록은 그대로다.
+  · d121 val 875 = avocado-slice 266 / bmx-bumps 220 / camel 325 / couple-hug 64.
+  · 실측: 충돌이 **camel 과 avocado-slice 에만** 있다. `d124_da3_molmo2` 의 코퍼스 kNN rate
+    0.0137 은 camel 0.0369 + 나머지 3 씬 0.0000 이고, `gendop_gdstyle_p30_slerp` 0.0046 도
+    전부 camel(0.0123). couple-hug 는 9 arm 전부 0 이다 (arc median 0.085~1.03).
+  · 씬별로 보면 `d123_da3` 는 avocado-slice(0.0188)·camel(0.0215) 양쪽에서 걸리고
+    `d124_da3_molmo2` 는 avocado-slice 0 / camel 0.0369 로 한 씬에 몰린다 — 코퍼스 평균
+    0.0137 이 같아도 실패 모양이 다르다.
 - **`CinemaTraj/scripts/eval_collision_rate.py` — 궤적 충돌률 게이지 2종 (G1 + kNN k=10)
   (2026-09-07, 사용자 지시 "우리 G1 gate로 먼저 collision rate 재줘").** 예측 궤적이 씬 안으로
   파고드는 비율을 재는데, 게이지가 하나면 판정을 못 믿는다:

@@ -5,6 +5,21 @@ All notable changes to the latentcam sub-project. Follows [Keep a Changelog](htt
 ## [Unreleased]
 
 ### Added
+- **`main/conf/experiment/dynpose_d137c147_da3_{dd10,nodd}.yaml` — DataDoP 비율 ablation 을
+  **캡션이 최신인** dynpose 코퍼스 위에서 다시 (D160, 2026-09-07, 사용자 지시 "fitting 끝난
+  최신 dynpose 기준 caption 만 최신 형태로 바꾼 걸로 dd10 와 nodd da3 로 학습").** 같은 질문을
+  d107 코퍼스에서 먼저 띄웠다가 epoch 3 에서 멈췄다 — d107 캡션이 D121 이전 구조형
+  (`target: dog. motion: the camera dollies back ...`)이라 D123 이후 arm 들과 축이 어긋난다.
+  · 코퍼스는 `latentcam_dynpose_d137c147` (D147 이 d137 뱅크의 캡션만 다시 구운 것). fit 이
+    끝난 dynpose 5종 중 캡션이 최신인 유일한 것이다 — D157(875편)은 아직 fit 중.
+    seg_list 4종 + `meta_dynpose.csv` 가 d137 과 바이트 동일함을 `cmp` 로 확인했다.
+  · `nodd` seg_list 는 이 코퍼스에 없어서 새로 만들었다 (`filter_seg_list_by_preset.py
+    --exclude_presets_prefix dd_ --suffix nodd`, RNG 없음). 실측 구성:
+    dd10 train 9,728 (dd_ 973 = 10.0%) / nodd train 8,755 (dd_ 0) — **나머지 8,755 행은
+    같은 행**이라 D84 축(full→nodd 가 60% 를 들어냈던 것)과 달리 짝이 거의 like-for-like 다.
+    test 는 1,129 vs 1,016 로 113 행 차이가 남는다.
+  · `dynpose_d137_da3`(D137) 대비 실효 diff 는 `exp_name`/`dl3dv_root`/`train_seg_list`/
+    `test_seg_list` 4줄이라 dd10 arm 은 **캡션 교체 대조군**을 겸한다.
 - **`main/evaluate/CLaTr/configs/dataset/standardization/dynpose49.yaml` + `scripts/prepare_clatr_vista.py`
   의 `--train_list/--test_list` — CLaTr 게이지를 dynpose d137 코퍼스로도 만든다 (D158, 2026-09-07,
   사용자 지시 "CLaTr도 dynpose d137에 대해서 학습 돌려놔줘").** prep 스크립트는 split 목록

@@ -7,6 +7,32 @@
 ## [Unreleased]
 
 ### Added
+- **`CinemaTraj/scripts/gendop_style_captions.py` + `run_gendop_eval.py --text_dir/--text_tag`
+  — GenDoP 에 학습 분포 정합 문장을 먹이는 텍스트 arm (2026-09-07, 사용자 지시 "gendop가
+  학습한 환경에 맞춰주기 위해 ... motion text와 target만 사용해서").** 지금까지 GenDoP 에 넣던
+  문장은 우리 D121 자연어 캡션이라 `framing`(medium shot tightening to...) · `composition`
+  (with the fence on the right...) 절이 붙어 있고 어휘도 우리 태거 것이다. GenDoP 는 DataDoP
+  캡션(`move forward` / `yaw left`)으로 학습됐으므로 그건 **분포 밖**이고, 낮게 나온 수치가
+  모델 탓인지 문장 탓인지 안 갈린다.
+  · 문장은 두 조각으로만 만든다 — `da3/captions_gendop/<idx>_tag.json` 의 chunk 열
+    (`move`/`angular`) + `prompts.json[<idx>].caption_fields.target_text`. **preset 이름으로
+    손매핑하지 않는다** — 그 태그는 우리가 GenDoP 파이프라인 세팅으로 GT 포즈에서 직접
+    뽑은 것이라 어휘가 이미 DataDoP 과 같고, `orbit_right` 의 실제 태그가 `move right` +
+    `yaw left` 인지는 포즈가 답한다 (좌우 부호를 눈대중으로 정하지 않기 위함).
+    전치사는 첫 chunk 의 이동 방향이 고른다: forward→`towards`, backward→`away from`,
+    그 외→`focusing on`.
+  · 출력이 eval 폴더와 **같은 모양**(`<out>/test/<prefix>_<scene>_<idx>_caption.json`, 키
+    `Concise Interaction`)이라 `gendop_release_infer.py --text_from_eval_dir` 에 그대로 꽂힌다
+    — infer 스크립트는 한 줄도 안 고쳤다.
+  · `run_gendop_eval.py` 는 `--text_dir` 를 안 주면 예전과 **비트동일**하다 (ref arm 의 eval
+    폴더). `--text_dir` 만 주고 `--text_tag` 를 빼면 기본 캡션 산출물을 덮어쓰므로 assert 로
+    막는다. 경로는 `pred_gendop_rgbd_p49_gdstyle` 처럼 접미사로 갈린다.
+  · vista d121 test 875 entry 생성 결과: `written 875 / missing_tag 0 / no_target 64 /
+    degenerate 28 / words min 4 med 17 max 43`. `no_target 64` 는 targetless preset
+    (D90 `aim=free` 의 pan/tilt 4종)이라 정상이고, 그중 28건은 회전까지 DataDoP
+    `angular_static_threshold` 아래로 태깅돼 문장이 `The camera remains static.` 하나만
+    남는다 — 숨기지 않고 `degenerate` 로 세서 `config.json` 과 요약표에 남긴다.
+
 - **`CinemaTraj/scripts/run_gendop_eval.py` — GenDoP 릴리즈 ckpt 를 코퍼스 인자로 돌리는 드라이버
   (D158, 2026-09-07, 사용자 지시 "gendop text_rgbd에 대해서 돌려놔주고").** `tmp/d156/
   run_gendop_d121.py`(vista 전용)를 `CORPORA` 표로 인자화해 `scripts/` 로 승격한 것이다 —

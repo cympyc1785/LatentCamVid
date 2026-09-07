@@ -16,6 +16,28 @@
   절두체 화각은 `fl_x/fl_y/w/h` 실측이고 깊이만 `--frustum_len` 으로 줄인다.
 - **`gendop` p30 raw eval 폴더 2종** (`eval_dir_gendop_{text,rgbd}_raw`) — 아래 Fixed 항목의
   올바른 판독 경로. 추론은 재사용하고 `--stage evaldir --pose_length 30 --raw` 만 다시 돌렸다.
+- **`gendop_preds_to_eval_dir.py --resample gendop_slerp` + `run_gendop_eval.py --resample`
+  — 30 pose → 49 프레임을 GenDoP **자신의** 보간기로 (2026-09-07, 사용자 지시 "그냥 30으로
+  뽑고 interpolate, sampling하는 코드가 원본에 있을테니 49프레임으로 맞춰서").** 기존
+  `index_pick` 은 `np.rint(np.linspace(0,29,49))` 라 30개 중 19개가 두 번 뽑혀 **같은 pose 가
+  연속 2프레임**인 계단이 생긴다 — 궤적이 정지→점프를 반복하는 것으로 보이고, 그 계단이
+  속도 기반 지표(jerk·caption motion 태그)에 그대로 새어 든다.
+  · 새 경로는 `GenDoP/core/utils.sample_from_dense_cameras` (회전 quaternion SLERP + 이동 LERP)
+    를 그대로 부른다. 원본 `eval.py:256-262` 가 30 pose 를 120프레임으로 늘릴 때 쓰는 함수다.
+  · 시간축은 `t = i/(n-1)` — 원본은 `i/120` 이라 마지막 pose 를 안 밟지만(궤적의 99.2%만 씀),
+    우리 GT 49프레임은 소스 클립 전체를 덮으므로 끝점을 포함해야 같은 구간을 비교한다.
+  · 호출 제약 2개는 원본 버그를 우회하지 않고 그대로 따랐다 — (1) `fraction` 이 (B,M) 인 채로
+    (B,M,4) 쿼터니언에 곱해져 **M>1 이면 브로드캐스트가 깨진다** → `eval.py` 처럼 시각 하나씩
+    루프. (2) `is_valid_rotation_matrix` 가 `torch.ones_like(matrix)` 와 비교해 **float64 를 주면
+    dtype mismatch 로 죽는다** → float32 로 넘긴다.
+  · SLERP 은 좌불변, LERP 은 아핀이라 `rel_anchor` 와 **교환된다** — 호출 위치를 `index_pick`
+    과 같은 자리에 뒀다. `rmax = max_f |rel[f,:3,3]|` 도 불변(보간 내부점은 knot 을 못 넘음):
+    두 arm 모두 rmax gain median 3.4498 로 일치.
+  · 기본값은 `index_pick` 이라 **기존 런과 비트동일**. eval 폴더 접미사 `_slerp` 로 갈린다.
+  · 실측(200 entry, `eval_dir_gendop_rgbd_raw` → `..._raw_slerp`): 중복/0 스텝 20.0/48 → **1.3/48**,
+    스텝 max/median 2.35 → **1.53**, p95 50.75 → **7.65**.
+  · `gendop_slerp` 은 `GenDoP` env 로 돌려야 한다(`core/utils` 가 torch·trimesh·megfile 을
+    import) — `stage_evaldir` 이 `--resample` 에 따라 인터프리터를 고른다.
 - **`CinemaTraj/scripts/eval_collision_rate.py` — 궤적 충돌률 게이지 2종 (G1 + kNN k=10)
   (2026-09-07, 사용자 지시 "우리 G1 gate로 먼저 collision rate 재줘").** 예측 궤적이 씬 안으로
   파고드는 비율을 재는데, 게이지가 하나면 판정을 못 믿는다:

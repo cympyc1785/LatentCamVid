@@ -7,6 +7,22 @@
 ## [Unreleased]
 
 ### Added
+- **`CinemaTraj/scripts/rank_traj_text_match.py` — pred 궤적이 **텍스트대로 움직였는지**를 GT
+  궤적 대비로 재고 arm 격차로 정렬 (2026-09-07, 사용자 지시 "충돌말고 우리 모델이 text에 따라
+  카메라가 잘 움직이고 gendop는 아닌 영상으로 보여줘").** 충돌률·subject_in_frame 은 결과물의
+  안전성/구도를 재므로 "arc right 지시를 반대로 냈다" 같은 **지시 불이행**을 못 잡는다 (구도가
+  우연히 맞으면 통과). 캡션은 GT 궤적에서 뽑은 문장이므로 "텍스트를 따랐나" = "GT 궤적과 같은
+  방향·크기·회전으로 갔나" 로 환원해, frame0 앵커를 푼 rel pose 위에서 `dir_err_deg`(순변위
+  방향각) / `len_ratio`(경로길이비) / `rot_err_deg`(마지막 프레임 geodesic) 를 낸다.
+  `--rank_pair OURS=THEIRS` 로 `dir_err(THEIRS) − dir_err(OURS)` 내림차순 정렬.
+  · 정지 지시는 GT 순변위가 0 이라 방향각이 정의되지 않는다 → `--static_u` 아래는 NaN 으로
+    두고 정렬에서 뺀다. 안 그러면 static 엔트리가 "방향 불일치"로 상위에 올라온다.
+  · 실측 (d121 val 875, `dir_err` med / mean / `len_ratio` med / `rot_err` med):
+    d133 6.85 / 16.17 / 0.8378 / 2.89 · d124 7.71 / 18.46 / 0.9077 / 3.31 ·
+    d123 9.46 / 21.54 / 0.8749 / 3.00 · gd_style 14.87 / 22.85 / 0.5431 / 11.08 ·
+    gd_rgbd 22.42 / 36.42 / 0.5262 / 15.74.
+  · gd_style 의 median 이 14.9° 라 **계통적 축 뒤집힘은 아니다** — 아래 데모 엔트리의
+    170°대는 그 arm 의 per-entry 실패다 (변환기 규약 버그로 오독하지 않도록 기록).
 - **`render_pred_depth_warp.py --caption_dir LABEL=DIR` — arm 이 **실제로 받은** 조건 텍스트를
   eval 폴더 밖에서 읽는다 (2026-09-07, 사용자 지시 "gdstyle은 text가 move forward 이래야하는거
   아니야?").** 열 라벨을 `load_condition_text(eval_dir, name)` 로만 뽑고 있었는데 GenDoP

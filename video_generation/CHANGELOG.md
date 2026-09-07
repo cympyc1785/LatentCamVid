@@ -7,6 +7,23 @@
 ## [Unreleased]
 
 ### Added
+- **`gendop_preds_to_eval_dir.py --no_scale_token` + `run_gendop_eval.py --no_scale_token`
+  — scale 토큰을 되나눠 **공식 배포 판본**과 크기를 맞춘다 (2026-09-07, 사용자 지시 "적용
+  안한게 공식 배포 버전인 것 같으니 적용 안하고 다시 metric 측정해줘").** 배포 `eval.py:233`
+  의 `c2ws[:,:3,3] *= scale_value` 는 **numpy 사본**에만 걸리고 그 사본은 `draw_json` 궤적 PNG
+  전용이다 — pred JSON 을 쓰는 `pose_normalize`(`:239`) 는 scale 이 안 걸린 torch `camera_pose`
+  를 받고, `core/utils.py:206 token_to_camera` 도 token 7·8 만 `fx,fy` 로 쓰고 **token 9(scale)
+  는 안 쓴다**. 우리 `gendop_release_infer.py:243-247` 은 `exp(coords[:,9]/bins*4-2)` 를 곱해
+  npz 에 넣고 곱한 값을 `scale` 로 같이 저장하므로, 변환기에서 되나누면 **정확히** 배포 판본이
+  된다 (재추론 불필요).
+  · 실측 scale 분포(875 entry): `rgbd` med 0.5028 (min 0.1534 / max 2.0842),
+    `gdstyle` med 0.4874 (min 0.1821 / max 1.2840) — 되나누면 궤적이 **median 1.99배** 커지고
+    분포 폭이 13.6배라 절대 크기에 반응하는 지표(충돌률·τ)가 그만큼 달라진다.
+  · 되나눔 검증은 **de-anchor 후에** 해야 한다. eval JSON 은 world pose
+    `gt_cv[0] @ pred_rel`(변환기 :163) 이라 translation 이 `t_gt0 + R_gt0·t_rel` = `t_rel` 의
+    **아핀**함수다 — raw `transform_matrix` 를 비교하면 순수 배율로 안 보인다.
+    `inv(ref[0]) @ pred` 로 풀면 `rmax` 비가 정확히 `1/scale` (5개 프로브 전부 일치).
+  · 기본값은 `--scale_token`(True) 이라 **기존 런과 비트동일**. eval 폴더 접미사 `_noscale`.
 - **`CinemaTraj/scripts/plot_eval_frustums.py` — eval arm 궤적을 카메라 절두체로 3D 비교
   (2026-09-07, 사용자 지시 "카메라 frustum 시각화도 보여줘").** `render_pred_depth_warp.py` 는
   "그 카메라에서 보면 어떻게 보이나"만 보여줘서, warp 이 중간에 꺾일 때 그게 좌표 규약 뒤집힘인지
@@ -38,6 +55,17 @@
     스텝 max/median 2.35 → **1.53**, p95 50.75 → **7.65**.
   · `gendop_slerp` 은 `GenDoP` env 로 돌려야 한다(`core/utils` 가 torch·trimesh·megfile 을
     import) — `stage_evaldir` 이 `--resample` 에 따라 인터프리터를 고른다.
+- **`eval_subject_in_frame.py --no_temporal_persistence` / `--limit`
+  — subject_in_frame 을 **1:1 depth warp** 에서 잰다 (2026-09-07, 사용자 지시 "subject in frame을
+  vista4d 렌더 말고 depth warp까지만으로 측정해줘").** `CloudRenderer.visible_at` 이
+  `temporal_persistence=True` 면 `visible[:, frame]` (49프레임 누적, ~2.7M 점) 를,
+  `False` 면 `indices[:,0]==frame` (~55k 점) 를 쓴다. 후자가 "프레임 f 의 depth 를 그 카메라로
+  warp 한 것"이고 다른 모델과 같은 조건이다.
+  · `subject_in_frame` 은 두 모드에서 거의 불변이지만 **`hole_fraction` 은 모드 간 비교 금지**
+    (누적이 hole 을 메운다). 판독 실수를 막기 위해 보고서에 `render_mode` 열을 남긴다
+    (`cloud` / `warp_1to1`).
+  · 12-entry 프로브 실측: 211.03 s -> 65.97 s (3.2배).
+  · `--limit N` 은 씬마다 앞에서 N entry 만 — 프로브용.
 - **`CinemaTraj/scripts/eval_collision_rate.py` — 궤적 충돌률 게이지 2종 (G1 + kNN k=10)
   (2026-09-07, 사용자 지시 "우리 G1 gate로 먼저 collision rate 재줘").** 예측 궤적이 씬 안으로
   파고드는 비율을 재는데, 게이지가 하나면 판정을 못 믿는다:
@@ -285,6 +313,9 @@
   재현할 때의 근거 기록이다. 첫 사용처는 `configs/bank/d150S.json` / `d150L.json`.
 
 ### Changed
+- **`eval_collision_rate.py` CORPORA 의 `gendop_*_p30_slerp` arm 2개를 `_noscale` eval 폴더로
+  재지정** — 위 `--no_scale_token` 항목의 판독 경로. 되나누면 궤적이 median 1.99배 커지므로
+  절대 크기에 반응하는 충돌률이 그만큼 달라진다.
 - **GenDoP 판독값을 raw output 으로 (`run_gendop_eval.py --raw`, `eval_collision_rate.py`
   CORPORA; 2026-09-07 사용자 지시 "앞으로 raw output 그대로 써주고 metric들도 이에 맞춰서
   다시 표 만들어줘").** `gendop_preds_to_eval_dir.py` 는 기본으로 GenDoP 의
@@ -302,6 +333,19 @@
     `gendop_gdstyle_p49` arm 을 추가했다. 결과는 `results/20260907_d159_collision_raw/`.
 
 ### Fixed
+- **`eval_subject_in_frame.py` 가 재굽기된 **다른 세대**의 코퍼스를 읽어 subject 를 전부 엉뚱한
+  물체로 잡고 있었다 — 이전 `subject_in_frame` 수치 전량 무효 (`FIX.log` 2026-09-07).**
+  `--corpus_root` 기본값이 `latentcam_da3` 였는데 그 코퍼스는 재굽기되어 씬별 변이가
+  191/97/178/34 = **500** 으로 줄었고, d121 eval 폴더는 266/220/325/64 = **875** 세대다.
+  entry 인덱스는 코퍼스 키가 아니지만 `variant_id` 형식은 세대가 달라도 같아서
+  `entry_subject` 가 `stat_4` 같은 **그럴듯한 노드 id** 를 계속 돌려준다 — 191 에서
+  `KeyError` 로 죽기 전까지 190 entry 를 조용히 틀리게 재고 있었다.
+  · 기본값을 `latentcam_da3_k6_d121`(eval `config.yaml: dl3dv_root`) 로 고정.
+  · `assert_corpus_matches()` 추가 — 코퍼스 `prompts.json` 의
+    `prompt_camera_with_scene_video.concise` 와 eval `test/<name>_caption.json` 의
+    `Concise Interaction` 을 대조해 불일치면 즉사. 씬마다 첫·중간·끝 **3군데**를 찌른다
+    (entry 0 은 언제나 "첫 anchor 의 첫 preset" 이라 재굽기 후에도 우연히 맞는다).
+  · `run_gendop_eval.py stage_score` 는 이미 올바른 `--corpus_root` 를 넘기고 있었다.
 - **GenDoP `--pose_length 49` 산출물은 pose 30 부터 발산한다 — p49 arm 전량 판독 불가
   (2026-09-07, 사용자 지적 "gendop는 중간에 왜 갑자기 꺾여?").** depth-warp 영상에서 보이던
   꺾임의 원인이다. **좌표 규약 문제가 아니다** — `GL2CV` 를 적용한 쪽의 cos(GT,pred) 가 875 entry

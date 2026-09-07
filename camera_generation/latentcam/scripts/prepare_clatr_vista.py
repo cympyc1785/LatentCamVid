@@ -19,8 +19,10 @@ CLaTr 은 c2w 를 원하고, E.T. 계열 데이터는 OpenGL 축이다. 그래�
     c2w = inv(w2c);  c2w[:, :3, 1:3] *= -1      # OpenCV(+Y down/+Z fwd) → OpenGL(+Y up/-Z fwd)
 `|c2w| >= 1e2` 인 궤적은 발산으로 보고 버린다(원본과 같은 컷). 버린 건 error.txt 에 남긴다.
 
-split 은 원본의 95/5 랜덤이 아니라 **코퍼스 자신의** `seg_list_vista4d_{train,test}.txt` 를 쓴다.
-학습 arm 들과 test entry 가 어긋나면 지표를 서로 대조할 수 없기 때문이다.
+split 은 원본의 95/5 랜덤이 아니라 **코퍼스 자신의** `seg_list_*_{train,test}.txt` 를 쓴다.
+학습 arm 들과 test entry 가 어긋나면 지표를 서로 대조할 수 없기 때문이다. 기본값은 vista 의
+`seg_list_vista4d_{train,test}.txt` 이고, dynpose 처럼 목록 이름이 다른 코퍼스는
+`--train_list/--test_list` 로 바꾼다 (entry 형식 `<dataset>/<scene>/<idx>` 는 동일).
 
 사용 예시:
     # 1) JSON + split 목록 (CPU)
@@ -29,6 +31,12 @@ split 은 원본의 95/5 랜덤이 아니라 **코퍼스 자신의** `seg_list_v
     CUDA_VISIBLE_DEVICES=2 python scripts/prepare_clatr_vista.py --stage clip
     # 3) 한 번에 + 표준화 통계 출력
     CUDA_VISIBLE_DEVICES=2 python scripts/prepare_clatr_vista.py --stage all --print_stats
+    # 4) dynpose d137 (목록 이름만 다르다)
+    python scripts/prepare_clatr_vista.py --stage all --print_stats \
+        --corpus /data1/cympyc1785/data/DynPose-LBM/latentcam_dynpose_d137 \
+        --out    /data1/cympyc1785/data/DynPose-LBM/clatr_dynpose_d137 \
+        --train_list seg_list_dynpose_dd10_train.txt \
+        --test_list  seg_list_dynpose_dd10_test.txt
 """
 from argparse import ArgumentParser
 from json import load as json_load, dump as json_dump
@@ -72,8 +80,7 @@ def stage_json(args):
     counts, errors, lengths = {}, [], []
     trans_all = []                       # 표준화 통계용 (train 만)
 
-    for split, list_name in (('train', 'seg_list_vista4d_train.txt'),
-                             ('test', 'seg_list_vista4d_test.txt')):
+    for split, list_name in (('train', args.train_list), ('test', args.test_list)):
         entries = _read_list(path.join(args.corpus, list_name))
         out_split = path.join(args.out, split)
         makedirs(out_split, exist_ok=True)
@@ -194,10 +201,13 @@ def stage_clip(args):
 # ----------------------------------------------------------------------------------- #
 
 def main():
-    ap = ArgumentParser(description='vista d128 → CLaTr 학습 데이터')
+    ap = ArgumentParser(description='vista/dynpose 코퍼스 → CLaTr 학습 데이터')
     ap.add_argument('--corpus', default=CORPUS_DEFAULT)        # latentcam_da3_k6_d128
     ap.add_argument('--out', default=OUT_DEFAULT)              # CLaTr data_dir 가 될 곳
     ap.add_argument('--stage', default='all', choices=['json', 'clip', 'all'])
+    # 코퍼스마다 split 목록 파일 이름이 다르다 (vista4d / dynpose_dd10 / ...). 기본값은 vista.
+    ap.add_argument('--train_list', default='seg_list_vista4d_train.txt')
+    ap.add_argument('--test_list', default='seg_list_vista4d_test.txt')
     ap.add_argument('--width', type=int, default=640)          # meta_vista4d.csv 와 같음
     ap.add_argument('--height', type=int, default=360)
     ap.add_argument('--clip_version', default='ViT-B/32')      # CLaTr lm/clip.yaml 과 같음

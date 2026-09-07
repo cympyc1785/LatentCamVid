@@ -5,6 +5,18 @@ All notable changes to the latentcam sub-project. Follows [Keep a Changelog](htt
 ## [Unreleased]
 
 ### Added
+- **`main/evaluate/CLaTr/configs/dataset/standardization/dynpose49.yaml` + `scripts/prepare_clatr_vista.py`
+  의 `--train_list/--test_list` — CLaTr 게이지를 dynpose d137 코퍼스로도 만든다 (D158, 2026-09-07,
+  사용자 지시 "CLaTr도 dynpose d137에 대해서 학습 돌려놔줘").** prep 스크립트는 split 목록
+  파일 이름이 `seg_list_vista4d_{train,test}.txt` 로 **하드코딩**돼 있어 dynpose
+  (`seg_list_dynpose_dd10_*`)를 못 읽었다. 인자로 뺐고 **기본값은 vista 그대로**라 기존 호출은
+  글자 그대로 같은 명령이다. 데이터 결과 train 9,728 / test 1,129 / 발산·결측 0, 궤적 길이
+  전부 49 (= 학습 arm 3종과 같은 entry 집합).
+  · dynpose49.yaml 의 실측 `shift_std` 는 **[3e-08, 1e-08, 2e-08]** 이다 — dynpose target
+    궤적은 frame0 이 world 원점에 앵커돼 있어 첫 프레임 위치가 항상 0 이기 때문이고, vista
+    d121 의 [0.389, 0.082, 0.226] 과 대비된다. 그대로 적으면 `standardize` 를 켜는 순간
+    0 나눗셈이라 **1.0 으로 두고** 실측값은 주석에 남겼다. vista49 와 마찬가지로
+    `trajectory_dataset.py:43` 의 `self.standardize = False` 때문에 현재는 안 쓰인다.
 - **`scripts/prepare_clatr_vista.py` + `main/evaluate/CLaTr/configs/dataset/standardization/vista49.yaml`
   — CLaTr 을 우리 vista 코퍼스로 학습할 수 있게 (D153, 2026-09-06).** 지금까지 caption 지표를
   **E.T./ArtTraj 로 학습된 ckpt** 로 재 왔다. 그 config 는 `num_cams: 120` 에 shift_std

@@ -7,6 +7,21 @@
 ## [Unreleased]
 
 ### Added
+- **`CinemaTraj/scripts/run_gendop_eval.py` — GenDoP 릴리즈 ckpt 를 코퍼스 인자로 돌리는 드라이버
+  (D158, 2026-09-07, 사용자 지시 "gendop text_rgbd에 대해서 돌려놔주고").** `tmp/d156/
+  run_gendop_d121.py`(vista 전용)를 `CORPORA` 표로 인자화해 `scripts/` 로 승격한 것이다 —
+  두 번째 코퍼스가 생긴 시점이라 승격 조건을 만족한다. 단계는 그대로 inputs → infer →
+  evaldir → score 4개이고, **vista_d121 항목은 d156 에서 실제로 돈 값 그대로**라 같은 명령이
+  같은 결과를 낸다. 새 코퍼스는 표에 항목 하나(`corpus`/`split_name`/`eval_data`/`prefix`/
+  `cloud_root`/`out`/`depth_norm`/`ours`/`ref`)를 더하면 끝난다.
+  · **`depth_norm` 을 dynpose 도 `median` 으로 잡았다.** 처음엔 `none` 으로 적었는데,
+    `dynpose_gendop_inputs.py` 요약표의 `min` 행(0.19~6.16)을 median 으로 잘못 읽은 것이었다.
+    실제 per-scene frame0 depth median 은 **0.41~20.55 (중앙값 2.68)** 로 GenDoP 학습
+    대역(릴리즈 `text_rgbd/case1_depth.npy` med 0.323) 밖이다. `none` 이면 깊이만 8배 큰
+    조건이 들어간다.
+  · dynpose d137 val 1,129 entry / 27 scene, `--pose_length 49 --no_strict_pose_length`,
+    텍스트는 우리 모델(`eval_my/20260906_013323_dynpose_d137_da3__last`)이 받은 문장 그대로.
+
 - **`CinemaTraj/configs/bank/d157_dynpose.json` — dynpose 875편을 최신 vista 게이지로 재굽기
   (D157, 2026-09-07, 사용자 지시 "gpu 2개 이상 남으면 최신 vista 방식으로 dynpose도 돌려줘").**
   D149 는 러너 스크립트(`run_dynpose_d149_shard.sh`)만 있고 **실제로는 한 편도 안 돌았다**
@@ -196,6 +211,13 @@
   재현할 때의 근거 기록이다. 첫 사용처는 `configs/bank/d150S.json` / `d150L.json`.
 
 ### Fixed
+- **`CinemaTraj/scripts/gendop_release_infer.py --eval_dir_prefix` — `--text_from_eval_dir` 의
+  파일명 접두사가 `vista4d` 로 하드코딩돼 있었다 (D158, 2026-09-07).** eval 폴더는 코퍼스
+  이름으로 접두사를 붙이는데(`dynpose_<scene>_<idx>_caption.json`) 조회는 항상
+  `vista4d_...` 를 찾아서, dynpose 를 돌리면 **전 엔트리가 조용히 `skipped` 로 빠지고 rc=0**
+  으로 끝났다 (smoke 4개 → written 0 / skipped 4). 접두사를 인자로 뺐고 **기본값 `vista4d`**
+  라 기존 vista 호출은 그대로다. 같은 사고를 다음에 바로 보이게 하려고 요약표에
+  `no_caption` 행을 추가했다 — 0 이 아니면 접두사를 확인하라고 같이 찍는다.
 - **`CinemaTraj/scripts/run_bank.py` — `--eval_data` 를 그걸 안 받는 단계에도 붙이던 것
   (D157, 2026-09-07).** `_base_args` 가 config 의 `eval_data` 를 **모든 단계에** 붙였는데
   `route_presets.py` 와 `emit_bank.py` 에는 그 argparse 인자가 없다 (둘 다 `output_root`

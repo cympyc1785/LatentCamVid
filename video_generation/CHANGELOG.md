@@ -7,6 +7,16 @@
 ## [Unreleased]
 
 ### Added
+- **`CinemaTraj/scripts/run_gendop_eval.py` — `CORPORA["vista_d121_snowboard"]` (2026-09-07,
+  사용자 지시 "snowboard처럼 물체가 빠르게 움직이는 video에서도 잘 tracking같은걸 하는지").**
+  `vista_d121` 과 코퍼스·ckpt 가 같고 split 만 다르다 — snowboard 는 **학습 split** 이라
+  `seg_list_vista4d_test.txt` 에 없어서 875 val 런의 어느 eval 폴더에도 예측이 0건이다.
+  `eval_testset.py --set test_seg_list=<snowboard track27>` 로 같은 epoch100·seed42 로 27 entry
+  를 따로 뽑고 그 폴더를 `ours` 로 물린다. `ours` 는 두 arm (d123_da3 / d124_da3_molmo2) 뿐 —
+  d133 은 snowboard 재추론을 안 돌렸다.
+  · 걸림돌 하나: gdstyle 캡션 생성기가 읽는 `da3/captions_gendop/<idx>_tag.json` 도 test split
+    씬에만 있다. `caption_cameras_datadop.py --sets latentcam --no_llm --latentcam_split <...>`
+    로 태깅만 27편 추가 생성하면 된다 (LLM 불필요 = vLLM 안 띄움).
 - **`CinemaTraj/scripts/rank_traj_text_match.py` — pred 궤적이 **텍스트대로 움직였는지**를 GT
   궤적 대비로 재고 arm 격차로 정렬 (2026-09-07, 사용자 지시 "충돌말고 우리 모델이 text에 따라
   카메라가 잘 움직이고 gendop는 아닌 영상으로 보여줘").** 충돌률·subject_in_frame 은 결과물의

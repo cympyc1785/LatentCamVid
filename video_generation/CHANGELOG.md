@@ -58,12 +58,25 @@
 - **`eval_subject_in_frame.py --no_temporal_persistence` / `--limit`
   — subject_in_frame 을 **1:1 depth warp** 에서 잰다 (2026-09-07, 사용자 지시 "subject in frame을
   vista4d 렌더 말고 depth warp까지만으로 측정해줘").** `CloudRenderer.visible_at` 이
-  `temporal_persistence=True` 면 `visible[:, frame]` (49프레임 누적, ~2.7M 점) 를,
+  `temporal_persistence=True` 면 `visible[:, frame]` (~2.7M 점) 를,
   `False` 면 `indices[:,0]==frame` (~55k 점) 를 쓴다. 후자가 "프레임 f 의 depth 를 그 카메라로
   warp 한 것"이고 다른 모델과 같은 조건이다.
-  · `subject_in_frame` 은 두 모드에서 거의 불변이지만 **`hole_fraction` 은 모드 간 비교 금지**
-    (누적이 hole 을 메운다). 판독 실수를 막기 위해 보고서에 `render_mode` 열을 남긴다
-    (`cloud` / `warp_1to1`).
+  · **정정 (2026-09-07, 사용자 지적 "occlusion 같은것도 나중에 보려면 static만 누적한 …"):**
+    `True` 를 "49프레임 전량 누적"으로 적은 것은 틀렸다. `Vista4D/utils/point_cloud/point_cloud.py:63`
+    이 `visible = (visible & dynamic_mask) | static_mask` 라서 **정적 점만** 전 프레임 True 이고
+    동적 점은 자기 프레임 하나에서만 True 다. 즉 기본값 `True` 가 곧 **"static 누적 + dynamic 1:1"**
+    이고, 두 모드가 갈라지는 지점은 정적 점 하나뿐이다.
+    - **가림(occlusion) 판정에 쓸 모드는 `True`** — 벽·가구가 다른 프레임에서만 관측됐으면
+      NTP 에서는 점군에 아예 없어서 subject 가 안 가려진 것처럼 보인다.
+    - **동적 subject** — 실루엣은 두 모드가 동일(동적 점은 어차피 1프레임). 달라지는 건
+      z-buffer 를 막는 정적 껍데기뿐.
+    - **정적 subject** — NTP 는 subject 점도 프레임 f 것만 남겨 실루엣이 1/49 로 얇아진다.
+      중심 추정이 흔들리고 `subject_zero_frames` 가 늘어 지표가 체계적으로 낮게 나온다.
+      d121 val 은 정적 subject 가 다수(초반 327 entry 중 205)라 이 편향이 표를 지배한다.
+    - 앞서 적은 "`subject_in_frame` 은 두 모드에서 거의 불변" 은 삭제했다 — 근거였던 12-entry
+      프로브가 잘못된 코퍼스(아래 Fixed) 위에서 돈 것이라 무효다.
+  · **`hole_fraction` 은 모드 간 비교 금지** (누적이 hole 을 메운다). 판독 실수를 막기 위해
+    보고서에 `render_mode` 열을 남긴다 (`cloud` / `warp_1to1`).
   · 12-entry 프로브 실측: 211.03 s -> 65.97 s (3.2배).
   · `--limit N` 은 씬마다 앞에서 N entry 만 — 프로브용.
 - **`CinemaTraj/scripts/eval_collision_rate.py` — 궤적 충돌률 게이지 2종 (G1 + kNN k=10)

@@ -7,6 +7,15 @@
 ## [Unreleased]
 
 ### Added
+- **`CinemaTraj/scripts/plot_eval_frustums.py` — eval arm 궤적을 카메라 절두체로 3D 비교
+  (2026-09-07, 사용자 지시 "카메라 frustum 시각화도 보여줘").** `render_pred_depth_warp.py` 는
+  "그 카메라에서 보면 어떻게 보이나"만 보여줘서, warp 이 중간에 꺾일 때 그게 좌표 규약 뒤집힘인지
+  모델 발산인지 회전 튐인지를 못 가른다. 절두체를 프레임 순서(viridis)대로 세워 경로선과 같이
+  그리면 셋이 그림에서 갈린다. 축 범위는 **arm 전체를 합쳐 한 번만** 잡는다 (arm 별로 잡으면
+  발산 궤적이 자동 축소돼 정상처럼 보인다). `--mark_frame` 으로 의심 인덱스에 빨간 x.
+  절두체 화각은 `fl_x/fl_y/w/h` 실측이고 깊이만 `--frustum_len` 으로 줄인다.
+- **`gendop` p30 raw eval 폴더 2종** (`eval_dir_gendop_{text,rgbd}_raw`) — 아래 Fixed 항목의
+  올바른 판독 경로. 추론은 재사용하고 `--stage evaldir --pose_length 30 --raw` 만 다시 돌렸다.
 - **`CinemaTraj/scripts/eval_collision_rate.py` — 궤적 충돌률 게이지 2종 (G1 + kNN k=10)
   (2026-09-07, 사용자 지시 "우리 G1 gate로 먼저 collision rate 재줘").** 예측 궤적이 씬 안으로
   파고드는 비율을 재는데, 게이지가 하나면 판정을 못 믿는다:
@@ -271,6 +280,22 @@
     `gendop_gdstyle_p49` arm 을 추가했다. 결과는 `results/20260907_d159_collision_raw/`.
 
 ### Fixed
+- **GenDoP `--pose_length 49` 산출물은 pose 30 부터 발산한다 — p49 arm 전량 판독 불가
+  (2026-09-07, 사용자 지적 "gendop는 중간에 왜 갑자기 꺾여?").** depth-warp 영상에서 보이던
+  꺾임의 원인이다. **좌표 규약 문제가 아니다** — `GL2CV` 를 적용한 쪽의 cos(GT,pred) 가 875 entry
+  평균 **+0.6337**, 미적용은 **−0.0222** 로 현행 변환이 맞다.
+  · 실측: 프레임 스텝 `|dt|` 가 앞 29 스텝 median 의 10배를 처음 넘는 인덱스가
+    **정확히 29 인 비율 rgbd 0.855 / text 0.867 / gdstyle 0.925**, 29~33 이면 0.94~0.98.
+    스텝 최대/median 비는 p30 런 **1.5~1.7** 대 p49 런 **~50**.
+  · 원인은 `gendop_release_infer.py` 의 `--forbid_eos` (pose_length≠30 이면 auto on). EOS 로짓을
+    −inf 로 막아 `max_new_tokens` 까지 강제 생성시키므로, 릴리즈 학습 길이 30 을 넘긴 19 pose 는
+    학습 분포 밖 토큰이다. `n_poses_hist {49: 875}` 는 "성공"이 아니라 **EOS 를 막은 결과**다.
+  · 2차 오염: `rmax = max_f |rel[f,:3,3]|` 의 argmax 가 **90~92%** 에서 index≥30 (쓰레기 꼬리)에
+    있다. 즉 rescale 판본의 배율은 노이즈가 정했고, `rmax(49)/rmax(0..29)` median 1.27~1.37 만큼
+    유효 구간이 눌렸다.
+  · camel 4 entry depth-warp hole: p49_raw 0.42/0.52/0.43/0.55 → p30_raw 0.17/0.40/0.14/0.20.
+  · **판독은 p30 native → 49 index-pick 으로 되돌린다.** p49 로 낸 CLaTr/caption F1/충돌률/
+    subject_in_frame 표는 전부 이 꼬리를 포함하므로 폐기.
 - **`CinemaTraj/scripts/gendop_release_infer.py --eval_dir_prefix` — `--text_from_eval_dir` 의
   파일명 접두사가 `vista4d` 로 하드코딩돼 있었다 (D158, 2026-09-07).** eval 폴더는 코퍼스
   이름으로 접두사를 붙이는데(`dynpose_<scene>_<idx>_caption.json`) 조회는 항상

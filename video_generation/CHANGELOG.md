@@ -7,6 +7,23 @@
 ## [Unreleased]
 
 ### Added
+- **`CinemaTraj/scripts/eval_collision_rate.py` — 궤적 충돌률 게이지 2종 (G1 + kNN k=10)
+  (2026-09-07, 사용자 지시 "우리 G1 gate로 먼저 collision rate 재줘").** 예측 궤적이 씬 안으로
+  파고드는 비율을 재는데, 게이지가 하나면 판정을 못 믿는다:
+  · **G1** — `lbm/gates.behind_profile` 을 그대로 부른다 (재구현 아님). 카메라 중심을 소스
+    49프레임에 재투영해 `z_cam > depth + 0.02·S` 인 프레임이 하나라도 있으면 충돌.
+    `clear_frac=0` (뱅크 운영값 0.10 이 아니라) 이라 "가까이 갔다"가 아니라 "관측된 표면 뒤로
+    갔다"를 뜻한다. 자유 임계가 없는 대신 **화면 밖으로 투영되는 카메라는 못 본다**.
+  · **kNN** — 49프레임 non-sky 유효 depth 를 unproject 한 점군(stride 4, `|∇log z|>0.05` 경계
+    픽셀 제거)에서 카메라 중심까지의 **10번째** 최근접 거리를 `S` 로 나눈 값. k=1 이면 떠도는
+    경계 점 하나가 판정을 뒤집는다. 49프레임 중 **하나라도** `r` 미만이면 그 궤적은 충돌.
+  · `r` 은 하드코딩하지 않는다 — 점군 밀도(=`--stride`)에 따라 변하므로 `--knn_calib_arm gt
+    --knn_target_rate 0.01` 로 **GT 궤적의 최소 `d_10` 1% 분위**를 매 실행 계산한다.
+  · eval 폴더 `*_transforms_{ref,pred}.json` 은 **DA3 world c2w / OpenGL / 미정규화**임을
+    `recon_and_seg/<video>/cameras.npz` 대조로 확인했다 (frame0 일치). 스케일 재수화 없이
+    `S` 로 나누기만 하면 된다.
+  · 산출물 `<out>/{collision_rate.json,collision_per_entry.csv}`.
+    vista d121 test 875 × 6 arm 결과는 `results/20260907_d159_collision/`.
 - **`CinemaTraj/scripts/gendop_style_captions.py` + `run_gendop_eval.py --text_dir/--text_tag`
   — GenDoP 에 학습 분포 정합 문장을 먹이는 텍스트 arm (2026-09-07, 사용자 지시 "gendop가
   학습한 환경에 맞춰주기 위해 ... motion text와 target만 사용해서").** 지금까지 GenDoP 에 넣던

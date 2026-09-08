@@ -7,6 +7,59 @@
 ## [Unreleased]
 
 ### Added
+- **D166 — scene 당 카메라 5개 구성 (`route_presets.py --slot_plan grid2x2 --free_moving
+  --max_anchors`, `sample_camera_bank.py --preset_route`, `configs/bank/d166_dynpose_grid5.json`)
+  (2026-09-08, 사용자 지시 "scene 별로 4개정도만 카메라를 만들고싶은데" → "free-moving을 하나
+  넣어서 scene 마다 5개로 나오도록").** `goals.md` 의 "scene ↑ (10k), preset ↓" 를 집행한다.
+  D157 실측 scene 당 850 s 중 fit 이 503 s(78%)이고 fit 은 변이 수에 선형이라, 변이를
+  144.4 → 5 로 줄이는 것이 scene 수를 늘릴 유일한 예산이다.
+  · 구성 = `anchor{a,b} × slot{P1,P2}` (2×2) + free-moving 1. 슬롯 쌍은 **video 해시**로 골라
+    두 anchor 가 공유한다(`GRID_SLOT_PAIRS` 8쌍) — 슬롯까지 anchor 마다 다르면 target 축과
+    motion 축이 섞여 4칸 중 어느 것도 서로의 대조군이 아니게 된다.
+  · `--free_moving rotate|datadop` — target 절 **없는** 변이를 scene 당 1개, 격자 밖 첫 anchor
+    에만. 격자에 넣으면 두 anchor 의 캡션이 (target 절이 없어서) 글자 단위로 같아진다.
+    `track_` 접두사가 안 붙는 것을 assert 로 못 박는다 (사용자 지시 "track+free-moving 제외").
+  · `--preset_route` (`sample_camera_bank`) — `preset_route_v1` JSON 의 anchor 별 `slots` 를
+    읽어 (nodes × presets) **합집합 격자를 안 돈다**. 없으면 기존 합집합 경로 그대로.
+    합집합이면 away side 차이(`truck_left` vs `truck_right`)만으로 2×4=8 로 부푼다.
+  · `--max_anchors` (`route_presets`) — `sample_camera_bank` 와 같은 이름·같은 의미.
+    `--max_dynamic_anchors 2 --max_static_anchors 2 --max_anchors 2` 가 곧 "dyn+dyn 우선,
+    부족분만 stat" 이다 (`pick_main_anchors` 가 동적 우선 정렬이라).
+  · 2×2 후보에서 `lateral`(truck_*) 제외 — aim=free 인데 캡션에 target 절이 있다
+    (D157 sif-only 탈락 7,910행 중 3,024 = 38.2%, task #134). `rotate`(pan_*) 는 캡션이 이미
+    targetless 라 free-moving 슬롯으로 옮겼다. grid 에선 `recede` 를 track 보너스에서도 빼
+    `track_dolly_out`(track_* ∧ aim=free)이 안 나오게 한다.
+  · fit 사다리는 `0.20` 한 단. D157 실측 ① rung 0.35/0.50 이 코퍼스의 71.6% 를 먹으며 합격률
+    38.3%, 전부 0.20 이면 83.0% ② **rung 은 강도 축이 아니다** — preset 을 고정하면 path_len
+    비가 1.04~1.23배에 P(b>a) 0.520~0.538 이다 (pooled 1.58배는 Simpson).
+  · **전부 옵션 분기다** — `--slot_plan full`(기본) + `--free_moving off`(기본) +
+    `--preset_route` 미지정이면 d157 경로 그대로다 (같은 씬에서 anchor 4 × preset 14 = 56 재현).
+- **D166 backfill — scene 당 5는 **상한**이고 모자라면 다른 preset 으로 채운다
+  (`route_presets.py --target_variants` + `anchors[].backfill` + scene 단위 `free_moving`,
+  `sample_camera_bank.py plan_variants()` / `--target_variants`) (2026-09-08, 사용자 지시
+  "최대 5개이고 … fitting해서 5개가 안되면 경우에따라 추가로 다른 가능한 preset을 시도").**
+  라우팅이 5개를 맞춰 놔도 뱅크가 anchor 를 **소스 frame 0 가시성**(`min_subject_points` /
+  `min_subject_area`)으로 더 떨어뜨린다. 파일럿 21편 실측 분포가 `5×11 / 3×7 / 2×3` (82행,
+  편당 3.90) 이었고, 짧은 6편 중 **5편이 anchor 를 통째로 잃었다**. 라우팅은 렌더를 안 하므로
+  이걸 예측할 수 없다 — 배분을 뱅크로 옮겼다.
+  · `sample_camera_bank` 의 anchor 루프를 **3단**으로 쪼갰다. ① 가시성 판정을 전량 먼저 돌려
+    살아남은 anchor 를 확정(`subject_points` 캐시) ② `plan_variants()` 가 예산을 배분
+    ③ 기존 preset 루프는 그 작업 목록을 돈다.
+  · 배분 규칙(사용자 확정): live anchor 2+ 이고 움직이면 `{a,b} × 슬롯 2` = 4, 그 외(정지 /
+    anchor 1개)는 `a × 슬롯 4` = 4. 거기에 free-moving 1. 모자라면 `backfill`(라우팅이
+    keep_pair 밖으로 밀어 둔 슬롯, `GRID_ALLOWED_SLOTS` 순서)에서 round-robin 으로 채운다.
+    3번째 anchor 는 안 끌어온다 — 그 씬만 target 축이 3-way 가 되어 2×2 대조가 깨진다.
+  · **free-moving 이 scene 단위 키로 올라갔다.** 전에는 `routed[0]["slots"]` 에 붙어서 그
+    anchor 가 죽으면 같이 사라졌다 (`023615b3` / `01d32f88`). 이제 **살아남은 첫 anchor** 에
+    붙는다 — anchor 를 안 쓰는 변이라 같이 죽을 이유가 없다.
+  · `track_*` 게이트(D77 `moving` / D128 `center_drift_u`)의 집행부를 `track_ok()` 로 올렸다.
+    preset 루프 안에서 `continue` 하면 슬롯이 조용히 비는데, 배분 단계에서 걸러야 그 자리를
+    backfill 로 채울 수 있다. **판정 자체는 한 글자도 안 바뀌었다.**
+  · 품질 게이트(hole / sif / behind) 탈락 행은 backfill 을 **안 부른다** (사용자 확정) —
+    코퍼스 필터가 나중에 거른다. 트리거는 `enumerate 결과 < target_count` 뿐이다.
+  · 검증 5편(파일럿에서 3/5/2/3/2 였던 씬): tau 단계 전부 `총 5/5`.
+  · `target_count` 가 0 이면(=`--preset_route` 없음 또는 그 키가 없는 옛 JSON) 배분을 안 한다
+    = 옛 동작(anchor 전량 × preset 전량).
 - **`CinemaTraj/scripts/{sample_camera_bank,fit_hole_ladder}.py --timing_json` — (anchor, preset)
   단위 소요시간 실측 (2026-09-08, 사용자 지시 "preset당 얼마나 걸리는지 단계마다 측정해줘").**
   `logs/d157/*.{graph,cloud,route,tau,fit,emit}.log` 의 mtime 은 **단계**까지만 나눠준다 —
@@ -433,6 +486,40 @@
   재현할 때의 근거 기록이다. 첫 사용처는 `configs/bank/d150S.json` / `d150L.json`.
 
 ### Changed
+- **`route_presets.py --orbit_fallback drop` (기본) — `s_curve` 를 라우팅 어휘에서 뺀다
+  (2026-09-08, 사용자 지시 "그리고 preset에서 s_curve는 제거해줘").** `s_curve` 가 코퍼스에
+  들어가는 **유일한 입구**는 orbit 슬롯의 좁은-span 대체였다 (`obs_az_span <
+  ORBIT_MIN_SPAN_DEG=120°`). `drop` 이면 그 자리에 슬롯을 아예 안 만든다 — 다른 preset 으로
+  메우지 않는 이유는 orbit 슬롯의 뜻이 "곡선 선회"인데 좁은 span 에서 그걸 하는 preset 이
+  s_curve 말고 없고, `arc`/`recede` 를 억지로 넣으면 이미 그 슬롯을 쓰는 쌍과 겹쳐 2x2 의
+  motion 축이 죽기 때문이다. 빠진 몫은 D166 backfill 이 같은 anchor 의 남은 슬롯에서 채운다.
+  · `lbm/presets.py` 의 `s_curve` builder 는 **안 지운다** — 이미 나간 뱅크와 `decision.json`
+    이 그 이름을 참조하고, 지우면 재현·캡션 조회가 통째로 깨진다. 라우팅만 막는다.
+  · 함수 기본값은 `"s_curve"`(옛 동작), CLI 기본값이 `"drop"`. d157/d166 재현은
+    `--orbit_fallback s_curve`.
+  · dynpose 21편 실측: 40 anchor 중 **29개(72.5%)** 가 `orbit_ok=False` 라 이 갈래를 탄다.
+    슬롯 80 → 78, backfill 풀 240 → 213, `s_curve` 슬롯 13·풀 16 → **0·0**.
+  · **부작용(측정치, 미조정)**: `grid_slot_pair` 가 회전 후 "둘 다 있는 첫 쌍"을 집으므로
+    orbit 이 든 3쌍이 빠지면 그 다음 쌍으로 밀린다 — `(recede,orbit)→(advance,vertical)`,
+    `(orbit,static)→(recede,vertical)`, `(advance,orbit)→(recede,vertical)`. 21편 중 6편의
+    슬롯 쌍이 바뀌고 전부 `vertical` 쪽으로 갔다: crane 계열 11 → 23 (슬롯의 29.5%),
+    `static_look_at` 5 → 2. `GRID_SLOT_PAIRS` 를 다시 고르지 않는 한 이 쏠림은 남는다.
+- **`build_bank_captions.py --no_nl_framing` — framing / shot scale 을 **구조체에만 남기고
+  concise 문장에서 뺀다** (2026-09-08, 사용자 지시 "framing, shot scale은 일단 구조체로만
+  남겨두고 concise에서는 빼둘 수 있어?").** D143 `framing_dropped` 와 **층이 다르다**: D143 은
+  "그 변이는 framing 을 약속할 자격이 없다" 라 `caption["framing"]` 까지 비우는데(JSON 과 문장이
+  같은 말을 해야 한다, D105), 이쪽은 **문장에서만** 뺀다. 두 손잡이는 겹쳐 쓸 수 있다.
+  · `composition` 절도 같이 빠진다 — `nl_prompt` 에서 그 절은 framing 뒤에만 붙을 자리가 있다
+    (`f"{head}, {link} {framing}" + comp`).
+  · **부작용과 그 처방**: motion 문구에 `{target}` 슬롯이 없는 preset(`dolly_out` 계열)은
+    framing 절이 대상을 부르는 유일한 자리다. d157 `016a6379` 129행 실측으로 문장이 대상을
+    부르는 행이 117 → 105 로 12개 줄었고 12개 전부 `dolly_out` 이었다. `dolly_out` 은 grid2x2
+    `recede` 슬롯 기본값이라 scene 당 5개 중 1개가 대상 없는 문장이 된다. 그래서 shot scale 도
+    composition 도 없는 **최소 절**을 되살린다 (`target_view` → "keeping X in view").
+    D143 이 뺀 변이에는 안 붙인다 — 거기선 프레임 유지가 실제로 거짓이다.
+  · 재실측(같은 129행): `caption["framing"]` 동일 **129/129**, `prompt` 변경 109/129,
+    문장이 대상을 부르는 행 **117 → 117**(최소 절 12개로 회복).
+  · 기본값은 `--nl_framing`(켬)이라 기존 캡션 코퍼스는 비트 동일.
 - **`eval_collision_rate.py` CORPORA 의 `gendop_*_p30_slerp` arm 2개를 `_noscale` eval 폴더로
   재지정** — 위 `--no_scale_token` 항목의 판독 경로. 되나누면 궤적이 median 1.99배 커지므로
   절대 크기에 반응하는 충돌률이 그만큼 달라진다.
@@ -453,6 +540,29 @@
     `gendop_gdstyle_p49` arm 을 추가했다. 결과는 `results/20260907_d159_collision_raw/`.
 
 ### Fixed
+- **D166 파일럿이 scene 당 5개가 아니라 3~4개를 냈다 — 서로 독립인 버그 2개
+  (`route_presets.py --track_min_drift_u` / `--min_anchor_sep`, `sample_camera_bank.py`
+  `route_cut`) (2026-09-08).** 20편 파일럿 실측으로 잡았다.
+  · **① route 와 tau 의 `track_` 판정이 서로 달랐다.** `route()` 는 `moving` 불리언만 보고
+    `track_` 접두사를 붙이는데 `sample_camera_bank` 는 `center_drift_u > --track_min_drift_u`
+    (0.05) 를 요구해서, `moving=True` 인데 변위가 작은 anchor 의 `track_*` 슬롯이 뱅크에서
+    **조용히 사라졌다** (`018ccdd9` 실측 `man` 0.0212 / `hat` 0.0147). `--slot_plan full` 에선
+    슬롯이 많아 티가 안 났지만 grid2x2 는 2칸 중 1칸이 통째로 날아가 5개가 3개가 된다.
+    → `route()` 에 같은 문턱을 넘긴다 (함수 기본값 0.0 = 옛 동작, CLI 기본값 0.05 = 뱅크와 동일).
+  · **② 2등 anchor 가 1등의 부속물이었다.** 면적순으로 고르니 part/whole 쌍이 나온다. 큰 쪽
+    OBB 의 **회전된 로컬 축**에서 잰 중심 거리(반-extent 단위) 실측: `person/hands` 1.08,
+    `man/sunglasses` 1.07, `man/hat` 1.53, `man/bowl` 1.91 (10쌍 중 4 = 40%) vs 진짜 다른 물체
+    `dog/person` 8.44, `hand/person` 11.14, `person/backsplash` 6.77 … 2.0 에 빈 띠가 있다.
+    → `--min_anchor_sep 2.0`(`obb_center_sep`). 전부 붙어 있으면(단일 물체 클로즈업) 1등은
+    남긴다 — anchor 0 은 씬 전체를 버린다. 절삭은 필터 **뒤에** 한다 (부속물이 슬롯을 차지한 뒤
+    잘리면 소용없다).
+  · **곁가지**: `--min_anchor_sep` 만 넣으면 `sample_camera_bank` 가 `pick_main_anchors` 를 따로
+    불러 그 노드를 **`presets` 합집합으로 되살린다** (D127 이 경고한 "라우팅 표에 없는 anchor 가
+    뱅크엔 있는" 상태). `--preset_route` 를 주면 그 JSON 이 anchor 목록의 정본이고, 빠진 노드는
+    `route_cut` 으로 찍고 버린다.
+  · 재라우팅 11/11 편이 정확히 n=5, `man/hat`·`man/sunglasses` 쌍은 `stat_0` 으로 교체됐다.
+  · **주의**: 위 두 값이 이제 CLI **기본값**이라(D143/D147 관례) d157 스타일 config 를 오늘
+    다시 돌리면 d157 과 비트 동일하지 않다. 함수 기본값은 옛 동작을 유지한다.
 - **`eval_subject_in_frame.py` 가 재굽기된 **다른 세대**의 코퍼스를 읽어 subject 를 전부 엉뚱한
   물체로 잡고 있었다 — 이전 `subject_in_frame` 수치 전량 무효 (`FIX.log` 2026-09-07).**
   `--corpus_root` 기본값이 `latentcam_da3` 였는데 그 코퍼스는 재굽기되어 씬별 변이가

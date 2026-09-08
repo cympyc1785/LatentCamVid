@@ -37,11 +37,26 @@ fit → emit. 카메라가 벽 속에 들어가거나 씬을 못 보는 경우�
 
 소스 두 계열:
 
-| 계열 | 소스 | 현황 (2026-09-04) |
+| 계열 | 소스 | 현황 (2026-09-08) |
 |---|---|---|
 | **in-the-wild video** | Vista4D 계열 dynamic 영상 | d121 뱅크 완료 — 52 scenes, train 14,975 / test 875 세그먼트 |
-| **in-the-wild video (대규모)** | dynpose 코퍼스 | d107 train 7,623 → **D122 재생성 중** (280 scenes, 251편 bake 완료) |
+| **in-the-wild video (대규모)** | dynpose 코퍼스 | **D157 재생성 중** — 875 scenes 4샤드, 382편 완료 (scene 당 카메라 mean 144.6) |
 | **TRUMANS** | 합성 human motion 씬, mesh GT (중력·지면·피사체 전부 GT) | preset 렌더 진행 중. keyframe N개를 LBM 에 그대로 먹일 수 있는 상태 |
+
+#### 다음 라운드의 방향 — **scene 을 늘리고 preset 을 줄인다** (D157 완료 후 착수)
+
+지금까지는 scene 수를 고정한 채 scene 당 카메라를 늘려 왔다. D157 이 그 축의 끝이다 —
+875 scenes × mean 144.6 = 약 126.5k 카메라. 다음 라운드는 **축을 바꾼다**:
+
+- **scene 을 10k 단위로 올린다.** 코퍼스의 다양성은 scene 이 지고 있고, 같은 scene 안의
+  144개 변이는 서로 강하게 상관되어 있다. 학습 신호가 늘어나는 방향은 scene 쪽이다.
+- **preset 개수를 대폭 줄인다.** 위를 하려면 scene 당 비용을 줄여야 한다. 실측상 scene 당
+  시간의 **78% 가 fit 단계**이고, fit 시간은 preset 상위 5종이 60% 를 먹는다. preset 을
+  깎는 것이 scene 수를 10배로 올릴 유일한 예산이다.
+
+구체적 손잡이(K1 preset 축소 / K2 사다리 2·4단만 / K3 scene 당 dd 하나)와 실측 근거는
+`camera_generation/models/Planner/CinemaTraj/DECISIONS.md` 의 "차기 뱅크(d157 후속)" 절에 있다.
+여기에는 목표만 적는다 — **scene ↑ (10k), preset ↓.**
 
 ### 2. film 유래 카메라 motion (DataDoP 계열)
 
@@ -87,7 +102,8 @@ free-moving 으로만 넣는다.**
 
 ### 2. 두 가지 이상이 복합된 카메라
 
-현재 샘플러 축은 `anchor × preset(13종) × τ ladder × speed/tracking/look_at_bias` 이고,
+현재 샘플러 축은 `anchor × preset(D157 기준 anchor 당 14종) × τ ladder × speed/tracking/look_at_bias`
+이고,
 **한 변이는 primitive 를 정확히 하나만 쓴다.** 실제 촬영은 그렇지 않다 — dolly 하면서 orbit
 하고, 도중에 target 을 바꾼다. 목표는 **primitive 2개 이상의 조합**을 GT 로 합성하고, 그
 조합을 설명하는 캡션까지 같이 만드는 것.

@@ -7,6 +7,24 @@
 ## [Unreleased]
 
 ### Added
+- **`CinemaTraj/scripts/eval_subject_in_frame.py --subject_occlusion` — subject **가림** 열
+  (`subject_visible_frac` / `_min` / `_mean`) (2026-09-08, 사용자 지시 "vista 데이터로 학습한
+  … 비교한 표에서 subject_visible_frac 추가해서 보여줘").** 기존 세 열로는 가림이 안 잡힌다 —
+  `subject_in_frame` 은 실루엣 **중심**이 상자 안인가(위치), `subject_pixel_coverage` 는 화면
+  **면적비**(크기)라 상판·기둥에 반쯤 가려진 subject 가 둘 다 멀쩡히 통과한다.
+  · 새 `occlusion_series()` 는 프레임마다 subject 점만 그린 실루엣(`render(..., subset=)`)을
+    한 번 더 렌더해 전체 렌더 depth 와 비교하고, `drawn & (depth_full < depth_alone − 0.02·S)`
+    를 가려진 픽셀로 센다 — `lbm/gates.py:338-349` · `sample_camera_bank.py:690-698` 과 같은 식.
+    `render.CloudRenderer.measure` 의 `num_subject_points` 판은 픽셀수/점개수라 **밀도**이지
+    비율이 아니어서 쓰지 않는다.
+  · 분모는 그 프레임 실루엣 픽셀 수라 화면 밖 성분이 안 들어간다 (프레임 이탈은
+    `subject_in_frame` 의 몫). 실루엣이 통째로 비면 0. 프레임 median 으로 접고 최악 프레임을
+    `subject_visible_min` 으로 따로 남긴다.
+  · `0.02·S` 의 `S` 는 `scene_graph.json["scale"]["S"]` — 게이트와 같은 게이지여야 판정이 같다.
+  · **기본값 off** 라 안 주면 열이 안 붙고 기존 표와 비트 단위로 같다. 렌더가 프레임당 1회
+    늘지만 두 번째 패스는 subject 점만이라 첫 패스보다 훨씬 싸다.
+  · 모드 주의: `warp_1to1`(`--no_temporal_persistence`)에서는 정적 점이 프레임 f 것만 남아
+    **가림막이 사라지므로** 이 열을 재면 안 된다. cloud 모드 전용.
 - **`CinemaTraj/scripts/run_gendop_eval.py` — `CORPORA["vista_d121_snowboard"]` (2026-09-07,
   사용자 지시 "snowboard처럼 물체가 빠르게 움직이는 video에서도 잘 tracking같은걸 하는지").**
   `vista_d121` 과 코퍼스·ckpt 가 같고 split 만 다르다 — snowboard 는 **학습 split** 이라

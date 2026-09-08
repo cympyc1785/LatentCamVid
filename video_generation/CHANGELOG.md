@@ -7,6 +7,70 @@
 ## [Unreleased]
 
 ### Added
+- **D169 — dynpose-100k 대량 ingest 드라이버 `scripts/dynpose_ingest.py`
+  (2026-09-08, 사용자 지시 "recon_and_seg 먼저 일단 돌릴 수 있는거 최대한 다 sharding 해서
+  돌려놔줘" + "모델 올렸다 내렸다 하면 오래 걸리니까 단계 나눠서 최대한 병렬로 다 돌리고
+  다 되면 다음 단계로").** 기존 경로는 `recon_and_seg_single.py` 를 **영상당 프로세스 하나**로
+  띄우는 bash 래퍼였다. DA3NESTED-GIANT-LARGE 는 로드가 43.7 s 인데 추론은 편당 ~29 s 라,
+  1만 편이면 로딩이 전체의 60% 를 먹는다. 새 드라이버는 프로세스당 DA3 를 **한 번만** 올리고
+  배정된 영상을 전부 돈다.
+  · `--stage link|recon|metadata|sam3|dynmask|launch` 하나짜리 python 드라이버. 단계 사이는
+    배리어 — `launch` 는 **한 단계만** GPU 여러 장에 부채꼴로 띄우고 전부 끝날 때까지 기다린다.
+    `--gpus` 값은 0~4 밖이면 assert 로 막는다.
+  · `recon` 은 `recon_and_seg_single.main()` 에서 이 코퍼스가 타는 분기(da3 / seg_keywords 없음 /
+    `keep_recon_sky` / dse 없음 / scene_scale 1.0)만 그대로 옮긴 것이다. 같은 scene 을 다시
+    돌려 기존 산출물과 대조: `intrinsics` 완전 일치, `cam_c2w` maxabs **5.5e-6**, `depths`
+    상대오차 **6.9e-4**(float16 양자화), `sky_mask` 비트 일치. (`dynamic_mask` 만 다른데,
+    기존 코퍼스 쪽은 이미 `dynpose_dynamic_mask_from_seg.py` 가 덮어쓴 상태라 그렇다.)
+  · 중간에 죽은 폴더가 "완료"로 보이지 않게 `<out>.partial` 에 쓰고 마지막에 rename 한다.
+    한 편이 죽어도 그 편만 FAIL 로 세고 계속 간다.
+  · **입력은 `video_input.mp4` 뿐**이다 (사용자 지시). `inpaint_result.mp4` 는 저자들이 이미
+    워프·인페인트를 돌린 결과물이라 소스 영상이 아니다.
+  · 출력 루트를 `DATA/DynPose-100K` 로 **새로 판다**. `DATA/DynPose-LBM/metadata.csv` 는
+    d157/d166/d168 뱅크가 코퍼스 목록으로 읽는 파일이라 여기에 9천 편을 더하면 그 뱅크들을
+    다시 굽지 못한다. shard 0000 의 880편은 symlink 로 재사용하므로 디스크는 안 는다.
+  · `metadata` 는 shard 0000 을 기존 `DynPose-LBM/metadata.csv`(D145 VLM 명사) 그대로 쓰고,
+    나머지만 `category/category.json` 의 `dynamic` 배열에서 채운다 — 두 어휘가 다르기 때문이다
+    (예: csv `dog, person, shoe, chair` vs category `fluffy dog, man holding dog`). 출처는
+    `metadata_provenance_d169.json` 에 남긴다.
+  · `sam3` / `dynmask` 는 기존 `sam3_seg_instances.py` / `dynpose_dynamic_mask_from_seg.py` 에
+    위임한다 (SAM3 도 그쪽이 이미 프로세스당 1회 로드다). 새로 짠 코드가 아니다.
+- **D168 — fit 실패 자리를 다음 층 preset 으로 메우는 routing/retry
+  (`sample_camera_bank.py --variant_pool full`, `fit_hole_ladder.py --fallback_ladder`
+  + `tag_suspects` 태그 2종, `configs/bank/d168_dynpose_gate.json`) (2026-09-08, 사용자 지시
+  "가능한 preset 들 최대한 돌리고 결과적으로 안나오면 다른 track 없는 preset 쪽을 본다던지
+  target anchor 를 포기하고 free-moving 으로 대체한다던지 이런 안전장치" + "최대한 최신
+  세팅을 쓰되 routing 및 retry 정도로만").** `(anchor, preset)` 하나가 `clamped_low` 로 끝나면
+  그 행이 그대로 뱅크에 남고 끝이었다 — 다른 preset 을 대신 시도하는 경로가 파이프라인
+  어디에도 없었다 (preset 대체는 τ 단계 `plan_variants` backfill 에만 있고, 그건 fit 이 돌기
+  전이라 fit 판정을 못 본다). d166 dynpose 21편 105행 중 `clamped_low*` 23 + `static` 5 =
+  **26.7%** 가 그렇게 남았다.
+  · `--variant_pool budget|full` (τ) — `full` 이면 예산 밖 preset 까지 변이로 깔아 두고
+    행마다 `plan_tier` 를 찍는다 (0 본 슬롯 / 1 non-track 조준 / 2 `track_*` / 3 target 포기
+    free-moving). `budget`(기본)이면 전 행 tier 0 이라 d167 과 같다.
+  · `--fallback_ladder` (fit) — 층을 나눠 돌면서 실패한 자리를 다음 층 preset 으로 메운다.
+    **층 0 을 전 anchor 에 대해 다 돌고 나서** 층 1 로 내려간다 (anchor 별로 내려가면 anchor A
+    의 예비가 anchor B 의 본 슬롯을 밀어내 2×2 격자가 깨진다). 쓸 만한 변이가
+    `--fallback_target 5` 개 모이면 멈춘다 — 전부 통과하는 scene 은 렌더 수가 d166 과 같다.
+  · **게이트는 한 개도 안 늘렸다.** 재시도 판정은 뱅크가 이미 갖고 있는 두 열
+    (`status` / `suspect`)을 읽고, 인자 이름·토큰 매칭도 코퍼스 단계
+    (`vista4d_bank_to_dl3dv.py --drop_status` / `--drop_suspect`)와 같게 맞췄다
+    (`--retry_status` / `--retry_suspect`). 구현도 `tag_suspects` 를 행 하나에 그대로 부르는
+    것이지 재구현이 아니다 — 재구현하면 retry 기준과 코퍼스 기준이 갈라진다.
+  · `tag_suspects` 태그 2종 추가. ④ `aim_target_subject_lost` = 기존 ①
+    `aim_free_subject_lost` 의 **여집합**(`aim != free` ∧ sif < `--suspect_in_frame`, 임계
+    공유). d166 실측 해당 10행 중 **7행**이 status 도 suspect 도 없이 조용히 통과했다.
+    ⑤ `hole_over_budget` = `hole_fraction > --suspect_hole`(0 이면 꺼짐). 0.35 는 d166 config
+    `_rung` 이 이미 합격 기준으로 쓰던 숫자다. d166 실측 `hole_fraction > 0.35` 14행 중 9행이
+    `solved` 이고 기존 어휘로 잡히는 건 1행뿐이었다.
+  · `aim_free_subject_lost` 는 retry 어휘에서 **일부러 뺐다** — free-moving 은 조준 자체를
+    안 하는 게 정의라(D157 aim=free sif p10 = 0.077) 넣으면 targetless 변이가 통째로 사라진다.
+  · 회전 전용 preset(`pan_*`)에 별도 하한을 두지 않는다 — `ROTATION_ONLY_PRESETS` 가 이미
+    D53 `frozen` 진단의 예외 목록이고, 실측상 `pan_deg` 는 `KNOB_RANGE` 하한 2.00(= `clamped_low`
+    5행)이거나 ≥19.31(= `solved` 16행)로 갈려 중간값이 없다.
+  · **전부 옵션 분기다** — `--variant_pool budget`(기본) + `--no_fallback_ladder`(기본) +
+    `--suspect_hole 0`(기본)이면 d167 뱅크와 같다. τ 뱅크에 `plan_tier` 가 없으면
+    `--fallback_ladder` 는 no-op 으로 떨어지고 그 사실을 표에 찍는다.
 - **D166 — scene 당 카메라 5개 구성 (`route_presets.py --slot_plan grid2x2 --free_moving
   --max_anchors`, `sample_camera_bank.py --preset_route`, `configs/bank/d166_dynpose_grid5.json`)
   (2026-09-08, 사용자 지시 "scene 별로 4개정도만 카메라를 만들고싶은데" → "free-moving을 하나

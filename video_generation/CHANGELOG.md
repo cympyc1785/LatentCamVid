@@ -7,6 +7,31 @@
 ## [Unreleased]
 
 ### Added
+- **D169 — `route_presets.py --slot_pair_fill rotate|substitute` (2026-09-08, 사용자 지시
+  "가능한 preset 후보풀을 뽑아두고 (s_curve 제외) 5개가 안나오면 후보풀에서 다시 뽑으면
+  되잖아").** `grid_slot_pair()` 는 video 해시로 고른 씨앗 쌍의 한 짝이 그 씬에 없으면 **쌍을
+  통째로 버리고** `GRID_SLOT_PAIRS` 목록의 다음 쌍으로 넘어갔다. D167 이 `--orbit_fallback
+  drop` 을 기본값으로 만든 뒤 이게 문제가 됐다 — 8쌍 중 3쌍이 orbit 을 물고 있는데 d166
+  파일럿 40 anchor 중 29개(72.5%)가 `orbit_ok=False` 라, 그 씬들이 살아 있던 짝까지 잃고
+  전혀 다른 쌍에 착지했다. 21편 실측으로 6편(28.6%)의 쌍이 바뀌었고 route 산출 preset 이
+  `crane_up` 8→17행, `dolly_in_look_at` 5→11행으로 쏠리고 `static_look_at` 은 5→2행으로
+  줄었다. `substitute`(CLI 기본값)는 **살아남은 짝을 유지하고 빠진 자리만** video 해시로
+  회전시킨 `GRID_ALLOWED_SLOTS` 후보풀에서 메운다: `recede+orbit` → d168 `advance+vertical`
+  (두 짝 다 교체) 대신 `recede+vertical`, `orbit+static` → `static+arc`, `advance+orbit` →
+  `advance+static`. 21편 preset 분포가 crane_up 11 / dolly_in_look_at 5 / static_look_at 5 로
+  d166 값에 돌아온다. 씨앗 쌍 두 짝이 다 살아 있는 15편은 `rotate` 와 **글자 단위로 같은**
+  답을 내므로 회귀가 없다. 함수 기본값은 `rotate`(옛 동작, d166/d168 재현), CLI 기본값이
+  `substitute` — D143/D167 과 같은 규약. `preset_route.json` 의 `reasons` 에 `grid_seed_pair`
+  와 `slot_pair_fill` 을 같이 적는다 (`grid_slot_pair` 만 보면 대체 여부를 못 본다).
+  세대 config `configs/bank/d169_dynpose_slotfill.json` 은 d168 에서 이 인자 하나만 다르다.
+- **D169 — `extract_nouns_vlm.py --num_frames` (기본 6, 2026-09-08 사용자 지시 "우리 방식대로
+  뽑되 프레임은 6개로 늘려줘").** `--frame_mode multi` 가 `np.linspace(0, N-1, 4)` 로 고정
+  4장이었다. 49프레임을 12프레임 간격으로 훑는 것이라 그 사이에만 나왔다 사라지는 물체를
+  통째로 놓치고, dynpose 9.5k 편은 씬당 물체 수가 Vista4D-Eval-Data 보다 많아 그 구멍이 SAM3
+  앵커 수로 곧장 번진다. 함수 기본값 4 = D145 51편 비교표의 옛 동작, CLI 기본값 6.
+  이걸 쓰는 이유는 dynpose-100k 배포본의 `category/category.json` 이 "형용사+명사" 구
+  (`fluffy dog`, `man holding dog`)라 Sa2VA 용 referring expression 이고, SAM3 text PCS 와
+  기존 코퍼스 880편(D145 평명사)과 어휘 축이 갈리기 때문이다.
 - **D169 — dynpose-100k 대량 ingest 드라이버 `scripts/dynpose_ingest.py`
   (2026-09-08, 사용자 지시 "recon_and_seg 먼저 일단 돌릴 수 있는거 최대한 다 sharding 해서
   돌려놔줘" + "모델 올렸다 내렸다 하면 오래 걸리니까 단계 나눠서 최대한 병렬로 다 돌리고
@@ -29,9 +54,16 @@
   · 출력 루트를 `DATA/DynPose-100K` 로 **새로 판다**. `DATA/DynPose-LBM/metadata.csv` 는
     d157/d166/d168 뱅크가 코퍼스 목록으로 읽는 파일이라 여기에 9천 편을 더하면 그 뱅크들을
     다시 굽지 못한다. shard 0000 의 880편은 symlink 로 재사용하므로 디스크는 안 는다.
+  · `nouns` 단계 추가 — `extract_nouns_vlm.py`(우리 프롬프트, `--num_frames 6`)를 recon 이 끝난
+    영상에 샤딩해서 돌리고 shard 별 `vlm_nouns.json` 을 남긴다. vLLM 서버(22002)는 **밖에서
+    미리 띄운다** — 여기서 올렸다 내리면 샤드마다 로드가 반복된다. 워커는 전부 같은 서버를
+    두드리므로 `--workers N` 은 GPU 수가 아니라 동시 요청 수다. `--skip_done` 은 기존
+    `vlm_nouns.json` 의 `(video, multi, vlm)` 레코드를 재질의하지 않는다.
   · `metadata` 는 shard 0000 을 기존 `DynPose-LBM/metadata.csv`(D145 VLM 명사) 그대로 쓰고,
-    나머지만 `category/category.json` 의 `dynamic` 배열에서 채운다 — 두 어휘가 다르기 때문이다
-    (예: csv `dog, person, shoe, chair` vs category `fluffy dog, man holding dog`). 출처는
+    나머지는 `--noun_source vlm`(기본)이면 위 `nouns` 산출물에서, `category`(옛 동작)면
+    `category/category.json` 의 `dynamic` 배열에서 채운다. 기본을 바꾼 이유는 두 어휘 축이
+    다르기 때문이다 (csv `dog, person, shoe, chair` vs category `fluffy dog, man holding dog`
+    — 후자는 Sa2VA referring expression 이라 SAM3 text PCS 에 그대로 못 넣는다). 출처는
     `metadata_provenance_d169.json` 에 남긴다.
   · `sam3` / `dynmask` 는 기존 `sam3_seg_instances.py` / `dynpose_dynamic_mask_from_seg.py` 에
     위임한다 (SAM3 도 그쪽이 이미 프로세스당 1회 로드다). 새로 짠 코드가 아니다.

@@ -7,6 +7,17 @@
 ## [Unreleased]
 
 ### Added
+- **`CinemaTraj/scripts/{sample_camera_bank,fit_hole_ladder}.py --timing_json` — (anchor, preset)
+  단위 소요시간 실측 (2026-09-08, 사용자 지시 "preset당 얼마나 걸리는지 단계마다 측정해줘").**
+  `logs/d157/*.{graph,cloud,route,tau,fit,emit}.log` 의 mtime 은 **단계**까지만 나눠준다 —
+  "fit 이 scene 중앙값 503 s 로 전체의 78%" 까지는 보이지만 그 안에서 preset 16종 중 어느 것이
+  비싼지는 안 보이고, preset 을 줄일 때 무엇을 자를지 못 고른다.
+  · 스키마 `{format, video, stage, total_seconds, entries[]}`, 각 entry 는
+    `{anchor_id, preset, rungs, variants, seconds}` + fit 은 `solve_calls`(그 preset 이 쓴
+    이분법 렌더 호출 수). `perf_counter()` 로 preset 본문 진입/이탈만 감싼다.
+  · **기본값 None 이라 안 주면 파일도 안 쓰고 집계 표도 안 찍는다** — 진행 중인 d157 4샤드와
+    비트 단위로 같은 경로. 켜도 측정은 `perf_counter` 두 번뿐이라 굽기 시간에 영향이 없다.
+  · 끝에 preset 별 정렬 표(`n / sec / s per anchor / calls / s per call`)를 stdout 에 찍는다.
 - **`CinemaTraj/scripts/eval_subject_in_frame.py --subject_occlusion` — subject **가림** 열
   (`subject_visible_frac` / `_min` / `_mean`) (2026-09-08, 사용자 지시 "vista 데이터로 학습한
   … 비교한 표에서 subject_visible_frac 추가해서 보여줘").** 기존 세 열로는 가림이 안 잡힌다 —

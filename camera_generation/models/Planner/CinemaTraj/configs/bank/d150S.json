@@ -1,0 +1,37 @@
+{
+  "_why": "D150 파일럿: τ 분모를 z_med_frame0 -> S 로 바꿨을 때 뱅크가 얼마나 움직이나. 나머지 축은 vista d128(`scripts/run_k6_d128_shard.sh`)과 문자 단위로 같다 — 대조군이 곧 hole_bank_k6_d128 이므로 다른 축이 하나라도 다르면 비교가 무의미해진다. GRAPH/CLOUD 는 안 돈다 (.graph_s115/.cloud_s115 재사용).",
+  "generation": "d150S",
+  "output_root": "out",
+  "eval_data": null,
+  "tau_bank_dir": "bank_d150S",
+  "bank_dir": "hole_bank_k6_d150S",
+  "stages": ["tau", "fit", "emit"],
+  "require_markers": [".graph_s115", ".cloud_s115"],
+  "tau": {
+    "args": [
+      "--aim_keyframes", "6", "--keyframe_aim", "auto", "--keyframe_ease", "smooth_kf",
+      "--fixed_focal", "--deroll", "--no_preview",
+      "--orbit_fixed_sweep", "--min_sweep_deg", "20", "--behind_src_frames", "49",
+      "--tau_ref", "follow",
+      "--track_dynamic_only", "--track_min_drift_u", "0.05",
+      "--max_dynamic_anchors", "3", "--max_static_anchors", "3", "--anchor_drop_surfaces",
+      "--trackings", "lock", "--preset_tracking",
+      "--behind_min_zcam", "0.02",
+      "--tau_denom", "S"
+    ]
+  },
+  "fit": {
+    "args": [
+      "--aim_keyframes", "6", "--keyframe_aim", "auto", "--keyframe_ease", "smooth_kf",
+      "--fixed_focal", "--deroll",
+      "--orbit_fixed_sweep", "--min_sweep_deg", "20", "--behind_src_frames", "49",
+      "--tau_ref", "follow", "--tracking", "lock", "--preset_tracking",
+      "--behind_min_zcam", "0.02", "--behind_clear_src_ratio", "0",
+      "--collision_time_match", "--collision_source", "depth",
+      "--area_timeline", "--composition",
+      "--composition_min_area", "0.004", "--composition_max_nodes", "3",
+      "--tau_denom", "S"
+    ]
+  },
+  "emit": {"args": []}
+}

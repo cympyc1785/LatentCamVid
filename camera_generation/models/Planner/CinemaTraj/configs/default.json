@@ -1,0 +1,57 @@
+{
+  "format": "lbm_lite_config_v1",
+  "python": "/data1/cympyc1785/miniconda3/envs/vista4d/bin/python",
+  "env_name": "vista4d",
+  "cuda_visible_devices": null,
+  "videos": ["camel", "avocado-slice"],
+
+  "shared": {
+    "device": "cuda",
+    "start_mode": "source_frame0",
+    "aim_anchor": "subject",
+    "aim_ramp_frames": 12,
+    "max_tau": 0.30,
+    "max_view_angle_deg": 40.0,
+    "min_coverage": 0.55,
+    "center_box": 0.80
+  },
+
+  "stages": {
+    "nouns": {},
+    "seg": {},
+    "graph": {
+      "skip_done": true,
+      "overlay": true,
+      "topdown": true
+    },
+    "board": {
+      "board_size": 9,
+      "board_columns": 3,
+      "tile_width": 640,
+      "tile_height": 360,
+      "pool_mode": "budget"
+    },
+    "loop": {
+      "api_base": "http://127.0.0.1:22002/v1",
+      "model": "Qwen/Qwen3-VL-30B-A3B-Instruct",
+      "temperature": 0.1,
+      "max_tokens": 2048,
+      "micro_rounds": 10,
+      "target_tau": 0.20,
+      "preset_columns": 3,
+      "allow_zoom": false
+    },
+    "decode": {
+      "target_tau": 0.20,
+      "orbit_span_frac": 0.8
+    },
+    "emit": {
+      "free_start": false
+    },
+    "verify": {
+      "date": "20260820",
+      "previews": true,
+      "cam_detail": true
+    }
+  }
+}

@@ -1,0 +1,65 @@
+{
+  "_why": "D157 dynpose 875편 전면 재굽기 — **D149 축(앞단까지 vista 방식) + D151 축(τ 분모 S)**. 사용자 지시 '최신 vista 방식으로 dynpose도 돌려줘'. D149 는 러너(`run_dynpose_d149_shard.sh`)만 있고 실제로는 한 편도 안 돌았다(`.graph_d149` 0편) — 그 사이 vista 가 d150S/d151 로 τ 분모를 z_med_frame0 에서 S 로 옮겼으므로, d149 를 그대로 돌리면 굽자마자 vista 와 게이지가 어긋난 코퍼스가 된다. 그래서 d149 config 를 따로 두지 않고 처음부터 d151 게이지로 굽는다.",
+  "_from_d149": "① detection 을 VLM 명사로 통일 (seg_instances 877편 재검출 완료, 옛 것은 seg_instances_bak_pre_d149_20260906). ② static 트리 추가 (seg_instances_static 846편) — `--drop_surfaces` 기본값이 벽/바닥/천장을 뺀다. ③ `--gravity_source geocalib` (사이드카 880/880 확보, d148). ④ `--num_external 0` — DataDoP 외부 모양(dd_*) 제외, 라우팅 preset 29 -> 14. GRAPH/CLOUD 는 ①②③ 이 전부 그래프 입력이라 `.graph_d122` 를 재사용할 수 없어 **돈다**.",
+  "_from_d151": "tau/fit 양쪽에 `--tau_denom S`, fit 에 `--tau_knob_min 0.005`. 근거는 `d151.json` 의 `_why` 그대로 — S 게이지가 낫지만 S/z_med 가 큰 씬에서 손잡이 하한 0.02 가 `clamped_low` 를 대량으로 만들어서 0.005 로 내린다.",
+  "_diff_vs_d151": "vista(d151) 와 다른 축은 **데이터 위치 + preset 라우팅 + GRAPH/CLOUD 실행 여부** 뿐이다. d151 은 tau args 에 `--max_dynamic_anchors/--max_static_anchors/--anchor_drop_surfaces` 를 직접 준다(route 단계가 없어서). 여기서는 route 가 `--nodes` 를 명시로 넘기므로 뱅크에 주면 no-op 이고(`sample_camera_bank.py:144-151`), 상한은 route 단계에 준다.",
+  "generation": "d157",
+  "output_root": "out_dynpose",
+  "eval_data": "/data1/cympyc1785/LatentCamVid/DATA/DynPose-LBM",
+  "tau_bank_dir": "bank_d157",
+  "bank_dir": "hole_bank_d157",
+  "stages": ["graph", "cloud", "route", "tau", "fit", "emit"],
+  "require_markers": [],
+  "graph": {
+    "marker": ".graph_d157",
+    "args": [
+      "--scene_scale_mode", "points_first_cam", "--scene_scale_stride", "1",
+      "--gravity_source", "geocalib",
+      "--no_skip_done", "--no_overlay", "--no_topdown"
+    ]
+  },
+  "cloud": {
+    "marker": ".cloud_d157",
+    "args": [
+      "--scene_scale_mode", "points_first_cam", "--scene_scale_stride", "1",
+      "--no_skip_done"
+    ]
+  },
+  "route": {
+    "out": "preset_route_d157.json",
+    "args": [
+      "--num_external", "0",
+      "--max_dynamic_anchors", "3", "--max_static_anchors", "3"
+    ]
+  },
+  "tau": {
+    "args": [
+      "--tau_ladder", "0.10", "0.20", "0.35", "0.60", "1.00",
+      "--aim_keyframes", "6", "--keyframe_aim", "auto", "--keyframe_ease", "smooth_kf",
+      "--fixed_focal", "--deroll", "--no_preview", "--skip_on_empty", "--device", "cuda",
+      "--orbit_fixed_sweep", "--min_sweep_deg", "20", "--behind_src_frames", "49",
+      "--tau_ref", "follow",
+      "--track_dynamic_only", "--track_min_drift_u", "0.05",
+      "--trackings", "lock", "--preset_tracking",
+      "--behind_min_zcam", "0.02",
+      "--tau_denom", "S"
+    ]
+  },
+  "fit": {
+    "args": [
+      "--hole_ladder", "0.10", "0.20", "0.35", "0.50",
+      "--aim_keyframes", "6", "--keyframe_aim", "auto", "--keyframe_ease", "smooth_kf",
+      "--fixed_focal", "--deroll",
+      "--orbit_fixed_sweep", "--min_sweep_deg", "20", "--behind_src_frames", "49",
+      "--tau_ref", "follow", "--tracking", "lock", "--preset_tracking",
+      "--behind_min_zcam", "0.02", "--behind_clear_src_ratio", "0",
+      "--collision_time_match", "--collision_source", "depth",
+      "--area_timeline", "--composition",
+      "--composition_min_area", "0.004", "--composition_max_nodes", "3",
+      "--device", "cuda",
+      "--tau_denom", "S",
+      "--tau_knob_min", "0.005"
+    ]
+  },
+  "emit": {"args": []}
+}

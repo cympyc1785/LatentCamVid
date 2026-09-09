@@ -1,0 +1,77 @@
+{
+  "_why": "D168 dynpose — **d166 세팅을 그대로 쓰고 routing 과 retry 만 바꾼다** (사용자 지시 2026-09-08 '최대한 최신 세팅을 쓰되 routing 및 retry 정도로만'). 이분법(`solve_knob`)·게이트 순서·사다리 목표는 d166 과 글자 그대로 같다 — 게이트를 새로 달지 않은 이유는, '이 변이는 못 쓴다'는 판정이 이미 `status`(이분법 판정) 와 `suspect`(D140 `tag_suspects`) 두 열에 있고 코퍼스 단계(`vista4d_bank_to_dl3dv.py --drop_status/--drop_suspect`)가 그걸 소비하고 있기 때문이다. 판정 어휘를 두 벌 만들면 둘이 어긋난다.",
+  "_what_changed": "① τ 가 `--variant_pool full` 로 **예비 preset 까지 미리 깐다** (routing). ② fit 이 층을 나눠 돌면서 실패한 자리를 다음 층 preset 으로 메운다 (retry). ③ `tag_suspects` 에 태그 2종을 더한다 — 기존 3종이 못 보던 구멍을 메우는 것이고, 둘 다 기존 함수·기존 인자 패턴 안에 있다.",
+  "_retry": "`--retry_status clamped_low --retry_suspect aim_target_subject_lost hole_over_budget motion_preset_no_motion static_start_collision`. 인자 이름·토큰 매칭 방식이 코퍼스 단계의 `--drop_status`/`--drop_suspect` 와 같다 — '코퍼스에서 잘릴 행'과 '재시도를 부르는 행'이 같은 어휘로 정의되므로 둘이 어긋날 수가 없다. 구현도 `tag_suspects` 를 행 하나에 그대로 부르는 것이지 재구현이 아니다. `aim_free_subject_lost` 는 **일부러 뺐다**: free-moving 은 조준 자체를 안 하는 게 정의라(D157 aim=free sif p10 = 0.077) 재시도할 대상이 아니고, 넣으면 targetless 변이가 통째로 사라진다.",
+  "_tiers": "t0 라우팅이 준 본 슬롯(grid2x2 + free) → t1 같은 anchor 의 **track 아닌** 조준 preset → t2 `track_*` → t3 **target anchor 를 포기한** free-moving. 사용자가 준 순서 그대로다. t2 를 t1 뒤에 두는 건 d166 에서 `behind > 0` 인 10행이 전부 `track_*` 였기 때문 — 본 슬롯 track 이 충돌로 죽었으면 같은 anchor 의 다른 track 도 같은 벽에 부딪힌다. 층 0 을 전 anchor 에 대해 다 돌고 나서 층 1 로 내려간다 (anchor 별로 내려가면 anchor A 의 예비가 anchor B 의 본 슬롯을 밀어내 2x2 격자가 깨진다). fit 은 **게을러서** 쓸 만한 변이가 `--fallback_target 5` 개(= d166 의 scene 당 예산) 모이면 멈춘다 — 전부 통과하는 scene 은 렌더 수가 d166 과 같고, 실패하는 scene 에서만 시간이 는다.",
+  "_tag4": "`aim_target_subject_lost` = 기존 ① `aim_free_subject_lost` 의 **여집합** (`aim != free` ∧ sif < `--suspect_in_frame`). 임계를 ① 과 공유한다 — 같은 것을 재는데 aim 만 다르므로 눈금을 따로 둘 이유가 없다. 사용자 지시 ①('target 이 있는 경우에만 sif')이 여기로 들어간다. d166 실측: 해당 10행 중 **7행**이 status 도 suspect 도 안 붙어 조용히 통과했다 (`pull_out_arc_right` solved, `crane_up` elev_limited, `s_curve` shape_limited …).",
+  "_tag5": "`hole_over_budget` = `hole_fraction > --suspect_hole 0.35`. 사용자 지시 ③('상한을 둬서')이 여기로 들어간다. **목표에 상한을 씌우는 대신 결과를 태그로 잡는 쪽을 골랐다** — 목표 상한은 이분법 입력을 바꾸는 새 손잡이인데, 실현된 hole 을 재는 건 기존 열 하나를 임계에 대는 것뿐이고 그 임계 0.35 는 d166 config `_rung` 이 이미 합격 기준(`hole<=0.35 & sif>=0.85 & behind=0`)으로 쓰던 숫자다. d166 실측: `hole_static` p100 0.474 → `target_hole` p100 **0.674** → `tau_max` p100 **2.246**; `hole_fraction > 0.35` 14행 중 9행이 `solved` 이고 기존 어휘로 잡히는 건 1행뿐이었다.",
+  "_diff_vs_d166": "tau `--variant_pool full`; fit `--fallback_ladder --fallback_target 5 --retry_status ... --retry_suspect ... --suspect_hole 0.35`. 그 외 graph/cloud/route/emit 와 게이지(`--tau_denom S`, `--tau_knob_min 0.005`, geocalib gravity) 는 d166 과 동일. **주의**: route 의 `--orbit_fallback drop` 은 이제 CLI 기본값이라 d166 을 오늘 다시 돌려도 원래 d166 뱅크와 비트 동일하지 않다 (슬롯 쌍 6편이 vertical 쪽으로 밀린다). d168 은 그 새 기본값 위에서 굽는다.",
+  "generation": "d168",
+  "output_root": "out_dynpose",
+  "eval_data": "/data1/cympyc1785/LatentCamVid/DATA/DynPose-LBM",
+  "tau_bank_dir": "bank_d168",
+  "bank_dir": "hole_bank_d168",
+  "stages": ["graph", "cloud", "route", "tau", "fit", "emit"],
+  "require_markers": [],
+  "graph": {
+    "marker": ".graph_d157",
+    "args": [
+      "--scene_scale_mode", "points_first_cam", "--scene_scale_stride", "1",
+      "--gravity_source", "geocalib",
+      "--no_skip_done", "--no_overlay", "--no_topdown"
+    ]
+  },
+  "cloud": {
+    "marker": ".cloud_d157",
+    "args": [
+      "--scene_scale_mode", "points_first_cam", "--scene_scale_stride", "1",
+      "--no_skip_done"
+    ]
+  },
+  "route": {
+    "out": "preset_route_d168.json",
+    "args": [
+      "--num_external", "0",
+      "--max_dynamic_anchors", "2", "--max_static_anchors", "2", "--max_anchors", "2",
+      "--slot_plan", "grid2x2",
+      "--free_moving", "rotate",
+      "--track_min_drift_u", "0.05", "--min_anchor_sep", "2.0"
+    ]
+  },
+  "tau": {
+    "args": [
+      "--tau_ladder", "0.10", "0.20", "0.35", "0.60", "1.00",
+      "--variant_pool", "full",
+      "--aim_keyframes", "6", "--keyframe_aim", "auto", "--keyframe_ease", "smooth_kf",
+      "--fixed_focal", "--deroll", "--no_preview", "--skip_on_empty", "--device", "cuda",
+      "--orbit_fixed_sweep", "--min_sweep_deg", "20", "--behind_src_frames", "49",
+      "--tau_ref", "follow",
+      "--track_dynamic_only", "--track_min_drift_u", "0.05",
+      "--trackings", "lock", "--preset_tracking",
+      "--behind_min_zcam", "0.02",
+      "--tau_denom", "S"
+    ]
+  },
+  "fit": {
+    "args": [
+      "--hole_ladder", "0.20",
+      "--fallback_ladder", "--fallback_target", "5",
+      "--retry_status", "clamped_low",
+      "--retry_suspect", "aim_target_subject_lost", "hole_over_budget",
+      "motion_preset_no_motion", "static_start_collision",
+      "--suspect_hole", "0.35",
+      "--aim_keyframes", "6", "--keyframe_aim", "auto", "--keyframe_ease", "smooth_kf",
+      "--fixed_focal", "--deroll",
+      "--orbit_fixed_sweep", "--min_sweep_deg", "20", "--behind_src_frames", "49",
+      "--tau_ref", "follow", "--tracking", "lock", "--preset_tracking",
+      "--behind_min_zcam", "0.02", "--behind_clear_src_ratio", "0",
+      "--collision_time_match", "--collision_source", "depth",
+      "--area_timeline", "--composition",
+      "--composition_min_area", "0.004", "--composition_max_nodes", "3",
+      "--device", "cuda",
+      "--tau_denom", "S",
+      "--tau_knob_min", "0.005"
+    ]
+  },
+  "emit": {"args": []}
+}

@@ -1,0 +1,33 @@
+{
+  "_why": "d150S 의 legacy 대조군 — τ 분모만 z_med_frame0(옛 정의). 목적은 두 가지다. ① `--tau_denom` 배선이 옛 뱅크를 **비트 동일**하게 재현하는지 확인(hole_bank_k6_d128 과 diff). ② S 뱅크와의 차이가 정말 분모 때문인지, 그 사이에 끼어든 다른 코드 변경 때문인지 가른다. d128 이후 fit/sample 코드가 손대졌으므로 ①을 통과해야 d128 을 대조군으로 쓸 수 있다.",
+  "extends": "d150S.json",
+  "generation": "d150L",
+  "tau_bank_dir": "bank_d150L",
+  "bank_dir": "hole_bank_k6_d150L",
+  "tau": {
+    "args": [
+      "--aim_keyframes", "6", "--keyframe_aim", "auto", "--keyframe_ease", "smooth_kf",
+      "--fixed_focal", "--deroll", "--no_preview",
+      "--orbit_fixed_sweep", "--min_sweep_deg", "20", "--behind_src_frames", "49",
+      "--tau_ref", "follow",
+      "--track_dynamic_only", "--track_min_drift_u", "0.05",
+      "--max_dynamic_anchors", "3", "--max_static_anchors", "3", "--anchor_drop_surfaces",
+      "--trackings", "lock", "--preset_tracking",
+      "--behind_min_zcam", "0.02",
+      "--tau_denom", "z_med_frame0"
+    ]
+  },
+  "fit": {
+    "args": [
+      "--aim_keyframes", "6", "--keyframe_aim", "auto", "--keyframe_ease", "smooth_kf",
+      "--fixed_focal", "--deroll",
+      "--orbit_fixed_sweep", "--min_sweep_deg", "20", "--behind_src_frames", "49",
+      "--tau_ref", "follow", "--tracking", "lock", "--preset_tracking",
+      "--behind_min_zcam", "0.02", "--behind_clear_src_ratio", "0",
+      "--collision_time_match", "--collision_source", "depth",
+      "--area_timeline", "--composition",
+      "--composition_min_area", "0.004", "--composition_max_nodes", "3",
+      "--tau_denom", "z_med_frame0"
+    ]
+  }
+}

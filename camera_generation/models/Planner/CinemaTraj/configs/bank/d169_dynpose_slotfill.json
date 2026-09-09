@@ -1,0 +1,75 @@
+{
+  "_why": "D169 dynpose — **d168 에서 route 한 줄만 바꾼다** (`--slot_pair_fill substitute`). d168 이 d166 대비 tier0 통과를 105행 82 → 105행 60 으로 잃었는데, 그 손실의 절반이 s_curve 12행이고 나머지 절반은 `grid_slot_pair()` 가 orbit 이 빠진 씨앗 쌍을 **통째로** 버리고 목록 뒤쪽의 전혀 다른 쌍으로 착지한 데서 왔다 (21편 중 6편이 쌍 변경, crane 계열 8→17행, `static_look_at` 5→2행). 사용자 지시 2026-09-08 '가능한 preset 후보풀을 뽑아두고 (s_curve 제외) 5개가 안나오면 후보풀에서 다시 뽑으면 되잖아' 가 이것이다.",
+  "_what_changed": "route 에 `--slot_pair_fill substitute` 하나. 씨앗 쌍의 **살아남은 짝은 유지**하고 빠진 자리만 video 해시로 회전한 `GRID_ALLOWED_SLOTS` 후보풀에서 메운다. 21편 실측 슬롯 쌍: `recede+orbit` 이 d168 에선 `advance+vertical`(두 짝 다 교체) 이었는데 d169 는 `recede+vertical`(recede 유지), `orbit+static` → d168 `recede+vertical` / d169 `static+arc`, `advance+orbit` → d168 `recede+vertical` / d169 `advance+static`. 두 짝이 다 살아 있는 15편은 d166/d168/d169 가 글자 단위로 같다.",
+  "_preset_dist": "21편 route 산출 preset 분포 (d166 | d168 | d169): crane_up 8|17|11, dolly_in_look_at 5|11|5, static_look_at 5|2|5, s_curve 13|0|0, dolly_out 20|20|20, pan_left 14|14|14. d168 의 crane/advance 쏠림이 사라지고 s_curve 자리는 arc·static·crane 으로 흩어진다.",
+  "_diff_vs_d168": "route `--slot_pair_fill substitute` 만 추가. tau/fit/emit/graph/cloud 인자와 게이지는 d168 과 **글자 단위로 같다** (`--variant_pool full`, `--fallback_ladder --fallback_target 5`, `--retry_status clamped_low`, `--retry_suspect ...`, `--suspect_hole 0.35`, `--tau_denom S`, `--tau_knob_min 0.005`). retry 층 구성도 그대로다 — 이번 세대가 시험하는 축은 **라우팅 하나**다.",
+  "generation": "d169",
+  "output_root": "out_dynpose",
+  "eval_data": "/data1/cympyc1785/LatentCamVid/DATA/DynPose-LBM",
+  "tau_bank_dir": "bank_d169",
+  "bank_dir": "hole_bank_d169",
+  "stages": ["route", "tau", "fit", "emit"],
+  "require_markers": [],
+  "graph": {
+    "marker": ".graph_d157",
+    "args": [
+      "--scene_scale_mode", "points_first_cam", "--scene_scale_stride", "1",
+      "--gravity_source", "geocalib",
+      "--no_skip_done", "--no_overlay", "--no_topdown"
+    ]
+  },
+  "cloud": {
+    "marker": ".cloud_d157",
+    "args": [
+      "--scene_scale_mode", "points_first_cam", "--scene_scale_stride", "1",
+      "--no_skip_done"
+    ]
+  },
+  "route": {
+    "out": "preset_route_d169.json",
+    "args": [
+      "--num_external", "0",
+      "--max_dynamic_anchors", "2", "--max_static_anchors", "2", "--max_anchors", "2",
+      "--slot_plan", "grid2x2",
+      "--slot_pair_fill", "substitute",
+      "--free_moving", "rotate",
+      "--track_min_drift_u", "0.05", "--min_anchor_sep", "2.0"
+    ]
+  },
+  "tau": {
+    "args": [
+      "--tau_ladder", "0.10", "0.20", "0.35", "0.60", "1.00",
+      "--variant_pool", "full",
+      "--aim_keyframes", "6", "--keyframe_aim", "auto", "--keyframe_ease", "smooth_kf",
+      "--fixed_focal", "--deroll", "--no_preview", "--skip_on_empty", "--device", "cuda",
+      "--orbit_fixed_sweep", "--min_sweep_deg", "20", "--behind_src_frames", "49",
+      "--tau_ref", "follow",
+      "--track_dynamic_only", "--track_min_drift_u", "0.05",
+      "--trackings", "lock", "--preset_tracking",
+      "--behind_min_zcam", "0.02",
+      "--tau_denom", "S"
+    ]
+  },
+  "fit": {
+    "args": [
+      "--hole_ladder", "0.20",
+      "--fallback_ladder", "--fallback_target", "5",
+      "--retry_status", "clamped_low",
+      "--retry_suspect", "aim_target_subject_lost", "hole_over_budget",
+      "motion_preset_no_motion", "static_start_collision",
+      "--suspect_hole", "0.35",
+      "--aim_keyframes", "6", "--keyframe_aim", "auto", "--keyframe_ease", "smooth_kf",
+      "--fixed_focal", "--deroll",
+      "--orbit_fixed_sweep", "--min_sweep_deg", "20", "--behind_src_frames", "49",
+      "--tau_ref", "follow", "--tracking", "lock", "--preset_tracking",
+      "--behind_min_zcam", "0.02", "--behind_clear_src_ratio", "0",
+      "--collision_time_match", "--collision_source", "depth",
+      "--area_timeline", "--composition",
+      "--composition_min_area", "0.004", "--composition_max_nodes", "3",
+      "--device", "cuda",
+      "--tau_denom", "S",
+      "--tau_knob_min", "0.005"
+    ]
+  },
+  "emit": {"args": []}
+}

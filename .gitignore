@@ -218,10 +218,31 @@ __marimo__/
 .streamlit/secrets.toml
 
 DATA
+DATA/Vista4D-Eval-Data
 tools
-camera_generation/models
+results
+# camera_generation/models 는 vendored 모델 트리라 통째로 무시한다. 유일한 예외가 우리가 직접
+# 쓴 CinemaTraj 플래너 **코드**다 — 여기가 추적 밖이면 스크립트를 지웠을 때 되돌릴 방법이 없다
+# (2026-09-09, 정리 작업 선행 조건). git 은 부모 디렉토리가 제외되면 자식을 되살릴 수 없으므로
+# `models` 를 `models/*` 로 바꿔 경로를 한 단계씩 열어 준다 (무시 범위는 이전과 동일).
+# 산출물(out*/ logs/ results/ __pycache__)은 `CinemaTraj/*` 줄에서 계속 닫혀 있다.
+camera_generation/models/*
+!camera_generation/models/Planner/
+camera_generation/models/Planner/*
+!camera_generation/models/Planner/CinemaTraj/
+camera_generation/models/Planner/CinemaTraj/*
+!camera_generation/models/Planner/CinemaTraj/scripts/
+!camera_generation/models/Planner/CinemaTraj/lbm/
+!camera_generation/models/Planner/CinemaTraj/scene_graph/
+!camera_generation/models/Planner/CinemaTraj/decode/
+!camera_generation/models/Planner/CinemaTraj/configs/
+!camera_generation/models/Planner/CinemaTraj/*.py
+!camera_generation/models/Planner/CinemaTraj/*.md
+# 4 MB 생성 데이터. retrieve_datadop_shapes.py 가 다시 만든다.
+camera_generation/models/Planner/CinemaTraj/configs/datadop_shapes.json
 video_generation/tools
 video_generation/models
+video_generation/results
 camera_generation/latentcam/results
 camera_generation/latentcam/eval_my
 camera_generation/latentcam/exp_results
@@ -232,3 +253,6 @@ camera_generation/latentcam/main/configs_backup
 camera_generation/latentcam/main/evaluate/CLaTr/lightning_logs
 camera_generation/latentcam/main/evaluate/CLaTr/results
 camera_generation/latentcam/checkpoints
+
+# 작업용 임시 파일 — /tmp 대신 여기를 쓴다 (CLAUDE.md "임시 파일은 <repo>/tmp/")
+/tmp/

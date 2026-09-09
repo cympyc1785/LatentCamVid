@@ -1,0 +1,69 @@
+{
+  "_why": "D166 dynpose — **scene 을 늘리기 위해 scene 당 카메라를 144.4 -> 5 로 줄인다** (goals.md '다음 라운드의 방향 — scene 을 늘리고 preset 을 줄인다'). D157 실측: scene 당 850s 중 fit 이 503s(78%) 이고 fit 은 변이 수에 선형이다. 5개 구성이면 fit 이 ~14s 로 떨어져 scene 당 ~260s (x3.3) 이 되고, 10k scene x 260s / GPU 5장 = 약 6.0일로 닿는다.",
+  "_composition": "scene 당 5 = anchor{a,b} x slot{P1,P2} (2x2) + free-moving 1. ① 2x2 는 target 축과 motion 축을 동시에 대조한다 — anchor 가 편당 1개면 `target:` 절이 씬 안에서 상수라 학습 신호가 0 이고(D84), preset 이 1개면 motion 절이 상수다. ② 슬롯 쌍은 **video 해시로 골라 두 anchor 가 공유**한다 (`route_presets.GRID_SLOT_PAIRS`) — 슬롯까지 anchor 마다 다르면 4칸 중 어느 것도 서로의 대조군이 아니다. ③ free-moving 1개는 target 절이 없는 변이(`pan_*`, caption `targetless`) 로, 격자 밖 첫 anchor 에만 붙인다 — 격자에 넣으면 두 anchor 의 캡션이 글자 단위로 같아진다.",
+  "_rung": "`--hole_ladder 0.20` 한 단. D157 384편 55,462행 실측으로 두 가지가 나왔다. ① rung 0.35/0.50 은 코퍼스의 71.6% 를 먹으면서 합격률(hole<=0.35 & sif>=0.85 & behind=0)이 38.3% 다. 전부 0.20 이면 83.0%, 전부 0.35 면 60.2%. ② **rung 은 강도 축이 아니다** — pooled path_len 비 0.10->0.20 은 1.58배지만 preset 을 고정하면 1.04~1.23배에 P(b>a) 0.520~0.538 이다. 강도를 실제로 정하는 건 `knob`(P=1.000). 그래서 사다리를 강도 축으로 쓰지 않고 수율이 제일 높은 한 단으로 고정한다.",
+  "_slots_dropped": "2x2 후보에서 `lateral`(truck_*) 과 `rotate`(pan_*) 를 뺐다. truck_* 은 aim='free' 인데 캡션에 target 절이 있다 — D157 sif-only 탈락 7,910행 중 3,024(38.2%)가 여기다 (task #134 가 고칠 때까지 제외). pan_* 은 캡션이 이미 targetless 라 모순은 아니지만, target 절이 없어서 2x2 안에 두면 두 anchor 의 캡션이 같아진다 — 그래서 free-moving 슬롯으로 옮겼다. `recede` 는 grid 에서 track 보너스 후보에서도 뺀다 (`track_dolly_out` 은 track_* 인데 aim='free', 사용자 지시).",
+  "_diff_vs_d157": "route 4개 인자(`--max_anchors 2`, `--max_dynamic_anchors 3->2`, `--max_static_anchors 3->2`, `--slot_plan grid2x2`, `--free_moving rotate`) 와 fit `--hole_ladder` 4단 -> 1단. graph/cloud/tau/emit 는 **한 글자도 안 바꿨다** — 게이지(`--tau_denom S`, `--tau_knob_min 0.005`)와 gravity(geocalib) 가 d157/d151 과 같아야 뱅크 간 비교가 성립한다. tau 사다리 5단도 그대로 둔다 (fit 이 τ 를 한 점으로 접으므로 행 수에 안 곱해진다).",
+  "generation": "d166",
+  "output_root": "out_dynpose",
+  "eval_data": "/data1/cympyc1785/LatentCamVid/DATA/DynPose-LBM",
+  "tau_bank_dir": "bank_d166",
+  "bank_dir": "hole_bank_d166",
+  "stages": ["graph", "cloud", "route", "tau", "fit", "emit"],
+  "require_markers": [],
+  "graph": {
+    "marker": ".graph_d157",
+    "args": [
+      "--scene_scale_mode", "points_first_cam", "--scene_scale_stride", "1",
+      "--gravity_source", "geocalib",
+      "--no_skip_done", "--no_overlay", "--no_topdown"
+    ]
+  },
+  "cloud": {
+    "marker": ".cloud_d157",
+    "args": [
+      "--scene_scale_mode", "points_first_cam", "--scene_scale_stride", "1",
+      "--no_skip_done"
+    ]
+  },
+  "route": {
+    "out": "preset_route_d166.json",
+    "args": [
+      "--num_external", "0",
+      "--max_dynamic_anchors", "2", "--max_static_anchors", "2", "--max_anchors", "2",
+      "--slot_plan", "grid2x2",
+      "--free_moving", "rotate",
+      "--track_min_drift_u", "0.05", "--min_anchor_sep", "2.0"
+    ]
+  },
+  "tau": {
+    "args": [
+      "--tau_ladder", "0.10", "0.20", "0.35", "0.60", "1.00",
+      "--aim_keyframes", "6", "--keyframe_aim", "auto", "--keyframe_ease", "smooth_kf",
+      "--fixed_focal", "--deroll", "--no_preview", "--skip_on_empty", "--device", "cuda",
+      "--orbit_fixed_sweep", "--min_sweep_deg", "20", "--behind_src_frames", "49",
+      "--tau_ref", "follow",
+      "--track_dynamic_only", "--track_min_drift_u", "0.05",
+      "--trackings", "lock", "--preset_tracking",
+      "--behind_min_zcam", "0.02",
+      "--tau_denom", "S"
+    ]
+  },
+  "fit": {
+    "args": [
+      "--hole_ladder", "0.20",
+      "--aim_keyframes", "6", "--keyframe_aim", "auto", "--keyframe_ease", "smooth_kf",
+      "--fixed_focal", "--deroll",
+      "--orbit_fixed_sweep", "--min_sweep_deg", "20", "--behind_src_frames", "49",
+      "--tau_ref", "follow", "--tracking", "lock", "--preset_tracking",
+      "--behind_min_zcam", "0.02", "--behind_clear_src_ratio", "0",
+      "--collision_time_match", "--collision_source", "depth",
+      "--area_timeline", "--composition",
+      "--composition_min_area", "0.004", "--composition_max_nodes", "3",
+      "--device", "cuda",
+      "--tau_denom", "S",
+      "--tau_knob_min", "0.005"
+    ]
+  },
+  "emit": {"args": []}
+}

@@ -1,0 +1,38 @@
+{
+  "_why": "D151 vista 52편 재굽기. d150S(파일럿 6편) 대비 **바뀌는 것은 fit 의 `--tau_knob_min 0.005` 한 줄뿐**이고 나머지 축은 문자 단위로 같다. 근거: d150S 는 τ 분모를 S 로 바꾼 뒤 S/z_med 가 큰 씬에서 `clamped_low` 가 대량 발생했다(martian-flag 93/258, camera-lens 50/172, parkour 94/320, snow-dog 28/258). 그 행들은 τ 손잡이 하한 0.02 때문에 이분법이 게이트를 만족하는 크기까지 못 내려간 것이지 기하학적으로 불가능한 게 아니다 — 하한 스윕(tmp/d151, 7값 x 6씬 x 32행)에서 0.005 면 martian-flag/camera-lens/snow-dog/parkour 전부 물리 위반이 0 이 되고 그 아래로는 아무것도 새로 안 풀린다. 분모가 안 걸리는 씬에서는 S 게이지가 그냥 더 낫다 (desert-park solved 124->146, snow-bike 123->154). GRAPH/CLOUD 는 안 돈다 (.graph_s115/.cloud_s115 재사용).",
+  "generation": "d151",
+  "output_root": "out",
+  "eval_data": null,
+  "tau_bank_dir": "bank_d151",
+  "bank_dir": "hole_bank_k6_d151",
+  "stages": ["tau", "fit", "emit"],
+  "require_markers": [".graph_s115", ".cloud_s115"],
+  "tau": {
+    "args": [
+      "--aim_keyframes", "6", "--keyframe_aim", "auto", "--keyframe_ease", "smooth_kf",
+      "--fixed_focal", "--deroll", "--no_preview",
+      "--orbit_fixed_sweep", "--min_sweep_deg", "20", "--behind_src_frames", "49",
+      "--tau_ref", "follow",
+      "--track_dynamic_only", "--track_min_drift_u", "0.05",
+      "--max_dynamic_anchors", "3", "--max_static_anchors", "3", "--anchor_drop_surfaces",
+      "--trackings", "lock", "--preset_tracking",
+      "--behind_min_zcam", "0.02",
+      "--tau_denom", "S"
+    ]
+  },
+  "fit": {
+    "args": [
+      "--aim_keyframes", "6", "--keyframe_aim", "auto", "--keyframe_ease", "smooth_kf",
+      "--fixed_focal", "--deroll",
+      "--orbit_fixed_sweep", "--min_sweep_deg", "20", "--behind_src_frames", "49",
+      "--tau_ref", "follow", "--tracking", "lock", "--preset_tracking",
+      "--behind_min_zcam", "0.02", "--behind_clear_src_ratio", "0",
+      "--collision_time_match", "--collision_source", "depth",
+      "--area_timeline", "--composition",
+      "--composition_min_area", "0.004", "--composition_max_nodes", "3",
+      "--tau_denom", "S",
+      "--tau_knob_min", "0.005"
+    ]
+  },
+  "emit": {"args": []}
+}

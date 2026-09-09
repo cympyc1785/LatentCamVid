@@ -600,6 +600,22 @@
   재현할 때의 근거 기록이다. 첫 사용처는 `configs/bank/d150S.json` / `d150L.json`.
 
 ### Changed
+- **`.gitignore` — CinemaTraj 플래너 **코드**를 git 추적 대상으로 되돌린다 (2026-09-09, 사용자
+  질문 "git이 추적하게 못하나").** `camera_generation/models` 는 vendored 모델 트리 9종(CCD,
+  CamVLA, DIRECTOR, Director3D, GenDoP, I3DM, LAMP, Planner, SCVideo) 때문에 통째로 무시되고
+  있었는데, 그 안에 우리가 직접 쓴 `Planner/CinemaTraj/` 가 같이 묻혀 있었다 —
+  `git ls-files scripts/` 가 **0건**이라 스크립트를 지우면 되돌릴 방법이 없는 상태였다
+  (scripts 127 py 37,990줄 + 35 sh 3,005줄). git 은 부모 디렉토리가 제외되면 자식을 negate 로
+  되살릴 수 없으므로 `camera_generation/models` → `camera_generation/models/*` 로 바꾸고
+  `Planner/` → `CinemaTraj/` → `{scripts,lbm,scene_graph,decode,configs}/` + 루트 `*.py`/`*.md`
+  만 한 단계씩 열었다. 무시 범위 자체는 이전과 같다 — 다른 8개 모델 트리는 그대로 닫혀 있고,
+  산출물(`out*/` 618+280+142 GB, `logs/`, `results/` 12 GB, `__pycache__`)은
+  `CinemaTraj/*` 줄에서 계속 막힌다. 실측 편입량 **211 파일 / 3.28 MB**
+  (py 154 · sh 35 · json 11 · md 10 · txt 1). 유일한 명시적 제외는 `configs/datadop_shapes.json`
+  (4 MB 생성 데이터, `retrieve_datadop_shapes.py` 가 재생성).
+  **왜 지금**: 스크립트 정리(사체 4편 + 참조 1회 30편 심사)를 하려면 `rm` 이 되돌릴 수 있어야
+  한다. 추적이 없으면 attic 디렉토리로 옮기는 우회가 필요했는데, 이제 그냥 지우고
+  `git checkout` 으로 되돌릴 수 있다.
 - **D169 — `describe_instances_vlm.py --num_frames` 기본 3 → 6 (2026-09-09, 사용자 지시
   "일단 6으로 설정 올려줘").** 기존 산출물 266편 421 노드 실측: `action` 이 빈 노드는 9.0%
   뿐이라 3장으로도 행위 자체는 나온다. 문제는 **무엇이** 나오느냐다 — 상위 동사가 `being` 77

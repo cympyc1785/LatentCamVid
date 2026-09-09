@@ -81,10 +81,10 @@ def main():
     parser = ArgumentParser()
     parser.add_argument("--videos", nargs="+", required=True)          # 잴 영상들
     parser.add_argument("--stages", default=",".join(DEFAULT_STAGES))  # 쉼표 목록
-    parser.add_argument("--out_root", default="/tmp/vista_timing")     # 격리 출력 루트
+    parser.add_argument("--out_root", default="/data1/cympyc1785/LatentCamVid/tmp/vista_timing")     # 격리 출력 루트
     parser.add_argument("--bank_dir", default="hole_bank_k6")          # 뱅크 폴더 이름
-    parser.add_argument("--cuda", default="6", type=str)               # CUDA_VISIBLE_DEVICES
-    parser.add_argument("--log_dir", default="/tmp/vista_timing/logs")
+    parser.add_argument("--cuda", default="0", type=str)               # CUDA_VISIBLE_DEVICES
+    parser.add_argument("--log_dir", default="/data1/cympyc1785/LatentCamVid/tmp/vista_timing/logs")
     parser.add_argument("--dry_run", action="store_true", default=False)
     parser.add_argument("--no_dry_run", dest="dry_run", action="store_false")
     args = parser.parse_args()

@@ -113,7 +113,7 @@ def main(args):
 if __name__ == "__main__":
     parser = ArgumentParser()
     parser.add_argument("--run_dir", required=True, type=str)     # Cinematographer/output/<run_id>
-    parser.add_argument("--out", default="/tmp/lbm_previews.mp4", type=str)
+    parser.add_argument("--out", default="/data1/cympyc1785/LatentCamVid/tmp/lbm_previews.mp4", type=str)
     parser.add_argument("--hold_sec", default=1.6, type=float)    # shot 당 화면에 머무는 시간
     parser.add_argument("--fps", default=25, type=int)
     parser.add_argument("--width", default=1280, type=int)

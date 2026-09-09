@@ -157,5 +157,5 @@ if __name__ == "__main__":
     parser.add_argument("--frames", default="0,24,48", type=str)
     parser.add_argument("--width", default=0, type=int)        # 0 이면 씬 해상도 그대로
     parser.add_argument("--height", default=0, type=int)
-    parser.add_argument("--out", default="/tmp/vista_blend_check", type=str)
+    parser.add_argument("--out", default="/data1/cympyc1785/LatentCamVid/tmp/vista_blend_check", type=str)
     main(parser.parse_args(argv_after_dashdash()))

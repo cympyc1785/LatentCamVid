@@ -18,7 +18,7 @@ LC=/data1/cympyc1785/LatentCamVid/camera_generation/latentcam
 PY=/data1/cympyc1785/miniconda3/envs/vista4d/bin/python
 HOLE=hole_bank_d110
 OUT=/data1/cympyc1785/data/DynPose-LBM/latentcam_dynpose_d110
-TESTV=/tmp/d107_test_videos.txt                    # d107 과 동일한 scene holdout 27편
+TESTV=/data1/cympyc1785/LatentCamVid/tmp/d107_test_videos.txt                    # d107 과 동일한 scene holdout 27편
 cd $CT
 
 if [ "${1:-}" = "--wait" ]; then

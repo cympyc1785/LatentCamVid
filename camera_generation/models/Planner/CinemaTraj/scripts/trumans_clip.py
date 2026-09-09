@@ -184,7 +184,7 @@ if __name__ == "__main__":
     parser.add_argument("--start", default=0, type=int)              # 창 시작 프레임
     parser.add_argument("--num_frames", default=49, type=int)        # 코퍼스와 같은 49
     parser.add_argument("--stride", default=1, type=int)             # 30fps -> 그대로면 1
-    parser.add_argument("--out", default="/tmp/trumans_clip.mp4", type=str)
+    parser.add_argument("--out", default="/data1/cympyc1785/LatentCamVid/tmp/trumans_clip.mp4", type=str)
 
     parser.add_argument("--rank", action="store_true", default=False)   # 창 점수표만 찍고 끝
     parser.add_argument("--step", default=30, type=int)              # --rank 창 간격

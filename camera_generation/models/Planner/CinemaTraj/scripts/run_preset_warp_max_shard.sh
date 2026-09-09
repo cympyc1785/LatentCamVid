@@ -85,7 +85,7 @@ PYEOF
     CUDA_VISIBLE_DEVICES=$GPU $PY scripts/render_bank_videos.py \
         --video "$V" --bank_dir "$BANK" --variant_ids $IDS $EXTRA $FF \
         --with_source --columns 6 --tile_width 400 --tile_height 225 --fps 12 \
-        --name "$NAME" > "/tmp/warpmax_$V.log" 2>&1
+        --name "$NAME" > "/data1/cympyc1785/LatentCamVid/tmp/warpmax_$V.log" 2>&1
     RC=$?
     echo "[s$SHARD] RENDER $V rc=$RC  $(date +%H:%M:%S)"
     [ $RC -eq 0 ] && cp "$ROOT/$V/$BANK/$NAME" "$OUTDIR/$NAME"

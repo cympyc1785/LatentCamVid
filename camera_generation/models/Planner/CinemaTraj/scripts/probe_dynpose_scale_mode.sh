@@ -24,7 +24,7 @@ D=/data1/cympyc1785/LatentCamVid/DATA/DynPose-LBM
 CT=/data1/cympyc1785/LatentCamVid/camera_generation/models/Planner/CinemaTraj
 PY=/data1/cympyc1785/miniconda3/envs/vista4d/bin/python
 SH=$CT/configs/datadop_shapes.json
-FAIL=/tmp/probe_scale_fail_$ARM.log
+FAIL=/data1/cympyc1785/LatentCamVid/tmp/probe_scale_fail_$ARM.log
 cd $CT
 
 # r_pts_first 0.49 ~ 1.64 로 고르게 뽑은 6편 (audit_scene_scale.py 실측, /tmp/dynpose_scale.csv)

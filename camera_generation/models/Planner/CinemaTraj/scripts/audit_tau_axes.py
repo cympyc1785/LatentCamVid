@@ -235,7 +235,7 @@ def main():
     # 사다리가 **못 풀고 끝난** 변이(`clamped_low+tau_floor` / `unreached`)는 손잡이가 0 에
     # 박혀 있거나 목표에 못 닿은 것이라, 섞어 놓으면 축이 아니라 사다리의 실패를 재게 된다.
     parser.add_argument("--status", nargs="*", default=None, type=str)
-    parser.add_argument("--out", default="/tmp/tau_axes.csv", type=str)
+    parser.add_argument("--out", default="/data1/cympyc1785/LatentCamVid/tmp/tau_axes.csv", type=str)
     args = parser.parse_args()
 
     out_root = args.output_root or path.join(CLOUD_ROOT, "out")

@@ -20,7 +20,7 @@ SH=$CT/configs/datadop_shapes.json
 BANK=bank_d107
 HOLE=hole_bank_d110
 EASE="${EASE:-smooth_kf}"
-FAIL=/tmp/dynpose_d110_fail_s$SID.log
+FAIL=/data1/cympyc1785/LatentCamVid/tmp/dynpose_d110_fail_s$SID.log
 cd $CT
 for V in $(ls out_dynpose); do
   H=$(( 0x$(printf '%s' "$V" | md5sum | cut -c1-8) % NS ))

@@ -97,6 +97,6 @@ def main(args):
 
 if __name__ == "__main__":
     parser = ArgumentParser()
-    parser.add_argument("--out", default="/tmp/trumans_blend_probe.json", type=str)
+    parser.add_argument("--out", default="/data1/cympyc1785/LatentCamVid/tmp/trumans_blend_probe.json", type=str)
     parser.add_argument("--show", default=60, type=int)   # 씬당 콘솔에 찍을 오브젝트 수
     main(parser.parse_args(argv_after_dashdash()))

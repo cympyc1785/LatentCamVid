@@ -600,6 +600,20 @@
   재현할 때의 근거 기록이다. 첫 사용처는 `configs/bank/d150S.json` / `d150L.json`.
 
 ### Changed
+- **정리 — `/tmp` 기본 출력 경로 13곳을 `<repo>/tmp/` 로, `time_vista_stages.py --cuda` 기본값을
+  `6` → `0` 으로 (2026-09-09, 사용자 지시 "우리 돌리는 파이프라인 영향 안가는 선에서 쭉
+  진행해줘").** 둘 다 CLAUDE.md 규칙 위반이 argparse **기본값**에 박혀 있던 경우다 —
+  플래그를 안 주고 돌리면 조용히 규칙을 어긴다.
+  · `/tmp` 8 py (`audit_scene_scale.py:145` `audit_tau_axes.py:238` `lbm_preview_reel.py:116`
+  `probe_trumans_blend.py:100` `time_vista_stages.py:84,87` `trumans_blend_layout_worker.py:154`
+  `trumans_clip.py:187` `vista_blend_check.py:160`) + 5 sh (`probe_dynpose_scale_mode.sh:27`
+  `run_dynpose_d107_shard.sh:39` `run_dynpose_d110_export.sh:21` `run_dynpose_d110_shard.sh:23`
+  `run_preset_warp_max_shard.sh:88`). 규칙은 "`/tmp` 는 **쓰지 않는다** — 시스템이 임의로 비울 수
+  있어 scene 목록·로그가 조용히 사라진다". `run_dynpose_d110_export.sh` 의 `TESTV` 는 **읽는**
+  경로라 이미 사라졌을 자리였다. 파일명은 그대로 두고 상위만 옮겼으므로(`tmp/` 는 이미 존재)
+  makedirs 동작이 안 바뀐다.
+  · `time_vista_stages.py --cuda` 기본 `"6"` 은 "GPU 5~7 사용 금지 (2026-09-06 사용자 지시)"
+  정면 위반. 같은 sweep 을 `*.py`/`*.sh` 전체에 돌려 남은 5~7 기본값은 **0건** 확인.
 - **`.gitignore` — CinemaTraj 플래너 **코드**를 git 추적 대상으로 되돌린다 (2026-09-09, 사용자
   질문 "git이 추적하게 못하나").** `camera_generation/models` 는 vendored 모델 트리 9종(CCD,
   CamVLA, DIRECTOR, Director3D, GenDoP, I3DM, LAMP, Planner, SCVideo) 때문에 통째로 무시되고

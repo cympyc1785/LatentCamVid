@@ -142,7 +142,7 @@ def main():
     parser.add_argument("--stride", default=4, type=int)                   # 픽셀 서브샘플
     parser.add_argument("--max_points", default=2_000_000, type=int)
     parser.add_argument("--seed", default=0, type=int)
-    parser.add_argument("--out", default="/tmp/scene_scale.csv", type=str)
+    parser.add_argument("--out", default="/data1/cympyc1785/LatentCamVid/tmp/scene_scale.csv", type=str)
     args = parser.parse_args()
 
     videos = args.videos

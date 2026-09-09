@@ -151,5 +151,5 @@ if __name__ == "__main__":
     # 캐릭터(ARMATURE)를 자동으로 asset 에 추가. 끄면 --assets 에 적은 것만 잰다.
     parser.add_argument("--include_armatures", action="store_true", default=True)
     parser.add_argument("--no_include_armatures", dest="include_armatures", action="store_false")
-    parser.add_argument("--out", default="/tmp/trumans_layout.json", type=str)
+    parser.add_argument("--out", default="/data1/cympyc1785/LatentCamVid/tmp/trumans_layout.json", type=str)
     main(parser.parse_args(argv_after_dashdash()))

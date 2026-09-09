@@ -7,6 +7,24 @@
 ## [Unreleased]
 
 ### Added
+- **D169 — DA3 depth confidence 저장 `recon_da3.run_da3(return_conf=)` + `dynpose_ingest.py
+  --save_conf/--no_save_conf` (2026-09-09, 사용자 지시 "다음에 돌릴때는 conf도 저장해줘").**
+  DA3 는 `Prediction.conf` (N,H,W) 를 내놓는데 `run_da3` 가 4-tuple 만 돌려주며 버리고 있었다.
+  이제 `return_conf=True` 면 5번째 값으로 conf 를 주고, ingest 가 `conf/` 에 depths 와 같은
+  float16 EXR 로 남긴다 (`load_depths(".../conf")` 로 그대로 읽힘, 편당 +18 MB → 10.4k 편
+  +190 GB). 함수 기본값 `return_conf=False` 는 옛 동작이라 `recon_and_seg_single.py:54` 는
+  그대로 돌고, CLI 기본값은 `--save_conf`(켬)다. `recon_done()` 은 **일부러 conf 를 검사하지
+  않는다** — 넣으면 이 플래그 이전에 구운 편들이 전부 미완료로 되살아나 재계산된다.
+  2026-09-09 진행 중이던 dynpose-100k 10.4k 굽기는 사용자 지시로 이번 세대는 그대로 두므로
+  `conf/` 가 없다.
+- **D169 — `scene_graph/lift.py:valid_pixels(conf_mode=)`.** DA3 conf 는 `[0,1]` 이 아니라
+  `expp1 = exp(x)+1 ∈ [1, inf)` 다 (`depth_anything_3/model/dpt.py:49,296`). 그래서 옛 기본
+  임계 `conf > 0.5` 는 **전 픽셀을 통과시키는 no-op** 이고, conf 를 저장하기 시작하면 켜자마자
+  아무것도 안 거르는 상태가 될 자리였다. `conf_mode="relative"` 는 DA3 자신이 쓰는 방식
+  (`utils/alignment.py:93` 의 `conf >= median_conf`)대로 non-sky 픽셀 분위수를 임계로 삼는다
+  (`conf_threshold` 가 버릴 분위: 0.5 = 하위 절반). 함수 기본값 `absolute` 는 옛 동작.
+  참고로 **scene scale `S` 는 conf 와 무관하다** — `scene_graph/scale.py:71-73` 의 유효 조건은
+  `finite ∧ z>0 ∧ ~sky` 뿐이라 conf 없이도 정상 계산된다.
 - **D169 — `route_presets.py --slot_pair_fill rotate|substitute` (2026-09-08, 사용자 지시
   "가능한 preset 후보풀을 뽑아두고 (s_curve 제외) 5개가 안나오면 후보풀에서 다시 뽑으면
   되잖아").** `grid_slot_pair()` 는 video 해시로 고른 씨앗 쌍의 한 짝이 그 씬에 없으면 **쌍을

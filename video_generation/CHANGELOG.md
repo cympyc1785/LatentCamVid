@@ -600,6 +600,19 @@
   재현할 때의 근거 기록이다. 첫 사용처는 `configs/bank/d150S.json` / `d150L.json`.
 
 ### Changed
+- **D169 — `describe_instances_vlm.py --num_frames` 기본 3 → 6 (2026-09-09, 사용자 지시
+  "일단 6으로 설정 올려줘").** 기존 산출물 266편 421 노드 실측: `action` 이 빈 노드는 9.0%
+  뿐이라 3장으로도 행위 자체는 나온다. 문제는 **무엇이** 나오느냐다 — 상위 동사가 `being` 77
+  (18%, `being moved` 류 무정보 수동태) · `walking` 49 · `holding` 37 · `moving` 31 ·
+  `standing` 15 로, 진짜 이동과 자세/상태와 수동태가 섞인다. 방향·속도·궤적은 3장으로 못 잡는다.
+  더해서 `pick_frames` 가 면적 0 인 시간 구간을 건너뛰기 때문에 **32/421 은 3장도 못 받았다**
+  (0장 7 / 1장 12 / 2장 13). 6장이면 그 구간 손실이 줄어든다. 비용은 `build_image` 가 만드는
+  시트 폭이 2배(1344→2688 px)인 것뿐 — **호출 수는 노드당 1회로 그대로**다 (패널을 한 장으로
+  합치므로). 참고 대조군: DynamicVerse stage1 은 25장을 개별 이미지로 보내되
+  (`batch_process_qwen_pipeline.py:178`) 그 프레임은 고움직임 구간에서 뽑은 키프레임이고,
+  프롬프트의 `reasoning` 요구사항은 motion 이 아니라 외양이다
+  (`stage1_qwen.py:400` `"[key appearance features] + [held/carried objects if any]"`).
+  이미 구운 `instance_desc.json` 은 헤더에 `num_frames` 를 적어 두므로 세대 구분이 된다.
 - **`route_presets.py --orbit_fallback drop` (기본) — `s_curve` 를 라우팅 어휘에서 뺀다
   (2026-09-08, 사용자 지시 "그리고 preset에서 s_curve는 제거해줘").** `s_curve` 가 코퍼스에
   들어가는 **유일한 입구**는 orbit 슬롯의 좁은-span 대체였다 (`obs_az_span <

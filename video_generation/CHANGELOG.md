@@ -40,6 +40,31 @@
   · 릴 4편 `tmp/d174/reel/d174_span{1.5,1.8,3.5,308}_*.mp4` (span 극단 3 + 대조군 1, `--fixed_focal`).
   · **추천: `--orbit_min_span 0`** (= d170 ablation 설정 유지). 120 은 노드의 73%(moving 73.1%)를
   증거 없이 버려 backfill 에 떠넘기고, 앞서 산수로 제안했던 20 도 이 표에서는 막을 대상이 없다.
+  · **채택 (2026-09-10 사용자 지시 "orbit_min_span 은 별로인 것 같아 빼줘"): 기본값을 `0` 으로.**
+  `route_presets.py` 의 함수 기본값과 CLI 기본값 **둘 다** `ORBIT_MIN_SPAN_DEG`(120.0) → `0.0`.
+  인자와 상수는 남긴다 — `--orbit_min_span 120` 이 d166~d171 재현이고 스윕 손잡이이기도 하다.
+  `reasons.orbit_min_span_deg` 는 계속 찍히므로 옛 JSON 과 대조할 때 문턱이 바뀐 건지 span 이
+  바뀐 건지 가릴 수 있다.
+- **D174-b — `track_*` 게이트 감사: 배선은 정상, 문턱의 단위가 틀렸다 (2026-09-10, 사용자 지적
+  "global translation 이 일정 이상 안움직이면 track preset 안돌게끔 배선되어있는거 아니야?
+  현재 그런것들이 보이는데").** 게이트는 두 군데에 있고 둘 다 집행된다 — `route_presets.py:249`
+  (`center_drift_u > track_min_drift_u` 여야 track 슬롯을 만든다) + `sample_camera_bank.py:956`
+  (아니면 변이 폐기), CLI 기본 0.05 u. `tmp/d174/track_drift_audit.py` 로 세 세대를 감사한 결과
+  **위반 0건**: d157 track 행 13,557 / anchor 701 중 `drift ≤ 0.05` 가 0개, d170·d171c 도 0.
+  · 문제는 `center_drift_u` 가 scene scale `S` 로만 정규화된 양이라 **카메라와의 거리를 안 본다**는
+  것이다. 화면상 운동량은 각변위 `center_drift_u / d_ref` 에 비례한다. d157 track anchor 701개
+  분포 — p5 0.0774 / p10 0.1041 / p25 0.1764 / p50 0.3528 / p75 0.8185 / p90 1.8195,
+  `≤0.10` 9.4% / **`≤0.15` 21.0%** / `≤0.20` 31.7%.
+  · 실측 대조: `1216d742` dyn_2 box `drift 0.0549 / d_ref 1.2493 → 0.0439` 와 `160a57c9` dyn_1
+  suitcase `0.0608 / 1.4450 → 0.0421` 가 순변위 게이트를 통과하는데, 같은 영상 `1216d742` dyn_0
+  hand 는 0.2740 이고 대조군 `13d42c1a` dyn_0 man 은 `0.2748 / 0.2823 → 0.9734` 로 23배다.
+  캡션은 구별을 못 한다 — box 0.044 에 "the camera **dramatically tracks** box while craning
+  upward", suitcase 0.042 는 `track_{crane_up,dolly_in_look_at,pull_out_arc_right,truck_left}`
+  4종 전부가 붙었다. `lbm-preset-names-dont-match-motion` 과 같은 계열이다.
+  · 릴 3편 `tmp/d174/reel/d174_ang{0.0421,0.0439,0.9734}_*.mp4` — preset 을 `track_truck_left`
+  하나로 고정하고 각변위만 바꾼 대조 (`--fixed_focal`, `tmp/d174/render_track_drift.py`).
+  · 각변위 자체는 이미 계산돼 있다 — `rank_subject_motion.py:88` 의 `ang_drift = center_drift_u
+  / d_ref` 인데 **진단 열일 뿐 게이트가 아니다**. 문턱 값과 게이트 승격은 사용자 판정 대기.
 - **D172 — `configs/bank/d172_dynpose100k_graph.json` (dynpose-100k 10,346편 graph 전용 세대)
   + `tmp/d172/chain_geocalib_graph.py` (2026-09-10, 사용자 지시 "cloud까지만 돌리도록해줘" 를
   실측 후 graph 까지로 좁힌 것 — 같은 날 사용자 결정).** 지시를 글자대로 이행하면 /data1 이

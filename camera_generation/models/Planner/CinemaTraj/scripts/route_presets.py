@@ -43,7 +43,8 @@ if CINEMATRAJ_ROOT not in sys.path:
 from lbm.presets import PRESETS as _PRESETS  # noqa: E402  (sys.path 조작 뒤여야 한다)
 from scene_graph.schema import pick_main_anchors  # noqa: E402
 
-# obs_az_span 이 이만큼 안 되면 orbit 은 소스가 못 본 면으로 넘어간다 → s_curve 로 대체.
+# 옛 orbit span 게이트의 문턱. **D174 에서 기본 off(0)** 로 내렸다 — 실측이 전제를 기각했다
+# (`--orbit_min_span 120` 으로 되살리면 d166~d171 재현). 근거는 route() docstring.
 ORBIT_MIN_SPAN_DEG = 120.0
 # 소스 자체 횡이동이 이보다 작으면 방향을 못 정한다 (world 단위, z_med 로 나눈 값).
 LATERAL_DEADBAND = 0.02
@@ -191,7 +192,7 @@ def route(graph: dict, min_area_frac: float, allow_vertical_fallback: bool = Fal
           bonus_slots: tuple = TRACK_BONUS_SLOTS,
           track_min_drift_u: float = 0.0,
           orbit_fallback: str = "s_curve",
-          orbit_min_span: float = ORBIT_MIN_SPAN_DEG):
+          orbit_min_span: float = 0.0):
     """-> (anchor, [(slot, preset), ...], reasons dict). preset 이름은 그대로 캡션 어휘가 된다.
 
     `track_mode` (D82) — anchor 가 **움직일 때만** 의미가 있다 (`sample_camera_bank` D77 이
@@ -229,14 +230,23 @@ def route(graph: dict, min_area_frac: float, allow_vertical_fallback: bool = Fal
     슬롯이 빠진 몫은 D166 backfill 이 그 anchor 의 남은 슬롯에서 채운다.
     d166 실측: 40 anchor 중 29 개(72.5%)가 `orbit_ok=False` 라 이 갈래를 탄다.
 
-    `orbit_min_span` (D170, 사용자 지시 2026-09-10 "소스 영상 방위각 폭 조건 빼서 돌려서
-    depth warp 영상 보여줘봐") — 위 갈래를 가르는 문턱 자체를 인자로 뺀다. 기본값
-    `ORBIT_MIN_SPAN_DEG`(120.0) 이 옛 동작이고, `0` 이면 게이트가 통째로 꺼져 **span 과
-    무관하게 orbit 슬롯을 만든다**. 이 문턱은 근거가 실측이 아니라 "좁은 span 에서 선회하면
-    점군에 자료 없는 면으로 넘어간다"는 추론이었고, d169 파일럿에서 그 대가가 드러났다 —
-    게이트가 anchor 의 72.5% 를 막고, 그 자리를 backfill 이 떠맡으면서 `pull_out_arc_right`
-    통과율이 100%(4/4) → 16.7%(1/6) 로 무너졌다. 문턱을 낮추는 게 더 싼지는 실제 warp 을
-    봐야 정해진다. 120 이 맞는 값인지도 이 인자로 스윕해서 확인한다.
+    `orbit_min_span` (D170 도입 → **D174 에서 기본 0 = off**, 사용자 지시 2026-09-10
+    "orbit_min_span 은 별로인 것 같아 빼줘") — 위 갈래를 가르는 문턱. `0` 이면 게이트가
+    통째로 꺼져 **span 과 무관하게 orbit 슬롯을 만든다**. `120` 을 주면 옛 동작(d166~d171).
+
+    끈 이유는 전제가 실측에서 관측되지 않아서다. 문턱의 근거는 "좁은 span 에서 선회하면
+    점군에 자료 없는 면으로 넘어간다"는 추론이었는데, 게이트 도입 **이전** 세대인 d157
+    (384편 / Δ0.2 단 orbit 807행)로 재보니 `hole_fraction`·`hole_max`·`hole_max/hole`·
+    `subject_visible_frac`·`subject_area_med` 가 span 1.5°~315° 에서 평평하다. 구멍은 물체
+    주위 방위각이 아니라 근접 가림물과의 시차에서 나오고, 그건 hole 사다리가 이미 직접
+    재서 손잡이로 통제한다. 반면 대가는 컸다 — d169 파일럿에서 게이트가 anchor 의 72.5% 를
+    막고 그 자리를 backfill 이 떠맡으면서 `pull_out_arc_right` 통과율이 100%(4/4) →
+    16.7%(1/6) 로 무너졌다.
+
+    span 이 실제로 바꾸는 것은 sweep clamp 하나다 — `span_frac = max(orbit_span_frac,
+    min_sweep_deg/span)` 이라 span<56 이면 sweep 이 nominal 45°에 못 미치고 span<20 이면
+    바닥 20°에 붙는다. 남는 비용은 캡션 충실도(span 1.5° 인데 "dramatically orbits")이고,
+    그건 라우팅이 아니라 캡션이 realized sweep 을 읽게 하는 쪽에서 고친다.
     """
     assert orbit_fallback in ("s_curve", "drop"), f"orbit_fallback: {orbit_fallback}"
     assert orbit_min_span >= 0.0, f"orbit_min_span: {orbit_min_span}"
@@ -637,11 +647,11 @@ if __name__ == "__main__":
     # 옛 뱅크(d157/d166)를 재현하려면 `--orbit_fallback s_curve`.
     parser.add_argument("--orbit_fallback", default="drop", type=str,
                         choices=("drop", "s_curve"))
-    # D170 (사용자 지시 2026-09-10 "소스 영상 방위각 폭 조건 빼서 돌려서 depth warp 영상
-    # 보여줘봐"): 위 갈래를 가르는 문턱. `0` 이면 게이트를 끄고 span 과 무관하게 orbit 을 만든다.
-    # CLI 기본값도 옛 동작(120.0)으로 둔다 — 이건 채택된 변경이 아니라 **아직 육안 판정 전인
-    # ablation** 이라, 기본값을 바꾸면 d166~d169 재현이 조용히 깨진다.
-    parser.add_argument("--orbit_min_span", default=ORBIT_MIN_SPAN_DEG, type=float)
+    # D174 (사용자 지시 2026-09-10 "orbit_min_span 은 별로인 것 같아 빼줘"): 게이트 **기본 off**.
+    # D170 릴 + d157 807행 실측에서 hole·hole_max·subject_visible_frac 이 span 1.5°~315° 에서
+    # 평평했다 — 문턱의 전제("좁은 span 에서 선회하면 미관측 면으로 넘어간다")가 관측되지 않는다.
+    # 인자 자체는 남긴다: `--orbit_min_span 120` 이면 d166~d171 재현이고, 스윕도 이걸로 한다.
+    parser.add_argument("--orbit_min_span", default=0.0, type=float)
     # D169 (사용자 지시 2026-09-08): 씨앗 슬롯 쌍의 한 짝이 없을 때. rotate = 쌍을 통째로 버리고
     # 다음 쌍으로(옛 동작, d166/d168 재현용). substitute = 살아남은 짝을 유지하고 빠진 자리만
     # 후보풀에서 메운다. 근거와 실측은 `grid_slot_pair` docstring.

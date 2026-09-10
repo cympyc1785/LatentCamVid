@@ -1,0 +1,72 @@
+{
+  "_why": "D177 (사용자 지시 2026-09-10 \"dynamic 중에 human, animal 같은걸 제외하고 object중에 이동량이 작은건 static으로 만들어주는거\" + \"이 static 강등 해결되면 dynpose를 최신 방식으로 fit 돌려놔줘\") — dynpose 코퍼스를 **새 dynamic_mask 위에서 d171c 방식으로 다시 굽는다**. d157 뱅크(384편)는 ① 정지 소품이 dynamic 으로 남아 있는 마스크 위에서 구워졌고 ② fit 이 d166~d171 델타(1단 사다리 + fallback + subject_visible + follow keyframe) 이전이다. 두 축을 한 번에 갈아끼운다.",
+
+  "_what_changed_vs_d157": "① `dynamic_mask` 가 D177 강등본이다 (`dynpose_dynamic_mask_from_seg.py --demote_static_objects`, drift/d_ref<0.05 & path/d_ref<0.15, living/worn 보호). 646편 graph 기준 3,233 dyn 노드 중 211개(6.5%) / 145편이 강등되고 **dyn 이 전멸하는 영상은 0편**이다. ② fit 인자가 d171c 그대로다 (아래 `_fit_from`). 나머지(graph/route/tau 인자)는 d157 과 글자 그대로 같다.",
+
+  "_stages_why": "graph 는 **안 돈다** — `scene_graph/io.py` 가 `dynamic_mask` 를 로드하지만 shape assert 에만 쓰고 노드/OBB/운동량은 전부 `seg_instances` 에서 나온다 (강등은 `kind`/`moving` 을 안 건드리는 설계다, `build_scene_graph.py:156` D128 기각 참고). 그래서 `.graph_d157` 마커를 **요구**하고 재사용한다. cloud 는 dynamic_mask 가 static/dynamic 분리를 정하므로 **반드시 다시 굽는다**. route 는 graph 산출물만 보지만 1초라 그냥 다시 돈다. tau/fit 은 둘 다 `cloud.npz` 를 `CloudRenderer` 로 읽으므로(`sample_camera_bank.py:848`) cloud 가 바뀌면 같이 다시 돈다.",
+
+  "_cloud_guard": "D176-c 가드가 `lbm/cloud.py` 에 들어가 있다 — `dynamic_mask` 가 전부 0 이면 굽기 전에 죽는다. d157 표본의 39% 가 조용히 전부-정적으로 구워졌던 사고(#209 D175-a)가 이번 굽기에서 함께 해소된다.",
+
+  "_fit_from": "`d171c_dynpose_kftrans.json` 의 `fit.args` 를 **글자 그대로** 옮겼다. 구성: 사다리 1단 `--hole_ladder 0.20` (`--hole_mode` 는 기본값 `excess` = `hole_static + Δ`; 사용자 지시 \"hole 예산 Δ0.20 이건 그냥 이전꺼대로 유지하자\") + `--fallback_ladder --fallback_target 5` retry-only (D168/D169) + `--min_subject_visible 0.6` (D171-b) + `--follow_keyframes 6 --follow_kf_interp cubic` (D171-c). 회전 쪽 `--keyframe_ease` 는 `smooth_kf` 유지 — D173 이 `cubic`/`savgol` 을 선택지로 열었지만 기본을 안 바꿨고, 그 뒤에 만든 `d175_vista.json` 도 `smooth_kf` 다.",
+
+  "_scope": "`tmp/d177/videos.txt` 394편 = **DynPose-LBM 에 `seg_instances/<v>/masks.npz` 가 있고** `.graph_d157` 마커도 있는 편. 마커 하나로는 스코프를 못 정한다 — `d172_dynpose100k_graph.json` 이 `output_root: out_dynpose` 를 공유하면서 마커 이름까지 `.graph_d157` 로 같아서, `out_dynpose` 의 `.graph_d157` 606개 중 212개는 **DynPose-100K** 편이다(2026-09-10 실측). 그쪽은 `--eval_data` 가 달라 cloud 가 못 돈다. 코퍼스를 877편으로 넓히는 것은 별건이다 — d157 은 사용자 지시(2026-09-08)로 384편에서 멈췄고 LBM 877편 중 graph 가 있는 건 447편뿐이다.",
+
+  "generation": "d177",
+  "output_root": "out_dynpose",
+  "eval_data": "/data1/cympyc1785/LatentCamVid/DATA/DynPose-LBM",
+  "tau_bank_dir": "bank_d177",
+  "bank_dir": "hole_bank_d177",
+  "stages": ["cloud", "route", "tau", "fit", "emit"],
+  "require_markers": [".graph_d157"],
+  "cloud": {
+    "marker": ".cloud_d177",
+    "args": [
+      "--scene_scale_mode", "points_first_cam", "--scene_scale_stride", "1",
+      "--no_skip_done"
+    ]
+  },
+  "route": {
+    "out": "preset_route_d177.json",
+    "args": [
+      "--num_external", "0",
+      "--max_dynamic_anchors", "3", "--max_static_anchors", "3"
+    ]
+  },
+  "tau": {
+    "args": [
+      "--tau_ladder", "0.10", "0.20", "0.35", "0.60", "1.00",
+      "--aim_keyframes", "6", "--keyframe_aim", "auto", "--keyframe_ease", "smooth_kf",
+      "--fixed_focal", "--deroll", "--no_preview", "--skip_on_empty", "--device", "cuda",
+      "--orbit_fixed_sweep", "--min_sweep_deg", "20", "--behind_src_frames", "49",
+      "--tau_ref", "follow",
+      "--track_dynamic_only", "--track_min_drift_u", "0.05",
+      "--trackings", "lock", "--preset_tracking",
+      "--behind_min_zcam", "0.02",
+      "--tau_denom", "S"
+    ]
+  },
+  "fit": {
+    "args": [
+      "--hole_ladder", "0.20",
+      "--fallback_ladder", "--fallback_target", "5",
+      "--retry_status", "clamped_low",
+      "--retry_suspect", "aim_target_subject_lost", "hole_over_budget",
+      "motion_preset_no_motion", "static_start_collision",
+      "--suspect_hole", "0.35",
+      "--aim_keyframes", "6", "--keyframe_aim", "auto", "--keyframe_ease", "smooth_kf",
+      "--fixed_focal", "--deroll",
+      "--orbit_fixed_sweep", "--min_sweep_deg", "20", "--behind_src_frames", "49",
+      "--tau_ref", "follow", "--tracking", "lock", "--preset_tracking",
+      "--behind_min_zcam", "0.02", "--behind_clear_src_ratio", "0",
+      "--collision_time_match", "--collision_source", "depth",
+      "--area_timeline", "--composition",
+      "--composition_min_area", "0.004", "--composition_max_nodes", "3",
+      "--device", "cuda",
+      "--tau_denom", "S",
+      "--tau_knob_min", "0.005",
+      "--min_subject_visible", "0.6",
+      "--follow_keyframes", "6", "--follow_kf_interp", "cubic"
+    ]
+  },
+  "emit": {"args": []}
+}

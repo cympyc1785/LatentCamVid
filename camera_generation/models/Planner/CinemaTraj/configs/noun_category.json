@@ -1,0 +1,81 @@
+{
+  "format": "noun_category_v1",
+  "_why": "dyn 트랙의 명사를 living(사람·동물·신체부위) / worn(착용·소지물) / object 로 가른다. dynamic_mask 를 다시 만들 때 **object 만** 이동량 임계로 static 강등 대상이 된다 (`dynpose_dynamic_mask_from_seg.py --demote_static_objects`). living 은 소품보다 늘 크게 움직이지만 정지 프레임이 섞이면 임계에 걸릴 수 있어 무조건 보호하고, worn 은 앉아 있는 사람의 셔츠처럼 순변위가 0 에 가까운 경우가 흔해서 기본 보호한다 (`--demote_worn` 으로 해제).",
+  "_how": "명사를 공백으로 쪼개 토큰 집합을 만든다. `overrides` 에 정확히 일치하면 그 값. 아니면 토큰이 `living_tokens` 와 겹치면 living, `worn_tokens` 와 겹치면 worn, 아니면 `default`. **보호가 안전한 쪽**이라 애매하면 living/worn 으로 넣었다 — 잘못 보호하면 강등이 덜 될 뿐이지만, 잘못 강등하면 움직이는 물체가 49겹 정적점으로 굳는다.",
+  "_coverage": "d157 계열 631편 dyn 노드 3,155개 / 명사 466종에서 뽑아 손으로 분류했다 (2026-09-10). 미등록 명사는 토큰 규칙으로 떨어지고, 그래도 안 걸리면 object(=강등 후보)다.",
+  "default": "object",
+
+  "living_tokens": [
+    "man", "men", "woman", "women", "person", "people", "boy", "girl", "child",
+    "children", "kid", "baby", "human", "guy", "lady", "crowd", "cameraman",
+    "policeman", "officer", "worker", "waiter", "boxer", "astronaut", "rider",
+    "player", "cyclist", "bicyclist", "spectator", "passenger", "athlete",
+    "dancer", "chef", "cook", "claus", "skeleton",
+
+    "hand", "hands", "finger", "fingers", "arm", "arms", "leg", "legs", "foot",
+    "feet", "head", "face", "hair", "beard", "tail", "wing", "fist", "torso",
+    "shoulder", "knee", "tattoo", "tattooed",
+
+    "dog", "cat", "horse", "cow", "pig", "goat", "sheep", "chicken", "duck",
+    "bird", "fish", "crab", "octopus", "snake", "lion", "tiger", "bear", "camel",
+    "elephant", "monkey", "rabbit", "puppy", "kitten", "caterpillar", "animal",
+    "squirrel", "goose", "turtle", "deer", "cucumber"
+  ],
+
+  "worn_tokens": [
+    "shirt", "t-shirt", "tshirt", "cap", "hat", "sombrero", "beanie", "helmet",
+    "jacket", "coat", "hoodie", "sweater", "sweatshirt", "vest", "jersey",
+    "uniform", "suit", "costume", "apron", "dress", "skirt", "pants", "trousers",
+    "jeans", "shorts", "leggings", "clothing", "clothes", "top",
+
+    "glove", "gloves", "mitt", "shoe", "shoes", "boot", "sandal", "sneaker",
+    "footwear", "sock", "belt", "tie", "scarf", "bandana", "headband", "hairnet",
+    "blindfold",
+
+    "glasses", "sunglasses", "watch", "necklace", "bracelet", "ring", "earring",
+    "tiara", "purse", "handbag", "backpack", "lanyard", "headphones", "earphone",
+
+    "collar", "leash", "reins", "saddle", "muzzle"
+  ],
+
+  "_overrides_why": "토큰 규칙이 반대로 가는 것들. 대부분 음식·장난감인데 동물 이름을 달고 있다.",
+  "overrides": {
+    "hot dog": "object",
+    "dog toy": "object",
+    "plush horse": "object",
+    "stuffed animal": "object",
+    "animal skin": "object",
+    "chicken breasts package": "object",
+    "toy car": "object",
+    "toy ear cleaner": "object",
+    "statue": "object",
+    "shadow": "object",
+    "drawing": "object",
+    "picture": "object",
+    "meat": "object",
+    "bacon": "object",
+    "cloth": "object",
+    "fabric": "object",
+    "leather": "object",
+    "tag": "object",
+    "price tag": "object",
+    "name tag": "worn",
+    "arm guard": "worn",
+    "hair clip": "worn",
+    "space suit": "worn",
+    "hazmat suit": "worn",
+    "flip flop": "worn",
+    "hoop earring": "worn",
+    "guitar case": "object",
+    "inflatable ring": "object",
+    "handrail": "object",
+    "headlight": "object",
+    "fishing rod": "object",
+    "walking stick": "object",
+    "hiking pole": "object",
+    "robot arm": "object",
+    "car lift": "object",
+    "ladyfinger": "object",
+    "sweet potato": "object"
+  }
+}

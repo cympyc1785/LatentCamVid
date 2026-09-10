@@ -6,6 +6,40 @@
 
 ## [Unreleased]
 
+### Added
+- **D177 — dyn 트랙 중 "안 움직이는 소품"을 `dynamic_mask` 에서 빼는 강등 (2026-09-10, 사용자
+  지시 "dynamic 중에 human, animal 같은걸 제외하고 object중에 이동량이 작은건 static으로
+  만들어주는거 돌려봐줄 수 있어?").** VLM 이 "dynamic 명사"로 부른 것 중 주차된 차·벽 간판·상
+  위 그릇처럼 실제로는 정지한 것이 많고, 그것들이 dynamic 으로 남으면 `unproject` 가 프레임당
+  1장씩만 보이는 점으로 올려 다시점 누적을 못 한다 — 카메라가 움직이면 그 자리가 hole 이 된다.
+  · `configs/noun_category.json` (**신규**, `noun_category_v1`) — 명사를 토큰 규칙으로
+  `living`(사람·동물·신체부위) / `worn`(착용·소지물) / `object` 로 가른다. d157 계열 631편의
+  dyn 노드 3,155개 / 명사 466종을 보고 손으로 분류했다. **living/worn 은 기본 보호**
+  (`--demote_worn` 으로 worn 해제). 애매하면 보호 쪽으로 넣었다 — 잘못 보호하면 강등이 덜 될
+  뿐이지만, 잘못 강등하면 움직이는 물체가 49겹 정적점으로 굳는다.
+  · `scripts/dynpose_dynamic_mask_from_seg.py` — `--demote_static_objects`(**기본 꺼짐**, 켜야
+  달라진다). 판정은 **각변위** `center_drift_u / d_ref < 0.05` **와** `path_len_u / d_ref < 0.15`
+  둘 다. scene scale 단위(`center_drift_u`)만 보면 카메라에서 먼 물체의 화면상 정지를 못 본다
+  (D174: 같은 0.06u 가 `d_ref` 1.44 에서는 각변위 0.042). 경로길이를 같이 보는 것은 왕복·제자리
+  회전 보호용. `merged_from` 의 `"dyn#N"` 형제 track 까지 같이 뺀다 (`instances.py:297`).
+  · 강등은 `dynamic_mask` **한 곳에만** 걸고 `scene_graph.json` 의 `kind`/`moving` 은 안 건드린다
+  — `moving` 은 anchor split key 라 강등하면 dyn 앵커가 0 인 씬이 생긴다
+  (`build_scene_graph.py:156` 의 D128 기각, 2026-09-05 사용자 판단).
+  · 실측(646 graph): dyn 노드 3,233개 중 **211개(6.5%) / 145편** 강등, **dyn 전멸 영상 0편**.
+  임계 감도 — 0.02/0.06 에서 42개(1.3%), 0.08/0.24 에서 411개(12.7%, 전멸 3편).
+  · `dynamic_mask/from_seg.json` 에 `demote_*` 인자 · `demoted_track_ids` · `demoted_nodes` ·
+  `mean_before_demote` · `flipped_pixel_frac` 을 남긴다. **노드 수가 아니라 뒤집힌 픽셀 비율**을
+  재는 이유는, 강등한 트랙이 살아남은 트랙 마스크 안에 들어 있으면(앉은 사람의 셔츠) 합집합이
+  그대로라 노드 수만 세면 그걸 못 보기 때문이다.
+- **`configs/bank/d177_dynpose.json`** — dynpose 394편을 새 `dynamic_mask` 위에서 d171c 방식으로
+  다시 굽는 세대 config (`cloud→route→tau→fit→emit`, graph 는 `.graph_d157` 재사용).
+  fit 인자는 `d171c_dynpose_kftrans.json` 글자 그대로 = 사다리 1단 `--hole_ladder 0.20` +
+  `--fallback_ladder --fallback_target 5` + `--min_subject_visible 0.6` +
+  `--follow_keyframes 6 --follow_kf_interp cubic`.
+  스코프 주의 — `d172_dynpose100k_graph.json` 이 `out_dynpose` 와 마커 `.graph_d157` 을 공유해서
+  `out_dynpose` 의 마커 606개 중 212개는 **DynPose-100K** 편이다. 스코프 키는 마커가 아니라
+  "DynPose-LBM 에 `seg_instances/<v>/masks.npz` 가 있는가" 다.
+
 ### Fixed
 - **D176-c — `cloud.npz` 를 빈 `dynamic_mask` 위에서 굽는 사고를 막는 가드 (2026-09-10, 사용자
   질문 "cloud 가 static 으로 잘못 나온 이유가 뭐야?").** 원인은 **단계 순서 경합**이다:

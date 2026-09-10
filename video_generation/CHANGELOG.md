@@ -99,7 +99,12 @@
   `|dω|max` 0.993 / 1.062 / 1.329 — 즉 **회전을 위치와 통일하면 각가속도가 되레 커진다**.
   `smooth_kf`(Laplacian 4-pass) 가 회전에서는 여전히 가장 매끄럽다. u_trans6 와 u_cubic6 의
   병진 수치가 소수점까지 같은 것이 정합성 확인 — 조준 변경은 위치를 안 건드린다.
-  · 판정 보류. 릴 5편(`tmp/d171/reel/u_kf_*.mp4`) + 그래프 33장(`tmp/d171/plots/`) 육안 확인 후.
+  · **판정: 통일 기각, `u_trans6` 채택** (2026-09-10 사용자 "추천대로 해주고"). 즉 회전은
+  `--keyframe_ease smooth_kf`, 위치만 `--follow_keyframes 6 --follow_kf_interp cubic` — 이미
+  `d171c_dynpose_kftrans.json` 이 그 조합이라 **config 변경 없음**. `cubic`/`savgol` 회전 갈래는
+  옵션으로 남긴다 (기본값 아님). 근거는 위 표의 `|dω|` 행 — 이름을 통일해도 SO(3) 에서
+  "매끄럽다"는 Laplacian 쪽이 이긴다. 릴 5편(`tmp/d171/reel/u_kf_*.mp4`) + 그래프
+  33장(`tmp/d171/plots/`).
 - **D171-c — `configs/bank/d171c_dynpose_kftrans.json` (2026-09-10).** d171 에서 fit 인자
   **두 줄만** 더한다 (`--follow_keyframes 6 --follow_kf_interp cubic`). route/tau 는 안 돌고
   `preset_route_d170.json` + `bank_d170` 을 재사용하므로 `hole_bank_d171` 과 행 단위 diff 다.

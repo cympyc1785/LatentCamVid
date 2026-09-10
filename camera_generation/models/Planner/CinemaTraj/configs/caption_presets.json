@@ -84,11 +84,11 @@
  "presets": {
   "dolly_in": {
    "axis": "dolly",
-   "phrase": "dollies in along its own axis without re-aiming"
+   "phrase": "dollies straight forward", "phrase_legacy_reaim": "dollies in along its own axis without re-aiming"
   },
   "dolly_out": {
    "axis": "dolly",
-   "phrase": "dollies back along its own axis without re-aiming"
+   "phrase": "dollies straight back", "phrase_legacy_reaim": "dollies back along its own axis without re-aiming"
   },
   "dolly_in_look_at": {
    "axis": "dolly",
@@ -211,7 +211,7 @@
   },
   "track_dolly_in": {
    "axis": "track",
-   "phrase": "tracks {target} while pushing in along its own axis"
+   "phrase": "tracks {target} while pushing in", "phrase_legacy_reaim": "tracks {target} while pushing in along its own axis"
   },
   "track_dolly_in_look_at": {
    "axis": "track",

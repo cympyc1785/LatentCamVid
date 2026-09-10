@@ -1,0 +1,36 @@
+{
+  "_why": "D176-c 릴 재촬영용. D174 각변위 대조 릴 3편 중 2편(160a57c9 / 13d42c1a)의 `cloud.npz` 가 dynamic_mask 가 비어 있을 때 구워져 **동적 점 0개**였다 — `static_mask = ~dynamic_mask` 가 전 픽셀 정적이 되어 동적 물체가 49개 사본으로 잔류한다 (`lbm/cloud.py` §empty_dynmask). 마스크는 지금 정상이므로 cloud 만 다시 구우면 되는데, hole 사다리를 그 오염 cloud 위에서 풀었으므로 fit 도 같이 다시 돈다.",
+  "_diff_vs_d157": "**설정 축은 하나도 안 바꾼다** — 릴의 목적이 '같은 조건에서 cloud 만 고쳤을 때 warp 이 달라지는가'라, fit/emit args 는 `d157_dynpose.json` 을 글자 그대로 복사했다. 다른 것은 stages(graph/route/tau 재사용) 와 bank_dir 뿐이다. tau 단계도 `bank_d157` 을 그대로 쓴다 (τ 는 cloud 를 안 본다 — 분모 S 는 raw depth, 기준점은 시작 pose).",
+  "generation": "d176",
+  "output_root": "out_dynpose",
+  "eval_data": "/data1/cympyc1785/LatentCamVid/DATA/DynPose-LBM",
+  "tau_bank_dir": "bank_d157",
+  "bank_dir": "hole_bank_d176",
+  "stages": ["cloud", "fit", "emit"],
+  "require_markers": [".graph_d157"],
+  "cloud": {
+    "marker": ".cloud_d176",
+    "args": [
+      "--scene_scale_mode", "points_first_cam", "--scene_scale_stride", "1",
+      "--no_skip_done"
+    ]
+  },
+  "fit": {
+    "args": [
+      "--hole_ladder", "0.10", "0.20", "0.35", "0.50",
+      "--aim_keyframes", "6", "--keyframe_aim", "auto", "--keyframe_ease", "smooth_kf",
+      "--fixed_focal", "--deroll",
+      "--orbit_fixed_sweep", "--min_sweep_deg", "20", "--behind_src_frames", "49",
+      "--tau_ref", "follow", "--tracking", "lock", "--preset_tracking",
+      "--behind_min_zcam", "0.02", "--behind_clear_src_ratio", "0",
+      "--collision_time_match", "--collision_source", "depth",
+      "--area_timeline", "--composition",
+      "--composition_min_area", "0.004", "--composition_max_nodes", "3",
+      "--device", "cuda",
+      "--tau_denom", "S",
+      "--tau_knob_min", "0.005",
+      "--min_subject_visible", "0"
+    ]
+  },
+  "emit": {"args": []}
+}

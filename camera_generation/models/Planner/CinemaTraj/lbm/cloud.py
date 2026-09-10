@@ -176,6 +176,26 @@ def main(args):
     non_sky = ~recon["sky_mask"][0]
     assert (finite & non_sky).sum() / max(non_sky.sum(), 1) > 0.95, "non-sky depth 유효율 < 0.95"
 
+    # ── §empty_dynmask (D176, 2026-09-10) ────────────────────────────────────────────────
+    # `dynpose_ingest.py:177` 의 recon 단계는 `seg_keywords=[]` 라 **all-zero placeholder**
+    # dynamic_mask 를 png 로 써 두고, 나중에 `dynmask` 단계가 SAM3 합집합으로 덮는다. 그
+    # 사이에 cloud 를 구우면 `load_recon_and_seg` 가 `static_mask = ~dynamic_mask` 로 **전
+    # 픽셀을 정적**으로 만들고, 정적 점은 `visible` 이 전 프레임 True 라 동적 물체가 49개
+    # 사본으로 잔류한다 — 에러 없이, `visible.sum(1)==1` 이 정확히 0 으로.
+    # `load_masks` 는 png 가 **존재하는지**만 보므로(media.py:148) 새까만 png 는 통과한다.
+    # 실측 (dynpose 표본 120편): 47편(39%)이 이 상태였고 `hole_fraction` med 0.199 vs 0.279,
+    # `subject_visible_frac<0.6` 36.8% vs 25.5% 로 편향됐다. bake 시각으로는 못 가른다
+    # (정상인 씬의 cloud 가 오염된 씬보다 오래된 경우가 있다).
+    dyn_frac = float(recon["dynamic_mask"].mean())
+    if dyn_frac == 0.0 and not args.allow_empty_dynamic_mask:
+        seg_npz = path.join(args.eval_data, "eval_data", "seg_instances", args.video, "masks.npz")
+        raise AssertionError(
+            f"{args.video}: dynamic_mask 가 전부 0 이다 — cloud 를 구우면 전 픽셀이 정적이 되어 "
+            f"동적 물체가 49개 사본으로 남는다.\n"
+            f"  seg_instances masks.npz {'있음' if path.isfile(seg_npz) else '없음'}: {seg_npz}\n"
+            f"  있으면 `scripts/dynpose_dynamic_mask_from_seg.py` (dynmask 단계) 를 먼저 돌릴 것.\n"
+            f"  정말 동적 물체가 없는 씬이면 `--allow_empty_dynamic_mask` 로 통과시킨다.")
+
     # S / z_med 는 **전처리 전 raw depth** 로 잰다. preprocess 가 sky depth 를 SKY_DEPTH(1e3) 로
     # 덮어쓰기 때문에 순서를 바꾸면 게이지가 통째로 망가진다 (non-sky 로 걸러도 습관적으로 위험).
     S = scene_scale(recon["depths"], K, recon["sky_mask"], cam_c2w=recon["cam_c2w"],
@@ -197,6 +217,9 @@ def main(args):
         "frame0_rot_deg": frame0_rot_deg, "frame0_offset": frame0_offset,
         "preprocess": bool(args.preprocess), "depth_outliers": args.depth_outliers,
         "ignore_sky_mask": bool(args.ignore_sky_mask),
+        # D176. 굽는 시점의 마스크 상태를 캐시에 박는다 — 이게 없으면 "동적 점 0개"가 마스크가
+        # 비어서인지 정말 정적인 씬인지 npz 를 열어봐도 못 가른다 (§empty_dynmask).
+        "dynamic_mask_frac": dyn_frac, "num_dynamic": int(num_dynamic),
         "cam_c2w": recon["cam_c2w"].astype(np.float32), "K": K.astype(np.float32),
     })
 
@@ -225,6 +248,11 @@ if __name__ == "__main__":
     parser.add_argument("--no_preprocess", dest="preprocess", action="store_false")
     parser.add_argument("--depth_outliers", default="gaussian", choices=["gaussian", "pool"])
     parser.add_argument("--ignore_sky_mask", action="store_true", default=False)
+
+    # 빈 dynamic_mask 로 굽는 것은 **기본적으로 사고**다 (§empty_dynmask). 동적 물체가 정말
+    # 없는 씬을 굽고 싶을 때만 켠다 — 켜면 meta 의 `dynamic_mask_frac` 이 0 으로 남아 나중에
+    # 그 씬들만 골라낼 수 있다.
+    parser.add_argument("--allow_empty_dynamic_mask", action="store_true", default=False)
 
     # S 의 정의. `build_scene_graph.py` 와 **같은 값이어야 한다** — 두 산출물(`scene_graph.json`,
     # `cloud.npz`)이 서로 다른 게이지를 들고 있으면 게이트 마진 `0.02·S` 와 후보 거리가 어긋난다.

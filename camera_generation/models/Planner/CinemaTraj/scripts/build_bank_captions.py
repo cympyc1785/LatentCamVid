@@ -43,6 +43,11 @@
 `--magnitude` / `--nl_framing` 으로 예전 문장을 그대로 되살린다. `caption["framing"]` 구조체는
 그대로 채워지므로(§caption_of 의 D166 층 구분) 나중에 지표로 쓰거나 되살릴 수 있다.
 
+같은 지시로 **재조준 여부도 부정형을 버리고 최소쌍으로** 바꿨다 (§restore_legacy_reaim):
+    dolly_in        "dollies in along its own axis without re-aiming"  ->  "dollies straight forward"
+    dolly_in_look_at "dollies straight forward toward {target}"        (그대로)
+즉 aim 은 **대상을 방향으로 부르는지**로만 갈린다. `--legacy_dolly_phrase` 가 옛 문구를 되살린다.
+
 `--prompt_style fields` 는 예전 형식을 문자 단위로 그대로 다시 만든다. 그 경로에서
 `--prompt_fields target,motion` (기본)이 네 필드 중 앞 둘만 쓰고, 나머지 둘은 JSON 에 남는다.
 
@@ -805,10 +810,38 @@ def promote_targetless(cfg: dict):
     return sorted(promoted)
 
 
+def restore_legacy_reaim(cfg: dict):
+    """`--legacy_dolly_phrase`: D176 이전의 **부정형 재조준 문구**를 되살린다.
+
+    D176 (사용자 지시 2026-09-10) 전에는 aim=free dolly 세 개가 재조준을 **부정형으로** 설명했다:
+        dolly_in        "dollies in along its own axis without re-aiming"
+        dolly_out       "dollies back along its own axis without re-aiming"
+        track_dolly_in  "tracks {target} while pushing in along its own axis"
+    지금은 그 절을 지우고, **대상을 방향으로 부르는지 여부**를 재조준 판별자로 삼는다:
+        dolly_in       "dollies straight forward"           / dolly_in_look_at  "... toward {target}"
+        dolly_out      "dollies straight back"              / dolly_out_look_at "... away from {target}"
+        track_dolly_in "tracks {target} while pushing in"   / ..._look_at       "... toward {it}"
+    즉 같은 동작에서 전치사구 하나만 다른 **최소쌍**이 되고, 부정형("~하지 않는다")이 사라진다.
+    부정을 텍스트 조건으로 주는 것은 조건부 생성에서 약한 신호다 — 있는 것을 말하는 쪽이 낫다.
+
+    `promote_targetless` 와 같은 이유로 **기본을 바꾸되 되돌릴 손잡이를 남긴다**: 이미 굽어서
+    학습에 들어간 캡션(d121/d157 계열)을 다시 export 할 때 문자열이 어긋나면 안 된다.
+    """
+    restored = []
+    for name, spec in cfg["presets"].items():
+        phrase = spec.get("phrase_legacy_reaim")
+        if not phrase:
+            continue
+        spec["phrase"] = phrase
+        restored.append(name)
+    return sorted(restored)
+
+
 def main(args):
     out_root = args.output_root or path.join(CINEMATRAJ_ROOT, "out")
     with open(args.presets, encoding="utf-8") as file:
         cfg = json.load(file)
+    legacy_reaim = restore_legacy_reaim(cfg) if args.legacy_dolly_phrase else []
     promoted = promote_targetless(cfg) if args.targetless_promote else []
     events = load_events(args.metadata_csv)
     label_map = load_label_map(args.label_map)
@@ -896,6 +929,9 @@ def main(args):
                    # 이건 **문장에 실었는가**라 층이 다르다 (§caption_of) — 헤더에 없으면
                    # 같은 뱅크에서 나온 두 캡션 파일을 문자열로 역추적해야 한다.
                    "nl_framing": bool(args.nl_framing),
+                   # D176. 부정형 재조준 문구를 되살렸는지 (§restore_legacy_reaim). 빈 목록이
+                   # 기본(= 새 최소쌍 문구)이고, 되살리면 어느 preset 이 바뀌었는지 이름이 남는다.
+                   "legacy_reaim_phrase": legacy_reaim,
                    "anchor_desc": bool(desc_map),
                    "label_map": path.basename(args.label_map) if args.label_map else None,
                    "event": event, "captions": captions}
@@ -917,6 +953,7 @@ def main(args):
           f"크기 부사 {'켬' if magnitude else '끔'}   "
           f"framing 문장 {'켬' if args.nl_framing else '끔'}   "
           f"targetless 승격 {promoted if promoted else '끔'}   "
+          f"재조준 부정문구 {legacy_reaim if legacy_reaim else '끔'}   "
           f"{'(dry run — 안 씀)' if args.dry_run else ''}")
     n_all = sum(r[1] for r in rows)
     n_drop = sum(r[2] for r in rows)
@@ -954,6 +991,12 @@ if __name__ == "__main__":
     # 지금 그 옛 문자열로 학습 중이다). 새로 굽는 뱅크에서만 명시적으로 켤 것.
     parser.add_argument("--targetless_promote", action="store_true", default=False)
     parser.add_argument("--no_targetless_promote", dest="targetless_promote",
+                        action="store_false")
+    # D176 (사용자 지시 2026-09-10). aim=free dolly 세 개의 부정형 재조준 문구
+    # ("along its own axis without re-aiming") 를 되살린다 — §restore_legacy_reaim.
+    # **기본 꺼짐** = 새 최소쌍 문구. 옛 코퍼스를 다시 export 할 때만 켠다.
+    parser.add_argument("--legacy_dolly_phrase", action="store_true", default=False)
+    parser.add_argument("--no_legacy_dolly_phrase", dest="legacy_dolly_phrase",
                         action="store_false")
     # 앵커 라벨 → 자연어 명사 표. **안 주면 기존 동작 그대로** (Vista 는 라벨이 이미 명사다).
     # TRUMANS 는 라벨이 blend 오브젝트 이름이라 `configs/trumans_labels.json` 이 필요하다.

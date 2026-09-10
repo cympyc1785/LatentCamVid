@@ -6,7 +6,46 @@
 
 ## [Unreleased]
 
+### Fixed
+- **D176-c — `cloud.npz` 를 빈 `dynamic_mask` 위에서 굽는 사고를 막는 가드 (2026-09-10, 사용자
+  질문 "cloud 가 static 으로 잘못 나온 이유가 뭐야?").** 원인은 **단계 순서 경합**이다:
+  `scripts/dynpose_ingest.py:177` 의 recon 단계가 `seg_keywords=[]` 라 **all-zero placeholder**
+  `dynamic_mask/*.png` 를 써 두고, 나중에 `dynmask` 단계가 SAM3 합집합으로 덮는다. 그 사이에
+  cloud 를 구우면 `load_recon_and_seg` 가 `static_mask = ~dynamic_mask` 로 **전 픽셀을 정적**으로
+  만들고, 정적 점은 `visible` 이 전 프레임 True 라 동적 물체가 49개 사본으로 잔류한다 — 에러
+  없이, `visible.sum(1)==1` 이 정확히 0 으로. `utils/media.py:148 load_masks` 는 png 가
+  **존재하는지**만 보므로 새까만 png 가 그대로 통과한다.
+  · 규모: dynpose 표본 120편 중 **47편(39%)**. 편향은 `hole_fraction` med **0.199 vs 0.279**,
+  `subject_area_med` **0.0895 vs 0.0409**, `subject_visible_frac<0.6` **36.8% vs 25.5%** —
+  고스트가 프레임을 메우고 자기 자신을 가린다. bake 시각으로는 못 가른다 (정상 씬의 cloud 가
+  오염 씬보다 오래된 경우가 있다: 1216d742 1788788057 정상 / 13d42c1a 1788805177 오염).
+  · `lbm/cloud.py` — 굽기 전 `dynamic_mask.mean()==0` 이면 **assert 로 멈춘다** (§empty_dynmask).
+  메시지가 `seg_instances/<video>/masks.npz` 유무를 같이 찍어서 "dynmask 를 먼저 돌려라" 인지
+  "정말 정적인 씬"인지 바로 갈린다. 후자는 `--allow_empty_dynamic_mask` 로 통과.
+  cloud meta 에 **`dynamic_mask_frac` / `num_dynamic`** 을 실어 npz 만 보고도 판별되게 했다.
+  · `scripts/dynpose_dynamic_mask_from_seg.py` — 완료 마커 `dynamic_mask/from_seg.json`
+  (`mean`, `num_frames`, `seg_mtime`) 을 쓴다. png 만으로는 "단계가 안 돎" 과 "돌았는데 SAM3 가
+  아무것도 못 찾음" 이 구분되지 않았다. `*.png` 만 읽는 `load_masks` 에는 영향 없다.
+
 ### Changed
+- **D176-b — dolly 계열 캡션에서 부정형 재조준 절을 뺐다 (2026-09-10, 사용자 지시 "그냥 dolly in
+  look at 일 경우만 towards woman 이렇게 하면 되잖아").** `configs/caption_presets.json` 의 세
+  문구에서 `along its own axis without re-aiming` / `along its own axis` 를 지우고, 재조준
+  여부를 **대상을 방향으로 부르는지**로만 가른다:
+  `dolly_in` `"dollies straight forward"` / `dolly_in_look_at` `"... toward {target}"`,
+  `dolly_out` `"dollies straight back"` / `dolly_out_look_at` `"... away from {target}"`,
+  `track_dolly_in` `"tracks {target} while pushing in"` / `..._look_at` `"... toward {it}"`.
+  부정("~하지 않는다")을 조건으로 주는 것은 조건부 생성에서 약한 신호다.
+  · 옛 문구는 `phrase_legacy_reaim` 키로 config 에 남아 있고 `--legacy_dolly_phrase` 로 되살린다
+  (`promote_targetless` 와 같은 이유 — 학습에 들어간 캡션이 조용히 바뀌면 안 된다).
+  캡션 JSON 헤더에 `legacy_reaim_phrase` 키, 요약표에 `재조준 부정문구 켬/끔` 추가.
+  · **실제로 문장이 바뀐 preset 은 `dolly_out` 하나**다. d157 384편 55,462행에서
+  `dolly_out` 5,572행(10.05%) / `dolly_in_look_at` 5,544행(10.00%) / `track_dolly_in_look_at`
+  1,936행(3.49%) / `track_dolly_out` 1,844행(3.32%) 인데 **`dolly_in` 과 `track_dolly_in` 은
+  0행**이다 (라우팅이 aim=free push-in 을 한 번도 안 뽑았다).
+  · 예: `The camera dollies back along its own axis without re-aiming, keeping dog in view.`
+  → `The camera dollies straight back, keeping dog in view.`
+
 - **D176 — nl 캡션 기본 문장을 `target` + `camera` 두 축만으로 좁혔다 (2026-09-10, 사용자 지시
   "정도 부사를 빼주고 framing 도 ... 빼서 target, camera 관련된 내용만 들어가도록").**
   `scripts/build_bank_captions.py` 의 **기본값 두 개**를 뒤집었다 — `--magnitude` 3-state 의
@@ -32,6 +71,12 @@
   → `The camera tracks alongside woman while sliding to the left.`
 
 ### Added
+- **D176-c — `configs/bank/d176_dynpose_cloudfix.json` (D174 릴 3편 cloud 재굽기).**
+  `stages: ["cloud", "fit", "emit"]`, `tau_bank_dir: "bank_d157"` 재사용, `bank_dir:
+  "hole_bank_d176"`. **fit/emit args 는 `d157_dynpose.json` 글자 그대로** — 릴의 질문이 "같은
+  조건에서 cloud 만 고치면 warp 이 달라지는가"라 설정 축을 하나도 안 건드린다. tau 를 재사용하는
+  근거는 τ 가 cloud 를 안 보기 때문이다 (분모 `S` 는 raw depth, 기준점은 시작 pose).
+
 - **D175 — `configs/bank/d175_vista.json` (vista 52편에 비-routing 델타 이식) (2026-09-10,
   사용자 지시 "vista 에도 똑같이 적용해서 돌려봐줘").** d151 대비 **fit 인자만** 바뀐다:
   `--min_subject_visible 0 → 0.6` (D171-b), `--follow_keyframes 6 --follow_kf_interp cubic`

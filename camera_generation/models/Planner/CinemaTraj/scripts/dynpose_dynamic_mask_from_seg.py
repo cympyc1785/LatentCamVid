@@ -12,6 +12,7 @@ env: 아무거나 (numpy + PIL)
     python scripts/dynpose_dynamic_mask_from_seg.py --eval_data /data1/.../DynPose-LBM \
         --videos 00e9f728-... 015b197d-...
 """
+import json
 from argparse import ArgumentParser
 from glob import glob
 from os import path
@@ -47,6 +48,15 @@ def main(args):
                 frame = np.array(Image.fromarray(frame.astype(np.uint8) * 255)
                                  .resize(Image.open(png).size, Image.NEAREST)) > 0
             Image.fromarray((frame * 255).astype(np.uint8)).save(png)
+        # D176. **완료 마커**. png 만 보면 "이 단계가 안 돌아서 placeholder(전부 0)" 와 "돌았는데
+        # SAM3 가 아무것도 못 찾음" 이 구분되지 않는다 (`dynpose_ingest.py:177` 이 all-zero
+        # placeholder 를 쓴다). 그 구분이 안 되면 cloud 를 조용히 전부-정적으로 굽게 된다 —
+        # 실제로 dynpose 표본의 39% 가 그렇게 구워졌다 (`lbm/cloud.py` §empty_dynmask).
+        # `*.png` 만 읽는 `load_masks` 에는 영향이 없다.
+        with open(path.join(mask_dir, "from_seg.json"), "w", encoding="utf-8") as file:
+            json.dump({"format": "dynmask_from_seg_v1", "video": video,
+                       "num_frames": int(union.shape[0]), "mean": float(union.mean()),
+                       "seg_mtime": path.getmtime(seg_path)}, file, ensure_ascii=False, indent=2)
         print(f"{video}: dynamic_mask {union.shape} 덮어씀 (mean {union.mean():.4f})")
 
 

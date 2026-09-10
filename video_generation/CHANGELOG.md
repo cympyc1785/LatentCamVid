@@ -108,6 +108,16 @@
 - **D171-c — `configs/bank/d171c_dynpose_kftrans.json` (2026-09-10).** d171 에서 fit 인자
   **두 줄만** 더한다 (`--follow_keyframes 6 --follow_kf_interp cubic`). route/tau 는 안 돌고
   `preset_route_d170.json` + `bank_d170` 을 재사용하므로 `hole_bank_d171` 과 행 단위 diff 다.
+  · 4편 굽기 완료 (2026-09-10, GPU 3, 4/4 OK, 편당 55~68 s). **변이 집합은 24개로 동일** —
+  보간이 어느 변이가 살아남는지는 안 바꾼다. 행 단위 diff: `path_len_u` 가 **`track_*` 9행에서만**
+  −2.6 ~ −12.0% (|Δ| 평균 8.13%), `hole_fraction` 9행 |Δ| 5.10%, `tau_max` 8행 1.77%,
+  `sweep_deg`/`subject_in_frame` **0행**. `subject_visible_frac` 은 22행이 움직였지만 최대
+  절대변화가 0.0101 로 뱅크 렌더 비결정성(±0.04) 안이라 신호가 아니다. 유일한 status 뒤집힘은
+  02044b66 `track_dolly_in_look_at` `approach_limited → obb_limited` (knob +10.8%) — 경로가
+  매끄러워지면서 손잡이가 더 나가 binding 게이트가 approach 에서 OBB 로 넘어갔다.
+  `plan_tier` 0=20 / 1=1 / 2=2 / 3=1 → **fallback ladder 가 변이의 17%(4/24)를 채운다**.
+  · 릴 `tmp/d171c/reel/d171c_*.mp4` 4편 (위=d171 / 아래=d171c). 음성 대조군으로 static anchor
+  변이(`stat_0__orbit_right`)를 넣었다 — follow center 가 없어 정의상 두 줄이 같아야 한다.
 - **D170 — `route_presets.py --orbit_min_span` (orbit 슬롯 방위각 게이트를 인자로 노출)
   + `configs/bank/d170_dynpose_orbitspan.json` (2026-09-10, 사용자 지시 "소스 영상 방위각 폭
   조건 빼서 돌려서 depth warp 영상 보여줘봐").** `ORBIT_MIN_SPAN_DEG = 120.0` 이 상수로 박혀

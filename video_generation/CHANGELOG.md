@@ -7,6 +7,39 @@
 ## [Unreleased]
 
 ### Added
+- **D174 — `--orbit_min_span` 게이트를 d157 코퍼스로 실측 판정 (2026-09-10, 사용자 질문
+  "orbit_min_span이 뭔데" 에 답하기 위해).** 이 게이트는 `route_presets.py:291` 에서
+  `obs_az_span_deg < ORBIT_MIN_SPAN_DEG(120)` 인 노드의 orbit 슬롯을 통째로 없앤다(`--orbit_fallback
+  drop`). 근거는 "소스가 좁게만 본 물체를 선회하면 미관측 면으로 넘어가 warp 이 구멍난다" 였는데
+  **실측이 한 번도 없었다.** d157 뱅크는 게이트 도입 커밋(`99adfbc`) **이전** 세대라 span 과 무관하게
+  orbit 을 구웠다 — 384편 / Δ0.2 단 **orbit 807행**이 그대로 자연 실험이다 (`tmp/d174/span_vs_hole.py`).
+  span 버킷별 중앙값:
+
+  | span | n | hole | hole_max | hmax/h | tau | sweep | vis | subj_area | knob=cap% | shape_limited% |
+  |---|---|---|---|---|---|---|---|---|---|---|
+  | <20 | 103 | 0.287 | 0.492 | 1.62 | 1.140 | 20.0 | 0.768 | 0.077 | 53.4 | 49.5 |
+  | 20–40 | 107 | 0.298 | 0.476 | 1.59 | 0.875 | 22.5 | 0.814 | 0.073 | 37.4 | 36.4 |
+  | 40–60 | 51 | 0.298 | 0.464 | 1.59 | 0.814 | 36.8 | 0.730 | 0.054 | 13.7 | 5.9 |
+  | 60–90 | 111 | 0.283 | 0.460 | 1.54 | 0.871 | 45.0 | 0.769 | 0.103 | 7.2 | 6.3 |
+  | 90–120 | 77 | 0.289 | 0.481 | 1.54 | 0.901 | 45.0 | 0.751 | 0.086 | 5.2 | 5.2 |
+  | 120–180 | 140 | 0.253 | 0.436 | 1.69 | 0.911 | 45.0 | 0.777 | 0.080 | 4.3 | 3.6 |
+  | ≥180 | 218 | 0.290 | 0.488 | 1.67 | 0.917 | 45.0 | 0.733 | 0.072 | 7.8 | 6.0 |
+
+  · **`obs_az_span` 은 hole 을 예측하지 않는다.** `hole`·`hole_max`·`hmax/h`(끝프레임 쏠림)·
+  `subject_visible_frac`·`subject_area_med` 가 span 1.5° ~ 315° 에서 전부 평평하다. span<20 은 오히려
+  tau 가 최대(1.140)고 vis 도 상위다. 게이트가 세워진 전제("좁은 span → 미관측 면 → 구멍")가 807행에서
+  **관측되지 않는다.** 물리적으로도 그렇다 — 구멍은 물체 주위 방위각이 아니라 **근접 가림물과의 시차**에서
+  나오고, 그건 사다리가 이미 직접 재서 손잡이로 통제한다.
+  · span 이 실제로 바꾸는 것은 **sweep clamp 하나**다: `span_frac = max(orbit_span_frac, min_sweep_deg/span)`
+  이라 span<56 이면 sweep 이 nominal 45°에 못 미치고, span<20 이면 바닥 20°에 붙는다 → `knob=cap` 53.4%,
+  `shape_limited` 49.5%. 즉 좁은 span 의 orbit 은 "반경 큰 20° 얕은 호"가 된다.
+  · **남는 진짜 비용은 캡션 충실도**다 (`lbm-preset-names-dont-match-motion` 과 같은 계열). span 1.5°
+  mirror 가 realized sweep 20° 인데 캡션은 "the camera dramatically orbits to the left around mirror" —
+  강도 부사는 tau/path 에서 나오고 sweep 은 안 본다. 이건 라우팅이 아니라 **캡션이 realized sweep 을
+  읽게 하는 쪽**에서 고칠 문제다.
+  · 릴 4편 `tmp/d174/reel/d174_span{1.5,1.8,3.5,308}_*.mp4` (span 극단 3 + 대조군 1, `--fixed_focal`).
+  · **추천: `--orbit_min_span 0`** (= d170 ablation 설정 유지). 120 은 노드의 73%(moving 73.1%)를
+  증거 없이 버려 backfill 에 떠넘기고, 앞서 산수로 제안했던 20 도 이 표에서는 막을 대상이 없다.
 - **D172 — `configs/bank/d172_dynpose100k_graph.json` (dynpose-100k 10,346편 graph 전용 세대)
   + `tmp/d172/chain_geocalib_graph.py` (2026-09-10, 사용자 지시 "cloud까지만 돌리도록해줘" 를
   실측 후 graph 까지로 좁힌 것 — 같은 날 사용자 결정).** 지시를 글자대로 이행하면 /data1 이

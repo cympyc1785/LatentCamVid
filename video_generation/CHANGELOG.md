@@ -6,6 +6,31 @@
 
 ## [Unreleased]
 
+### Changed
+- **D176 — nl 캡션 기본 문장을 `target` + `camera` 두 축만으로 좁혔다 (2026-09-10, 사용자 지시
+  "정도 부사를 빼주고 framing 도 ... 빼서 target, camera 관련된 내용만 들어가도록").**
+  `scripts/build_bank_captions.py` 의 **기본값 두 개**를 뒤집었다 — `--magnitude` 3-state 의
+  형식별 기본(`nl` 켬)이 **형식과 무관하게 끔**이 되고, `--nl_framing` 기본이 `True → False`.
+  예전 문장은 `--magnitude --nl_framing` 으로 글자 그대로 돌아온다.
+  · **부사를 뺀 이유**: `adverb_of`(`:168`)가 요청이 아니라 **실현치**(`tau_max`/`pan_deg`)를
+  버킷에 넣는다. d157 55,462행 중 54%가 기하 제약(`shape/elev/obb/approach/collision/
+  clamped_low`)으로 깎였는데 부사도 같이 깎여 캡션↔pose 가 일관된다 — 요청↔실현 대비가 남는
+  축은 orbit sweep 하나뿐이고(캡션이 `sweep_deg` 를 안 읽는다), 거기서도 `--min_sweep_deg 20`
+  바닥 556행(orbit 의 17.2%) 중 465행에 significantly/dramatically 가 붙는다.
+  **최종 목표는 요청 강도를 싣는 것**(사용자 확정)이고 그때까지는 뺀다.
+  · **framing 을 뺀 이유**: shot size 어휘가 실측 면적비와 구간이 겹친다 — 불일치 vista d121
+  35.9%(9,052/25,222) / dynpose d157 **49.6%**(10,300/20,785). `plain` 절은 0/10,872 로 완벽하고
+  범인은 timeline head 어휘다(tighten 61.7% / widen 57.1% / exit 82.8%). 게다가
+  `subject_visible_frac`(가림)을 캡션 코드가 **한 번도 안 읽는다** — `<0.5` 가 vista 9.5% /
+  dynpose 9.7%. `caption["framing"]` 구조체는 그대로 채워지므로(D166 층 구분) 지표로는 남는다.
+  · 캡션 JSON 헤더에 **`nl_framing` 키를 추가**했다. `framing_on_free`/`framing_min_in_frame`/
+  `framing_exit_min_in_frame` 은 *자격 판정*이고 `nl_framing` 은 *문장에 실었는가*라 층이 다른데,
+  헤더에 없어서 두 캡션 파일을 문자열로 역추적해야 했다. 요약표에도 `framing 문장 켬/끔` 추가.
+  · 예 (`160a57c9 dyn_0__track_truck_left__hole0.1`):
+  `The camera steadily tracks alongside woman while sliding to the left, keeping her in a
+  close-up shot that widens to a medium close-up shot.`
+  → `The camera tracks alongside woman while sliding to the left.`
+
 ### Added
 - **D175 — `configs/bank/d175_vista.json` (vista 52편에 비-routing 델타 이식) (2026-09-10,
   사용자 지시 "vista 에도 똑같이 적용해서 돌려봐줘").** d151 대비 **fit 인자만** 바뀐다:

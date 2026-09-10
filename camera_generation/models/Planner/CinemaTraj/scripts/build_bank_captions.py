@@ -26,6 +26,23 @@
 들어오고 나가는지 (`sample_camera_bank.composition_stats` 가 뱅크에 실은 노드 id).
 구조형이 아니라 자연어인 근거는 D117-a PE-AV 프로브다 (구조형이 4형식 중 꼴찌).
 
+**D176 부터 nl 기본 문장은 `target` + `camera` 두 축만 남긴다** (사용자 지시 2026-09-10):
+
+    The camera orbits around the woman in a purple shirt holding a suitcase.
+    The camera pulls back, keeping the woman in a purple shirt in view.
+
+위 ②③ 이 기본에서 빠졌다. 이유는 **둘 다 실측과 문장이 어긋난다**:
+    크기 부사   `adverb_of` 가 요청이 아니라 **실현치**(`tau_max`/`pan_deg`)를 읽는다. d157
+                55,462행 중 54%가 기하 제약으로 깎였는데 부사도 같이 깎여, 요청↔실현 대비가
+                남는 축은 orbit sweep 하나뿐이다(캡션이 `sweep_deg` 를 안 읽어서). 최종
+                목표는 **요청 강도**를 싣는 것이고(§adverb_of), 그때까지는 뺀다.
+    framing     shot size 어휘가 실측 면적비와 구간이 겹친다 — d157 20,785 entry 중 49.6%가
+                불일치(timeline head 어휘 tighten 61.7% / widen 57.1% / exit 82.8%). 게다가
+                `subject_visible_frac`(가림)을 캡션이 한 번도 안 읽어서 "화면 안에 있지만
+                완전히 가려진" 행이 close-up 을 약속한다.
+`--magnitude` / `--nl_framing` 으로 예전 문장을 그대로 되살린다. `caption["framing"]` 구조체는
+그대로 채워지므로(§caption_of 의 D166 층 구분) 나중에 지표로 쓰거나 되살릴 수 있다.
+
 `--prompt_style fields` 는 예전 형식을 문자 단위로 그대로 다시 만든다. 그 경로에서
 `--prompt_fields target,motion` (기본)이 네 필드 중 앞 둘만 쓰고, 나머지 둘은 JSON 에 남는다.
 
@@ -797,9 +814,10 @@ def main(args):
     label_map = load_label_map(args.label_map)
     external_labels = load_external_labels(args.external_shapes)
     fields = [f.strip() for f in args.prompt_fields.split(",") if f.strip()]
-    # 크기 부사는 3-state 다: 안 주면 형식이 정한다 (nl 은 켬 — 사용자 지시, fields 는 끔 —
-    # 예전 그대로). `--magnitude` / `--no_magnitude` 로 형식과 무관하게 못 박을 수 있다.
-    magnitude = (args.prompt_style == "nl") if args.magnitude is None else bool(args.magnitude)
+    # 크기 부사는 3-state 다: 안 주면 형식과 무관하게 **끔**(D176, 사용자 지시 2026-09-10 —
+    # 부사가 요청이 아니라 실현치를 읽어서 요청↔실현 대비가 안 남는다, §모듈 docstring).
+    # `--magnitude` 를 명시하면 D121~D175 문장이 그대로 돌아온다.
+    magnitude = False if args.magnitude is None else bool(args.magnitude)
 
     if args.videos == ["all"]:
         videos = sorted(v for v in events
@@ -874,6 +892,10 @@ def main(args):
                    # D154. exit 절 전용 임계. 두 값이 같으면 D143 과 같은 동작이다.
                    "framing_exit_min_in_frame": float(args.framing_exit_min_in_frame),
                    "framing_dropped": n_framing_dropped,
+                   # D176. 문장에 framing 절을 넣었는지. `framing_*` 세 키는 **자격 판정**이고
+                   # 이건 **문장에 실었는가**라 층이 다르다 (§caption_of) — 헤더에 없으면
+                   # 같은 뱅크에서 나온 두 캡션 파일을 문자열로 역추적해야 한다.
+                   "nl_framing": bool(args.nl_framing),
                    "anchor_desc": bool(desc_map),
                    "label_map": path.basename(args.label_map) if args.label_map else None,
                    "event": event, "captions": captions}
@@ -893,6 +915,7 @@ def main(args):
           f"형식 {args.prompt_style}   "
           f"{'(필드 미사용)' if args.prompt_style == 'nl' else f'프롬프트 필드 {fields}'}   "
           f"크기 부사 {'켬' if magnitude else '끔'}   "
+          f"framing 문장 {'켬' if args.nl_framing else '끔'}   "
           f"targetless 승격 {promoted if promoted else '끔'}   "
           f"{'(dry run — 안 씀)' if args.dry_run else ''}")
     n_all = sum(r[1] for r in rows)
@@ -966,7 +989,10 @@ if __name__ == "__main__":
     # `--no_nl_framing` 이면 `caption["framing"]` 은 그대로 채워지고 `prompt` 만
     # `The camera [motion].` 로 짧아진다. D143 게이트와 층이 다르다 (§caption_of docstring).
     # `composition` 절도 같이 빠진다 — 문장에서 그 자리가 framing 뒤뿐이다.
-    parser.add_argument("--nl_framing", action="store_true", default=True)
+    # D176 (사용자 지시 2026-09-10): **기본 꺼짐**. shot size 어휘가 실측 면적비와 구간이
+    # 겹치고(d157 49.6% 불일치) 가림(`subject_visible_frac`)을 캡션이 안 읽는다. `--nl_framing`
+    # 으로 D166 이전 문장(framing + composition 절)이 그대로 돌아온다.
+    parser.add_argument("--nl_framing", action="store_true", default=False)
     parser.add_argument("--no_nl_framing", dest="nl_framing", action="store_false")
     # D143 (사용자 지시 2026-09-06). 프레이밍 약속을 못 지키는 변이에서 그 절을 뺀다.
     # **기본은 변이 축**(`--framing_min_in_frame 0.85`): 그 변이의 실측 `subject_in_frame` 이

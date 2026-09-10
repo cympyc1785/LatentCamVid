@@ -7,6 +7,36 @@
 ## [Unreleased]
 
 ### Added
+- **D175 — `configs/bank/d175_vista.json` (vista 52편에 비-routing 델타 이식) (2026-09-10,
+  사용자 지시 "vista 에도 똑같이 적용해서 돌려봐줘").** d151 대비 **fit 인자만** 바뀐다:
+  `--min_subject_visible 0 → 0.6` (D171-b), `--follow_keyframes 6 --follow_kf_interp cubic`
+  (D171-c), `--hole_ladder`/`--hole_mode` **명시 핀**(값은 d151 이 실제로 쓴 것과 동일 —
+  `out/*/hole_bank_k6_d151/bank.json` 의 `ladder_base.target_rule = "hole_static + delta"`).
+  · **tau 는 안 돈다** — `bank_d151` 재사용. d170 계열이 tau 에 더한 `--device cuda` 는 argparse
+  기본값과 같고(`sample_camera_bank.py:1385`), `--skip_on_empty` 는 0행일 때만 갈리는데 d151 은
+  52편 전부 행이 나왔다.
+  · **`--fallback_ladder` 계열은 일부러 뺐다.** `fit_hole_ladder.py:797` 이 `fallback_on =
+  fallback_ladder and any(tier_of.values())` 인데 tier 는 τ 가 `--variant_pool full` 로 깐 예비
+  변이에만 붙는다 — `bank_d151` 은 budget 풀이라 전 tier 0 → 켜도 no-op 이다. 게다가
+  `--fallback_target 5` 는 "쓸 만한 변이 5개 모이면 중단"이라 켜지면 편당 343행을 5행으로 자른다.
+  · **hole 사다리는 4단 유지** (dynpose 계열의 1단 `0.20` 을 안 따라간다). 단수 축소는 품질 수정이
+  아니라 코퍼스 크기 결정이고 편수가 384 vs 52 로 7배 다르다 — vista 에서 같은 짓을 하면
+  17,836행이 ~4.5k 로 줄고 `min_subject_visible 0.6` 이 또 깎는다.
+- **D175-a — dynpose `cloud.npz` 의 ~40%가 동적 점 0개 (2026-09-10, 사용자 지적 "릴 첫 영상에서
+  dynamic object 로 point cloud 가 되어야하는데 왜 static 으로 되어있음?").** `lbm/cloud.py` 의
+  `unproject` 는 `static_mask = ~dynamic_mask` 로 정적 점에 시간 지속성을 주는데, 굽는 시점에
+  `dynamic_mask` 가 전부 0이면 **모든 픽셀이 정적**이 되어 동적 물체가 49개 사본으로 전 프레임
+  남는다 (`visible.sum(1)==1` 이 정확히 0, 에러 없음 — D172 에 기록된 함정과 같은 계열).
+  · 표본 120편(`tmp/d175/scan_cloud_dyn.py`, seed 0/1) 중 **47편(39%)이 동적 점 0개**이고 그 씬들의
+  현재 `dynamic_mask` 는 전부 비어 있지 않다(8~63%). bake 시각으로는 안 갈린다 — zero 구간
+  09-08 00:11~16:26 과 ok 구간 09-04 04:59~09-08 16:05 가 겹친다(d157 굽기와 D169 ingest 가 병주).
+  · 편향 방향 (d157 뱅크, 표본 80편 · 5,110행 vs 5,247행): `hole_fraction` med **0.199 vs 0.279**,
+  `subject_area_med` **0.0895 vs 0.0409**, `subject_visible_frac < 0.6` **36.8% vs 25.5%**.
+  고스트가 프레임을 메우고 자기 자신을 가린다 — 사다리가 푸는 손잡이가 이 열들이라 궤적 크기까지
+  틀어진다. `scene_graph.json` 은 seg_instances(SAM3) 기반이라 `dyn_*` 노드는 멀쩡하다.
+  · vista `out/` 은 무사 (12/12 정상, dyn 4.19~58.56%).
+  · D174-b 릴 3편 중 `160a57c9`(0%)와 대조군 `13d42c1a`(0%)가 여기 걸린다 — **각변위 수치는
+  scene_graph track 에서 나오므로 유효하지만, 렌더 인상은 2/3 이 오염됐다.**
 - **D174 — `--orbit_min_span` 게이트를 d157 코퍼스로 실측 판정 (2026-09-10, 사용자 질문
   "orbit_min_span이 뭔데" 에 답하기 위해).** 이 게이트는 `route_presets.py:291` 에서
   `obs_az_span_deg < ORBIT_MIN_SPAN_DEG(120)` 인 노드의 orbit 슬롯을 통째로 없앤다(`--orbit_fallback
@@ -33,10 +63,10 @@
   · span 이 실제로 바꾸는 것은 **sweep clamp 하나**다: `span_frac = max(orbit_span_frac, min_sweep_deg/span)`
   이라 span<56 이면 sweep 이 nominal 45°에 못 미치고, span<20 이면 바닥 20°에 붙는다 → `knob=cap` 53.4%,
   `shape_limited` 49.5%. 즉 좁은 span 의 orbit 은 "반경 큰 20° 얕은 호"가 된다.
-  · **남는 진짜 비용은 캡션 충실도**다 (`lbm-preset-names-dont-match-motion` 과 같은 계열). span 1.5°
-  mirror 가 realized sweep 20° 인데 캡션은 "the camera dramatically orbits to the left around mirror" —
-  강도 부사는 tau/path 에서 나오고 sweep 은 안 본다. 이건 라우팅이 아니라 **캡션이 realized sweep 을
-  읽게 하는 쪽**에서 고칠 문제다.
+  · span 1.5° mirror 가 realized sweep 20° 인데 캡션은 "the camera dramatically orbits to the left
+  around mirror" — 강도 부사는 tau/path 에서 나오고 sweep 은 안 본다. **정정 (2026-09-10 사용자):
+  캡션이 realized 를 안 읽는 것은 버그가 아니라 설계**다 — 요청한 변위가 기하학적으로 깎였을 때
+  모델이 geometry 를 읽어 그 축소를 맞히게 하려는 것. 정도가 과한지는 D175-b 에서 잰다.
   · 릴 4편 `tmp/d174/reel/d174_span{1.5,1.8,3.5,308}_*.mp4` (span 극단 3 + 대조군 1, `--fixed_focal`).
   · **추천: `--orbit_min_span 0`** (= d170 ablation 설정 유지). 120 은 노드의 73%(moving 73.1%)를
   증거 없이 버려 backfill 에 떠넘기고, 앞서 산수로 제안했던 20 도 이 표에서는 막을 대상이 없다.

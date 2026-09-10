@@ -53,8 +53,56 @@
   이전에 구운 뱅크의 지문이 전부 바뀐다. `SHAPE_DEFAULTS` 폴백도 같은 `0`/`"cubic"` 이라
   옛 뱅크는 `emit_bank` 재구성에서 비트 단위로 그대로다. `main()` 의 `decision_fingerprint(…)`
   호출은 positional drift 를 막으려고 키워드 인자로 바꿨다.
-  · **arm 채택은 아직 안 했다** — 릴 5편 전달 후 사용자 선택 대기(D171-c). 그래서 CLI 기본값도
-  `0`(끔) 이다.
+  · **속도 변화량으로 다시 쟀다**(`tmp/d171/kf_speed_table.py`, 17행 = 3 scene x 2 preset x
+  4 hole 단). `v=|Δp|` / `|dv|=|Δ|Δp||` / `acc=|Δ²p|` / `v_cv=std(v)/mean(v)`, off=1.00 기하평균 —
+  `dv_p95` savgol **0.485** / cubic **0.493**, `dv_max` 0.497 / 0.508, `v_cv` 0.849 / 0.869,
+  `acc_p95` 0.636 / **0.591**, `acc_max` **0.569** / 0.604, `jerk_p95` 0.788 / **0.370**,
+  `jerk_max` 0.567 / **0.209**, `path_u` 0.916 / **0.953**. **속력 변화량에서는 두 arm 이
+  동률**이고 갈리는 건 경로 보존 하나다 — savgol 은 보간기가 아니라 평활기라 keyframe 을 안
+  지난다. **jerk 는 판정에서 뺀다**: cubic 은 구간별 3차라 jerk 가 구간 상수가 되어(17행 전부
+  `jerk_p95 == jerk_max`) 구조적으로 이긴다.
+  · 관행 조사 — Blender(Bézier + Auto Clamped, Continuous Acceleration) / Maya(Auto) /
+  Houdini(Bézier) / Unreal Sequencer(Cubic Auto) / Unity(ClampedAuto, Cinemachine SmoothPath 는
+  C² 보장) 가 전부 **cubic + 자동 탄젠트 + 극값 clamp** 다. natural cubic 이나 plain uniform
+  Catmull-Rom 을 기본값으로 쓰는 도구는 없다(Heckbert 1985). video-gen 쪽 keyframe→dense 는
+  대부분 translation linear + rotation slerp.
+  · **채택: `--follow_keyframes 6 --follow_kf_interp cubic`** (사용자 지시 2026-09-10 "일단
+  cubic 으로 하되" → "그냥 translation 도 통일성 있게 keyframe 6개로 해줘"). `--aim_keyframes 6`
+  과 같은 수이고, 두 채널이 같은 `rint(linspace(0,F-1,n))` 를 쓰므로 F=49 에서 조준과 위치가
+  **정확히 같은 프레임** [0,10,19,29,38,48] 에 앉는다. CLI/`SHAPE_DEFAULTS` 기본값은 여전히
+  `0`(끔) 이라 옛 뱅크는 그대로고, 채택은 config 핀으로만 한다.
+  · 게이트 순서 확인 — 보간은 `fit_tau` **앞**에서 위치 채널에 들어가므로(`build_poses.py:757`
+  → `offsets_world`) τ 도 hole/G1/OBB/`subject_visible_frac` 도 전부 **보간된 궤적**을 렌더해
+  잰다(`fit_hole_ladder.probe()` → `measure_trajectory`). 조준은 raw 를 그대로 쓴다(D73).
+  · 미해결 — `CubicSpline(bc_type="natural")` 은 프레임 0/48 에서 f''=0 을 강제해 시작·정지가
+  붕 뜬다. 업계 기본값은 `not-a-knot` 계열 + 극값 탄젠트 clamp 인데 미검증이라 안 바꿨다.
+- **D173 — `build_poses.py --keyframe_ease {cubic,savgol}` (회전 채널을 위치 채널과 같은
+  보간기로, 2026-09-10 사용자 지시 "interpolation 을 rotation, translation 동일하게 cubic 혹은
+  savgol 로 통일해서 돌려주고 track+object-centric preset 으로 scene 몇개 fit 해서 depth warp 랑
+  속도, 가속도 그래프 시각화해줘봐").** D171-c 까지는 두 채널이 서로 다른 보간기를 썼다 —
+  위치는 `keyframe_follow_centers` 의 natural cubic, 회전은 `smooth_kf`(선형 slerp 折れ線 +
+  SO(3) Laplacian 4-pass). 같은 매듭 [0,10,19,29,38,48] 위에서 한쪽만 C² 면 "부드럽다"가 채널마다
+  다른 뜻이 된다. 이제 이름이 같으면 규약도 같다:
+  · `cubic` = `scipy.spatial.transform.RotationSpline` (각가속도 최소 C² 3차, **매듭을 정확히
+  통과**). 위치 쪽 `CubicSpline` 과 같은 성질이라 `aim_err_at_kf_deg` 가 0 이다. 단 경계조건은
+  다르다 — scipy 가 노출을 안 해서 끝점 각가속도 0(natural)을 못 건다.
+  · `savgol` = 선형 slerp 折れ線 + **쿼터니언** Savitzky-Golay(창 `--follow_smooth`=9, p=2,
+  반구 정렬 후 필터 → 재정규화). 위치 쪽 `savgol` 갈래와 창까지 같다. `smooth_kf` 와 마찬가지로
+  매듭을 정확히 통과하지 않으므로 keyframe roll assert 에서 제외 목록에 넣었다.
+  · 기본값은 **`smooth_kf` 그대로** (`build_poses`/`fit_hole_ladder` 둘 다). 배포 뱅크 재현이
+  안 깨진다. `emit_bank` 는 `fixed.keyframe_ease` 를 읽으므로 새 값도 그대로 되만들어진다.
+  · 실측 4-arm (`tmp/d171/run_kf_arms.py`, `tmp/d171/plot_kf_speed.py`; 3 scene x 4 preset
+  `track_{orbit_right,push_in_arc_left,pull_out_arc_right,crane_up}` x 4 hole, 완주 14행).
+  u_off=1.00 기하평균 — **병진**은 `path_u` u_trans6/u_cubic6 0.759 / u_savgol6 0.724,
+  `v_cv` 0.563 / 0.516, `acc_p95` 0.249 / 0.335. **회전**은 `turn_deg` 0.947 / 0.955 / 0.951 로
+  거의 같은데 `|dω|p95` 가 u_trans6 0.988 / u_cubic6 **1.160** / u_savgol6 **1.542**,
+  `|dω|max` 0.993 / 1.062 / 1.329 — 즉 **회전을 위치와 통일하면 각가속도가 되레 커진다**.
+  `smooth_kf`(Laplacian 4-pass) 가 회전에서는 여전히 가장 매끄럽다. u_trans6 와 u_cubic6 의
+  병진 수치가 소수점까지 같은 것이 정합성 확인 — 조준 변경은 위치를 안 건드린다.
+  · 판정 보류. 릴 5편(`tmp/d171/reel/u_kf_*.mp4`) + 그래프 33장(`tmp/d171/plots/`) 육안 확인 후.
+- **D171-c — `configs/bank/d171c_dynpose_kftrans.json` (2026-09-10).** d171 에서 fit 인자
+  **두 줄만** 더한다 (`--follow_keyframes 6 --follow_kf_interp cubic`). route/tau 는 안 돌고
+  `preset_route_d170.json` + `bank_d170` 을 재사용하므로 `hole_bank_d171` 과 행 단위 diff 다.
 - **D170 — `route_presets.py --orbit_min_span` (orbit 슬롯 방위각 게이트를 인자로 노출)
   + `configs/bank/d170_dynpose_orbitspan.json` (2026-09-10, 사용자 지시 "소스 영상 방위각 폭
   조건 빼서 돌려서 depth warp 영상 보여줘봐").** `ORBIT_MIN_SPAN_DEG = 120.0` 이 상수로 박혀

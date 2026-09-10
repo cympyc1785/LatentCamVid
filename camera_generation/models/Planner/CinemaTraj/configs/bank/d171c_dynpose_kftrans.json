@@ -1,0 +1,89 @@
+{
+  "_why": "D171-c (사용자 지시 2026-09-10 \"recon 이 깔끔한 sparse keyframe 들을 기준으로 translation 도 interpolate 해보는건 어떰\" → \"일단 cubic 으로 하되\" → \"그냥 translation 도 통일성 있게 keyframe 6개로 해줘\") — **d171 에서 fit 인자 두 줄만 더한다** (`--follow_keyframes 6 --follow_kf_interp cubic`). track_* preset 이 subject 를 매 프레임 따라가서 위치 채널이 떨리는 문제. 지금까지는 저역통과(`smooth_follow_centers`, savgol w=9 p=2) 하나뿐이었는데, 그건 보간기가 아니라 **평활기**라 keyframe 을 통과하지 않고 경로를 깎는다.",
+
+  "_what_changed": "fit 에 `--follow_keyframes 6 --follow_kf_interp cubic`. route/tau/graph/cloud 는 안 돈다 — d170 의 `preset_route_d170.json` + τ 뱅크 `bank_d170` 재사용. d171 대비 변수는 이 두 인자뿐이라 `hole_bank_d171` 과 행 단위 diff 가 된다.",
+
+  "_keyframe_count_why": "6 인 이유는 `--aim_keyframes 6` 과 맞추기 위해서다. 두 채널 모두 `build_poses.keyframe_indices` 와 같은 `rint(linspace(0, F-1, n))` + dedupe 를 쓰므로 F=49 에서 **정확히 같은 프레임** [0,10,19,29,38,48] 에 앉는다 (간격 10/9/10/9/10 — 완전 균등은 아니다). 이름만 같은 게 아니라 실제로 같은 매듭이다.",
+
+  "_interp_why": "3 arm 실측 17행(3 scene x 2 preset x 4 hole 단, `tmp/d171/kf_speed_table.py`). off=1.00 기하평균 — 속력 변화량 `|dv|p95` savgol 0.485 / cubic 0.493 (**동률**), `v_cv` 0.849 / 0.869, `acc_p95` 0.636 / 0.591. 갈리는 건 **경로 보존** `path_u` savgol 0.916 vs cubic 0.953 (최악 bmx track_truck_right hole0.1: savgol −26.1% vs cubic −14.7%) — savgol 이 keyframe 을 안 지나기 때문이다. jerk 는 cubic 0.209 로 압도하지만 **판정에 쓰면 안 된다**: cubic 은 구간별 3차라 jerk 가 구간 상수가 되어(전 17행 `jerk_p95 == jerk_max`) 구조적으로 이긴다.",
+
+  "_gate_order": "보간은 `fit_tau` **앞**에서 위치 채널에 들어간다 (`build_poses.py:757` → `offsets_world`). 따라서 τ 도, hole/G1/OBB/subject_visible_frac 게이트도 전부 **보간된 궤적**을 렌더해서 잰다 (`fit_hole_ladder.probe()` → `measure_trajectory`). 조준(`reference_centers`)은 raw 를 그대로 쓴다 (D73) — 회전 쪽 평활은 `--aim_keyframes` 담당이다.",
+
+  "_bc_type_note": "`CubicSpline(bc_type=\"natural\")` 이라 프레임 0/48 에서 f''=0 이 강제된다 — 시작·정지가 약간 붕 뜬다. 업계 기본값(Blender Continuous Acceleration / Unity ClampedAuto / Maya Auto)은 `not-a-knot` 계열 + 국소 극값 탄젠트 clamp 다. 미검증이라 이번 세대에서는 안 바꾼다.",
+
+  "generation": "d171c",
+  "output_root": "out_dynpose",
+  "eval_data": "/data1/cympyc1785/LatentCamVid/DATA/DynPose-LBM",
+  "tau_bank_dir": "bank_d170",
+  "bank_dir": "hole_bank_d171c",
+  "stages": [
+    "fit",
+    "emit"
+  ],
+  "require_markers": [],
+  "fit": {
+    "args": [
+      "--hole_ladder",
+      "0.20",
+      "--fallback_ladder",
+      "--fallback_target",
+      "5",
+      "--retry_status",
+      "clamped_low",
+      "--retry_suspect",
+      "aim_target_subject_lost",
+      "hole_over_budget",
+      "motion_preset_no_motion",
+      "static_start_collision",
+      "--suspect_hole",
+      "0.35",
+      "--aim_keyframes",
+      "6",
+      "--keyframe_aim",
+      "auto",
+      "--keyframe_ease",
+      "smooth_kf",
+      "--fixed_focal",
+      "--deroll",
+      "--orbit_fixed_sweep",
+      "--min_sweep_deg",
+      "20",
+      "--behind_src_frames",
+      "49",
+      "--tau_ref",
+      "follow",
+      "--tracking",
+      "lock",
+      "--preset_tracking",
+      "--behind_min_zcam",
+      "0.02",
+      "--behind_clear_src_ratio",
+      "0",
+      "--collision_time_match",
+      "--collision_source",
+      "depth",
+      "--area_timeline",
+      "--composition",
+      "--composition_min_area",
+      "0.004",
+      "--composition_max_nodes",
+      "3",
+      "--device",
+      "cuda",
+      "--tau_denom",
+      "S",
+      "--tau_knob_min",
+      "0.005",
+      "--min_subject_visible",
+      "0.6",
+      "--follow_keyframes",
+      "6",
+      "--follow_kf_interp",
+      "cubic"
+    ]
+  },
+  "emit": {
+    "args": []
+  },
+  "_scenes": "d170/d171 과 같은 4편 (016a6379, 0220a51f, 019bbbc2, 02044b66)."
+}

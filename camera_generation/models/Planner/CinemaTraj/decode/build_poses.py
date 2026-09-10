@@ -80,6 +80,7 @@ from os import path
 import numpy as np
 from scipy.interpolate import CubicSpline
 from scipy.signal import savgol_filter
+from scipy.spatial.transform import Rotation, RotationSpline
 
 CINEMATRAJ_ROOT = path.dirname(path.dirname(path.abspath(__file__)))
 if CINEMATRAJ_ROOT not in sys.path:
@@ -330,16 +331,8 @@ def smooth_kf_schedule(rotations: list, frames: list, num_frames: int,
     양 끝은 고정한다 (frame0 은 어차피 소스 회전으로 덮어써지고, 마지막은 preset 끝점이다).
     `lam` 은 pass 당 이동 비율, `passes` 는 반복 횟수 — 둘의 곱이 대략 평활 폭을 정한다.
     """
-    schedule = [None] * num_frames
-    for index in range(len(frames) - 1):
-        a, b = frames[index], frames[index + 1]
-        for f in range(a, b + 1):
-            schedule[f] = slerp_rotation(rotations[index], rotations[index + 1], (f - a) / (b - a))
-    for f in range(num_frames):                      # keyframe 이 F-1 에 못 미치는 경우 꼬리 채움
-        if schedule[f] is None:
-            schedule[f] = np.asarray(rotations[-1], dtype=float).copy()
-
-    current = np.stack([np.asarray(r, dtype=float) for r in schedule])
+    current = np.stack([np.asarray(r, dtype=float)
+                        for r in _slerp_polyline(rotations, frames, num_frames)])
     if num_frames < 3 or passes <= 0 or lam <= 0.0:
         return [current[f] for f in range(num_frames)]
     for _ in range(int(passes)):
@@ -353,6 +346,75 @@ def smooth_kf_schedule(rotations: list, frames: list, num_frames: int,
             updated[f] = current[f] @ rotation_exp(axis, float(np.linalg.norm(step)) * lam / 2.0)
         current = updated
     return [current[f] for f in range(num_frames)]
+
+
+def _slerp_polyline(rotations: list, frames: list, num_frames: int):
+    """keyframe 사이를 선형 slerp 로 채운 折れ線. `smooth_kf`/`savgol` 의 공통 출발점."""
+    schedule = [None] * num_frames
+    for index in range(len(frames) - 1):
+        a, b = frames[index], frames[index + 1]
+        for f in range(a, b + 1):
+            schedule[f] = slerp_rotation(rotations[index], rotations[index + 1], (f - a) / (b - a))
+    for f in range(num_frames):                      # keyframe 이 F-1 에 못 미치면 꼬리 채움
+        if schedule[f] is None:
+            schedule[f] = np.asarray(rotations[-1], dtype=float).copy()
+    return schedule
+
+
+def cubic_rotation_schedule(rotations: list, frames: list, num_frames: int):
+    """SO(3) 3차 spline (D173). **위치 채널의 `CubicSpline` 과 같은 규약**을 회전에 건다.
+
+    왜 새로 만드나 (사용자 지시 2026-09-10, "interpolation 을 rotation, translation 동일하게
+    cubic 혹은 savgol 로 통일"): 지금까지 두 채널이 서로 다른 보간기를 썼다 — 위치는
+    `keyframe_follow_centers` 의 natural cubic, 회전은 `smooth_kf`(선형 slerp 折れ線 + Laplacian
+    평활)다. 같은 매듭 [0,10,19,29,38,48] 위에서 한쪽만 C² 고 한쪽은 깎은 折れ線이면 "부드럽다"
+    는 말이 채널마다 다른 뜻이 된다.
+
+    `scipy.spatial.transform.RotationSpline` 은 각가속도를 최소화하는 C² 3차 spline 이고
+    **매듭을 정확히 통과한다** — 위치 쪽 `CubicSpline` 과 정확히 같은 성질이라 (통과 + C²)
+    두 채널이 한 규약이 된다. `smooth_kf` 와 달리 `aim_err_at_kf_deg` 가 0 이다.
+
+    경계조건은 `CubicSpline(bc_type="natural")` 과 **다르다** — RotationSpline 은 끝에서 각가속도
+    0 을 강제하지 않는다 (scipy 가 노출을 안 한다). 그래서 시작·정지의 붕 뜨는 느낌은 위치 쪽만
+    있다. 이 비대칭은 실측으로 확인할 것 (`--keyframe_ease cubic` 릴).
+    """
+    knots = np.asarray(frames, dtype=float)
+    if len(knots) < 2 or num_frames < 2:
+        return [np.asarray(rotations[0], dtype=float).copy() for _ in range(num_frames)]
+    spline = RotationSpline(knots, Rotation.from_matrix(np.stack(
+        [np.asarray(r, dtype=float) for r in rotations])))
+    matrices = spline(np.arange(num_frames, dtype=float)).as_matrix()
+    return [matrices[f] for f in range(num_frames)]
+
+
+def savgol_rotation_schedule(rotations: list, frames: list, num_frames: int,
+                             window: int = 9, polyorder: int = 2):
+    """선형 slerp 折れ線 + Savitzky-Golay (D173). 위치 채널 `savgol` 갈래와 같은 규약.
+
+    위치 쪽 `keyframe_follow_centers(interp="savgol")` 가 "linear 로 채운 뒤
+    `smooth_follow_centers`(w=9, p=2)" 인 것과 한 글자도 다르지 않게 맞춘다 — 다른 점은 회전이
+    벡터공간이 아니라는 것뿐이다. 필터는 **쿼터니언 성분**에 걸고 다시 정규화한다. 부호는
+    이웃과 내적이 음수면 뒤집어 연속으로 만든다 (q 와 −q 가 같은 회전이라 안 하면 필터가
+    가짜 점프를 본다).
+
+    `smooth_kf`(Laplacian) 와 무엇이 다른가: Laplacian 은 이웃 2개만 보는 반복 평활이라 창이
+    `passes×lam` 으로 **간접적으로** 정해지는데, 여기는 위치 쪽과 **같은 창 9**를 명시적으로
+    쓴다. 즉 두 채널의 평활 폭이 같아진다. 대가는 같다 — keyframe 을 정확히 통과하지 않는다
+    (`aim_err_at_kf_deg` 로 찍힌다).
+    """
+    schedule = _slerp_polyline(rotations, frames, num_frames)
+    quaternions = Rotation.from_matrix(np.stack(schedule)).as_quat()
+    for f in range(1, len(quaternions)):             # 반구 정렬 — q 와 −q 의 가짜 점프 제거
+        if float(np.dot(quaternions[f], quaternions[f - 1])) < 0.0:
+            quaternions[f] = -quaternions[f]
+    window = int(window)
+    window = min(window, len(quaternions) - (1 - len(quaternions) % 2))   # 홀수 & <= N
+    if window > polyorder + 1:
+        quaternions = savgol_filter(quaternions, window, polyorder, axis=0, mode="interp")
+    norms = np.linalg.norm(quaternions, axis=1, keepdims=True)
+    quaternions = quaternions / np.maximum(norms, 1e-12)
+    matrices = Rotation.from_quat(quaternions).as_matrix()
+    return [matrices[f] for f in range(num_frames)]
 
 
 def aim_keyframe_rotations(poses: np.ndarray, rel_local: np.ndarray, targets: np.ndarray,
@@ -823,7 +885,8 @@ def build_poses(decision: dict, graph: dict, board: dict | None = None,
         # 간격으로 정해진다 (F=49, N=5 면 12프레임 안에 넘어간다).
         assert keyframe_aim in ("auto", "target", "preset_rel"), \
             f"모르는 keyframe_aim: {keyframe_aim}"
-        assert keyframe_ease in ("smoothstep", "linear", "arclen", "arclen_kf", "smooth_kf"), \
+        assert keyframe_ease in ("smoothstep", "linear", "arclen", "arclen_kf", "smooth_kf",
+                                "cubic", "savgol"), \
             f"모르는 keyframe_ease: {keyframe_ease}"
         mode = keyframe_aim if keyframe_aim != "auto" else (
             "target" if aim == "look_at" else "preset_rel")
@@ -831,15 +894,21 @@ def build_poses(decision: dict, graph: dict, board: dict | None = None,
         frames = keyframe_indices(num_frames, int(aim_keyframes))
         rotations = aim_keyframe_rotations(poses, rel_local, reference, up_world, frames,
                                            c2w_start[:3, :3], mode)
-        if keyframe_ease in ("arclen", "arclen_kf", "smooth_kf"):
+        if keyframe_ease in ("arclen", "arclen_kf", "smooth_kf", "cubic", "savgol"):
             # D86. 구간별 ease 를 버리고 누적 호길이 위에서 잇는다 — 각속도 펌핑 제거.
             # arclen 은 전역 smoothstep(keyframe 시각이 밀린다), arclen_kf 는 PCHIP(시각 보존).
             # D89 smooth_kf 는 재타이밍이 아니라 折れ線 자체를 깎는다 — aim_err 를 대가로 낸다.
+            # D173 cubic/savgol 은 위치 채널(`--follow_kf_interp`)과 **같은 이름 = 같은 규약**이다.
             schedule = (arclen_rotation_schedule(rotations, num_frames)
                         if keyframe_ease == "arclen"
                         else smooth_kf_schedule(rotations, frames, num_frames,
                                                 smooth_passes, smooth_lambda)
                         if keyframe_ease == "smooth_kf"
+                        else cubic_rotation_schedule(rotations, frames, num_frames)
+                        if keyframe_ease == "cubic"
+                        else savgol_rotation_schedule(rotations, frames, num_frames,
+                                                      follow_smooth)
+                        if keyframe_ease == "savgol"
                         else arclen_kf_schedule(rotations, frames, num_frames))
             for f in range(num_frames):
                 poses[f][:3, :3] = schedule[f]
@@ -942,8 +1011,9 @@ def build_poses(decision: dict, graph: dict, board: dict | None = None,
         # 소스 카메라의 기울기를 그대로 물려받으므로 제외하고, `preset_rel` 은 preset 회전이
         # 얹혀 있어 정의상 0 이 아니다.
         if keyframe_info["mode"] == "target":
-            if keyframe_ease in ("arclen", "smooth_kf"):
-                # smooth_kf 는 折れ線을 깎느라 keyframe 회전을 정확히 통과하지 않는다 (의도된 것).
+            if keyframe_ease in ("arclen", "smooth_kf", "savgol"):
+                # smooth_kf/savgol 은 折れ線을 깎느라 keyframe 회전을 정확히 통과하지 않는다
+                # (의도된 것 — D173 savgol 은 위치 채널과 같은 창 저역통과다).
                 # 그러니 `poses[frames]` 의 roll 은 조준 오류가 아니라 평활량이다 — 대신 그 양은
                 # `aim_err_at_kf_deg` 로 따로 찍는다. 판정은 arclen 과 같이 회전 자체에서.
                 checked = [abs(r) for r in keyframe_info["keyframe_rolls"][1:]]
@@ -1173,8 +1243,12 @@ if __name__ == "__main__":
     # D86. arclen_kf = 누적 호길이 PCHIP (각속도 평탄 + keyframe 시각 보존).
     # arclen = 누적 호길이 위 전역 smoothstep (더 평탄하지만 keyframe 시각이 밀린다).
     # smoothstep 은 D71~D84 기존 동작 (배포된 뱅크 전량), linear 는 구간별 등속.
+    # D173. cubic / savgol 은 **위치 채널 `--follow_kf_interp` 와 같은 이름 = 같은 규약**이다
+    # (cubic = 매듭 통과 C² spline, savgol = 折れ線 + 창 `--follow_smooth` 저역통과). 두 채널을
+    # 같은 보간기로 통일하고 싶을 때 쓴다. 기본값은 여전히 smooth_kf = 배포 뱅크 동작.
     parser.add_argument("--keyframe_ease", default="smooth_kf",
-                        choices=["smoothstep", "linear", "arclen", "arclen_kf", "smooth_kf"])
+                        choices=["smoothstep", "linear", "arclen", "arclen_kf", "smooth_kf",
+                                 "cubic", "savgol"])
     # 맥동비는 p4 에서 이미 포화(4.58 -> p24 4.36)하는데 keyframe 조준오차는 계속 커진다
     # (kf_dev med 1.53° -> 3.85°). p4 가 효율 구간의 시작점이라 기본값이다.
     parser.add_argument("--smooth_passes", default=4, type=int)      # smooth_kf 반복 횟수

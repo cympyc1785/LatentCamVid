@@ -1866,8 +1866,10 @@ if __name__ == "__main__":
     # D89. 기본값이 `SHAPE_DEFAULTS` 가 아니다 — 그쪽은 **키가 없는 예전 뱅크를 재현할 때의
     # 폴백**이라 영원히 `smoothstep` 이어야 하고, 여기는 **새로 굽는 뱅크의 기본값**이다.
     # 새 뱅크는 `fixed.keyframe_ease` 에 값을 명시적으로 적으므로 폴백을 타지 않는다.
+    # D173. `cubic`/`savgol` 은 위치 채널 `--follow_kf_interp` 와 같은 이름 = 같은 규약이다.
     parser.add_argument("--keyframe_ease", default="smooth_kf", type=str,
-                        choices=["smoothstep", "linear", "arclen", "arclen_kf", "smooth_kf"])
+                        choices=["smoothstep", "linear", "arclen", "arclen_kf", "smooth_kf",
+                                 "cubic", "savgol"])
     # D90. `smooth_kf` 스케줄 전용 인자. 여기 기본값은 `build_poses` **서명** 기본값(12/0.5)과
     # 같아야 한다 — 예전에는 이 스크립트가 인자를 아예 안 넘겨서 서명 기본값으로 구웠고,
     # `emit_bank` 는 자기 CLI 기본값(4)으로 되만들어 회전만 조용히 어긋났다. 이제 `fixed` 에 싣는다.

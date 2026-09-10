@@ -1,0 +1,36 @@
+{
+  "_why": "D172 — dynpose-100k 10,346편에 **graph 만** 굽는다. 사용자 지시는 '9-10 cloud까지만 돌리도록해줘' 였으나 실측 후 cloud 를 뺐다: `cloud.npz` 가 씬당 1.44 GB (p50 1475 MB, n=447) 라 10,346편이면 15.2 TB 인데 /data1 여유가 2.9 TB 다. 약 1,970편에서 포화해 /data1 을 쓰는 모든 사용자를 막는다. `scene_graph.json` 은 씬당 144 KB 라 10k 여도 1.5 GB 로 안전하다. cloud 는 D171(hole 예산·occlusion 게이트) 이 확정된 뒤 배치 단위로 cloud->tau->fit->emit 를 돌고 그 배치의 cloud 를 지우는 방식으로 간다 (2026-09-10 사용자 결정).",
+
+  "_eval_data": "`DATA/DynPose-100K`. `eval_data/recon_and_seg/<v>` 는 875편에 대해 `DATA/DynPose-LBM` 로의 심볼릭 링크이고, `eval_data/seg_instances` 는 100K 쪽에 실디렉토리로 따로 있다. 두 코퍼스의 seg 를 대조하면 공통 877편 중 `masks.npz` 크기가 다른 건 `015b197d-2bcf-466e-9ae5-95012be884ac` **1편뿐**이다 (sam3 를 `--done_root DynPose-LBM --skip_done` 으로 돌려 재사용했기 때문). 그래서 아래 marker 재사용이 성립한다.",
+
+  "_marker_reuse": "graph marker 를 `.graph_d172` 가 아니라 **`.graph_d157` 그대로** 쓴다. 이미 굽힌 391편을 다시 굽지 않으려는 것이고, 근거는 위 `_eval_data` — 입력(recon_and_seg 심볼릭 공유 + seg 876/877 동일)과 args 가 d157 과 글자 단위로 같다. 예외인 `015b197d` 는 마커를 지워 강제 재굽기한다. **args 를 한 글자라도 바꾸면 이 재사용은 즉시 무효**이니 그때는 marker 를 `.graph_d172` 로 바꿀 것.",
+
+  "_prereq": "graph 는 ① `recon_and_seg/<v>/dynamic_mask` 가 **SAM3 합집합으로 덮인 뒤**여야 하고(recon 직후엔 전 프레임 0 이라 정적 subject 만 남는다 — `dynpose_dynamic_mask_from_seg.py` 가 덮는다) ② `out_dynpose/<v>/geocalib_gravity.json` 사이드카가 있어야 한다(`--gravity_source geocalib` 가 없으면 assert). 사이드카는 2026-09-10 기준 880/10,346 뿐이라 9,466편을 `scripts/geocalib_gravity.py` (env `geocalib`) 로 먼저 굽는다. 체인 순서: sam3 -> dynmask -> geocalib -> graph.",
+
+  "_runtime": "실측 — geocalib 3.5 s/편(모델 로드 35 s 제외), graph 85.5 s/편. graph 를 16 샤드(GPU 0~3 x4)로 돌리면 9,955편 x 85.5 s / 16 = 약 14.7 시간.",
+
+  "generation": "d172",
+  "output_root": "out_dynpose",
+  "eval_data": "/data1/cympyc1785/LatentCamVid/DATA/DynPose-100K",
+  "tau_bank_dir": "bank_d172",
+  "bank_dir": "hole_bank_d172",
+  "stages": ["graph"],
+  "require_markers": [],
+  "graph": {
+    "marker": ".graph_d157",
+    "args": [
+      "--scene_scale_mode", "points_first_cam", "--scene_scale_stride", "1",
+      "--gravity_source", "geocalib",
+      "--no_skip_done", "--no_overlay", "--no_topdown"
+    ]
+  },
+  "cloud": {
+    "_disabled": "디스크 때문에 이 세대에서는 안 돈다 (§_why). 배치로 돌릴 때 쓰라고 d157 과 같은 args 를 남겨 둔다.",
+    "marker": ".cloud_d157",
+    "args": [
+      "--scene_scale_mode", "points_first_cam", "--scene_scale_stride", "1",
+      "--no_skip_done"
+    ]
+  },
+  "emit": {"args": []}
+}

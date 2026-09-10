@@ -1,7 +1,7 @@
 {
   "_why": "D170 ablation (사용자 지시 2026-09-10 \"소스 영상 방위각 폭 조건 빼서 돌려서 depth warp 영상 보여줘봐\") — **d169 에서 route 한 줄만 바꾼다** (`--orbit_min_span 0`). `ORBIT_MIN_SPAN_DEG=120` 은 실측이 아니라 \"좁은 span 에서 선회하면 점군에 자료 없는 면으로 넘어간다\"는 추론으로 정한 값인데, d169 파일럿에서 대가가 드러났다 — 40 anchor 중 29개(72.5%)의 orbit 슬롯을 막고 그 자리를 backfill 이 떠맡으면서 `pull_out_arc_right` 통과율이 100%(4/4) → 16.7%(1/6) 로 무너졌다. 게이트를 끄고 실제 depth warp 을 봐서 문턱이 맞는지 육안 판정한다.",
   "_what_changed": "route 에 `--orbit_min_span 0` 하나. span 과 무관하게 orbit 슬롯을 만든다. `--orbit_fallback drop` 은 그대로 두지만 게이트가 꺼지면 그 갈래가 아예 안 불린다 (s_curve 는 여전히 0행). 나머지 인자는 d169 와 글자 단위로 같다.",
-  "_preset_dist": "TBD — 실행 후 채운다.",
+  "_preset_dist": "4편 8 anchor 의 route 산출 slot preset (backfill 제외): dolly_out 4, crane_up 4, track_pull_out_arc_right 2, track_dolly_in_look_at 2, dolly_in_look_at 2, track_orbit_right 1, orbit_right 1. **표본 4편이라 d166/d169 의 21편 분포와 나란히 놓지 말 것** — 게이트를 껐는데도 orbit 계열이 2/16 에 그친 건 span 이 아니라 slot_plan grid2x2 가 anchor 당 슬롯을 2개로 묶기 때문이다.",
   "_diff_vs_d168": "d169 + `--orbit_min_span 0`. tau/fit/emit/graph/cloud 인자와 게이지는 d168/d169 와 글자 단위로 같다 — 이번 세대가 시험하는 축은 **orbit span 게이트 하나**다.",
   "generation": "d170",
   "output_root": "out_dynpose",
@@ -157,7 +157,8 @@
       "--tau_denom",
       "S",
       "--tau_knob_min",
-      "0.005"
+      "0.005",
+      "--min_subject_visible", "0"
     ]
   },
   "emit": {

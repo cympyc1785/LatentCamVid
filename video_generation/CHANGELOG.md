@@ -7,6 +7,54 @@
 ## [Unreleased]
 
 ### Added
+- **D172 — `configs/bank/d172_dynpose100k_graph.json` (dynpose-100k 10,346편 graph 전용 세대)
+  + `tmp/d172/chain_geocalib_graph.py` (2026-09-10, 사용자 지시 "cloud까지만 돌리도록해줘" 를
+  실측 후 graph 까지로 좁힌 것 — 같은 날 사용자 결정).** 지시를 글자대로 이행하면 /data1 이
+  찬다: `cloud.npz` 는 씬당 **1.44 GB**(p50 1475 MB / p95 1527 MB / max 1535 MB, n=447 실측)라
+  10,346편이면 **15.2 TB** 인데 여유는 **2.9 TB** 다 — 약 1,970편에서 포화해 /data1 을 쓰는
+  모든 사용자를 막는다. `scene_graph.json` 은 씬당 144 KB 라 10k 여도 1.5 GB 로 안전하다.
+  그래서 이 세대는 `stages: ["graph"]` 뿐이고, cloud 는 D171(hole 예산·occlusion 게이트)이
+  확정된 뒤 배치 단위로 cloud→tau→fit→emit 를 돌고 그 배치의 cloud 를 지우는 방식으로 간다.
+  · `cloud.npz` 내부 실측(43.5M 점): `points_world` f32 522 MB + `indices` i32 522 MB +
+  `visible_packed` u8 305 MB + `colors` u8 131 MB. `indices` 는 (f,h,w) 가 **raster 순서의
+  순증가 부분집합**임을 확인해서 49×720×1280 비트마스크 5.4 MB 로 줄일 수 있고
+  `points_world`/`colors` 는 depth+K+c2w / 소스 영상에서 재계산된다 — 즉 cloud 는 순수 캐시다
+  (재생성 61 s/편, 캐시 로드 2.3 s). 이 축소는 소비처 10곳(`render_bank_videos.py:213`,
+  `render_pred_depth_warp.py:140`, `audit_bank_geometry.py:174`, `eval_subject_in_frame.py:193`
+  등)의 로더를 전부 고쳐야 해서 이번엔 안 한다.
+  · **graph marker 를 `.graph_d172` 가 아니라 `.graph_d157` 그대로 재사용**한다. 이미 굽힌
+  391편을 다시 굽지 않으려는 것이고, 근거는 입력 동일성 실측이다 — `recon_and_seg/<v>` 는
+  875편에 대해 `DATA/DynPose-LBM` 로의 심볼릭 링크이고, `seg_instances` 는 100K 쪽 실디렉토리
+  인데 공통 877편 중 `masks.npz` 크기가 다른 건 `015b197d-…` **1편뿐**이다(sam3 를
+  `--done_root DynPose-LBM --skip_done` 으로 돌려 재사용했다). 그 1편은 체인이 마커를 지워
+  강제 재굽기한다. args 를 한 글자라도 바꾸면 이 재사용은 무효다.
+  · 체인은 **sam3 → dynmask → geocalib → graph** 다. graph 는 ① `dynamic_mask/` 가 SAM3
+  합집합으로 덮인 뒤여야 하고(recon 직후엔 전 프레임 0 이라 그대로 구우면 동적 노드 0 인
+  그래프가 **에러 없이** 나온다) ② `geocalib_gravity.json` 사이드카가 있어야 한다
+  (`--gravity_source geocalib` 은 없으면 assert). 사이드카는 880/10,346 뿐이라 9,466편을
+  `scripts/geocalib_gravity.py`(env `geocalib`, GPU 0~3 4샤드)로 먼저 굽는다.
+  · 실측 런타임 — geocalib 3.5 s/편(모델 로드 35 s 제외), graph 85.5 s/편. graph 12샤드로
+  9,955편 ≈ 19.7 시간. 죽었다 판정은 PID 로, 단계 사이에는 완료율 게이트(dynmask 표본 400편
+  95% / 사이드카 97%)를 둔다.
+- **D171 — `build_poses.py:keyframe_follow_centers()` + `--follow_keyframes` /
+  `--follow_kf_interp` (`fit_hole_ladder.py`, `emit_bank.py` 경유, 2026-09-10, 사용자 지시
+  "현재 track일 경우 너무 물체를 따라가서 흔들리는데 recon이 깔끔한 sparse keyframe들을
+  기준으로 translation도 interpolate해보는건 어떰?").** follow 위치 채널을 균등 keyframe
+  N개로 줄였다가 `linear`/`savgol`/`cubic` 으로 다시 채운다. `0`(기본) 이면 예전 저역통과
+  경로(`smooth_follow_centers`, savgol w=9 p=2)를 글자 그대로 탄다.
+  · 9-uniform 3 arm 실측(bmx / snowboard / 02044b66, track 2 preset). **knob 은 arm 사이에
+  사실상 동일**하고(bmx `track_truck_right` knob 0.6269 전 arm 동일, hole 0.1684~0.1775,
+  τ 0.289~0.308) 바뀌는 건 떨림뿐이다. pos jerk p95 — bmx `track_truck_right`
+  off 0.07089 / savgol 0.06112 / **cubic 0.03086**, snowboard off 0.00434 / savgol 0.00301 /
+  **cubic 0.00128**, 02044b66 off 0.01194 / savgol 0.01223 / **cubic 0.00700**. cubic 은
+  `p95 == max` 라 매듭 사이가 균일하다. path_len 대가는 bmx `track_truck_right` 에서
+  savgol **−25%**(코너를 갉는다) vs cubic −15%.
+  · `decision_fingerprint` 에는 **켰을 때만** 키가 들어간다(2계층 규칙) — 안 그러면 D171
+  이전에 구운 뱅크의 지문이 전부 바뀐다. `SHAPE_DEFAULTS` 폴백도 같은 `0`/`"cubic"` 이라
+  옛 뱅크는 `emit_bank` 재구성에서 비트 단위로 그대로다. `main()` 의 `decision_fingerprint(…)`
+  호출은 positional drift 를 막으려고 키워드 인자로 바꿨다.
+  · **arm 채택은 아직 안 했다** — 릴 5편 전달 후 사용자 선택 대기(D171-c). 그래서 CLI 기본값도
+  `0`(끔) 이다.
 - **D170 — `route_presets.py --orbit_min_span` (orbit 슬롯 방위각 게이트를 인자로 노출)
   + `configs/bank/d170_dynpose_orbitspan.json` (2026-09-10, 사용자 지시 "소스 영상 방위각 폭
   조건 빼서 돌려서 depth warp 영상 보여줘봐").** `ORBIT_MIN_SPAN_DEG = 120.0` 이 상수로 박혀
@@ -615,6 +663,27 @@
   재현할 때의 근거 기록이다. 첫 사용처는 `configs/bank/d150S.json` / `d150L.json`.
 
 ### Changed
+- **D171 — `fit_hole_ladder.py --min_subject_visible` 기본값 `0.0`(측정만) → **`0.6`(판정)**
+  + 옛 9 세대 config 를 `"--min_subject_visible", "0"` 으로 고정 + `configs/bank/
+  d171_dynpose_occlusion.json` 신설 (2026-09-10, 사용자 지시 "어차피 hole 볼 때 랜더링하니까
+  subject_visible_frac를 판정으로 올려줘").** D112 에서 열로만 재던 가림을 이분법 게이트로
+  올린다. `--min_subject_visible 0` 이면 예전 동작으로 정확히 되돌아가고, 재현이 깨지지 않게
+  d150L/d150L2/d150S/d151/d157_dynpose/d166/d168/d169/d170 **9개 config 에 `0` 을 박았다**
+  (각 파일 3줄 변경).
+  · 임계 0.6 의 근거는 d169 dynpose 21편 164행 실측 분위수다 — p05 0.508 / p10 0.562 /
+  p25 0.827 / p50 0.971, 임계별 태그 수 0.30 → 7행(4.3%) / 0.50 → 8행(4.9%) /
+  **0.60 → 20행(12.2%)** / 0.70 → 30행(18.3%) / 0.80 → 36행(22.0%). 0.5 이하는 분포 바닥만
+  긁어 `027514bb orbit_right`(`subject_in_frame 1.0` 인데 `frac 0.542 / min 0.007` 로 벽에
+  가림)를 놓치고, 0.7 이상은 usable 60행 중 8행(13%)의 손잡이를 깎기 시작한다(0.6 은 2행).
+  · **행을 버리지 않는다** — 이분법이 가시비율이 임계를 넘을 때까지 손잡이를 줄이고, 하한에서도
+  못 넘기면 `status=clamped_low` + `binding=occlusion` 이 되어 기존 `--retry_status
+  clamped_low` 가 다음 층 preset 으로 넘긴다.
+  · d170 vs d171 4편 24행 diff 실측 — **바뀐 건 2행뿐**이고 나머지 22행은 손잡이까지 동일하다.
+  `019bbbc2 stat_0__orbit_right__hole0.2` knob 3.000→0.502 / seen 0.5055→0.6116 /
+  status `shape_limited`→`occlusion_limited`, `02044b66 dyn_0__track_pull_out_arc_right__hole0.2`
+  knob 1.375→0.192 / seen **0.0071→0.9853** / binding `hole`→`obb`. `hole_static`·`target_hole`
+  은 불변이라 게이트가 예산이 아니라 손잡이만 건드린 게 확인된다. 렌더 비용은
+  284.1 s → 325.9 s (**+14.7%**) — 코드 주석의 "2배"가 아니다.
 - **정리 — `/tmp` 기본 출력 경로 13곳을 `<repo>/tmp/` 로, `time_vista_stages.py --cuda` 기본값을
   `6` → `0` 으로 (2026-09-09, 사용자 지시 "우리 돌리는 파이프라인 영향 안가는 선에서 쭉
   진행해줘").** 둘 다 CLAUDE.md 규칙 위반이 argparse **기본값**에 박혀 있던 경우다 —

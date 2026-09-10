@@ -78,6 +78,7 @@ import sys
 from os import path
 
 import numpy as np
+from scipy.interpolate import CubicSpline
 from scipy.signal import savgol_filter
 
 CINEMATRAJ_ROOT = path.dirname(path.dirname(path.abspath(__file__)))
@@ -121,6 +122,7 @@ def decision_fingerprint(decision: dict, start_mode: str = "source_frame0",
                          # `"0"` vs `"0.0"` 로 갈리고, `emit.py:169` 가 **손대지도 않은 poses 를
                          # stale 로 오판**한다 (camel 실측).
                          follow_gain: float | str = "0", follow_smooth: int = 9,
+                         follow_keyframes: int = 0, follow_kf_interp: str = "cubic",
                          deroll: bool = False):
     """decision 에서 pose 를 실제로 바꾸는 필드만 뽑아 만든 지문.
 
@@ -160,6 +162,13 @@ def decision_fingerprint(decision: dict, start_mode: str = "source_frame0",
     # **D73 이전에 만든 뱅크 전량이 거짓으로 stale 판정**된다 (ramp/keyframe 과 같은 규칙).
     if payload["follow_gain"] not in ("0", "0.0"):
         payload["follow_smooth"] = int(trajectory.get("follow_smooth", follow_smooth))
+        # D171. 같은 두 층 규칙 — keyframe 보간을 **켠 뱅크에서만** 지문에 들어간다. 항상 넣으면
+        # D171 이전 뱅크 전량이 거짓 stale 이 된다. `kf_interp` 는 keyframe 이 켜졌을 때만
+        # pose 를 바꾸므로 그때만 같이 싣는다.
+        keyframes = int(trajectory.get("follow_keyframes", follow_keyframes))
+        if keyframes > 1:
+            payload["follow_keyframes"] = keyframes
+            payload["follow_kf_interp"] = str(trajectory.get("follow_kf_interp", follow_kf_interp))
     # D99. 껐을 때만 키를 빼는 이유는 follow_smooth 와 같다 — 넣어 버리면 D99 이전 뱅크 전량이
     # 거짓 stale 이 된다. 켠 뱅크는 자기들끼리만 비교하면 되므로 그때만 지문에 들어간다.
     if deroll:
@@ -425,6 +434,52 @@ def smooth_follow_centers(centers_world: np.ndarray, window: int = 9, polyorder:
     return savgol_filter(centers, window, polyorder, axis=0, mode="interp")
 
 
+def keyframe_follow_centers(centers_world: np.ndarray, keyframes: int = 0,
+                            interp: str = "cubic", smooth_window: int = 9,
+                            polyorder: int = 2):
+    """follow **위치 채널**을 균등 keyframe 몇 개로 줄였다가 다시 채운다 (D171).
+    `keyframes <= 1` 이면 아무것도 안 하고 `smooth_follow_centers` 로 넘긴다 = 기존 동작.
+
+    왜 저역통과(`smooth_follow_centers`) 말고 이것인가 (사용자 지시 2026-09-10, "track 일 경우
+    너무 물체를 따라가서 흔들리는데 recon 이 깔끔한 sparse keyframe 들을 기준으로 translation 도
+    interpolate 해보는건 어떰"): savgol 은 **모든 프레임의 오차를 평균**하는 필터라, recon 이
+    한두 프레임에서 크게 튀면 그 오차가 창 전체로 번진다. keyframe 방식은 반대로 **표본을
+    버린다** — 49프레임 중 9개만 믿고 나머지 40개는 아예 안 본다. 조준(`reference_centers`)은
+    여기서도 안 건드린다 (§`smooth_follow_centers`).
+
+    `interp` 세 갈래. 셋 다 **같은 9개 control point** 를 지나므로 갈리는 건 그 사이를 어떻게
+    채우냐 하나다:
+
+        linear  keyframe 사이 직선. keyframe 에서 속도가 꺾여 6번 각진다 (대조군).
+        savgol  linear 로 채운 뒤 기존 `smooth_follow_centers` 를 그대로 한 번 더 — 꺾인 자리를
+                창 `smooth_window` 로 둥글린다. 기존 코드 경로를 재사용하는 쪽.
+        cubic   9점을 지나는 natural cubic spline. 정의상 C² 라 꺾임이 없고 필터 창이 없다.
+                단 control point 가 튀면 그 사이 구간이 **원자료보다 크게** 오버슈트한다.
+
+    `bc_type="natural"` 인 이유: 양 끝 2차도함수를 0 으로 두면 첫/끝 프레임에서 가속이 0 이라
+    시작·종료가 부드럽다. `not-a-knot`(scipy 기본)은 끝 구간을 이웃 구간과 같은 3차식으로
+    이어 붙여서 끝에서 튀기 쉽다.
+    """
+    keyframes = int(keyframes)
+    centers = np.asarray(centers_world, dtype=float)
+    if keyframes <= 1 or len(centers) <= 2:
+        return smooth_follow_centers(centers, smooth_window, polyorder)
+    assert interp in ("linear", "savgol", "cubic"), f"모르는 follow_kf_interp: {interp}"
+    n = len(centers)
+    # 균등 인덱스. 반올림이 겹칠 수 있어(짧은 클립) unique 로 접는다 — 접히면 실제 keyframe 수가
+    # 요청보다 적어지지만 궤적은 여전히 그 점들을 지난다.
+    idx = np.unique(np.rint(np.linspace(0, n - 1, min(keyframes, n))).astype(int))
+    if len(idx) < 2:
+        return smooth_follow_centers(centers, smooth_window, polyorder)
+    frames = np.arange(n, dtype=float)
+    if interp == "cubic":
+        if len(idx) < 4:                     # natural spline 은 4점 미만이면 못 푼다
+            return np.stack([np.interp(frames, idx, centers[idx, k]) for k in range(3)], axis=1)
+        return CubicSpline(idx.astype(float), centers[idx], axis=0, bc_type="natural")(frames)
+    filled = np.stack([np.interp(frames, idx, centers[idx, k]) for k in range(3)], axis=1)
+    return filled if interp == "linear" else smooth_follow_centers(filled, smooth_window, polyorder)
+
+
 def solve_follow_gain(centers_world: np.ndarray, src_positions: np.ndarray,
                       start_position: np.ndarray, hi: float = 2.5, steps: int = 251,
                       min_benefit: float = 0.20, moving: bool = True):
@@ -582,6 +637,7 @@ def build_poses(decision: dict, graph: dict, board: dict | None = None,
                 traj_basis: str = "source", aim_keyframes: int = 0,
                 keyframe_aim: str = "auto", keyframe_ease: str = "smoothstep",
                 follow_gain: float | str = 0.0, follow_smooth: int = 9,
+                follow_keyframes: int = 0, follow_kf_interp: str = "cubic",
                 use_fit_tau: bool = True, preset_tracking: bool = True,
                 smooth_passes: int = 12, smooth_lambda: float = 0.5,
                 tau_ref: str = "source", deroll: bool = False,
@@ -695,7 +751,13 @@ def build_poses(decision: dict, graph: dict, board: dict | None = None,
     # 위치 채널만 한 번 더 편다 (D73). 조준(`reference_centers`)은 raw 를 그대로 쓴다 — 흔들림은
     # 병진 쪽이고, 조준은 subject 를 실제로 따라가야 맞다. gain 도 편 궤적 위에서 다시 푼다.
     follow_smooth = int(trajectory.get("follow_smooth", follow_smooth))
-    follow_centers = smooth_follow_centers(centers_world, follow_smooth)
+    # D171. keyframe 보간을 켜면 저역통과 대신 그쪽이 위치 채널을 만든다 (0 이면 예전 경로 그대로).
+    follow_keyframes = int(trajectory.get("follow_keyframes", follow_keyframes))
+    follow_kf_interp = str(trajectory.get("follow_kf_interp", follow_kf_interp))
+    follow_centers = (keyframe_follow_centers(centers_world, follow_keyframes,
+                                              follow_kf_interp, follow_smooth)
+                      if follow_keyframes > 1
+                      else smooth_follow_centers(centers_world, follow_smooth))
     if follow_solved:
         # `moving` 을 넘긴다 — 정적 노드의 OBB 중심 미끄러짐은 크기만으로 동적과 안 갈린다.
         follow_gain, _ = solve_follow_gain(follow_centers, src_c2w[:, :3, 3], c2w_start[:3, 3],
@@ -919,6 +981,9 @@ def build_poses(decision: dict, graph: dict, board: dict | None = None,
                if traj_basis_requested != traj_basis else {}),
             "follow": {"gain": round(follow_gain, 4), "solved": bool(follow_solved),
                        "smooth": int(follow_smooth),
+                       # D171. 껐으면(0) 키를 안 남긴다 — 옛 행과 열이 같아야 diff 가 조용하다.
+                       **({"keyframes": int(follow_keyframes),
+                           "kf_interp": str(follow_kf_interp)} if follow_keyframes > 1 else {}),
                        # 이 궤적이 CameraBench 로 무슨 shot 인지 (gain=0 이면 tracking shot 이 아니다).
                        **({"kind": "none"} if follow_gain == 0.0 else
                           follow_shot_kind(c2w_start[:3, 3], centers_world, up_world)),
@@ -1010,6 +1075,8 @@ def main(args):
                                keyframe_ease=args.keyframe_ease,
                                follow_gain=args.follow_gain,
                                follow_smooth=args.follow_smooth,
+                               follow_keyframes=args.follow_keyframes,
+                               follow_kf_interp=args.follow_kf_interp,
                                smooth_passes=args.smooth_passes,
                                smooth_lambda=args.smooth_lambda,
                                preset_tracking=args.preset_tracking,
@@ -1023,7 +1090,11 @@ def main(args):
                             decision, start_mode, args.aim_anchor, args.aim_ramp_frames,
                             args.traj_basis, args.aim_keyframes, args.keyframe_aim,
                             args.keyframe_ease, args.follow_gain, args.follow_smooth,
-                            args.deroll))
+                            # D171 로 서명 중간에 두 인자가 늘었다 — 위치 인자로 넘기면
+                            # `deroll` 이 `follow_keyframes` 자리로 밀린다. 키워드로 못 박는다.
+                            follow_keyframes=args.follow_keyframes,
+                            follow_kf_interp=args.follow_kf_interp,
+                            deroll=args.deroll))
 
     info = extra["info"]
     print(f"{args.video}  subject {decision['subject_id']}  preset {info['preset']} "
@@ -1114,6 +1185,14 @@ if __name__ == "__main__":
     # follow 위치 채널 저역통과 창 (D73, savgol p=2). 1 = 끔(기존 동작). 9 가 실측 무릎이다 —
     # 흔들림(|jerk| p95)을 4.4배 깎으면서 τ 는 오히려 좋아지고 subject 이탈은 0.012u 다.
     parser.add_argument("--follow_smooth", default=9, type=int)
+    # D171. follow 위치 채널을 균등 keyframe N개로 줄였다가 다시 채운다 (사용자 지시 2026-09-10
+    # "recon 이 깔끔한 sparse keyframe 들을 기준으로 translation 도 interpolate"). 0/1 = 끔 =
+    # `--follow_smooth` 저역통과 그대로 = 기존 동작. **기본값을 0 으로 두는 이유**: 이 손잡이는
+    # 아직 육안 대조(D171-c 릴) 전이라 채택된 게 아니다. 사다리·게이트가 아니라 궤적 모양을
+    # 바꾸므로, 기본을 켜면 진행 중인 굽기가 코퍼스 중간에 정의를 갈아탄다 (`tau_denom` 과 같은 이유).
+    parser.add_argument("--follow_keyframes", default=0, type=int)
+    parser.add_argument("--follow_kf_interp", default="cubic",
+                        choices=["linear", "savgol", "cubic"])
     # D93. `track_*` preset 의 조준 추종률을 위치 추종률(`PRESET_FOLLOW`=1.0)에 맞춰 lock 으로.
     # 끄면 `decision.json` 의 `tracking` 이 그대로 간다 = D93 이전 동작.
     parser.add_argument("--preset_tracking", action="store_true", default=True)

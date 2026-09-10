@@ -316,6 +316,12 @@ def main(args):
                 # (그때 이분법은 SE(3) 로그 전체를 깎았다).
                 orbit_fixed_sweep=bool(fixed.get("orbit_fixed_sweep",
                                                  FIXED_FALLBACK["orbit_fixed_sweep"])),
+                # D171. 같은 규칙 — **뱅크에 적힌 값**. 키가 없으면 D171 이전 뱅크라 0 =
+                # 저역통과 (그때 follow 위치 채널은 언제나 savgol 이었다).
+                follow_keyframes=int(fixed.get("follow_keyframes",
+                                               FIXED_FALLBACK["follow_keyframes"])),
+                follow_kf_interp=str(fixed.get("follow_kf_interp",
+                                               FIXED_FALLBACK["follow_kf_interp"])),
                 # D150. 같은 규칙 — **뱅크에 적힌 값**. 키가 없으면 D150 이전 뱅크라
                 # `z_med_frame0` (그때 τ 의 분모는 언제나 frame0 z-depth 중앙값이었다).
                 tau_denom=str(fixed.get("tau_denom", FIXED_FALLBACK["tau_denom"])))

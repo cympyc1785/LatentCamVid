@@ -27,7 +27,8 @@
       "--collision_time_match", "--collision_source", "depth",
       "--area_timeline", "--composition",
       "--composition_min_area", "0.004", "--composition_max_nodes", "3",
-      "--tau_denom", "z_med_frame0"
+      "--tau_denom", "z_med_frame0",
+      "--min_subject_visible", "0"
     ]
   }
 }

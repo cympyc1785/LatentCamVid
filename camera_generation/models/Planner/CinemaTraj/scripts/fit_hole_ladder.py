@@ -270,6 +270,11 @@ SHAPE_DEFAULTS = {"aim_ramp_frames": 12, "orbit_span_frac": 0.8, "min_sweep_deg"
                   # (이 키는 "이 뱅크가 절단을 켜고 구워졌나"의 표식), 그 열이 없거나 비어 있으면
                   # `emit_bank` 는 절단을 안 한다 — 그래서 옛 뱅크는 비트 단위로 그대로다.
                   "time_truncate": False,
+                  # D171. follow 위치 채널 keyframe 보간. **`0` / `"cubic"` 이어야 한다** — 이 키가
+                  # 없는 뱅크는 D171 이전이고 그때 위치 채널은 언제나 savgol 저역통과였다
+                  # (`0` = 끔). `interp` 는 켰을 때만 pose 를 바꾸므로 폴백 값은 아무거나 상관없지만
+                  # `build_poses` 서명 기본값과 같은 `"cubic"` 으로 맞춰 둔다.
+                  "follow_keyframes": 0, "follow_kf_interp": "cubic",
                   # D150. τ 의 분모. **`"z_med_frame0"` 이어야 한다** — 이 키가 없는 뱅크는
                   # D150 이전이고 그때 분모는 언제나 frame0 z-depth 중앙값이었다. 새 정의(`"S"`)
                   # 는 CLI `--tau_denom S` 로 명시적으로 켠다.
@@ -1019,6 +1024,9 @@ def main(args):
                             smooth_lambda=args.smooth_lambda,
                             preset_tracking=args.preset_tracking, deroll=args.deroll,
                             orbit_fixed_sweep=args.orbit_fixed_sweep,
+                            # D171. 0 이면 `build_poses` 가 예전 저역통과 경로를 그대로 탄다.
+                            follow_keyframes=args.follow_keyframes,
+                            follow_kf_interp=args.follow_kf_interp,
                             tau_denom=args.tau_denom)
                         # `fit_tau` 가 max_scale 에 붙었으면 τ 를 못 맞춘 것이다 — 모양을 키워 다시.
                         # 마지막 시도에서는 **곱하지 않고** 끝낸다: 여기서 곱하면 `_cache` 에
@@ -1396,6 +1404,10 @@ def main(args):
                       "deroll": bool(args.deroll),
                       # F9. 이분법이 sweep 을 깎았는지(False) 반경을 깎았는지(True).
                       "orbit_fixed_sweep": bool(args.orbit_fixed_sweep),
+                      # D171. follow 위치 채널 keyframe 보간. 0 = 저역통과(D171 이전 동작).
+                      # 키가 없는 옛 뱅크는 `SHAPE_DEFAULTS` 가 같은 0 으로 되푼다.
+                      "follow_keyframes": int(args.follow_keyframes),
+                      "follow_kf_interp": str(args.follow_kf_interp),
                       # F7. 이 뱅크가 시간축 절단을 켜고 구워졌나. 되만들 때 실제로 읽는 건
                       # 행의 `hold_from` 이고 이건 표식이다 (키가 없으면 F7 이전 = False).
                       "time_truncate": bool(args.time_truncate),
@@ -1813,6 +1825,13 @@ if __name__ == "__main__":
     parser.add_argument("--preset_tracking", action="store_true", default=True)
     parser.add_argument("--no_preset_tracking", dest="preset_tracking", action="store_false")
     parser.add_argument("--look_at_bias", default=0.0, type=float)
+    # D171. follow 위치 채널을 균등 keyframe N개로 줄였다가 다시 채운다. 0 = 끔 = D171 이전
+    # 동작(`--follow_smooth` savgol 저역통과). 기본값을 0 으로 두는 이유는 `build_poses` 쪽
+    # 주석과 같다 — 아직 육안 대조(D171-c) 전이고, 궤적 모양을 바꾸는 손잡이는 굽기 도중에
+    # 기본이 바뀌면 코퍼스가 두 규약으로 갈린다.
+    parser.add_argument("--follow_keyframes", default=SHAPE_DEFAULTS["follow_keyframes"], type=int)
+    parser.add_argument("--follow_kf_interp", default=SHAPE_DEFAULTS["follow_kf_interp"],
+                        choices=["linear", "savgol", "cubic"])
     parser.add_argument("--start_mode", default="source_frame0", type=str)
     parser.add_argument("--aim_anchor", default="subject", type=str)
     # 기본값은 `SHAPE_DEFAULTS` 한 군데서만 온다 (emit_bank 가 예전 뱅크를 읽을 때 같은 값을
@@ -1917,7 +1936,26 @@ if __name__ == "__main__":
     parser.add_argument("--no_subject_visible", dest="subject_visible", action="store_false")
     # D112. 가림을 **판정**으로 올린다 (사용자 지시). 0 이하면 예전 동작 그대로 (측정만).
     # 켜면 이분법이 subject 실루엣을 따로 그려야 해서 fit 렌더가 2배다.
-    parser.add_argument("--min_subject_visible", default=0.0, type=float)
+    #
+    # D171 (사용자 지시 2026-09-10 "어차피 hole 볼 때 랜더링하니까 subject_visible_frac 를
+    # 판정으로 올려줘"). 기본값을 0.0(측정만) → **0.6(판정)** 으로 올린다. `0` 을 주면 예전
+    # 동작으로 정확히 되돌아간다.
+    #
+    # 왜 0.6 인가 (d169 dynpose 21편 164행 실측, `subject_visible_frac` = 잰 프레임의 median):
+    #
+    #     분위수   p05 0.508   p10 0.562   p25 0.827   p50 0.971
+    #     임계     0.30 →   7행(4.3%)   0.50 →  8행(4.9%)   0.60 → 20행(12.2%)
+    #              0.70 →  30행(18.3%)  0.80 → 36행(22.0%)  0.85 → 44행(26.8%)
+    #
+    # 0.5 이하는 분포의 바닥만 긁어서 **놓치는 사례가 남는다** — `027514bb orbit_right` 은
+    # `subject_in_frame 1.0`(프레임 안에 멀쩡히 있다) 인데 `frac 0.542 / min 0.007` 로 벽에
+    # 가려 사실상 안 보이는데도 태그가 하나도 안 붙었다. 0.7 이상은 usable 60행 중 8행(13%)의
+    # 손잡이를 깎기 시작해서 대가가 커진다 (0.6 은 2행). 그 사이가 0.6 이다.
+    #
+    # **이 게이트는 행을 버리지 않는다** — 이분법이 가시비율이 임계를 넘을 때까지 손잡이를
+    # 줄인다. 손잡이 하한에서도 못 넘기면 `status=clamped_low` + `binding=occlusion` 이 되고,
+    # 그건 이미 `--retry_status clamped_low` 가 잡아 다음 층 preset 으로 넘긴다.
+    parser.add_argument("--min_subject_visible", default=0.6, type=float)
     # ── D168 (사용자 지시 2026-09-08). **게이트는 한 개도 안 늘린다** — 이분법(`solve_knob`)과
     #    사다리 목표는 D166 과 글자 그대로 같다. 새로 짜는 건 routing 과 retry 둘뿐이다.
     #    끄면(기본) 출력이 D167 뱅크와 **비트 단위로 같다**.

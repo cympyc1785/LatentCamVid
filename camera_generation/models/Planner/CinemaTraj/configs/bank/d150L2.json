@@ -73,7 +73,8 @@
       "--composition_max_nodes",
       "3",
       "--tau_denom",
-      "z_med_frame0"
+      "z_med_frame0",
+      "--min_subject_visible", "0"
     ]
   }
 }

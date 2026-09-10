@@ -7,6 +7,21 @@
 ## [Unreleased]
 
 ### Added
+- **D170 — `route_presets.py --orbit_min_span` (orbit 슬롯 방위각 게이트를 인자로 노출)
+  + `configs/bank/d170_dynpose_orbitspan.json` (2026-09-10, 사용자 지시 "소스 영상 방위각 폭
+  조건 빼서 돌려서 depth warp 영상 보여줘봐").** `ORBIT_MIN_SPAN_DEG = 120.0` 이 상수로 박혀
+  있어 `obs_az_span < 120°` 인 anchor 는 orbit 슬롯이 통째로 사라졌다(`--orbit_fallback drop`
+  기본). d169 파일럿 실측으로 그 대가가 드러났다 — **anchor 40개 중 29개(72.5%)가
+  `orbit_ok=False`** 이고, 빈 자리를 backfill 이 떠맡으면서 `pull_out_arc_right` tier0 통과율이
+  d166 100%(4/4) → d169 16.7%(1/6) 로 무너졌다. 120 이라는 값의 근거는 실측이 아니라 "좁은
+  span 에서 선회하면 점군에 자료 없는 면으로 넘어간다"는 **추론**이었다.
+  · 함수 기본값·CLI 기본값 **둘 다 `ORBIT_MIN_SPAN_DEG`(120.0)** 로 두어 옛 동작을 보존한다 —
+  채택된 변경이 아니라 아직 육안 판정 전인 ablation 이라, 기본값을 바꾸면 d166~d169 재현이
+  조용히 깨진다. `--orbit_min_span 0` 이면 게이트를 꺼서 span 과 무관하게 orbit 을 만든다.
+  · `reasons` 에 `orbit_min_span_deg` 를 같이 적는다. `orbit_ok` 는 문턱에 대한 **상대값**이라
+  문턱을 안 남기면 옛 JSON 과 비교할 때 span 이 변한 건지 게이트가 변한 건지 못 가른다.
+  · 회귀 확인: 기본값으로 `016a6379…` 를 라우팅해 기존 `preset_route_d169.json` 과 재귀 diff —
+  차이는 새 진단 키 `orbit_min_span_deg: 120.0` 3개(`anchors[0..1].reasons`, `reasons`)뿐.
 - **D169 — DA3 depth confidence 저장 `recon_da3.run_da3(return_conf=)` + `dynpose_ingest.py
   --save_conf/--no_save_conf` (2026-09-09, 사용자 지시 "다음에 돌릴때는 conf도 저장해줘").**
   DA3 는 `Prediction.conf` (N,H,W) 를 내놓는데 `run_da3` 가 4-tuple 만 돌려주며 버리고 있었다.

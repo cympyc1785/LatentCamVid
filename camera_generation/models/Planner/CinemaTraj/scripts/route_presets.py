@@ -190,7 +190,8 @@ def route(graph: dict, min_area_frac: float, allow_vertical_fallback: bool = Fal
           vertical_gravity: tuple = ("ground_ransac",),
           bonus_slots: tuple = TRACK_BONUS_SLOTS,
           track_min_drift_u: float = 0.0,
-          orbit_fallback: str = "s_curve"):
+          orbit_fallback: str = "s_curve",
+          orbit_min_span: float = ORBIT_MIN_SPAN_DEG):
     """-> (anchor, [(slot, preset), ...], reasons dict). preset 이름은 그대로 캡션 어휘가 된다.
 
     `track_mode` (D82) — anchor 가 **움직일 때만** 의미가 있다 (`sample_camera_bank` D77 이
@@ -227,8 +228,18 @@ def route(graph: dict, min_area_frac: float, allow_vertical_fallback: bool = Fal
     `arc`/`recede` 를 넣으면 이미 그 슬롯을 쓰는 쌍과 겹쳐 2x2 의 motion 축이 죽는다.
     슬롯이 빠진 몫은 D166 backfill 이 그 anchor 의 남은 슬롯에서 채운다.
     d166 실측: 40 anchor 중 29 개(72.5%)가 `orbit_ok=False` 라 이 갈래를 탄다.
+
+    `orbit_min_span` (D170, 사용자 지시 2026-09-10 "소스 영상 방위각 폭 조건 빼서 돌려서
+    depth warp 영상 보여줘봐") — 위 갈래를 가르는 문턱 자체를 인자로 뺀다. 기본값
+    `ORBIT_MIN_SPAN_DEG`(120.0) 이 옛 동작이고, `0` 이면 게이트가 통째로 꺼져 **span 과
+    무관하게 orbit 슬롯을 만든다**. 이 문턱은 근거가 실측이 아니라 "좁은 span 에서 선회하면
+    점군에 자료 없는 면으로 넘어간다"는 추론이었고, d169 파일럿에서 그 대가가 드러났다 —
+    게이트가 anchor 의 72.5% 를 막고, 그 자리를 backfill 이 떠맡으면서 `pull_out_arc_right`
+    통과율이 100%(4/4) → 16.7%(1/6) 로 무너졌다. 문턱을 낮추는 게 더 싼지는 실제 warp 을
+    봐야 정해진다. 120 이 맞는 값인지도 이 인자로 스윕해서 확인한다.
     """
     assert orbit_fallback in ("s_curve", "drop"), f"orbit_fallback: {orbit_fallback}"
+    assert orbit_min_span >= 0.0, f"orbit_min_span: {orbit_min_span}"
     assert track_mode in ("add", "replace", "off"), f"track_mode: {track_mode}"
     # `node` 를 주면 그 노드로 라우팅한다 (`--num_anchors > 1` 이 anchor 마다 부른다).
     node = node if node is not None else pick_anchor(graph, min_area_frac)
@@ -277,7 +288,7 @@ def route(graph: dict, min_area_frac: float, allow_vertical_fallback: bool = Fal
              ("rotate", tp("rotate", f"pan_{away}")),
              ("arc", tp("arc", f"pull_out_arc_{toward}"))]
 
-    if span >= ORBIT_MIN_SPAN_DEG:
+    if span >= orbit_min_span:
         slots.append(("orbit", tp("orbit", f"orbit_{away}")))
     elif orbit_fallback == "s_curve":
         # 관측 폭이 좁으면 orbit 은 점군에 자료가 없는 면으로 넘어간다. 같은 "곡선 이동"을
@@ -305,9 +316,12 @@ def route(graph: dict, min_area_frac: float, allow_vertical_fallback: bool = Fal
                "center_drift_u": round(float(node.get("center_drift_u", 0.0)), 4),
                "obs_az_span_deg": round(span, 1),
                "gravity_method": grav, "source_lateral": round(lat, 4),
-               "away_side": away, "orbit_ok": span >= ORBIT_MIN_SPAN_DEG,
+               "away_side": away, "orbit_ok": span >= orbit_min_span,
                # D167. `orbit_ok=False` 인데 슬롯이 없으면 여기가 `drop` 이다 (옛 JSON 엔 없는 키).
                "orbit_fallback": orbit_fallback,
+               # D170. `orbit_ok` 는 이 문턱에 대한 상대값이다 — 문턱을 같이 안 적으면 옛 JSON 과
+               # 비교할 때 span 이 변한 건지 게이트가 변한 건지 못 가른다.
+               "orbit_min_span_deg": round(float(orbit_min_span), 1),
                "vertical_gravity_ok": grav in vertical_gravity,
                "vertical_dropped": grav not in vertical_gravity and not allow_vertical_fallback,
                "track_mode": track_mode,
@@ -444,7 +458,8 @@ def main(args):
                                   vertical_gravity=vertical_gravity,
                                   bonus_slots=bonus_slots,
                                   track_min_drift_u=args.track_min_drift_u,
-                                  orbit_fallback=args.orbit_fallback)
+                                  orbit_fallback=args.orbit_fallback,
+                                  orbit_min_span=args.orbit_min_span)
         full_first = full_first if full_first is not None else dict(slots)
         backfill = []
         if grid:
@@ -622,6 +637,11 @@ if __name__ == "__main__":
     # 옛 뱅크(d157/d166)를 재현하려면 `--orbit_fallback s_curve`.
     parser.add_argument("--orbit_fallback", default="drop", type=str,
                         choices=("drop", "s_curve"))
+    # D170 (사용자 지시 2026-09-10 "소스 영상 방위각 폭 조건 빼서 돌려서 depth warp 영상
+    # 보여줘봐"): 위 갈래를 가르는 문턱. `0` 이면 게이트를 끄고 span 과 무관하게 orbit 을 만든다.
+    # CLI 기본값도 옛 동작(120.0)으로 둔다 — 이건 채택된 변경이 아니라 **아직 육안 판정 전인
+    # ablation** 이라, 기본값을 바꾸면 d166~d169 재현이 조용히 깨진다.
+    parser.add_argument("--orbit_min_span", default=ORBIT_MIN_SPAN_DEG, type=float)
     # D169 (사용자 지시 2026-09-08): 씨앗 슬롯 쌍의 한 짝이 없을 때. rotate = 쌍을 통째로 버리고
     # 다음 쌍으로(옛 동작, d166/d168 재현용). substitute = 살아남은 짝을 유지하고 빠진 자리만
     # 후보풀에서 메운다. 근거와 실측은 `grid_slot_pair` docstring.

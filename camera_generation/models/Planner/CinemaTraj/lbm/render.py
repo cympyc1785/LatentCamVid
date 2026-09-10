@@ -52,10 +52,16 @@ def look_at_c2w(position, target, up):
 class CloudRenderer:
     """cloud.npz 를 한 번 GPU 에 올려두고 pose 를 계속 갈아끼우며 렌더한다."""
 
-    def __init__(self, cloud_path: str, vista4d_root: str = VISTA4D_ROOT_DEFAULT,
+    def __init__(self, cloud_path, vista4d_root: str = VISTA4D_ROOT_DEFAULT,
                  device: str = "cuda", dtype=torch.float32, fixed_focal: bool = False):
+        """`cloud_path` 는 npz 경로(str) 또는 이미 구운 cloud dict.
+
+        dict 를 받는 경로는 `--cloud_source memory` 용이다 — cloud.npz 가 영상당 1.4 GiB 라
+        디스크를 안 거치고 tau/fit 이 그 자리에서 굽는다 (`cloud.cloud_from_recon` 설명 참조).
+        """
         self.vista4d = import_vista4d(vista4d_root)
-        cloud = load_cloud(cloud_path, device=device, dtype=dtype)
+        cloud = (cloud_path if isinstance(cloud_path, dict)
+                 else load_cloud(cloud_path, device=device, dtype=dtype))
         self.colors = cloud["colors"]
         self.points = cloud["points_world"]
         self.visible = cloud["visible"]
@@ -218,6 +224,68 @@ class CloudRenderer:
             if num_subject_points:  # z-buffer 를 통과해 실제로 그려진 subject 점의 비율
                 out["subject_visible_frac"] = float(subject.sum() / max(num_subject_points, 1))
         return out
+
+
+CLOUD_SOURCES = ("npz", "memory")
+
+
+def add_cloud_source_args(parser):
+    """tau/fit 공통 `--cloud_source`. 기본 `npz` = **기존 동작 그대로**."""
+    parser.add_argument(
+        "--cloud_source", default="npz", choices=CLOUD_SOURCES,
+        help="npz = <out>/<video>/cloud.npz 를 읽는다 (기본, 기존 동작). "
+             "memory = 디스크를 안 거치고 recon 에서 그 자리에 굽는다 (cloud 단계 불필요).")
+    return parser
+
+
+def open_renderer(args, out_root: str, graph: dict):
+    """`--cloud_source` 에 따라 cloud 를 조달하고 recon 을 함께 돌려준다. -> (renderer, recon)
+
+    왜 recon 까지 같이 돌려주나: tau(`sample_camera_bank.py`)/fit(`fit_hole_ladder.py`) 은
+    렌더러를 만든 직후 `load_scene` 으로 recon 을 **어차피 한 번 더** 읽고 있었다. memory 모드는
+    그 recon 을 그대로 재활용해 cloud 를 굽는다 — 그래서 in-memory 재구축의 실제 추가 비용은
+    `preprocess_scene` + `unproject` ≈ 10초뿐이고, 그 대가로 cloud 단계(굽기 28s + 1.4 GiB 쓰기
+    + 프로세스 기동)가 통째로 사라진다. 실측은 `cloud.cloud_from_recon` docstring 참조.
+
+    `S`/`z_med`/`parallax` 는 **graph 의 `scale` 블록에서** 가져온다. 여기서 다시 재면 stride 1
+    에서 6초가 더 들고, 무엇보다 게이지가 두 군데서 계산되어 갈릴 수 있다. 호출부가 이미
+    `assert_scale_mode(graph, ...)` 로 mode 를 검사한 뒤라 값이 맞는다는 보장이 있다.
+    """
+    from scene_graph.io import load_scene                                       # noqa: PLC0415
+
+    source = getattr(args, "cloud_source", "npz")
+    assert source in CLOUD_SOURCES, f"알 수 없는 --cloud_source: {source}"
+
+    if source == "npz":
+        cloud_path = path.join(out_root, args.video, "cloud.npz")
+        assert path.isfile(cloud_path), (
+            f"cloud.npz 가 없다. 먼저 `python -m lbm.cloud --video {args.video}` "
+            f"(또는 `--cloud_source memory`)")
+        renderer = CloudRenderer(cloud_path, vista4d_root=args.vista4d_root,
+                                 device=args.device, fixed_focal=args.fixed_focal)
+        recon = load_scene(args.eval_data, args.video, args.vista4d_root,
+                           seg_root=args.seg_root, seg_static_root=args.seg_static_root)
+        return renderer, recon
+
+    from .cloud import cloud_from_recon, import_vista4d as _import_vista4d      # noqa: PLC0415
+
+    recon = load_scene(args.eval_data, args.video, args.vista4d_root,
+                       seg_root=args.seg_root, seg_static_root=args.seg_static_root)
+    scale = graph["scale"]
+    cloud = cloud_from_recon(
+        recon, _import_vista4d(args.vista4d_root),
+        video=args.video, eval_data=args.eval_data,
+        S=float(scale["S"]), z_med=float(scale["z_med_frame0"]),
+        parallax=float(scale["parallax_ratio"]),
+        scene_scale_mode=str(scale["mode"]), scene_scale_stride=int(scale["stride"]),
+        device=args.device,
+        preprocess=getattr(args, "preprocess", True),
+        depth_outliers=getattr(args, "depth_outliers", "gaussian"),
+        ignore_sky_mask=getattr(args, "ignore_sky_mask", False),
+        allow_empty_dynamic_mask=getattr(args, "allow_empty_dynamic_mask", False))
+    renderer = CloudRenderer(cloud, vista4d_root=args.vista4d_root,
+                             device=args.device, fixed_focal=args.fixed_focal)
+    return renderer, recon
 
 
 def reprojection_residual(renderer: "CloudRenderer", frame: int, cam_c2w=None, K=None):

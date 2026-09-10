@@ -7,6 +7,37 @@
 ## [Unreleased]
 
 ### Added
+- **D178 — tau/fit `--cloud_source memory`: cloud 를 굽되 디스크에 안 쓴다 (2026-09-11, 사용자
+  지시 "cloud로 만들되 저장은 하지 않는거지").** `cloud.npz` 는 영상당 **1.4 GiB** 이고 dynpose
+  447편에 **610.6 GiB** 다. 디스크를 거치는 유일한 이유는 tau(`sample_camera_bank.py`)와
+  fit(`fit_hole_ladder.py`)이 **별개 프로세스**라 메모리를 못 넘기기 때문이지, 재구축이 비싸서가
+  아니다. 실측(00e9f728, 44.6 M points, GPU 0): `build_cloud` 자체는 **0.60s**, 비싼 쪽은
+  `load_recon_and_seg` 4.74s · `preprocess_recon` 9.37s · `save_cloud` 7.56s · `load_cloud` 6.46s.
+  그런데 tau/fit 은 렌더러를 만든 직후 `load_scene` 으로 recon 을 **어차피 한 번 더** 읽고 있었고
+  (`sample_camera_bank.py:855`, `fit_hole_ladder.py:706`), `S`/`z_med`/`parallax` 는
+  `scene_graph.json` 의 `scale` 블록에 이미 있다. 그래서 in-memory 재구축의 실제 추가 비용은
+  preprocess+unproject ≈ 10s 뿐이고, 대신 `cloud` 단계(굽기 28s + 1.4 GiB 쓰기 + 프로세스 기동)가
+  통째로 사라진다.
+  · `lbm/cloud.py` — `cloud_from_recon()` (이미 로드된 recon → `load_cloud` 와 같은 dict) +
+  `assert_dynamic_mask_nonempty()` (D176-c 가드를 함수로 승격). 가드를 함수로 뽑은 이유는 npz
+  경로와 in-memory 경로가 **같은 판정**을 써야 하기 때문이다 — 이 가드가 잡는 사고는 애초에
+  에러 없이 통과하는 종류라 한쪽만 고치면 조용히 빠진다. `main()` 은 이제 이 함수를 부르고
+  `save_cloud` 만 얹는다 (npz 산출물 불변).
+  · `S`/`z_med`/`parallax` 를 **인자로 받는다** — 여기서 다시 재면 `scene_scale` 이 stride 1 에서
+  6초 더 들고, 무엇보다 게이지가 graph 와 갈릴 수 있다. 호출자가 graph 의 `scale` 을 그대로 넘긴다.
+  · `lbm/render.py` — `CloudRenderer(cloud_path=...)` 가 **dict 도** 받는다. 공통 진입점
+  `add_cloud_source_args(parser)` / `open_renderer(args, out_root, graph) -> (renderer, recon)` 을
+  두어 tau/fit 양쪽의 cloud 조달 + recon 로드 4블록을 한 줄로 합쳤다.
+  · `scripts/{sample_camera_bank,fit_hole_ladder}.py` — `--cloud_source {npz,memory}`,
+  **기본 `npz` = 기존 동작 그대로**. `memory` 면 config `stages` 에서 `cloud` 를 빼도 된다.
+  · **파리티 검증** (00e9f728, d177 config 의 tau/fit 인자 그대로, GPU 0):
+  cloud 텐서 `colors`/`points_world`/`visible`/`indices` **전부 bit-identical**(최대차 0.000e+00),
+  meta 는 `parallax_ratio` 만 4.878e-09(npz float 직렬화 왕복). `bank.json` 103변이 중 86개가
+  갈렸지만 **결정 열(`status`/`knob`/`preset`/`tau_*`/`hole_*`)은 0건**이고 갈린 7종은 전부 렌더
+  측정 열이다. **npz 를 두 번 돌린 대조군**에서 같은 7종이 더 크게 흔들린다 —
+  `subject_visible_min` 0.0278(npz↔mem) vs **0.0495**(npz↔npz), `subject_visible_frac`
+  0.0233 vs **0.0347**. 즉 차이의 원인은 memory 경로가 아니라 렌더러 비결정성이다.
+  시간도 동등: tau 301.9→302.7s, fit 613.0→607.9s (cloud 단계 ~40s 가 순이득).
 - **D177 — dyn 트랙 중 "안 움직이는 소품"을 `dynamic_mask` 에서 빼는 강등 (2026-09-10, 사용자
   지시 "dynamic 중에 human, animal 같은걸 제외하고 object중에 이동량이 작은건 static으로
   만들어주는거 돌려봐줄 수 있어?").** VLM 이 "dynamic 명사"로 부른 것 중 주차된 차·벽 간판·상

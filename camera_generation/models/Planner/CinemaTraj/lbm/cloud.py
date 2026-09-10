@@ -119,6 +119,88 @@ def subject_point_mask(indices: torch.Tensor, track_masks: np.ndarray):
     return lut[f, h, w]
 
 
+def assert_dynamic_mask_nonempty(dyn_frac: float, video: str, eval_data: str):
+    """§empty_dynmask (D176, 2026-09-10) 가드.
+
+    `dynpose_ingest.py:177` 의 recon 단계는 `seg_keywords=[]` 라 **all-zero placeholder**
+    dynamic_mask 를 png 로 써 두고, 나중에 `dynmask` 단계가 SAM3 합집합으로 덮는다. 그 사이에
+    cloud 를 구우면 `load_recon_and_seg` 가 `static_mask = ~dynamic_mask` 로 **전 픽셀을 정적**으로
+    만들고, 정적 점은 `visible` 이 전 프레임 True 라 동적 물체가 49개 사본으로 잔류한다 — 에러
+    없이, `visible.sum(1)==1` 이 정확히 0 으로. `load_masks` 는 png 가 **존재하는지**만 보므로
+    (media.py:148) 새까만 png 는 통과한다. 실측 (dynpose 표본 120편): 47편(39%)이 이 상태였고
+    `hole_fraction` med 0.199 vs 0.279, `subject_visible_frac<0.6` 36.8% vs 25.5% 로 편향됐다.
+    bake 시각으로는 못 가른다 (정상인 씬의 cloud 가 오염된 씬보다 오래된 경우가 있다).
+
+    함수로 뽑은 이유: npz 경로(`main()`)와 in-memory 경로(`cloud_from_recon`)가 **같은 판정**을
+    써야 한다. 가드가 복사되면 한쪽만 고쳐도 조용히 빠지는데, 이 가드가 잡는 사고는 애초에 에러
+    없이 통과하는 종류다.
+    """
+    if dyn_frac != 0.0:
+        return
+    seg_npz = path.join(eval_data, "eval_data", "seg_instances", video, "masks.npz")
+    raise AssertionError(
+        f"{video}: dynamic_mask 가 전부 0 이다 — cloud 를 구우면 전 픽셀이 정적이 되어 "
+        f"동적 물체가 49개 사본으로 남는다.\n"
+        f"  seg_instances masks.npz {'있음' if path.isfile(seg_npz) else '없음'}: {seg_npz}\n"
+        f"  있으면 `scripts/dynpose_dynamic_mask_from_seg.py` (dynmask 단계) 를 먼저 돌릴 것.\n"
+        f"  정말 동적 물체가 없는 씬이면 `--allow_empty_dynamic_mask` 로 통과시킨다.")
+
+
+def cloud_from_recon(recon: dict, vista4d, *, video: str, eval_data: str,
+                     S: float, z_med: float, parallax: float,
+                     scene_scale_mode: str, scene_scale_stride: int,
+                     device: str = "cuda", dtype=torch.float32, preprocess: bool = True,
+                     depth_outliers: str = "gaussian", ignore_sky_mask: bool = False,
+                     allow_empty_dynamic_mask: bool = False):
+    """이미 로드된 recon 에서 cloud 를 굽되 **디스크를 안 거친다**. -> `load_cloud` 와 같은 dict.
+
+    왜 이게 있나 (2026-09-11 사용자 지시 "cloud 로 만들되 저장은 하지 않는거지"). `cloud.npz` 는
+    영상당 **1.4 GiB** 다 (dynpose 447편에 610.6 GiB). 디스크를 거치는 유일한 이유는 tau
+    (`sample_camera_bank.py`) 와 fit (`fit_hole_ladder.py`) 이 **별개 프로세스**라 메모리를 못
+    넘기기 때문이지, 재구축이 비싸서가 아니다. 실측 (00e9f728, 44.6 M points, GPU 0):
+
+        load_recon_and_seg  4.74s   preprocess_recon  9.37s   build_cloud  0.60s
+        save_cloud          7.56s   load_cloud        6.46s   (npz 1445.9 MiB)
+
+    unproject 자체는 **0.60초**다. 게다가 tau/fit 은 둘 다 이 함수를 부르기 전에 `load_scene` 으로
+    recon 을 **이미** 읽고 있고, `S`/`z_med`/`parallax` 는 `scene_graph.json` 의 `scale` 에 이미
+    들어 있다. 그래서 in-memory 재구축의 실제 추가 비용은 preprocess+unproject ≈ 10s 뿐이고,
+    그 대신 cloud 단계(굽기 28s + 프로세스 기동) 하나가 통째로 사라진다.
+
+    `S`/`z_med`/`parallax` 를 **인자로 받는** 이유: 여기서 다시 재면 `scene_scale` 이 stride 1 에서
+    6초 걸리고, 무엇보다 그 값이 graph 와 갈릴 수 있다. 게이지가 두 군데서 계산되면 안 된다
+    (`lbm/cloud.py:49` 주석과 같은 이유). 호출자가 graph 의 `scale` 블록을 그대로 넘긴다.
+    """
+    num_frames, height, width, _ = recon["video"].shape
+    K = vista4d["intrinsics_to_K"](recon["intrinsics"])
+    dyn_frac = float(recon["dynamic_mask"].mean())
+    if not allow_empty_dynamic_mask:
+        assert_dynamic_mask_nonempty(dyn_frac, video, eval_data)
+
+    scene = preprocess_recon(recon, vista4d, depth_outliers=depth_outliers,
+                             ignore_sky_mask=ignore_sky_mask) if preprocess else recon
+    colors, points_world, visible, indices, _ = build_cloud(scene, vista4d, device=device, dtype=dtype)
+
+    frame0 = np.asarray(recon["cam_c2w"], dtype=np.float64)[0]
+    return {
+        "colors": colors, "points_world": points_world, "visible": visible, "indices": indices,
+        "meta": {
+            "video": video, "num_frames": num_frames, "height": height, "width": width,
+            "fps": float(recon["fps"]), "S": float(S), "z_med_frame0": float(z_med),
+            "parallax_ratio": float(parallax),
+            "scene_scale_mode": scene_scale_mode, "scene_scale_stride": int(scene_scale_stride),
+            "frame0_rot_deg": float(np.degrees(np.arccos(
+                np.clip((np.trace(frame0[:3, :3]) - 1) / 2, -1, 1)))),
+            "frame0_offset": float(np.linalg.norm(frame0[:3, 3])),
+            "preprocess": bool(preprocess), "depth_outliers": depth_outliers,
+            "ignore_sky_mask": bool(ignore_sky_mask),
+            "dynamic_mask_frac": dyn_frac,
+            "num_dynamic": int((visible.sum(dim=1) == 1).sum()),
+            "cam_c2w": np.asarray(recon["cam_c2w"]).astype(np.float32), "K": K.astype(np.float32),
+        },
+    }
+
+
 def save_cloud(output_path: str, colors, points_world, visible, indices, meta: dict):
     """visible (n, f) bool 은 그대로 저장하면 n*f 바이트라 packbits 로 8배 줄인다."""
     makedirs(path.dirname(output_path), exist_ok=True)
@@ -167,34 +249,12 @@ def main(args):
     # 앵커를 거치지 않았다 (camel 은 frame0 이 회전 6.0deg / 이동 0.0086 만큼 떠 있다). world 는
     # "cameras.npz 가 말하는 그 좌표계"로 정의하고, frame0 오프셋은 meta 에 기록만 한다.
     # emit 의 rel[0]=I 는 `inv(P[0]) @ P` 라 world 원점이 어디든 성립하므로 문제되지 않는다.
-    frame0_rot_deg = float(np.degrees(np.arccos(
-        np.clip((np.trace(recon["cam_c2w"][0][:3, :3]) - 1) / 2, -1, 1))))
-    frame0_offset = float(np.linalg.norm(recon["cam_c2w"][0][:3, 3]))
+    # (`frame0_rot_deg`/`frame0_offset` 은 `cloud_from_recon` 이 meta 에 넣는다.)
     assert abs(K[0, 0, 2] / width - 0.5) < 0.05 and abs(K[0, 1, 2] / height - 0.5) < 0.05,\
         f"principal point 가 중앙이 아니다: cx={K[0, 0, 2]} cy={K[0, 1, 2]} (W={width} H={height})"
     finite = np.isfinite(recon["depths"][0]) & (recon["depths"][0] > 0)
     non_sky = ~recon["sky_mask"][0]
     assert (finite & non_sky).sum() / max(non_sky.sum(), 1) > 0.95, "non-sky depth 유효율 < 0.95"
-
-    # ── §empty_dynmask (D176, 2026-09-10) ────────────────────────────────────────────────
-    # `dynpose_ingest.py:177` 의 recon 단계는 `seg_keywords=[]` 라 **all-zero placeholder**
-    # dynamic_mask 를 png 로 써 두고, 나중에 `dynmask` 단계가 SAM3 합집합으로 덮는다. 그
-    # 사이에 cloud 를 구우면 `load_recon_and_seg` 가 `static_mask = ~dynamic_mask` 로 **전
-    # 픽셀을 정적**으로 만들고, 정적 점은 `visible` 이 전 프레임 True 라 동적 물체가 49개
-    # 사본으로 잔류한다 — 에러 없이, `visible.sum(1)==1` 이 정확히 0 으로.
-    # `load_masks` 는 png 가 **존재하는지**만 보므로(media.py:148) 새까만 png 는 통과한다.
-    # 실측 (dynpose 표본 120편): 47편(39%)이 이 상태였고 `hole_fraction` med 0.199 vs 0.279,
-    # `subject_visible_frac<0.6` 36.8% vs 25.5% 로 편향됐다. bake 시각으로는 못 가른다
-    # (정상인 씬의 cloud 가 오염된 씬보다 오래된 경우가 있다).
-    dyn_frac = float(recon["dynamic_mask"].mean())
-    if dyn_frac == 0.0 and not args.allow_empty_dynamic_mask:
-        seg_npz = path.join(args.eval_data, "eval_data", "seg_instances", args.video, "masks.npz")
-        raise AssertionError(
-            f"{args.video}: dynamic_mask 가 전부 0 이다 — cloud 를 구우면 전 픽셀이 정적이 되어 "
-            f"동적 물체가 49개 사본으로 남는다.\n"
-            f"  seg_instances masks.npz {'있음' if path.isfile(seg_npz) else '없음'}: {seg_npz}\n"
-            f"  있으면 `scripts/dynpose_dynamic_mask_from_seg.py` (dynmask 단계) 를 먼저 돌릴 것.\n"
-            f"  정말 동적 물체가 없는 씬이면 `--allow_empty_dynamic_mask` 로 통과시킨다.")
 
     # S / z_med 는 **전처리 전 raw depth** 로 잰다. preprocess 가 sky depth 를 SKY_DEPTH(1e3) 로
     # 덮어쓰기 때문에 순서를 바꾸면 게이지가 통째로 망가진다 (non-sky 로 걸러도 습관적으로 위험).
@@ -203,25 +263,21 @@ def main(args):
     z_med = float(np.median(recon["depths"][0][finite & non_sky]))
     plx = parallax_ratio(recon["cam_c2w"], z_med)
 
-    scene = preprocess_recon(recon, vista4d, depth_outliers=args.depth_outliers,
-                             ignore_sky_mask=args.ignore_sky_mask) if args.preprocess else recon
-    colors, points_world, visible, indices, _ = build_cloud(scene, vista4d, device=args.device)
-    num_dynamic = int((visible.sum(dim=1) == 1).sum())
+    # 굽기 본체는 `cloud_from_recon` 하나다 (§empty_dynmask 가드 포함). tau/fit 의 in-memory
+    # 경로와 **같은 함수**를 써야 두 경로가 갈리지 않는다 — meta 한 필드만 달라도 `CloudRenderer`
+    # 가 다른 게이지로 조용히 돈다.
+    cloud = cloud_from_recon(
+        recon, vista4d, video=args.video, eval_data=args.eval_data,
+        S=S, z_med=z_med, parallax=plx,
+        scene_scale_mode=args.scene_scale_mode, scene_scale_stride=args.scene_scale_stride,
+        device=args.device, preprocess=args.preprocess, depth_outliers=args.depth_outliers,
+        ignore_sky_mask=args.ignore_sky_mask,
+        allow_empty_dynamic_mask=args.allow_empty_dynamic_mask)
+    points_world, num_dynamic = cloud["points_world"], cloud["meta"]["num_dynamic"]
+    frame0_rot_deg = cloud["meta"]["frame0_rot_deg"]
 
-    save_cloud(output_path, colors, points_world, visible, indices, meta={
-        "video": args.video, "num_frames": num_frames, "height": height, "width": width,
-        "fps": float(recon["fps"]), "S": S, "z_med_frame0": z_med, "parallax_ratio": plx,
-        # S 의 정의를 캐시에 같이 싣는다 — 안 싣으면 옛 게이지로 구운 `cloud.npz` 를 새 코드가
-        # 그대로 집어 쓰면서 아무 에러 없이 단위만 갈린다 (2026-09-02 정의 변경).
-        "scene_scale_mode": args.scene_scale_mode, "scene_scale_stride": args.scene_scale_stride,
-        "frame0_rot_deg": frame0_rot_deg, "frame0_offset": frame0_offset,
-        "preprocess": bool(args.preprocess), "depth_outliers": args.depth_outliers,
-        "ignore_sky_mask": bool(args.ignore_sky_mask),
-        # D176. 굽는 시점의 마스크 상태를 캐시에 박는다 — 이게 없으면 "동적 점 0개"가 마스크가
-        # 비어서인지 정말 정적인 씬인지 npz 를 열어봐도 못 가른다 (§empty_dynmask).
-        "dynamic_mask_frac": dyn_frac, "num_dynamic": int(num_dynamic),
-        "cam_c2w": recon["cam_c2w"].astype(np.float32), "K": K.astype(np.float32),
-    })
+    save_cloud(output_path, cloud["colors"], points_world, cloud["visible"], cloud["indices"],
+               meta=cloud["meta"])
 
     print(f"\n{'video':<18}{'points':>12}{'dynamic':>12}{'S':>10}{'z_med':>9}{'parallax':>10}{'f0_rot':>9}")
     print(f"{args.video:<18}{points_world.shape[0]:>12,}{num_dynamic:>12,}"

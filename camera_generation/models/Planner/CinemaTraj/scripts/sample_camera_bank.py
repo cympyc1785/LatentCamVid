@@ -81,7 +81,7 @@ from lbm.overlay import contact_sheet, label_tile, paint_holes                  
 from lbm.presets import (LEGACY_ONLY_PRESETS, PRESETS, STATIC_PRESETS,          # noqa: E402
                          TAU_REF_CHOICES, fit_tau, load_external_shapes,
                          resolve_aim)
-from lbm.render import CloudRenderer                                            # noqa: E402
+from lbm.render import CloudRenderer, add_cloud_source_args, open_renderer      # noqa: E402,F401
 from scene_graph.io import load_scene                                           # noqa: E402
 from scene_graph.scale import (TAU_DENOM_MODES, assert_scale_mode,             # noqa: E402
                                tau_denominator)
@@ -845,15 +845,12 @@ def main(args):
     out_root = args.output_root or path.join(CLOUD_ROOT, "out")
     graph = load_graph(path.join(out_root, args.video, "scene_graph.json"))
     scale_mode = assert_scale_mode(graph, args.allow_legacy_scale)   # F2
-    cloud_path = path.join(out_root, args.video, "cloud.npz")
-    assert path.isfile(cloud_path), f"cloud.npz 가 없다. 먼저 `python -m lbm.cloud --video {args.video}`"
     bank_folder = path.join(out_root, args.video, args.bank_dir)
     makedirs(bank_folder, exist_ok=True)
 
-    renderer = CloudRenderer(cloud_path, vista4d_root=args.vista4d_root, device=args.device,
-                             fixed_focal=args.fixed_focal)
-    recon = load_scene(args.eval_data, args.video, args.vista4d_root,
-                       seg_root=args.seg_root, seg_static_root=args.seg_static_root)
+    #    `--cloud_source npz`(기본) 는 예전과 같이 cloud.npz 를 읽고, `memory` 는 recon 에서
+    #    그 자리에 굽는다 (`lbm/render.py:open_renderer`).
+    renderer, recon = open_renderer(args, out_root, graph)
     num_frames = int(graph["num_frames"])
     external = register_external(args.external_shapes, args.external_aim)
     presets = args.presets or usable_presets(args.allow_zoom)
@@ -1375,6 +1372,7 @@ if __name__ == "__main__":
     parser.add_argument("--vista4d_root", default=VISTA4D_ROOT_DEFAULT, type=str)
     parser.add_argument("--seg_root", default=None, type=str)
     parser.add_argument("--seg_static_root", default=None, type=str)
+    add_cloud_source_args(parser)
 
     parser.add_argument("--video", required=True, type=str)
     # 변이가 0 일 때 assert 로 죽는 대신 skipped.json 을 남기고 정상 종료한다. 대량 러너용 —

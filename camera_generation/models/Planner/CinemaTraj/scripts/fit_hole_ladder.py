@@ -202,7 +202,7 @@ from lbm.cloud import EVAL_DATA_DEFAULT, VISTA4D_ROOT_DEFAULT                   
 from lbm.cloud import CINEMATRAJ_ROOT as CLOUD_ROOT                             # noqa: E402
 from lbm.cloud import subject_point_mask                                        # noqa: E402
 from lbm.presets import DEFAULT_SHAPE, STATIC_PRESETS, TAU_REF_CHOICES          # noqa: E402
-from lbm.render import CloudRenderer                                            # noqa: E402
+from lbm.render import CloudRenderer, add_cloud_source_args, open_renderer      # noqa: E402,F401
 from scene_graph.io import load_scene                                           # noqa: E402
 from scene_graph.scale import (TAU_DENOM_MODES, assert_scale_mode,             # noqa: E402
                                tau_denominator)
@@ -700,11 +700,9 @@ def main(args):
     folder = path.join(out_root, args.video, args.bank_dir)
     makedirs(folder, exist_ok=True)
 
-    renderer = CloudRenderer(path.join(out_root, args.video, "cloud.npz"),
-                             vista4d_root=args.vista4d_root, device=args.device,
-                             fixed_focal=args.fixed_focal)
-    recon = load_scene(args.eval_data, args.video, args.vista4d_root,
-                       seg_root=args.seg_root, seg_static_root=args.seg_static_root)
+    #    `--cloud_source npz`(기본) 는 예전과 같이 cloud.npz 를 읽고, `memory` 는 recon 에서
+    #    그 자리에 굽는다 (`lbm/render.py:open_renderer`).
+    renderer, recon = open_renderer(args, out_root, graph)
     num_frames = int(graph["num_frames"])
     nodes = {n["id"]: n for n in graph["nodes"]}
 
@@ -1626,6 +1624,7 @@ if __name__ == "__main__":
     parser.add_argument("--vista4d_root", default=VISTA4D_ROOT_DEFAULT, type=str)
     parser.add_argument("--seg_root", default=None, type=str)
     parser.add_argument("--seg_static_root", default=None, type=str)
+    add_cloud_source_args(parser)
 
     parser.add_argument("--video", required=True, type=str)
     # 출력 폴더 이름. `emit_bank.py --bank_dir` 과 같은 값을 쓴다. 예전엔 여기가 하드코딩이라

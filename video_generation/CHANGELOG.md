@@ -120,6 +120,31 @@
   아무것도 못 찾음" 이 구분되지 않았다. `*.png` 만 읽는 `load_masks` 에는 영향 없다.
 
 ### Changed
+- **D179 — `run_bank.py --threads` (기본 8): BLAS/OpenMP 스레드 상한. graph 단계가 CPU 를 48배
+  태우고 있었다 (2026-09-11, 사용자 질문 "더 빠르게 최적화 못함?").** 같은 씬
+  (`bb3bd56c-6993-40ef-8164-ba6635694d4d`) · 같은 인자 · `/usr/bin/time -v` A/B:
+
+  | | user CPU | system | wall | %CPU | 비자발 문맥전환 |
+  |---|---|---|---|---|---|
+  | 캡 없음 | **12,326.73 s** | 11.16 s | 393 s | **3136%** | 4,435,047 |
+  | `*_NUM_THREADS=8` | **254.02 s** | 3.44 s | 107 s | 241% | — |
+
+  **산출물 `scene_graph.json` 은 md5 동일** (`bd96def456a697ecbe749c56244e45e7`, 60,447 bytes
+  양쪽). 즉 사라진 12,072 core-s 는 연산이 아니라 **OpenBLAS/OpenMP 의 spin-wait** 다 —
+  프로세스당 **391 threads** 가 124 코어 위에서 서로를 기다리며 코어를 태운다. 혼자 돌 때는
+  기계 전체를 먹어 wall 이 짧게 나오지만(d172 config `_runtime` 주석의 "85.5 s/편"이 이 수치다),
+  샤드를 12개 띄우면 서로 spin 으로 물려 **47편/h** 까지 떨어진다. 실측 load average 는 12샤드에서
+  **593**, 캡 후 프로세스당 threads 는 **39**.
+  · 배선 위치는 `scripts/run_bank.py` 의 서브프로세스 env 다 (`THREAD_ENV_KEYS` 6종:
+  `OMP`/`OPENBLAS`/`MKL`/`NUMEXPR`/`VECLIB_MAXIMUM`/`OPENCV_FOR` `_NUM_THREADS`). 여기 한 곳이
+  graph/cloud/route/tau/fit/emit 전 단계의 공통 진입점이라, 드라이버
+  (`tmp/d172/chain_geocalib_graph.py`, `tmp/d179/chain_bank_10k.py`)는 손댈 필요가 없다.
+  · **`--threads 0` 이 예전 동작**(캡 없음)이다.
+  · **뱅크(tau/fit)는 캡의 영향이 거의 없다** — 같은 씬 TAU 125.5 s(캡8) vs 109.4 s(무캡).
+  GPU 바운드라 그렇다. 그래서 진행 중이던 d179 4샤드는 재기동하지 않고 다음 라운드부터
+  새 기본값이 붙게 뒀다.
+  · 집행: d172 graph 12샤드를 SIGINT 로 내리고 **24샤드**로 재기동
+  (`.graph_d157` 1,159/10,346 시점).
 - **D176-b — dolly 계열 캡션에서 부정형 재조준 절을 뺐다 (2026-09-10, 사용자 지시 "그냥 dolly in
   look at 일 경우만 towards woman 이렇게 하면 되잖아").** `configs/caption_presets.json` 의 세
   문구에서 `along its own axis without re-aiming` / `along its own axis` 를 지우고, 재조준

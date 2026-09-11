@@ -54,6 +54,15 @@ from time import strftime, time
 
 HERE = path.dirname(path.dirname(path.abspath(__file__)))
 STAGE_ORDER = ("graph", "cloud", "route", "tau", "fit", "emit")
+# BLAS/OpenMP 스레드 상한. **이걸 안 걸면 graph 단계가 CPU 를 48배 낭비한다** (D179 실측,
+# 씬 bb3bd56c 1편 · 같은 인자 · 산출물 md5 동일):
+#     캡 없음   user 12,326.7 s / wall 393 s / 3136% CPU / 비자발 문맥전환 4,435,047
+#     THREADS=8 user    254.0 s / wall 107 s /  241% CPU
+# 차이는 실제 연산이 아니라 OpenBLAS/OpenMP 의 spin-wait 다 — 프로세스당 391 threads 가
+# 124코어 위에서 서로를 기다리며 코어를 태운다. 샤드를 12개 띄우면 기계 전체가 spin 에 잠긴다.
+# 0 이면 캡을 안 건다 (예전 동작).
+THREAD_ENV_KEYS = ("OMP_NUM_THREADS", "OPENBLAS_NUM_THREADS", "MKL_NUM_THREADS",
+                   "NUMEXPR_NUM_THREADS", "VECLIB_MAXIMUM_THREADS", "OPENCV_FOR_THREADS_NUM")
 # 단계 -> 실행 대상. `-m` 이 붙은 것은 모듈 실행(`python -m lbm.cloud`).
 STAGE_ENTRY = {
     "graph": ("script", "scripts/build_scene_graph.py"),
@@ -76,15 +85,19 @@ def _cmd(stage, extra):
     return [executable] + (["-m", target] if kind == "module" else [target]) + list(extra)
 
 
-def _run(stage, argv, log_path, gpu, capture=False):
+def _run(stage, argv, log_path, gpu, capture=False, threads=0):
     """서브프로세스 1회. -> (rc, stdout or "")
 
     stdout/stderr 은 영상별 로그 파일로 보낸다 — 드라이버 stdout 에는 진행 한 줄만 남긴다
     (`CLAUDE.md` "로그는 전량 tee 하지 말고"). route 만 stdout 을 파싱해야 해서 capture 한다.
+
+    `threads > 0` 이면 BLAS/OpenMP 스레드 상한을 서브프로세스 env 에 심는다 (§THREAD_ENV_KEYS).
     """
     env = dict(environ)
     if gpu is not None:
         env["CUDA_VISIBLE_DEVICES"] = str(gpu)
+    if threads > 0:
+        env.update({key: str(threads) for key in THREAD_ENV_KEYS})
     if capture:
         with open(log_path, "w") as err:
             proc = sp_run(argv, stdout=PIPE, stderr=err, env=env, text=True)
@@ -110,7 +123,7 @@ def _base_args(cfg, video, bank_dir=None, stage=None):
     return out
 
 
-def process_video(cfg, video, stages, gpu, log_dir, skip_done, tag):
+def process_video(cfg, video, stages, gpu, log_dir, skip_done, tag, threads=0):
     """영상 1편을 config 의 단계 순서대로 통과시킨다. -> 상태 문자열."""
     root = path.join(cfg["output_root"], video)
     tau_dir = path.join(root, cfg["tau_bank_dir"])
@@ -138,7 +151,8 @@ def process_video(cfg, video, stages, gpu, log_dir, skip_done, tag):
             if skip_done and path.exists(marker):
                 continue
             print(f"[{tag}] {stage.upper():5s} {video}  {_now()}", flush=True)
-            rc, _ = _run(stage, _cmd(stage, _base_args(cfg, video, stage=stage) + spec["args"]), log_path, gpu)
+            argv = _cmd(stage, _base_args(cfg, video, stage=stage) + spec["args"])
+            rc, _ = _run(stage, argv, log_path, gpu, threads=threads)
             if rc != 0:
                 return f"FAIL({stage} rc={rc})"
             open(marker, "w").close()
@@ -146,7 +160,7 @@ def process_video(cfg, video, stages, gpu, log_dir, skip_done, tag):
         elif stage == "route":
             argv = _cmd(stage, _base_args(cfg, video, stage=stage) + spec["args"]
                         + ["--emit", "args", "--out", path.join(root, spec["out"])])
-            rc, text = _run(stage, argv, log_path, gpu, capture=True)
+            rc, text = _run(stage, argv, log_path, gpu, capture=True, threads=threads)
             line = text.strip().splitlines()[-1] if text.strip() else ""
             if rc != 0 or not line:
                 return f"FAIL(route rc={rc})"
@@ -158,7 +172,7 @@ def process_video(cfg, video, stages, gpu, log_dir, skip_done, tag):
                 continue
             print(f"[{tag}] TAU   {video}  {_now()}", flush=True)
             argv = _cmd(stage, _base_args(cfg, video, cfg["tau_bank_dir"], stage) + route_args + spec["args"])
-            rc, _ = _run(stage, argv, log_path, gpu)
+            rc, _ = _run(stage, argv, log_path, gpu, threads=threads)
             if rc != 0 and not path.exists(path.join(tau_dir, "skipped.json")):
                 return f"FAIL(tau rc={rc})"
 
@@ -175,13 +189,13 @@ def process_video(cfg, video, stages, gpu, log_dir, skip_done, tag):
             print(f"[{tag}] FIT   {video}  {_now()}", flush=True)
             argv = _cmd(stage, _base_args(cfg, video, cfg["bank_dir"], stage)
                         + ["--tau_bank_dir", cfg["tau_bank_dir"]] + spec["args"])
-            rc, _ = _run(stage, argv, log_path, gpu)
+            rc, _ = _run(stage, argv, log_path, gpu, threads=threads)
             if rc != 0:
                 return f"FAIL(fit rc={rc})"
 
         elif stage == "emit":
             argv = _cmd(stage, _base_args(cfg, video, cfg["bank_dir"], stage) + spec["args"])
-            rc, _ = _run(stage, argv, log_path, gpu)
+            rc, _ = _run(stage, argv, log_path, gpu, threads=threads)
             if rc != 0:
                 return f"FAIL(emit rc={rc})"
         print(f"[{tag}] {stage.upper():5s} {video} rc=0 {time() - t0:6.1f}s  {_now()}", flush=True)
@@ -226,6 +240,9 @@ def main():
     parser.add_argument("--skip_done", dest="skip_done", action="store_true", default=True,
                         help="이미 산출물이 있으면 건너뛴다 (기본)")
     parser.add_argument("--no_skip_done", dest="skip_done", action="store_false")
+    parser.add_argument("--threads", default=8, type=int,
+                        help="단계 서브프로세스의 BLAS/OpenMP 스레드 상한. 0 = 캡 없음(예전 동작). "
+                             "기본 8 (§THREAD_ENV_KEYS — graph 실측 CPU 48배 절감, 산출물 md5 동일)")
     args = parser.parse_args()
 
     cfg = load_config(args.config)
@@ -241,13 +258,15 @@ def main():
     makedirs(args.log_dir, exist_ok=True)
     tag = f"{cfg.get('generation', '?')}/s{args.shard_id}"
     print(f"[{tag}] {len(mine)}/{len(videos)}편  stages={','.join(stages)}  "
-          f"bank={cfg['bank_dir']}  gpu={args.gpu}  {_now()}", flush=True)
+          f"bank={cfg['bank_dir']}  gpu={args.gpu}  "
+          f"threads={args.threads or '캡 없음'}  {_now()}", flush=True)
 
     results = []
     for video in mine:
         t0 = time()
         try:
-            status = process_video(cfg, video, stages, args.gpu, args.log_dir, args.skip_done, tag)
+            status = process_video(cfg, video, stages, args.gpu, args.log_dir, args.skip_done, tag,
+                                   threads=args.threads)
         except Exception as exc:                      # 한 편이 죽어도 샤드는 계속 간다
             status = f"ERROR({type(exc).__name__}: {exc})"
         results.append((video, status, time() - t0))

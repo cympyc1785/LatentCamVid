@@ -70,6 +70,33 @@
   스코프 주의 — `d172_dynpose100k_graph.json` 이 `out_dynpose` 와 마커 `.graph_d157` 을 공유해서
   `out_dynpose` 의 마커 606개 중 212개는 **DynPose-100K** 편이다. 스코프 키는 마커가 아니라
   "DynPose-LBM 에 `seg_instances/<v>/masks.npz` 가 있는가" 다.
+- **D178-b — 릴·검증 스크립트 9종에 `--cloud_source` 배선 (2026-09-11).** tau/fit 만 memory 를
+  받으면 `cloud.npz` 를 지울 수 없다 — 릴·검증 쪽이 여전히 npz 를 열기 때문이다. 그래서
+  `verify.py` · `scripts/{render_bank_videos,render_pred_depth_warp,render_director_depth,
+  render_preset_grid_warp,render_target_cams_warp,render_target_poses_depth,render_target_swap_warp,
+  build_candidate_board,audit_bank_geometry,eval_subject_in_frame}.py` 를 전부
+  `add_cloud_source_args()` + `open_renderer()` 공통 진입점으로 바꿨다. **기본값은 `npz` 라 기존
+  동작 그대로**다.
+  · `lbm/render.py:open_renderer` 에 `video: str = None` 파라미터 추가 — `eval_subject_in_frame.py`
+  / `render_target_{cams_warp,poses_depth}.py` 는 **한 프로세스가 여러 씬을 루프로 돈다**.
+  그런 호출부는 `args.video` 자체가 없어서 기존 시그니처로는 못 부른다.
+  · 하드코딩돼 있던 `if not path.isfile(cloud_path): skip` 을 `args.cloud_source == "npz"` 로 감쌌다.
+  memory 모드는 recon 만 있으면 되는데 그 skip 이 먼저 걸려 전부 건너뛰었다.
+  · 배선 뒤 `out_dynpose` 의 `cloud.npz` **447편 606.6 GiB 삭제** (사용자 승인 2026-09-11).
+- **`configs/bank/d179_dynpose100k_bank.json` + `tmp/d179/chain_bank_10k.py`** — DynPose-100K
+  10,346편 전량 뱅크 (사용자 지시 2026-09-11 "이어서 10k scene 뽑아놓은것도 다 돌려놔줘").
+  graph 는 **이 config 에서 안 돈다** — `d172_dynpose100k_graph.json` 12샤드가 같은 `out_dynpose`
+  에 같은 마커(`.graph_d157`)로 굽고 있어서 켜면 같은 `scene_graph.json` 에 두 프로세스가 동시에
+  쓴다. 대신 `require_markers: [".graph_d157"]` 로 **graph 가 끝난 편만** 집어간다.
+  드라이버는 라운드 루프다 — graph 가 8일치 남아 있어서(실측 47편/h) 다 끝나기를 기다리면 그만큼
+  논다. 라운드마다 ① ready 스캔 → ② 정지 소품 강등(8 CPU 샤드, `from_seg.json` 의
+  `demote_static_objects` 로 중복 방지) → ③ route/tau/fit/emit 4 GPU 샤드 → ④ 재스캔.
+  `--cloud_source memory` 라 디스크 증가 0 (npz 였으면 1.44 GiB × 10,346 = 14.5 TiB, /data1 여유 2.9 TB).
+- **`configs/bank/d178_dynpose_rest.json`** — 483편용. **기동 후 중단했다** (2026-09-11 09:57).
+  483편이 `tmp/d172/videos_10346.txt` 의 **부분집합**(483/483)이라 graph 가 d172 와 완전 중복이었고,
+  마커가 `.graph_d178` vs `.graph_d157` 로 달라 서로 skip 도 안 됐다. 실측: d178 이 끝낸 11편은
+  **전부** 이미 `.graph_d157` 을 갖고 있었다 — 두 목록이 같은 UUID 정렬이라 d172 가 지나간 앞쪽을
+  다시 갈고 있었다. 스코프는 d179 가 흡수한다. config 는 근거와 함께 남긴다.
 
 ### Fixed
 - **D176-c — `cloud.npz` 를 빈 `dynamic_mask` 위에서 굽는 사고를 막는 가드 (2026-09-10, 사용자

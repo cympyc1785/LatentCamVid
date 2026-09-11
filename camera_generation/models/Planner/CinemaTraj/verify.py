@@ -48,7 +48,7 @@ from lbm.gates import behind_surface_frames                                     
 from lbm.overlay import paint_holes                                                # noqa: E402
 from lbm.presets import RECAMMASTER_ROOT                                           # noqa: E402
 from lbm.render import CloudRenderer                                               # noqa: E402
-from scene_graph.io import load_scene                                              # noqa: E402
+from lbm.render import add_cloud_source_args, open_renderer                        # noqa: E402
 from scene_graph.lift import apply_transform                                       # noqa: E402
 from scene_graph.obb import node_obb_at, obb_corners                               # noqa: E402
 from scripts.build_candidate_board import subject_track_volume                     # noqa: E402
@@ -456,7 +456,9 @@ def main(args):
 
     out_root = args.output_root or path.join(CINEMATRAJ_ROOT, "out")
     folder = path.join(out_root, args.video)
-    for name in ("cloud.npz", "scene_graph.json", "decision.json", "poses.npz",
+    # `cloud.npz` 는 npz 모드에서만 필수다 — memory 모드는 recon 에서 그 자리에 굽는다.
+    for name in (("cloud.npz",) if args.cloud_source == "npz" else ()) + \
+                ("scene_graph.json", "decision.json", "poses.npz",
                  "canonical/canonical.json", "canonical/canonical.npz"):
         assert path.isfile(path.join(folder, name)), \
             f"{name} 이 없다. 먼저 loop -> decode/emit 을 돌릴 것 ({folder})"
@@ -481,11 +483,7 @@ def main(args):
         f"poses.npz 가 decision.json 과 안 맞는다 (build_poses 를 다시 돌릴 것)\n"
         f"  poses.npz : {stored}\n  decision  : {expected}")
 
-    renderer = CloudRenderer(path.join(folder, "cloud.npz"),
-                             vista4d_root=args.vista4d_root, device=args.device,
-                             fixed_focal=args.fixed_focal)
-    recon = load_scene(args.eval_data, args.video, args.vista4d_root,
-                       seg_root=args.seg_root, seg_static_root=args.seg_static_root)
+    renderer, recon = open_renderer(args, out_root, graph)
     renderer.set_subject(subject_point_mask(
         renderer.indices, subject_track_volume(recon, node)).cpu().numpy())
 
@@ -552,6 +550,7 @@ def build_parser():
     parser.add_argument("--vista4d_root", default=VISTA4D_ROOT_DEFAULT, type=str)
     parser.add_argument("--seg_root", default=None, type=str)
     parser.add_argument("--seg_static_root", default=None, type=str)
+    add_cloud_source_args(parser)
     parser.add_argument("--results_root", default=RESULTS_DEFAULT, type=str)
     parser.add_argument("--date", default="20260820", type=str)  # results/<date>_lbm_lite/<video>/
 

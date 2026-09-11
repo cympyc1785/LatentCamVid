@@ -34,7 +34,7 @@ from lbm.cloud import CINEMATRAJ_ROOT as CLOUD_ROOT                             
 from lbm.cloud import VISTA4D_ROOT_DEFAULT                                      # noqa: E402
 from lbm.overlay import contact_sheet, label_tile                               # noqa: E402
 from lbm.presets import row_preset                                              # noqa: E402
-from lbm.render import CloudRenderer                                            # noqa: E402
+from lbm.render import add_cloud_source_args, open_renderer                     # noqa: E402
 from scripts.render_bank_videos import render_variant, write_video              # noqa: E402
 
 GL2CV = np.diag([1.0, -1.0, -1.0, 1.0])        # OpenGL c2w -> OpenCV c2w (열 1,2 부호)
@@ -137,14 +137,13 @@ def main(args):
     elif args.order == "fscore":
         raise SystemExit("--order fscore 는 --scores_csv 가 필요하다")
 
-    renderer = CloudRenderer(path.join(args.cloud_root, args.video, "cloud.npz"),
-                             vista4d_root=args.vista4d_root, device=args.device,
-                             fixed_focal=True)
+    # `fixed_focal=True` 는 이 릴의 규약이다 (아래 K 일치 assert 가 frame0 K 를 전제한다).
+    renderer, recon = open_renderer(args, args.cloud_root, want_recon=args.with_source,
+                                    fixed_focal=True)
     source = None
     if args.with_source:
         import cv2
-        from scene_graph.io import load_scene
-        source = load_scene(args.eval_data, args.video, args.vista4d_root)["video"]
+        source = recon["video"]
 
     makedirs(args.out_dir, exist_ok=True)
     reel, index, group_reels, bands = [], {}, {}, {}
@@ -268,6 +267,7 @@ if __name__ == "__main__":
     # recon 은 `DynPose-LBM/eval_data/recon_and_seg/`).
     parser.add_argument("--name_prefix", default="vista4d")   # entry 접두사 = 코퍼스 하위 폴더명
     parser.add_argument("--cloud_root", default=path.join(CLOUD_ROOT, "out"))
+    add_cloud_source_args(parser)
     parser.add_argument("--eval_data", default="/data1/cympyc1785/data/Vista4D-Eval-Data")
     # caption F1 band 분리. 없으면 라벨·reel·index 전부 기존과 동일하게 나온다.
     parser.add_argument("--scores_csv", default=None)        # eval 의 preds_scores.csv

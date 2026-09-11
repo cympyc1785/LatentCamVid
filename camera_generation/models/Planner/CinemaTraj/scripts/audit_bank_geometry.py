@@ -45,8 +45,7 @@ from lbm.cloud import CINEMATRAJ_ROOT as CLOUD_ROOT                             
 from lbm.cloud import subject_point_mask                                        # noqa: E402
 from lbm.gates import behind_profile                                            # noqa: E402
 from lbm.presets import row_preset                                              # noqa: E402
-from lbm.render import CloudRenderer                                            # noqa: E402
-from scene_graph.io import load_scene                                           # noqa: E402
+from lbm.render import add_cloud_source_args, open_renderer                     # noqa: E402
 from scene_graph.lift import apply_transform, project_points                    # noqa: E402
 from scene_graph.obb import node_obb_at, obb_corners                            # noqa: E402
 from scene_graph.schema import load_graph                                       # noqa: E402
@@ -165,15 +164,11 @@ def main(args):
         f"poses.npz {len(cam_c2w_all)} != bank.json {len(variants)} — 뱅크를 다시 만들 것"
 
     graph = load_graph(path.join(out_root, args.video, "scene_graph.json"))
-    recon = load_scene(args.eval_data, args.video, args.vista4d_root,
-                       seg_root=args.seg_root, seg_static_root=args.seg_static_root)
     scale = float(graph["scale"]["S"])
     nodes = {n["id"]: n for n in graph["nodes"]}
     T_wg = np.asarray(graph["frames"]["T_wg"], dtype=float)
 
-    renderer = CloudRenderer(path.join(out_root, args.video, "cloud.npz"),
-                             vista4d_root=args.vista4d_root, device=args.device,
-                             fixed_focal=args.fixed_focal)
+    renderer, recon = open_renderer(args, out_root, graph)
     src_frames = np.unique(np.linspace(0, renderer.num_frames - 1, args.behind_frames)
                            .round().astype(int)).tolist()
     occ_frames = np.unique(np.linspace(0, cam_c2w_all.shape[1] - 1, args.occlusion_frames)
@@ -305,6 +300,7 @@ if __name__ == "__main__":
     parser.add_argument("--vista4d_root", default=VISTA4D_ROOT_DEFAULT, type=str)
     parser.add_argument("--seg_root", default=None, type=str)
     parser.add_argument("--seg_static_root", default=None, type=str)
+    add_cloud_source_args(parser)
 
     parser.add_argument("--video", required=True, type=str)
     parser.add_argument("--device", default="cuda", type=str)

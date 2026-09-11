@@ -36,8 +36,7 @@ from lbm.gates import GATE_ORDER, evaluate, rank, write_csv                     
 from lbm.overlay import (board_labels, contact_sheet, contract_text,            # noqa: E402
                          draw_obb_world, draw_thirds, label_tile, paint_holes,
                          source_panel)
-from lbm.render import CloudRenderer, look_at_c2w                               # noqa: E402
-from scene_graph.io import load_scene                                           # noqa: E402
+from lbm.render import add_cloud_source_args, look_at_c2w, open_renderer        # noqa: E402
 from scene_graph.lift import apply_transform                                    # noqa: E402
 from scene_graph.obb import node_obb_at, obb_corners                            # noqa: E402
 from scene_graph.schema import load_graph                                       # noqa: E402
@@ -81,8 +80,6 @@ def source_camera_line(cam_c2w: np.ndarray, scale: float, z_med: float):
 def main(args):
     out_root = args.output_root or path.join(CLOUD_ROOT, "out")
     graph = load_graph(path.join(out_root, args.video, "scene_graph.json"))
-    cloud_path = path.join(out_root, args.video, "cloud.npz")
-    assert path.isfile(cloud_path), f"cloud.npz 가 없다. 먼저 `python -m lbm.cloud --video {args.video}`"
 
     board_folder = path.join(out_root, args.video, "board")
     if path.isfile(path.join(board_folder, "gates.csv")) and args.skip_done:
@@ -90,10 +87,7 @@ def main(args):
         return
     makedirs(board_folder, exist_ok=True)
 
-    renderer = CloudRenderer(cloud_path, vista4d_root=args.vista4d_root, device=args.device,
-                             fixed_focal=args.fixed_focal)
-    recon = load_scene(args.eval_data, args.video, args.vista4d_root,
-                       seg_root=args.seg_root, seg_static_root=args.seg_static_root)
+    renderer, recon = open_renderer(args, out_root, graph)
     node = pick_subject(graph["nodes"], args.subject_id, args.subject_min_area_frac)
 
     T_wg = np.asarray(graph["frames"]["T_wg"], dtype=float)
@@ -229,6 +223,7 @@ if __name__ == "__main__":
     parser.add_argument("--vista4d_root", default=VISTA4D_ROOT_DEFAULT, type=str)
     parser.add_argument("--seg_root", default=None, type=str)
     parser.add_argument("--seg_static_root", default=None, type=str)
+    add_cloud_source_args(parser)
 
     parser.add_argument("--video", required=True, type=str)
     parser.add_argument("--device", default="cuda", type=str)

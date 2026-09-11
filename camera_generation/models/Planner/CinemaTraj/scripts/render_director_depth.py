@@ -59,8 +59,7 @@ if CINEMATRAJ_ROOT not in sys.path:
 from lbm.cloud import EVAL_DATA_DEFAULT, VISTA4D_ROOT_DEFAULT                   # noqa: E402
 from lbm.cloud import CINEMATRAJ_ROOT as CLOUD_ROOT                             # noqa: E402
 from lbm.overlay import contact_sheet, label_tile, paint_holes                  # noqa: E402
-from lbm.render import CloudRenderer, look_at_c2w                               # noqa: E402
-from scene_graph.io import load_scene                                           # noqa: E402
+from lbm.render import add_cloud_source_args, look_at_c2w, open_renderer        # noqa: E402
 from scripts.render_bank_videos import colorize_depth, write_video              # noqa: E402
 
 
@@ -128,10 +127,7 @@ def main(args):
     up_g = R_gw @ np.asarray(graph["gravity"]["up_world"], dtype=np.float64)
     up_g /= np.linalg.norm(up_g)                    # G 에서는 +z
 
-    renderer = CloudRenderer(path.join(out_root, args.video, "cloud.npz"),
-                             vista4d_root=args.vista4d_root, device=args.device,
-                             fixed_focal=args.fixed_focal)
-    recon = load_scene(args.eval_data, args.video, args.vista4d_root)
+    renderer, recon = open_renderer(args, out_root, graph)
     source_video = recon["video"]
 
     # 렌더할 궤적 모으기: 최상위 npz + `--subdirs` 의 npz, 각각에서 `--samples` 만.
@@ -275,6 +271,7 @@ if __name__ == "__main__":
 
     # DA3 focal 떨림을 끄고 frame0 K 로 고정. 소스와 화각을 정확히 맞추려면 off.
     parser.add_argument("--fixed_focal", action="store_true", default=False)
+    add_cloud_source_args(parser)
     parser.add_argument("--no_fixed_focal", dest="fixed_focal", action="store_false")
     parser.add_argument("--depth_range", nargs=2, default=None, type=float)
     # concat 에 무엇을 깔지. `warp` = 소스 + depth warp 만 (컬러맵 줄 없음).

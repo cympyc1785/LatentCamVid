@@ -1,0 +1,67 @@
+{
+  "_why": "D179 (사용자 지시 2026-09-11 \"이어서 10k scene 뽑아놓은것도 다 돌려놔줘\") — DynPose-100K 10,346편 전량을 뱅크까지 굽는다. graph 는 **여기서 안 돈다** — `d172_dynpose100k_graph.json` 12샤드가 이미 같은 `out_dynpose` 에 `.graph_d157` 로 굽고 있어서, 여기서도 graph 를 켜면 같은 `scene_graph.json` 에 두 프로세스가 동시에 쓴다. 그래서 이 config 는 `require_markers: [\".graph_d157\"]` 로 **graph 가 끝난 편만** 집어간다.",
+
+  "_scope": "`tmp/d172/videos_10346.txt` 전량. d177 의 394편(`hole_bank_d177`)과 d178 스코프 483편이 **둘 다 이 10,346 안에** 있다 (실측: 394/394, 483/483). d177 394편은 세대 디렉토리가 달라 다시 구워진다 — 인자가 글자 그대로 같아 산출물은 같고, 비용은 394×246s ≈ 27 샤드-시간(전체의 3.8%)이다. 코퍼스를 한 세대(`hole_bank_d179`)로 모으는 값이 그보다 크다고 보고 재굽기를 택했다.",
+
+  "_d178_취소": "`d178_dynpose_rest.json` 4샤드는 2026-09-11 09:57 에 중단했다. 483편이 10,346 의 부분집합이라 graph 가 d172 와 완전 중복이었고(실측: d178 이 끝낸 11편은 **전부** 이미 `.graph_d157` 을 갖고 있었다 — 두 목록이 같은 UUID 정렬이라 d172 가 지나간 앞쪽을 다시 갈고 있었다), 마커가 `.graph_d178` 로 달라 서로 skip 도 안 됐다.",
+
+  "_cloud": "cloud 단계 없음 — tau/fit 이 `--cloud_source memory` 로 recon 에서 그 자리에 굽는다 (D178). npz 로 남기면 영상당 1.44 GiB × 10,346 = 14.5 TiB 이고 /data1 여유는 2.9 TB 다.",
+
+  "_pipeline_order": "graph(d172) → 정지 소품 강등(`scripts/dynpose_dynamic_mask_from_seg.py --demote_static_objects`) → route/tau/fit/emit(이 config). 강등은 run_bank 단계가 아니라 `tmp/d179/chain_bank_10k.py` 가 라운드마다 돌린다 — `scene_graph.json` 을 읽고 `dynamic_mask/` png 를 덮으므로 graph 뒤·route 앞이어야 한다.",
+
+  "_args": "route/tau/fit/emit 인자는 `d177_dynpose.json` / `d178_dynpose_rest.json` 과 글자 그대로 같다 (tau/fit 맨 앞 `--cloud_source memory` 만 D178 에서 추가된 것).",
+
+  "generation": "d179",
+  "output_root": "out_dynpose",
+  "eval_data": "/data1/cympyc1785/LatentCamVid/DATA/DynPose-100K",
+  "tau_bank_dir": "bank_d179",
+  "bank_dir": "hole_bank_d179",
+  "stages": ["route", "tau", "fit", "emit"],
+  "require_markers": [".graph_d157"],
+  "route": {
+    "out": "preset_route_d179.json",
+    "args": [
+      "--num_external", "0",
+      "--max_dynamic_anchors", "3", "--max_static_anchors", "3"
+    ]
+  },
+  "tau": {
+    "args": [
+      "--cloud_source", "memory",
+      "--tau_ladder", "0.10", "0.20", "0.35", "0.60", "1.00",
+      "--aim_keyframes", "6", "--keyframe_aim", "auto", "--keyframe_ease", "smooth_kf",
+      "--fixed_focal", "--deroll", "--no_preview", "--skip_on_empty", "--device", "cuda",
+      "--orbit_fixed_sweep", "--min_sweep_deg", "20", "--behind_src_frames", "49",
+      "--tau_ref", "follow",
+      "--track_dynamic_only", "--track_min_drift_u", "0.05",
+      "--trackings", "lock", "--preset_tracking",
+      "--behind_min_zcam", "0.02",
+      "--tau_denom", "S"
+    ]
+  },
+  "fit": {
+    "args": [
+      "--cloud_source", "memory",
+      "--hole_ladder", "0.20",
+      "--fallback_ladder", "--fallback_target", "5",
+      "--retry_status", "clamped_low",
+      "--retry_suspect", "aim_target_subject_lost", "hole_over_budget",
+      "motion_preset_no_motion", "static_start_collision",
+      "--suspect_hole", "0.35",
+      "--aim_keyframes", "6", "--keyframe_aim", "auto", "--keyframe_ease", "smooth_kf",
+      "--fixed_focal", "--deroll",
+      "--orbit_fixed_sweep", "--min_sweep_deg", "20", "--behind_src_frames", "49",
+      "--tau_ref", "follow", "--tracking", "lock", "--preset_tracking",
+      "--behind_min_zcam", "0.02", "--behind_clear_src_ratio", "0",
+      "--collision_time_match", "--collision_source", "depth",
+      "--area_timeline", "--composition",
+      "--composition_min_area", "0.004", "--composition_max_nodes", "3",
+      "--device", "cuda",
+      "--tau_denom", "S",
+      "--tau_knob_min", "0.005",
+      "--min_subject_visible", "0.6",
+      "--follow_keyframes", "6", "--follow_kf_interp", "cubic"
+    ]
+  },
+  "emit": {"args": []}
+}

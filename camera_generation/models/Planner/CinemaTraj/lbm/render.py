@@ -15,6 +15,7 @@
 예시 (env vista4d 필요):
     CUDA_VISIBLE_DEVICES=0 python -m lbm.render --video camel --self_check
 """
+import json
 from os import makedirs, path
 
 import numpy as np
@@ -229,62 +230,94 @@ class CloudRenderer:
 CLOUD_SOURCES = ("npz", "memory")
 
 
-def add_cloud_source_args(parser):
-    """tau/fit 공통 `--cloud_source`. 기본 `npz` = **기존 동작 그대로**."""
+def add_cloud_source_args(parser, eval_data_default: str = None):
+    """cloud 를 읽는 모든 스크립트 공통 `--cloud_source`. 기본 `npz` = **기존 동작 그대로**.
+
+    `eval_data_default` 를 주면 `--eval_data` 도 같이 단다 — memory 모드는 recon 이 있어야
+    굽는데, 릴 스크립트 일부(`render_preset_grid_warp.py` 등)는 원래 cloud.npz 만 읽어서
+    `--eval_data` 자체가 없었다. 이미 `--eval_data` 를 가진 스크립트는 인자 없이 부른다.
+    """
     parser.add_argument(
         "--cloud_source", default="npz", choices=CLOUD_SOURCES,
         help="npz = <out>/<video>/cloud.npz 를 읽는다 (기본, 기존 동작). "
              "memory = 디스크를 안 거치고 recon 에서 그 자리에 굽는다 (cloud 단계 불필요).")
+    if eval_data_default is not None:
+        parser.add_argument("--eval_data", default=eval_data_default, type=str,
+                            help="recon_and_seg 루트 (--cloud_source memory 일 때만 쓴다)")
     return parser
 
 
-def open_renderer(args, out_root: str, graph: dict):
-    """`--cloud_source` 에 따라 cloud 를 조달하고 recon 을 함께 돌려준다. -> (renderer, recon)
+def open_renderer(args, out_root: str, graph: dict = None, want_recon: bool = True,
+                  fixed_focal: bool = None, video: str = None):
+    """`--cloud_source` 에 따라 cloud 를 조달한다. -> (renderer, recon | None)
 
     왜 recon 까지 같이 돌려주나: tau(`sample_camera_bank.py`)/fit(`fit_hole_ladder.py`) 은
     렌더러를 만든 직후 `load_scene` 으로 recon 을 **어차피 한 번 더** 읽고 있었다. memory 모드는
     그 recon 을 그대로 재활용해 cloud 를 굽는다 — 그래서 in-memory 재구축의 실제 추가 비용은
     `preprocess_scene` + `unproject` ≈ 10초뿐이고, 그 대가로 cloud 단계(굽기 28s + 1.4 GiB 쓰기
     + 프로세스 기동)가 통째로 사라진다. 실측은 `cloud.cloud_from_recon` docstring 참조.
+    recon 이 필요 없는 호출부(릴 렌더 대부분)는 `want_recon=False` 로 npz 모드에서 그 4.7초를
+    안 낸다. memory 모드는 recon 없이는 못 구우므로 이 플래그와 무관하게 읽는다.
 
     `S`/`z_med`/`parallax` 는 **graph 의 `scale` 블록에서** 가져온다. 여기서 다시 재면 stride 1
-    에서 6초가 더 들고, 무엇보다 게이지가 두 군데서 계산되어 갈릴 수 있다. 호출부가 이미
-    `assert_scale_mode(graph, ...)` 로 mode 를 검사한 뒤라 값이 맞는다는 보장이 있다.
+    에서 6초가 더 들고, 무엇보다 게이지가 두 군데서 계산되어 갈릴 수 있다. `graph` 를 안 주면
+    `<out>/<video>/scene_graph.json` 을 직접 읽는다 (tau/fit 은 이미 로드한 것을 넘겨서
+    `assert_scale_mode` 검사를 거친 값을 쓴다).
+
+    args 에서 읽는 것 중 `vista4d_root`/`device`/`fixed_focal`/`seg_root`/`seg_static_root` 는
+    **없으면 기본값**으로 떨어진다 — 릴 스크립트마다 인자 집합이 달라서다. `fixed_focal` 을
+    명시로 넘기면 args 보다 우선한다 (릴 스크립트 중엔 `True` 로 못 박은 곳이 있다).
+
+    `video` 를 명시로 넘기면 `args.video` 대신 쓴다 — `eval_subject_in_frame.py` /
+    `render_target_*.py` 처럼 **한 프로세스가 여러 씬을 루프로 도는** 호출부가 있어서다.
+    그런 곳은 `args.video` 자체가 없다.
     """
     from scene_graph.io import load_scene                                       # noqa: PLC0415
 
     source = getattr(args, "cloud_source", "npz")
     assert source in CLOUD_SOURCES, f"알 수 없는 --cloud_source: {source}"
+    video = getattr(args, "video", None) if video is None else video
+    assert video, "video 를 못 정했다 (args.video 도 없고 인자로도 안 넘어왔다)"
+    vista4d_root = getattr(args, "vista4d_root", VISTA4D_ROOT_DEFAULT)
+    device = getattr(args, "device", "cuda")
+    fixed_focal = getattr(args, "fixed_focal", False) if fixed_focal is None else fixed_focal
+
+    def _load_recon():
+        assert getattr(args, "eval_data", None), (
+            "--eval_data 가 필요하다 (--cloud_source memory 또는 recon 을 쓰는 호출부)")
+        return load_scene(args.eval_data, video, vista4d_root,
+                          seg_root=getattr(args, "seg_root", None),
+                          seg_static_root=getattr(args, "seg_static_root", None))
 
     if source == "npz":
-        cloud_path = path.join(out_root, args.video, "cloud.npz")
+        cloud_path = path.join(out_root, video, "cloud.npz")
         assert path.isfile(cloud_path), (
-            f"cloud.npz 가 없다. 먼저 `python -m lbm.cloud --video {args.video}` "
+            f"cloud.npz 가 없다. 먼저 `python -m lbm.cloud --video {video}` "
             f"(또는 `--cloud_source memory`)")
-        renderer = CloudRenderer(cloud_path, vista4d_root=args.vista4d_root,
-                                 device=args.device, fixed_focal=args.fixed_focal)
-        recon = load_scene(args.eval_data, args.video, args.vista4d_root,
-                           seg_root=args.seg_root, seg_static_root=args.seg_static_root)
-        return renderer, recon
+        renderer = CloudRenderer(cloud_path, vista4d_root=vista4d_root,
+                                 device=device, fixed_focal=fixed_focal)
+        return renderer, (_load_recon() if want_recon else None)
 
     from .cloud import cloud_from_recon, import_vista4d as _import_vista4d      # noqa: PLC0415
 
-    recon = load_scene(args.eval_data, args.video, args.vista4d_root,
-                       seg_root=args.seg_root, seg_static_root=args.seg_static_root)
+    recon = _load_recon()
+    if graph is None:
+        with open(path.join(out_root, video, "scene_graph.json"), encoding="utf-8") as file:
+            graph = json.load(file)
     scale = graph["scale"]
     cloud = cloud_from_recon(
-        recon, _import_vista4d(args.vista4d_root),
-        video=args.video, eval_data=args.eval_data,
+        recon, _import_vista4d(vista4d_root),
+        video=video, eval_data=args.eval_data,
         S=float(scale["S"]), z_med=float(scale["z_med_frame0"]),
         parallax=float(scale["parallax_ratio"]),
         scene_scale_mode=str(scale["mode"]), scene_scale_stride=int(scale["stride"]),
-        device=args.device,
+        device=device,
         preprocess=getattr(args, "preprocess", True),
         depth_outliers=getattr(args, "depth_outliers", "gaussian"),
         ignore_sky_mask=getattr(args, "ignore_sky_mask", False),
         allow_empty_dynamic_mask=getattr(args, "allow_empty_dynamic_mask", False))
-    renderer = CloudRenderer(cloud, vista4d_root=args.vista4d_root,
-                             device=args.device, fixed_focal=args.fixed_focal)
+    renderer = CloudRenderer(cloud, vista4d_root=vista4d_root,
+                             device=device, fixed_focal=fixed_focal)
     return renderer, recon
 
 

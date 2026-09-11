@@ -25,7 +25,7 @@ from lbm.cloud import CINEMATRAJ_ROOT as CLOUD_ROOT                             
 from lbm.cloud import EVAL_DATA_DEFAULT, VISTA4D_ROOT_DEFAULT                   # noqa: E402
 from lbm.overlay import contact_sheet, label_tile                               # noqa: E402
 from lbm.presets import row_preset                                              # noqa: E402
-from lbm.render import CloudRenderer                                            # noqa: E402
+from lbm.render import add_cloud_source_args, open_renderer                     # noqa: E402
 from scripts.render_bank_videos import render_variant, write_video              # noqa: E402
 
 
@@ -63,8 +63,10 @@ def main(args):
     makedirs(args.out_dir, exist_ok=True)
     index = {}
     for scene in args.scenes:
-        cloud_path = path.join(CLOUD_ROOT, "out", scene, "cloud.npz")
-        if not path.isfile(cloud_path):
+        out_root = path.join(CLOUD_ROOT, "out")
+        # npz 모드만 cloud.npz 를 요구한다 — memory 모드는 recon 에서 그 자리에 굽는다.
+        if args.cloud_source == "npz" and not path.isfile(
+                path.join(out_root, scene, "cloud.npz")):
             print(f"[skip] {scene}: cloud.npz 없음")
             continue
         if args.from_target_poses:
@@ -79,8 +81,9 @@ def main(args):
         if not jobs:
             print(f"[skip] {scene}: 카메라 없음")
             continue
-        renderer = CloudRenderer(cloud_path, vista4d_root=args.vista4d_root,
-                                 device=args.device, fixed_focal=True)
+        # `fixed_focal=True` 는 이 릴의 규약이다 (focal 배율을 K_src 에 곱해 쓴다).
+        renderer, recon = open_renderer(args, out_root, want_recon=args.with_source,
+                                        fixed_focal=True, video=scene)
 
         clips, labels, holes = [], [], {}
         for name, c2w, intr in jobs:
@@ -101,8 +104,7 @@ def main(args):
         source = None
         if args.with_source:
             import cv2
-            from scene_graph.io import load_scene
-            video = load_scene(EVAL_DATA_DEFAULT, scene, args.vista4d_root)["video"]
+            video = recon["video"]
             source = [cv2.resize(video[f], (args.tile_width, args.tile_height))
                       for f in range(len(video))]
 
@@ -130,6 +132,7 @@ if __name__ == "__main__":
     parser = ArgumentParser(description=__doc__)
     parser.add_argument("--scenes", nargs="+", required=True)
     parser.add_argument("--root", default=EVAL_DATA_DEFAULT)
+    add_cloud_source_args(parser, eval_data_default=EVAL_DATA_DEFAULT)
     parser.add_argument("--vista4d_root", default=VISTA4D_ROOT_DEFAULT)
     parser.add_argument("--out_dir", required=True)
     parser.add_argument("--device", default="cuda")

@@ -37,9 +37,9 @@ if CINEMATRAJ_ROOT not in sys.path:
     sys.path.insert(0, CINEMATRAJ_ROOT)
 
 from lbm.cloud import CINEMATRAJ_ROOT as CLOUD_ROOT                             # noqa: E402
-from lbm.cloud import VISTA4D_ROOT_DEFAULT                                      # noqa: E402
+from lbm.cloud import EVAL_DATA_DEFAULT, VISTA4D_ROOT_DEFAULT                   # noqa: E402
 from lbm.overlay import contact_sheet, label_tile                               # noqa: E402
-from lbm.render import CloudRenderer                                            # noqa: E402
+from lbm.render import add_cloud_source_args, open_renderer                     # noqa: E402
 from scripts.render_bank_videos import render_variant, write_video              # noqa: E402
 from scripts.render_pred_depth_warp import load_entry_meta, load_transforms     # noqa: E402
 from scripts.render_target_swap_warp import ladder_rung                         # noqa: E402
@@ -78,9 +78,9 @@ def main(args):
     if missing:      # 조용히 빠지면 격자가 어긋나므로 눈에 띄게 찍는다
         print(f"[warn] anchor={args.anchor} 에 없는 preset: {missing}", flush=True)
 
-    renderer = CloudRenderer(path.join(CLOUD_ROOT, "out", args.video, "cloud.npz"),
-                             vista4d_root=args.vista4d_root, device=args.device,
-                             fixed_focal=True)
+    # `fixed_focal=True` 는 이 릴의 규약이다 (아래 K 일치 assert 가 frame0 K 를 전제한다).
+    renderer, _ = open_renderer(args, path.join(CLOUD_ROOT, "out"), want_recon=False,
+                                fixed_focal=True)
     makedirs(args.out_dir, exist_ok=True)
 
     cells, stats = [], {}
@@ -157,6 +157,7 @@ if __name__ == "__main__":
     parser.add_argument("--out_dir", required=True)
     parser.add_argument("--corpus_root",
                         default="/data1/cympyc1785/data/Vista4D-Eval-Data/latentcam_da3")
+    add_cloud_source_args(parser, eval_data_default=EVAL_DATA_DEFAULT)
     parser.add_argument("--vista4d_root", default=VISTA4D_ROOT_DEFAULT)
     parser.add_argument("--device", default="cuda")
     parser.add_argument("--stride", type=int, default=1)

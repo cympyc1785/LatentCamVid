@@ -55,8 +55,7 @@ from lbm.cloud import CINEMATRAJ_ROOT as CLOUD_ROOT                             
 from lbm.cloud import subject_point_mask                                        # noqa: E402
 from lbm.overlay import contact_sheet, label_tile, paint_holes                  # noqa: E402
 from lbm.presets import row_preset                                              # noqa: E402
-from lbm.render import CloudRenderer                                            # noqa: E402
-from scene_graph.io import load_scene                                           # noqa: E402
+from lbm.render import add_cloud_source_args, open_renderer                     # noqa: E402
 from scene_graph.schema import load_graph                                       # noqa: E402
 from scripts.build_candidate_board import subject_track_volume                  # noqa: E402
 
@@ -210,11 +209,7 @@ def main(args):
         skipped = sum(deroll_poses(cam, up_world, np.zeros(len(cam))) for cam in cam_c2w)
         print(f"{'deroll':<14}up_world={np.round(up_world, 4).tolist()} "
               f"({graph['gravity'].get('method')})  roll 미정의 프레임 {skipped}\n")
-    renderer = CloudRenderer(path.join(out_root, args.video, "cloud.npz"),
-                             vista4d_root=args.vista4d_root, device=args.device,
-                             fixed_focal=args.fixed_focal)
-    recon = load_scene(args.eval_data, args.video, args.vista4d_root,
-                       seg_root=args.seg_root, seg_static_root=args.seg_static_root)
+    renderer, recon = open_renderer(args, out_root, graph)
     nodes = {n["id"]: n for n in graph["nodes"]}
 
     chosen = select(bank["variants"], args.anchors, args.presets, args.tau,
@@ -323,6 +318,7 @@ if __name__ == "__main__":
     parser.add_argument("--vista4d_root", default=VISTA4D_ROOT_DEFAULT, type=str)
     parser.add_argument("--seg_root", default=None, type=str)
     parser.add_argument("--seg_static_root", default=None, type=str)
+    add_cloud_source_args(parser)
 
     parser.add_argument("--video", required=True, type=str)
     parser.add_argument("--device", default="cuda", type=str)

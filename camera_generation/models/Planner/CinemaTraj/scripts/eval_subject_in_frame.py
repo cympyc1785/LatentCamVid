@@ -56,8 +56,7 @@ if CINEMATRAJ_ROOT not in sys.path:
     sys.path.insert(0, CINEMATRAJ_ROOT)
 
 from lbm.cloud import EVAL_DATA_DEFAULT, VISTA4D_ROOT_DEFAULT, subject_point_mask  # noqa: E402
-from lbm.render import CloudRenderer                                               # noqa: E402
-from scene_graph.io import load_scene                                              # noqa: E402
+from lbm.render import add_cloud_source_args, open_renderer                        # noqa: E402
 from scripts.build_candidate_board import subject_track_volume                     # noqa: E402
 from verify import measure, render_plan                                            # noqa: E402
 
@@ -190,16 +189,16 @@ def main(args):
 
     rows, skipped = [], []
     for scene in sorted(by_scene):
-        cloud_path = path.join(args.cloud_root, scene, "cloud.npz")
         graph_path = path.join(args.cloud_root, scene, "scene_graph.json")
-        if not (path.isfile(cloud_path) and path.isfile(graph_path)):
+        # npz 모드는 cloud.npz 가 있어야 하고, memory 모드는 recon 만 있으면 된다.
+        needed = [graph_path] + ([path.join(args.cloud_root, scene, "cloud.npz")]
+                                 if args.cloud_source == "npz" else [])
+        if not all(path.isfile(p) for p in needed):
             skipped += [f"{scene}_{e}: cloud/graph 없음" for _, e in by_scene[scene]]
             continue
-        renderer = CloudRenderer(cloud_path, vista4d_root=args.vista4d_root,
-                                 device=args.device, fixed_focal=args.fixed_focal)
-        recon = load_scene(args.eval_data, scene, args.vista4d_root)
         with open(graph_path, encoding="utf-8") as file:
             graph = json.load(file)
+        renderer, recon = open_renderer(args, args.cloud_root, graph, video=scene)
 
         # 가림 판정의 depth 여유(0.02·S)는 씬 게이지를 따라야 한다 — `gates.evaluate` 와 같은 값.
         scene_scale = float(graph["scale"]["S"])
@@ -316,6 +315,7 @@ if __name__ == "__main__":
     parser.add_argument("--corpus_root",
                         default="/data1/cympyc1785/data/Vista4D-Eval-Data/latentcam_da3_k6_d121")
     parser.add_argument("--eval_data", default=EVAL_DATA_DEFAULT)
+    add_cloud_source_args(parser)
     parser.add_argument("--vista4d_root", default=VISTA4D_ROOT_DEFAULT)
     parser.add_argument("--center_box", type=float, default=0.80)    # verify.py 기본값과 동일
     # 표에 같이 찍을 center_box sweep 범위 (렌더는 한 번, 임계만 다시 건다)

@@ -44,9 +44,9 @@ CINEMATRAJ_ROOT = path.dirname(path.dirname(path.abspath(__file__)))
 if CINEMATRAJ_ROOT not in sys.path:
     sys.path.insert(0, CINEMATRAJ_ROOT)
 
-from lbm.cloud import VISTA4D_ROOT_DEFAULT                                      # noqa: E402
+from lbm.cloud import EVAL_DATA_DEFAULT, VISTA4D_ROOT_DEFAULT                   # noqa: E402
 from lbm.cloud import CINEMATRAJ_ROOT as CLOUD_ROOT                             # noqa: E402
-from lbm.render import CloudRenderer                                            # noqa: E402
+from lbm.render import add_cloud_source_args, open_renderer                     # noqa: E402
 from scripts.render_bank_videos import colorize_depth, write_video              # noqa: E402
 
 DL3DV_ROOT_DEFAULT = "/data1/cympyc1785/data/Vista4D-Eval-Data/latentcam_da3"
@@ -90,7 +90,6 @@ def main(args):
     for video in args.videos:
         chunk = f"{args.chunk_prefix}/{video}" if args.chunk_prefix else video
         target_npz = path.join(args.dl3dv_root, *chunk.split("/"), "da3", "target_poses.npz")
-        cloud_path = path.join(out_root, video, "cloud.npz")
         if not path.isfile(target_npz):
             # 학습 코퍼스에 없는 영상. 뱅크가 통째로 빠진 경우가 있어(예: snowboard 는 소스
             # 자신의 시차가 τ 사다리 꼭대기를 넘어 350/360 변이가 saturated) 이유를 같이 낸다.
@@ -104,7 +103,9 @@ def main(args):
                         f"saturated {info.get('num_dropped_saturated')})")
             skipped.append((video, why))
             continue
-        if not path.isfile(cloud_path):
+        # npz 모드만 cloud.npz 를 요구한다 — memory 모드는 recon 에서 그 자리에 굽는다.
+        if args.cloud_source == "npz" and not path.isfile(
+                path.join(out_root, video, "cloud.npz")):
             skipped.append((video, "cloud.npz 없음 (`python -m lbm.cloud --video <v>` 먼저)"))
             continue
 
@@ -133,8 +134,7 @@ def main(args):
         depth_dir = path.join(args.out_dir, video, "target_depth") if args.out_dir else \
             path.join(args.dl3dv_root, *chunk.split("/"), "da3", "target_depth")
         makedirs(depth_dir, exist_ok=True)
-        renderer = CloudRenderer(cloud_path, vista4d_root=args.vista4d_root,
-                                 device=args.device, fixed_focal=args.fixed_focal)
+        renderer, _ = open_renderer(args, out_root, want_recon=False, video=video)
         # `CloudRenderer.render` 는 넘긴 K 를 **점군 원본 해상도 기준**으로 보고 렌더 해상도로
         # 다시 줄인다 (render.py:143-146). 저장된 K 는 이미 0.5배 줄여 둔 것이라 그대로 넘기면
         # 화각이 두 번 줄어든다 — 여기서 원본 해상도로 되돌려 넘긴다.
@@ -216,6 +216,7 @@ if __name__ == "__main__":
     parser.add_argument("--dl3dv_root", default=DL3DV_ROOT_DEFAULT, type=str)
     parser.add_argument("--chunk_prefix", default="vista4d", type=str)
     parser.add_argument("--output_root", default=None, type=str)   # CinemaTraj out/ (cloud.npz)
+    add_cloud_source_args(parser, eval_data_default=EVAL_DATA_DEFAULT)
     parser.add_argument("--vista4d_root", default=VISTA4D_ROOT_DEFAULT, type=str)
     parser.add_argument("--bank_dir", default="hole_bank_k6", type=str)  # skipped.json 조회용
 

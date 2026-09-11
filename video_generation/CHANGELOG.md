@@ -7,6 +7,24 @@
 ## [Unreleased]
 
 ### Added
+- **D183 — D182 graph 위의 뱅크 config (`configs/bank/d183_dynpose100k_bank.json`)
+  (2026-09-12, 사용자 지시 "앞으로 돌릴 것도 배선 문제 없는지 미리 확인해놔줘").** d179 를
+  D182 뒤에 그대로 돌리면 **두 군데서 조용히 잘못된다**. ① `require_markers: [".graph_d157"]`
+  — D182 는 `.graph_d182` 를 쓰므로 3,423편만 통과하고 6,923편은 편마다
+  `FAIL(마커 .graph_d157 없음)` 인데 샤드 rc 는 0 이다 (완주한 것처럼 보이는 2/3 빈 코퍼스).
+  ② `bank_dir: hole_bank_d179` — `run_bank.process_video:210` 이 `canonical/canonical.json` 을
+  보고 `SKIP(done)` 하는데, 그 753편 + `skipped.json` 40편이 **dyn-only graph 로 라우팅된**,
+  정확히 다시 구워야 할 편들이다. 그래서 `extends: d179...` + 세대 디렉토리
+  (`bank_d183`/`hole_bank_d183`) + 마커만 바꿨다 — route/tau/fit/emit args 는 `load_config`
+  얕은 병합으로 d179 와 **글자 단위 동일**임을 실행해 확인했다.
+  · 강등(`dynpose_dynamic_mask_from_seg.py --demote_static_objects`)은 D182 뒤에 10,346편
+  전량 재실행해야 한다 — 디스크의 강등 323편(`from_seg.json` 1,934편 중)이 dyn-only graph
+  기준이다. 이 스크립트는 매번 `seg_instances/masks.npz` 에서 합집합을 다시 만들어(`build_union`)
+  **멱등**이므로 재실행으로 복구된다.
+  · D182 뒤에도 stat 노드가 0개로 남는 편이 있다: 정적 명사 0개 350편 + `vlm_nouns`
+  `source="exhausted"` 7편. sam3 완료분 실측 4.3% 가 stat track 0개다.
+  · `d181_track_orbit_pilot.json` 은 `extends: d179...` 라 같은 `.graph_d157` 을 물려받는다 —
+  되살릴 때 `require_markers` 를 같이 고칠 것.
 - **D182 — dynpose-100k graph 를 정적 노드 포함으로 전량 재굽기
   (`configs/bank/d182_dynpose100k_graph.json`) (2026-09-11, 사용자 지시 "우선 static 포함해서
   graph까지 먼저 다 완료하는걸 목표로 다시 돌리자").** D172 가 구운 graph 에 `stat_*` 노드가

@@ -7,6 +7,27 @@
 ## [Unreleased]
 
 ### Added
+- **D182 — dynpose-100k graph 를 정적 노드 포함으로 전량 재굽기
+  (`configs/bank/d182_dynpose100k_graph.json`) (2026-09-11, 사용자 지시 "우선 static 포함해서
+  graph까지 먼저 다 완료하는걸 목표로 다시 돌리자").** D172 가 구운 graph 에 `stat_*` 노드가
+  하나도 없었다. 플래그가 아니라 **디렉토리 부재**다 — `scene_graph/io.py:99` 는
+  `((seg_root,"dyn"), (seg_static_root,"stat"))` 를 돌면서 없는 루트를 **조용히 건너뛴다**
+  (에러도 경고도 없고 `scene_graph.json` 은 정상으로 보인다). `DATA/DynPose-LBM` 에는
+  `eval_data/seg_instances_static` 이 있어서 d157 은 stat 노드를 냈고 `DATA/DynPose-100K` 에는
+  없어서 d172 는 안 냈다. 같은 코드, 다른 결과.
+  · marker 를 **`.graph_d182`** 로 바꿨다. `.graph_d157` 을 그대로 쓰면 이미 있는 2,743편을
+  건너뛰는데 그게 정확히 다시 구워야 할 dyn-only 편들이다 (d172 `_marker_reuse` 가 경고한
+  "입력이 바뀌면 재사용 무효" — args 는 그대로지만 **입력에 정적 seg 루트가 새로 생겼다**).
+  `graph.args` 는 d172 와 글자 단위로 같다.
+  · 스모크 1편(`0013e08a`, 정적 명사 5개) rc=0 253.3s — 노드 **16개(stat 10 / dyn 6)**,
+  `dyn_1 supported_by=stat_1`, `near` 엣지가 stat 쪽으로 붙는다. d172 dyn-only 대비 노드가
+  6 → 16 이라 편당 시간도 85.5s → 250s 대로 오른다 (측정 당시 같은 카드에서 SAM3 12샤드가
+  동시에 돌고 있었으므로 상한값이다).
+  · 선행 단계는 `tmp/d182/chain_static_graph.py --stage nouns|link|sam3|graph` 가 돌린다
+  (tmp 는 git 미추적). nouns = 16 샤드 `vlm_nouns.json` 병합 후 `extract_static_nouns.py`
+  → 10,339/10,346 (7편은 VLM `source="exhausted"` 라 record 가 없고, `metadata.csv` 에
+  `prompt` 열이 없어 규칙 폴백도 불가). link = `DynPose-LBM` 정적 seg 846편 심볼릭 재사용.
+  sam3 = 잔여 ~9,493편.
 - **D180 — `run_bank.py --exec inproc`: 단계를 서브프로세스가 아니라 같은 프로세스에서 부른다
   (2026-09-11, 사용자 지시 "뱅크 더 빨리는 못함? 불필요한 방식 없는지 봐줘").** 8샤드 구간 실측
   씬당 205.8s(FIT 135.3 / TAU 62.7 / EMIT 7.4 / ROUTE 0.4) 중 **51.3s(25%)가 프로세스 경계

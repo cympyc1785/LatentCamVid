@@ -1,0 +1,26 @@
+{
+  "_why": "D182 — dynpose-100k 10,346편 graph 를 **정적 노드를 넣어** 전량 재굽기한다. D172 가 구운 graph 는 전부 dyn-only 였는데, 플래그 문제가 아니라 `DATA/DynPose-100K/eval_data/seg_instances_static` 디렉토리가 **없었기** 때문이다: `scene_graph/io.py:99` 는 두 seg 루트를 `(seg_root,'dyn'), (seg_static_root,'stat')` 로 돌면서 없는 루트를 조용히 건너뛴다 — 에러도 경고도 없다. 그래서 같은 코드가 `DATA/DynPose-LBM`(static 루트 있음) 에서는 stat 노드를 내고 `DATA/DynPose-100K` 에서는 안 냈다. 2026-09-11 사용자 지시 '우선 static 포함해서 graph까지 먼저 다 완료하는걸 목표로 다시 돌리자'.",
+
+  "_marker_new": "marker 를 **`.graph_d182`** 로 바꾼다. `.graph_d157` 을 그대로 쓰면 이미 있는 2,743편을 건너뛰는데 그게 정확히 다시 구워야 할 dyn-only 편들이다. d172 config 의 `_marker_reuse` 가 경고한 '입력이 바뀌면 재사용 무효' 조건에 해당한다 — args 는 안 바뀌었지만 **입력(정적 seg 루트)이 새로 생겼다**.",
+
+  "_prereq": "① `eval_data/seg_instances_static/<v>/{meta.json,masks.npz}` — `tmp/d182/chain_static_graph.py --stage nouns,link,sam3` 이 만든다 (846편은 DynPose-LBM 것을 심볼릭으로 재사용). ② `out_dynpose/<v>/geocalib_gravity.json` 사이드카 (D172 가 10,346/10,346 완료). ③ `recon_and_seg/<v>/dynamic_mask` SAM3 합집합 (D169 완료).",
+
+  "_runtime": "graph 85.5 s/편 x 10,346 = 245.7 GPU-h. 24 샤드(GPU 0~3 x6)면 약 10 시간. 정적 노드가 붙으면 OBB/relations 가 늘어 편당 시간이 소폭 오를 수 있다 — 첫 샤드 로그로 재측정할 것.",
+
+  "generation": "d182",
+  "output_root": "out_dynpose",
+  "eval_data": "/data1/cympyc1785/LatentCamVid/DATA/DynPose-100K",
+  "tau_bank_dir": "bank_d182",
+  "bank_dir": "hole_bank_d182",
+  "stages": ["graph"],
+  "require_markers": [],
+  "graph": {
+    "marker": ".graph_d182",
+    "args": [
+      "--scene_scale_mode", "points_first_cam", "--scene_scale_stride", "1",
+      "--gravity_source", "geocalib",
+      "--no_skip_done", "--no_overlay", "--no_topdown"
+    ]
+  },
+  "emit": {"args": []}
+}

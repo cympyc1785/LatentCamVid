@@ -1,0 +1,53 @@
+{
+  "_why": "D181 파일럿 (사용자 지시 2026-09-11 \"scene 중에 일정 이상 움직이는 dynamic target 있는 경우만 모아서 track + object-centric (e.g. track orbit left) 같은 것만 카메라 하나만 fitting되도록 먼저 돌려줘봐\"). 씬당 카메라 **1개**, 그 1개는 반드시 `track_orbit_{left|right}` 다.",
+
+  "_세_가지_제약이_각각_어디서_걸리나": "① '일정 이상 움직이는' = `--anchor_min_drift_u 0.30` — anchor **후보 자체**를 이동량으로 자른다. 기존 `--track_min_drift_u` 로는 안 되는데, 그건 이미 뽑힌 anchor 에 `track_` 접두사를 붙일지만 정하고 anchor 선택은 여전히 면적 순이라 정지한 큰 물체가 1등으로 뽑힌다. ② 'track + object-centric' = `--slot_whitelist orbit` + `--track_mode replace`. 슬롯 이름으로 거는 이유는 방향(left/right)이 소스 카메라 횡이동에서 나오는 씬별 값이라 preset 이름을 고정하면 소스와 같은 쪽으로 도는 변이가 섞여서다. ③ '카메라 하나만' = anchor 1 × 슬롯 1. `--target_variants 1` / `--fallback_target 1` 도 같이 내려야 fit 의 fallback 사다리가 5개를 채우려 들지 않는다.",
+
+  "_scope": "`tmp/d181/scenes_moving.txt` 981편 — `tmp/d181/pick_moving_scenes.py --drift 0.30` 이 뽑았다 (신선 graph 2,137편 중 45.9%). 문턱은 코퍼스 중앙값이고 기존 배선 문턱 0.05 의 6배다 (0.05 는 96.4% 를 통과시켜 '일정 이상'이 안 된다). D180-b 에서 격리한 372편은 목록에서 뺐다 — graph 재굽기 중이라 지금 디스크의 graph 가 곧 바뀐다.",
+
+  "_frame0": "`--anchor_require_frame0` 이 있어야 한다. 뱅크가 anchor 를 **소스 frame 0 가시성**으로 한 번 더 떨어뜨리는데(`skipped.json` 의 `no_surviving_anchors`), anchor 가 1개뿐이라 그러면 씬이 통째로 날아간다 — 첫 스모크 3편 중 2편이 그랬다(`track.frames` 가 13/2 에서 시작). 이동량 큰 물체일수록 나중에 프레임에 들어오므로 drift 문턱과 특히 겹친다. 씬 목록도 같은 조건으로 걸렀다.",
+
+  "_격리": "`tau_bank_dir`/`bank_dir`/`route.out` 을 전부 d179 와 다른 이름으로 뒀다. 특히 `route.out` — d179 는 `preset_route_d179.json` 을 **씬 루트에** 쓰므로 이름을 안 바꾸면 진행 중인 라이브 코퍼스의 라우팅 파일을 덮는다.",
+
+  "_d179와_다른_점": "route 인자(위 3개) + fit 의 `--fallback_target` 1(5에서). tau 인자는 글자 그대로 d179 를 물려받는다 — τ 사다리·조준·추종을 바꾸면 파일럿이 코퍼스의 부분집합이 아니게 된다.",
+
+  "extends": "d179_dynpose100k_bank.json",
+  "generation": "d181",
+  "tau_bank_dir": "bank_d181",
+  "bank_dir": "hole_bank_d181",
+  "route": {
+    "out": "preset_route_d181.json",
+    "args": [
+      "--num_external", "0", "--free_moving", "off",
+      "--max_dynamic_anchors", "1", "--max_static_anchors", "0", "--max_anchors", "1",
+      "--anchor_min_drift_u", "0.30", "--anchor_require_frame0",
+      "--slot_whitelist", "orbit",
+      "--track_mode", "replace",
+      "--target_variants", "1"
+    ]
+  },
+  "fit": {
+    "args": [
+      "--cloud_source", "memory",
+      "--hole_ladder", "0.20",
+      "--fallback_ladder", "--fallback_target", "1",
+      "--retry_status", "clamped_low",
+      "--retry_suspect", "aim_target_subject_lost", "hole_over_budget",
+      "motion_preset_no_motion", "static_start_collision",
+      "--suspect_hole", "0.35",
+      "--aim_keyframes", "6", "--keyframe_aim", "auto", "--keyframe_ease", "smooth_kf",
+      "--fixed_focal", "--deroll",
+      "--orbit_fixed_sweep", "--min_sweep_deg", "20", "--behind_src_frames", "49",
+      "--tau_ref", "follow", "--tracking", "lock", "--preset_tracking",
+      "--behind_min_zcam", "0.02", "--behind_clear_src_ratio", "0",
+      "--collision_time_match", "--collision_source", "depth",
+      "--area_timeline", "--composition",
+      "--composition_min_area", "0.004", "--composition_max_nodes", "3",
+      "--device", "cuda",
+      "--tau_denom", "S",
+      "--tau_knob_min", "0.005",
+      "--min_subject_visible", "0.6",
+      "--follow_keyframes", "6", "--follow_kf_interp", "cubic"
+    ]
+  }
+}

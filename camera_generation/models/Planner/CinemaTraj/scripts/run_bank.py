@@ -44,15 +44,27 @@ config 스키마 (`configs/bank/<gen>.json`):
     python scripts/run_bank.py --config configs/bank/d150S.json --videos <list> \
         --log_dir logs/d150S --gpu 2 --stages emit --no_skip_done
 """
+import sys
 from argparse import ArgumentParser
+from contextlib import redirect_stderr, redirect_stdout
+from importlib import import_module
+from importlib.util import module_from_spec, spec_from_file_location
+from io import StringIO
 from json import load as json_load
-from os import environ, makedirs, path
+from os import environ, execv, makedirs, path
 from subprocess import run as sp_run, PIPE
 from sys import executable, stderr
 from time import strftime, time
+from traceback import print_exc
 
 
 HERE = path.dirname(path.dirname(path.abspath(__file__)))
+# python 은 **스크립트가 있는 폴더**(`scripts/`)를 sys.path 에 넣지 cwd 를 넣지 않는다. 서브프로세스
+# 모드에서는 각 단계 스크립트가 제 나름대로 리포 루트를 꽂아 `lbm.*` 를 찾지만, in-process 모드는
+# 드라이버 자신이 `lbm.render`(cloud 캐시)와 `lbm.cloud`(module 단계)를 직접 import 한다 —
+# 그래서 여기서 못 박는다. 서브프로세스 모드에는 영향이 없다 (이미 들어있으면 안 넣는다).
+if HERE not in sys.path:
+    sys.path.insert(0, HERE)
 STAGE_ORDER = ("graph", "cloud", "route", "tau", "fit", "emit")
 # BLAS/OpenMP 스레드 상한. **이걸 안 걸면 graph 단계가 CPU 를 48배 낭비한다** (D179 실측,
 # 씬 bb3bd56c 1편 · 같은 인자 · 산출물 md5 동일):
@@ -85,14 +97,80 @@ def _cmd(stage, extra):
     return [executable] + (["-m", target] if kind == "module" else [target]) + list(extra)
 
 
-def _run(stage, argv, log_path, gpu, capture=False, threads=0):
-    """서브프로세스 1회. -> (rc, stdout or "")
+# ── in-process 실행 (D180) ───────────────────────────────────────────────────────
+# 왜: 씬당 205.8s 중 **51.3s(25%)가 프로세스 경계 비용**이다 (8샤드 구간 실측).
+#     import   route 0.45s + tau 7.27s + fit 6.74s + emit ~7.4s = 21.9s   <- 씬마다 다시 낸다
+#     중복 cloud  load_recon 4.74 + preprocess 9.37 + build_cloud 0.60 = 14.7s 를 tau/fit 이 각각
+# 샤드는 이미 한 프로세스가 씬을 순회하는 구조(`main` 의 for 문)라, 단계 호출만 in-process 로
+# 바꾸면 import 는 **씬당이 아니라 샤드당 1회**로 떨어지고, 같은 프로세스 안이므로
+# `lbm.render` 의 cloud 캐시가 tau->fit 중복도 없앤다.
+#
+# 기본은 `subprocess` = **예전 동작 그대로**다 (CLAUDE.md 분기 규칙). in-process 는 한 단계의
+# 메모리 누수·전역 오염이 샤드 전체를 물고 들어갈 수 있어서, 기본값으로 두지 않는다.
+_STAGE_MODULES = {}
+
+
+def _stage_module(stage):
+    """단계 스크립트를 **모듈로** 읽는다 (`__main__` 블록은 안 돈다). 프로세스당 1회."""
+    if stage in _STAGE_MODULES:
+        return _STAGE_MODULES[stage]
+    kind, target = STAGE_ENTRY[stage]
+    if kind == "module":
+        mod = import_module(target)
+    else:
+        name = f"_bank_stage_{path.splitext(path.basename(target))[0]}"
+        spec = spec_from_file_location(name, path.join(HERE, target))
+        mod = module_from_spec(spec)
+        sys.modules[name] = mod          # dataclass/pickle 이 모듈을 되찾을 수 있게
+        spec.loader.exec_module(mod)
+    _STAGE_MODULES[stage] = mod
+    return mod
+
+
+def _run_inproc(stage, argv, log_path, capture):
+    """같은 프로세스에서 단계 `main()` 을 부른다. -> (rc, stdout or "") 또는 None(=미지원).
+
+    `build_parser()` 가 없는 단계는 None 을 돌려 호출자가 서브프로세스로 되돌리게 한다 —
+    릴/구세대 스크립트를 이 경로에 억지로 태우지 않기 위함이다.
+
+    `KeyboardInterrupt` 는 **안 잡는다**. 샤드를 Ctrl+C 로 내리는 게 정상 종료 절차인데
+    (`CLAUDE.md`: 하드킬은 DataLoader worker 를 고아로 남긴다) 여기서 삼키면 그게 막힌다.
+    """
+    mod = _stage_module(stage)
+    if not hasattr(mod, "build_parser"):
+        return None
+    buf = StringIO() if capture else None
+    with open(log_path, "w") as log:
+        out = buf if capture else log
+        try:
+            with redirect_stdout(out), redirect_stderr(log):
+                mod.main(mod.build_parser().parse_args(argv))
+            rc = 0
+        except SystemExit as exc:        # argparse 오류 + 스크립트의 명시적 SystemExit("...")
+            rc = exc.code if isinstance(exc.code, int) else 1
+            if exc.code and not isinstance(exc.code, int):
+                print(f"SystemExit: {exc.code}", file=log)
+        except Exception:                # noqa: BLE001 — 한 단계가 죽어도 샤드는 계속 간다
+            print_exc(file=log)
+            rc = 1
+    return rc, (buf.getvalue() if capture else "")
+
+
+def _run(stage, extra, log_path, gpu, capture=False, threads=0, mode="subprocess"):
+    """단계 1회 실행. -> (rc, stdout or "")
 
     stdout/stderr 은 영상별 로그 파일로 보낸다 — 드라이버 stdout 에는 진행 한 줄만 남긴다
     (`CLAUDE.md` "로그는 전량 tee 하지 말고"). route 만 stdout 을 파싱해야 해서 capture 한다.
 
     `threads > 0` 이면 BLAS/OpenMP 스레드 상한을 서브프로세스 env 에 심는다 (§THREAD_ENV_KEYS).
+    in-process 모드에서는 `main()` 이 프로세스 env 에 **한 번** 심어 둔다 (OpenMP 는 로드
+    시점에 env 를 읽으므로 나중에 바꿔도 안 먹는다).
     """
+    if mode == "inproc":
+        got = _run_inproc(stage, list(extra), log_path, capture)
+        if got is not None:
+            return got                   # None 이면 아래 서브프로세스 경로로 되돌아간다
+    argv = _cmd(stage, extra)
     env = dict(environ)
     if gpu is not None:
         env["CUDA_VISIBLE_DEVICES"] = str(gpu)
@@ -123,7 +201,7 @@ def _base_args(cfg, video, bank_dir=None, stage=None):
     return out
 
 
-def process_video(cfg, video, stages, gpu, log_dir, skip_done, tag, threads=0):
+def process_video(cfg, video, stages, gpu, log_dir, skip_done, tag, threads=0, mode="subprocess"):
     """영상 1편을 config 의 단계 순서대로 통과시킨다. -> 상태 문자열."""
     root = path.join(cfg["output_root"], video)
     tau_dir = path.join(root, cfg["tau_bank_dir"])
@@ -151,16 +229,16 @@ def process_video(cfg, video, stages, gpu, log_dir, skip_done, tag, threads=0):
             if skip_done and path.exists(marker):
                 continue
             print(f"[{tag}] {stage.upper():5s} {video}  {_now()}", flush=True)
-            argv = _cmd(stage, _base_args(cfg, video, stage=stage) + spec["args"])
-            rc, _ = _run(stage, argv, log_path, gpu, threads=threads)
+            rc, _ = _run(stage, _base_args(cfg, video, stage=stage) + spec["args"],
+                         log_path, gpu, threads=threads, mode=mode)
             if rc != 0:
                 return f"FAIL({stage} rc={rc})"
             open(marker, "w").close()
 
         elif stage == "route":
-            argv = _cmd(stage, _base_args(cfg, video, stage=stage) + spec["args"]
-                        + ["--emit", "args", "--out", path.join(root, spec["out"])])
-            rc, text = _run(stage, argv, log_path, gpu, capture=True, threads=threads)
+            rc, text = _run(stage, _base_args(cfg, video, stage=stage) + spec["args"]
+                            + ["--emit", "args", "--out", path.join(root, spec["out"])],
+                            log_path, gpu, capture=True, threads=threads, mode=mode)
             line = text.strip().splitlines()[-1] if text.strip() else ""
             if rc != 0 or not line:
                 return f"FAIL(route rc={rc})"
@@ -171,8 +249,9 @@ def process_video(cfg, video, stages, gpu, log_dir, skip_done, tag, threads=0):
                               or path.exists(path.join(tau_dir, "skipped.json"))):
                 continue
             print(f"[{tag}] TAU   {video}  {_now()}", flush=True)
-            argv = _cmd(stage, _base_args(cfg, video, cfg["tau_bank_dir"], stage) + route_args + spec["args"])
-            rc, _ = _run(stage, argv, log_path, gpu, threads=threads)
+            rc, _ = _run(stage, _base_args(cfg, video, cfg["tau_bank_dir"], stage)
+                         + route_args + spec["args"],
+                         log_path, gpu, threads=threads, mode=mode)
             if rc != 0 and not path.exists(path.join(tau_dir, "skipped.json")):
                 return f"FAIL(tau rc={rc})"
 
@@ -187,15 +266,15 @@ def process_video(cfg, video, stages, gpu, log_dir, skip_done, tag, threads=0):
                     return "SKIP(변이 0)"
                 return "FAIL(tau 산출물 없음)"
             print(f"[{tag}] FIT   {video}  {_now()}", flush=True)
-            argv = _cmd(stage, _base_args(cfg, video, cfg["bank_dir"], stage)
-                        + ["--tau_bank_dir", cfg["tau_bank_dir"]] + spec["args"])
-            rc, _ = _run(stage, argv, log_path, gpu, threads=threads)
+            rc, _ = _run(stage, _base_args(cfg, video, cfg["bank_dir"], stage)
+                         + ["--tau_bank_dir", cfg["tau_bank_dir"]] + spec["args"],
+                         log_path, gpu, threads=threads, mode=mode)
             if rc != 0:
                 return f"FAIL(fit rc={rc})"
 
         elif stage == "emit":
-            argv = _cmd(stage, _base_args(cfg, video, cfg["bank_dir"], stage) + spec["args"])
-            rc, _ = _run(stage, argv, log_path, gpu, threads=threads)
+            rc, _ = _run(stage, _base_args(cfg, video, cfg["bank_dir"], stage) + spec["args"],
+                         log_path, gpu, threads=threads, mode=mode)
             if rc != 0:
                 return f"FAIL(emit rc={rc})"
         print(f"[{tag}] {stage.upper():5s} {video} rc=0 {time() - t0:6.1f}s  {_now()}", flush=True)
@@ -243,7 +322,24 @@ def main():
     parser.add_argument("--threads", default=8, type=int,
                         help="단계 서브프로세스의 BLAS/OpenMP 스레드 상한. 0 = 캡 없음(예전 동작). "
                              "기본 8 (§THREAD_ENV_KEYS — graph 실측 CPU 48배 절감, 산출물 md5 동일)")
+    parser.add_argument("--exec", dest="exec_mode", default="subprocess",
+                        choices=("subprocess", "inproc"),
+                        help="subprocess = 단계마다 새 프로세스(기본, 예전 동작). "
+                             "inproc = 같은 프로세스에서 단계 main() 호출 — import 가 씬당이 "
+                             "아니라 샤드당 1회가 되고 tau/fit 의 cloud 재구축이 캐시된다 (§_run_inproc)")
+    parser.add_argument("--inproc_recycle", default=50, type=int,
+                        help="inproc 모드에서 N편마다 샤드를 **자기 자신으로 재실행**(execv)해 "
+                             "누적 메모리를 턴다. 0 = 끔. 재실행 비용은 import 1회(~8s)뿐이고 "
+                             "`--skip_done` 이 이미 끝낸 편을 건너뛰므로 진행은 이어진다.")
     args = parser.parse_args()
+
+    # in-process 모드는 이 프로세스가 곧 단계 프로세스다 — CUDA/OpenMP 는 **첫 import 전에**
+    # env 를 읽으므로 여기서 못 박아야 한다 (나중에 바꾸면 안 먹는다).
+    if args.exec_mode == "inproc":
+        if args.gpu is not None:
+            environ["CUDA_VISIBLE_DEVICES"] = str(args.gpu)
+        if args.threads > 0:
+            environ.update({key: str(args.threads) for key in THREAD_ENV_KEYS})
 
     cfg = load_config(args.config)
     stages = [s for s in (args.stages.split(",") if args.stages else cfg["stages"])]
@@ -258,20 +354,40 @@ def main():
     makedirs(args.log_dir, exist_ok=True)
     tag = f"{cfg.get('generation', '?')}/s{args.shard_id}"
     print(f"[{tag}] {len(mine)}/{len(videos)}편  stages={','.join(stages)}  "
-          f"bank={cfg['bank_dir']}  gpu={args.gpu}  "
+          f"bank={cfg['bank_dir']}  gpu={args.gpu}  exec={args.exec_mode}  "
           f"threads={args.threads or '캡 없음'}  {_now()}", flush=True)
 
+    clear_cache = None
+    if args.exec_mode == "inproc":
+        from lbm.render import clear_cloud_cache, set_cloud_cache                # noqa: PLC0415
+        set_cloud_cache(True)            # tau -> fit 의 cloud 재구축 제거 (씬당 14.7s)
+        clear_cache = clear_cloud_cache
+
     results = []
+    done = 0
     for video in mine:
         t0 = time()
         try:
             status = process_video(cfg, video, stages, args.gpu, args.log_dir, args.skip_done, tag,
-                                   threads=args.threads)
+                                   threads=args.threads, mode=args.exec_mode)
         except Exception as exc:                      # 한 편이 죽어도 샤드는 계속 간다
             status = f"ERROR({type(exc).__name__}: {exc})"
+        if clear_cache is not None:
+            clear_cache()                # 씬 경계 — 캐시는 한 편분만 들고 있는다
         results.append((video, status, time() - t0))
         if not status.startswith("OK"):
             print(f"[{tag}] {status:24s} {video}", flush=True)
+        if status.startswith("OK"):
+            done += 1
+        if args.exec_mode == "inproc" and args.inproc_recycle > 0 and done >= args.inproc_recycle:
+            # 누수가 있어도 8샤드가 새벽에 OOM 으로 죽지 않게 하는 보호장치. `--skip_done` 이
+            # 이미 끝낸 편을 건너뛰므로 같은 인자로 다시 띄우면 그 자리에서 이어진다.
+            print(f"[{tag}] recycle — {done}편 처리 후 재실행  {_now()}", flush=True)
+            sys.stdout.flush()
+            stderr.flush()
+            # `-u` 는 sys.argv 에 안 남는다 — 드라이버가 로그를 실시간으로 읽으므로 env 로 건다.
+            environ["PYTHONUNBUFFERED"] = "1"
+            execv(executable, [executable] + sys.argv)
 
     print(f"\n[{tag}] === 요약 ===", file=stderr)
     width = max([len(v) for v, _, _ in results] + [5])

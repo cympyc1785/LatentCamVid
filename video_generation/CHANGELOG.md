@@ -7,6 +7,115 @@
 ## [Unreleased]
 
 ### Added
+- **D180 — `run_bank.py --exec inproc`: 단계를 서브프로세스가 아니라 같은 프로세스에서 부른다
+  (2026-09-11, 사용자 지시 "뱅크 더 빨리는 못함? 불필요한 방식 없는지 봐줘").** 8샤드 구간 실측
+  씬당 205.8s(FIT 135.3 / TAU 62.7 / EMIT 7.4 / ROUTE 0.4) 중 **51.3s(25%)가 프로세스 경계
+  비용**이다 — import 21.9s(route 0.45 + tau 7.27 + fit 6.74 + emit ~7.4)를 씬마다 다시 내고,
+  tau 와 fit 이 **같은 cloud 를 각각** 짓는다(load_recon 4.74 + preprocess 9.37 + build 0.60
+  = 14.7s ×2). 샤드는 이미 한 프로세스가 씬을 순회하는 구조라, 단계 호출만 in-process 로 바꾸면
+  import 가 **씬당이 아니라 샤드당 1회**로 떨어진다.
+  · `scripts/run_bank.py` — `--exec {subprocess,inproc}` (**기본 subprocess = 기존 동작 그대로**),
+  `--inproc_recycle 50`. 단계 스크립트를 `spec_from_file_location` 으로 모듈로 읽고
+  (`__main__` 블록은 안 돈다) `main(build_parser().parse_args(argv))` 를 부른다. stdout/stderr 는
+  기존과 같은 씬 로그로 리다이렉트. `KeyboardInterrupt` 는 **안 잡는다** — Ctrl+C 가 샤드의
+  정상 종료 절차다. CUDA/OpenMP env 는 **첫 import 전에** 못 박고, `--inproc_recycle` 회 처리하면
+  `execv` 로 자기 자신을 다시 띄워 누적 메모리를 턴다(`--skip_done` 이 이어받는다).
+  · `scripts/{route_presets,sample_camera_bank,fit_hole_ladder,emit_bank}.py` — 파서를
+  `build_parser()` 함수로 꺼냈다. `__main__` 안에 있으면 import 로는 만들 수 없다. CLI 동작 불변.
+  · `lbm/render.py` — 씬 1편분 cloud+recon 메모(`set_cloud_cache()`/`clear_cloud_cache()`,
+  **기본 꺼짐**). 캐시 키에 `source/video/out_root/vista4d_root/device/eval_data/seg_root/
+  seg_static_root/preprocess/depth_outliers/ignore_sky_mask/allow_empty_dynamic_mask/scale_key`
+  를 전부 넣는다. 히트해도 **렌더러는 항상 새로 만든다** — 안 그러면 `subject_mask` 가 샌다.
+  · `sys.path` — `run_bank.py` 가 리포 루트를 직접 꽂는다. python 은 **스크립트가 있는 폴더**
+  (`scripts/`)를 넣지 cwd 를 넣지 않아서, in-process 모드에서 드라이버가 직접 부르는
+  `lbm.render`/`lbm.cloud` import 가 `ModuleNotFoundError` 로 죽었다 (파리티 B팔 rc=1).
+  · **파리티 3편 최종 (GPU 1, 단계 시간 합, 초).** 결과는 안전하지만 **속도 이득이 없다.**
+
+    | stage | A(sub) | B(inproc) | C(sub) |
+    |---|---|---|---|
+    | ROUTE | 1.1 | 0.0 | 1.0 |
+    | TAU | 551.1 | 554.1 | 588.8 |
+    | FIT | 1266.5 | 1210.5 | 1308.5 |
+    | EMIT | 21.6 | 4.1 | 23.2 |
+    | 합 | 1840.3 | 1768.7 | 1921.5 |
+
+    B/A = 0.961, B/C = 0.920. 그런데 **A/C = 0.958** — 같은 설정 두 팔의 시간 차이가 inproc
+    이득과 같은 크기다. 즉 이 표본에서 speedup 은 **실행 간 잡음과 구분되지 않는다**. EMIT 만
+    21.6 → 4.1s 로 확실히 줄지만 절대량이 17s(3편)다. 위 25% 추정이 빗나간 이유: 단계 비용이
+    프로세스 경계가 아니라 **실제 연산**에 지배된다 (FIT 이 3편에 1266s = 씬당 422s).
+    → **라이브 d179 를 inproc 으로 재기동하지 않는다.** 재기동 비용이 이득보다 크다. 플래그는
+    남겨두되 기본값 subprocess 유지.
+  · **결과 동일성은 확인됐다(3편 전부).** `canonical.npz` 가 A~B·A~C **모두 max|Δ|=0 bitwise
+  동일**. `bank.json`/`canonical.json` 은 셋 다 갈리지만 차이가 `subject_visible_frac` 한 필드에
+  몰리고, 잡음 바닥(A~C) 2.73e-2 / 3.74e-2 / **5.72e-2** 대 inproc(A~B) 3.76e-2 / 3.95e-2 /
+  3.84e-2 — 002fe46a 는 **잡음 바닥이 inproc 차이보다 크다**. inproc 이 결과를 바꾸지 않는다.
+- **D180-b — d157 graph 372편 격리 + d172 로 재굽기 (2026-09-11).** d179 tau 가 하드 실패하던
+  원인. 인과는 4단: ① 2026-09-06 `sam3_static_instances.py` 가 `DynPose-LBM/eval_data/
+  seg_instances_static/` 846편을 만들고 d157 graph 가 그 위에서 `stat_*` 노드를 얻었다(372편에서
+  중단). ② 새 10k 인제스트 드라이버 `scripts/dynpose_ingest.py` 에는 static 단계가 **없어서**
+  (`grep static` 0건) `DATA/DynPose-100K` 는 `seg_instances_static/` 을 못 받았다 — "정적 물체
+  target 보류" 결정과 일관된다. ③ **실제 오류**: `d172_dynpose100k_graph.json` 이 `.graph_d157`
+  마커를 재사용하면서 근거로 든 "공통 877편 중 masks.npz 크기가 다른 건 1편뿐"이 `seg_instances`
+  만 비교한 것이었다. **한쪽에만 있는 디렉토리는 그 비교에 구조적으로 안 보인다.** ④ d179
+  (eval_data=100K)가 d157 의 `stat_*` 노드를 만나 `build_candidate_board.subject_track_volume`
+  에서 assert.
+  · 영향 실측: graph 2,251편 중 **372편(16.5%)** 오염. d179 가 손댄 478편 중 84편 하드 실패,
+  25편이 **어긋난 segmentation 으로 통과**(23편은 canonical.json 까지 썼다).
+  · 조치: `tmp/d180/quarantine_stale.py` 가 `.graph_d157` 372 + `hole_bank_d179` 29 +
+  `bank_d179` 123 + `preset_route_d179.json` 123 을 `tmp/d180/quarantine/` 로 **옮겼다**(안 지웠다).
+  `tmp/d180/regraph372.py` 가 같은 372편을 d172 config(eval_data=100K)로 4샤드 재굽기.
+  · 재굽기 델타(측정): dyn anchor 1.98→1.90(사실상 불변), stat anchor 1.55→**0.09**,
+  노드 11.59→4.92, canonical 카메라 수 불변(씬당 5 고정). 즉 코퍼스가 **dyn-only 로 균일**해진다
+  (사용자 지시 2026-09-11 "일단 dyn-only로 해주고").
+- **D181 — track + object-centric 씬당 카메라 1개 파일럿 (2026-09-11, 사용자 지시 "scene 중에
+  일정 이상 움직이는 dynamic target 있는 경우만 모아서 track + object-centric (e.g. track orbit
+  left) 같은 것만 카메라 하나만 fitting되도록 먼저 돌려줘봐").** 세 제약이 각각 다른 자리에 걸린다.
+  · `scripts/route_presets.py --anchor_min_drift_u`(**기본 0 = 끔**) — anchor **후보 자체**를
+  이동량(`center_drift_u`)으로 자른다. 기존 `--track_min_drift_u` 로는 안 되는 이유: 그건 이미
+  뽑힌 anchor 에 `track_` 접두사를 붙일지만 정하고, anchor 선택은 여전히 `max_area_frac` 순서라
+  **정지한 큰 물체가 1등으로 뽑히고** 이동량이 큰 물체는 상한 밖으로 밀린다. 캡을 걸기 **전에**
+  필터해야 이동량 상위 노드가 면적 순위에 안 잘린다.
+  · `scripts/route_presets.py --slot_whitelist`(**기본 "" = 끔**) — 라우팅된 슬롯 중 이것만 남긴다.
+  preset 이름이 아니라 **슬롯 이름**으로 거는 이유는 방향(left/right)이 소스 카메라 횡이동에서
+  나오는 씬별 값이라(`route()` 의 away/toward), preset 이름을 고정하면 소스와 같은 쪽으로 도는
+  변이가 섞이기 때문. 거르는 자리는 `route()` **바깥**이다 — 안에서 거르면 bonus track 슬롯
+  해싱과 `num_track` 집계가 화이트리스트에 따라 달라져 파일럿이 코퍼스의 부분집합이 아니게 된다.
+  `reasons` 에 `slot_whitelist` / `slot_whitelist_dropped` 를 남긴다.
+  · `configs/bank/d181_track_orbit_pilot.json` (**신규**, `extends: d179`) — anchor 1 × 슬롯 1 =
+  씬당 카메라 1개. route `--anchor_min_drift_u 0.30 --slot_whitelist orbit --track_mode replace
+  --max_anchors 1 --max_static_anchors 0 --target_variants 1`, fit `--fallback_target` 5→1
+  (안 내리면 fallback 사다리가 1변이 씬에서 5개를 채우려 든다). tau 인자는 d179 를 글자 그대로
+  물려받는다 — τ 사다리·조준·추종을 바꾸면 파일럿이 코퍼스의 부분집합이 아니게 된다.
+  · `scripts/route_presets.py --anchor_require_frame0`(**기본 off = 옛 동작**) — `track.frames` 에
+  프레임 0 이 없는 노드를 anchor 후보에서 뺀다. 뱅크가 anchor 를 **소스 frame 0 가시성**으로 한 번
+  더 떨어뜨리는데(`skipped.json` 의 `no_surviving_anchors`), anchor 가 1개뿐인 이 파일럿에서는
+  그러면 씬이 통째로 날아간다 — 첫 스모크 3편 중 **2편**이 그랬다(`track.frames` 가 13/2 에서
+  시작). 이동량이 큰 물체일수록 나중에 프레임에 들어오므로 drift 문턱과 특히 겹친다.
+  · 씬 목록 `tmp/d181/pick_moving_scenes.py` — 신선 graph 2,137편 중 `drift >= 0.30` **981편
+  (45.9%)**. 문턱은 코퍼스 중앙값이고 기존 배선 문턱 0.05 의 6배다 (0.05 는 96.4% 를 통과시켜
+  "일정 이상"이 안 된다). 분포: p25 0.169 / p50 0.308 / p75 0.538 / p90 0.866 / max 3.515.
+  frame0 조건을 목록에도 같은 기준으로 걸어 1,110 → 981편. D180-b 에서 격리한 372편은
+  제외(graph 재굽기 중).
+  · route 스모크 3편 — `--nodes dyn_1 --presets track_orbit_left` / `dyn_0 track_orbit_right` /
+  `dyn_0 track_orbit_left`. 방향이 씬마다 갈리는 것까지 확인.
+  · 수율 스모크 13편(GPU 2) **OK 11 / 13** — 씬당 67.4~81.8s (d179 의 카메라 5개 굽기가
+  443~815s). 팬아웃은 `tmp/d181/run_pilot.py`, 2샤드(GPU 2·3), screen `infer3`.
+- **D181-b — `lbm/cloud.py warm_linalg()`: 점군 올리기 전에 cuSOLVER 핸들을 확보한다
+  (2026-09-11).** D181 팬아웃 첫 기동에서 **3샤드가 전부 첫 씬에서** 죽었다
+  (`cusolverDnCreate` → `CUSOLVER_STATUS_INTERNAL_ERROR`). 범인은 Vista4D `render_frame()` 첫 줄의
+  `cam_c2w.inverse()` 인데, **4x4** 역행렬인데도 torch 가 cuSOLVER 경로를 타고 첫 호출에서 핸들을
+  만든다. 그 핸들은 torch 캐싱 할당자 **바깥에서** cudaMalloc 하므로 점군(프로세스당 ~28 GiB)이
+  카드를 채운 뒤에는 실패한다 — 4x4 역행렬이 메모리 부족으로 터지는 셈이라 스택만 보면 원인이
+  안 보인다. `build_cloud()`/`load_cloud()` 가 업로드 **전에** `torch.eye(4).inverse()` 를 한 번
+  때려 핸들을 미리 만든다 (프로세스·디바이스 단위 캐시라 1회면 충분, 실패해도 무시하고 진행).
+  재기동 후 같은 두 씬(`00a516f1`, `007d34fc`)이 rc=0 으로 통과.
+- **D180-c — `tmp/d180/parity.py` 판정을 md5 에서 수치 비교로 (2026-09-11).** 대조군 C 를 둔
+  덕에 잡혔다: **A != C** 였다 — 같은 설정 subprocess 두 번인데 `bank.json` md5 가 갈린다. 실제
+  차이는 `subject_visible_frac` / `near_depth` 의 소수 2~4째 자리뿐이고 정작 카메라 본체인
+  `canonical.npz` 는 A·C 가 **bitwise 동일**. md5 로 판정했으면 in-process 전환을 무고하게
+  기각할 뻔했다. `numeric_same()` 이 JSON/npz 를 leaf 단위 `max|Δ|` 로 비교하고(팔 이름이 박히는
+  `source_bank` 는 제외, `nan==nan` 취급), A~C 를 **잡음 바닥**으로 같이 찍어 A~B 를 그 바닥과
+  견주게 했다 — 기억 속 상수(±0.04)를 불러오는 대신 매 실행 실측한다.
 - **D178 — tau/fit `--cloud_source memory`: cloud 를 굽되 디스크에 안 쓴다 (2026-09-11, 사용자
   지시 "cloud로 만들되 저장은 하지 않는거지").** `cloud.npz` 는 영상당 **1.4 GiB** 이고 dynpose
   447편에 **610.6 GiB** 다. 디스크를 거치는 유일한 이유는 tau(`sample_camera_bank.py`)와

@@ -247,6 +247,44 @@ def add_cloud_source_args(parser, eval_data_default: str = None):
     return parser
 
 
+# ── 프로세스 레벨 cloud 캐시 (D180) ──────────────────────────────────────────────
+# 왜: tau(`sample_camera_bank.py`)와 fit(`fit_hole_ladder.py`)은 **같은 씬을 같은 인자로**
+# 연달아 연다. 별개 프로세스일 때는 각자 구울 수밖에 없었지만(실측 00e9f728:
+# `load_recon_and_seg` 4.74s + `preprocess_recon` 9.37s + `build_cloud` 0.60s = 14.7s 를 **씬당
+# 두 번**), `run_bank.py --exec inproc` 은 한 프로세스 안이라 두 번째 호출이 첫 번째 결과를
+# 그대로 받으면 된다. 씬당 14.7s = 205.8s 의 7.1%.
+#
+# 기본은 **꺼져 있다**. 서브프로세스 실행(기존 동작)에서는 어차피 히트가 없고, 여러 씬을 도는
+# 릴 스크립트가 무심코 켜면 GPU 메모리를 씬 수만큼 붙든다. 그래서 캐시는 **한 씬만** 들고
+# 있는다 — 키가 바뀌면 그 자리에서 버린다.
+#
+# 안전 근거(캐시가 결과를 못 바꾸는 이유):
+#   - cloud 텐서(`colors`/`points_world`/`visible`/`indices`)는 어디서도 in-place 변형되지
+#     않는다 (repo 전량 grep 0건). 히트 때도 `CloudRenderer` 는 **새로** 만들어 `subject_mask`
+#     가 씬 사이에 새는 것을 막는다 (`set_subject` 는 인스턴스 속성만 건드린다).
+#   - `recon` 도 호출부가 안 건드리고, `preprocess_scene` 은 `scene["depths"][indices]` 로
+#     advanced indexing 복사를 먼저 떠서 `depths[sky_mask] = SKY_DEPTH` 가 원본에 안 닿는다.
+#   - 키에 cloud 내용을 정하는 인자를 전부 넣는다. `fixed_focal` 은 `CloudRenderer` 단계라
+#     키 밖이다 (히트해도 렌더러는 새로 만들므로 정확하다).
+_CLOUD_CACHE_ON = False
+_CLOUD_CACHE = {}          # key -> {"cloud": dict, "recon": dict | None}
+
+
+def set_cloud_cache(enabled: bool):
+    """프로세스 레벨 cloud 캐시 on/off. 끄면 들고 있던 것도 즉시 버린다."""
+    global _CLOUD_CACHE_ON                                                      # noqa: PLW0603
+    _CLOUD_CACHE_ON = bool(enabled)
+    if not _CLOUD_CACHE_ON:
+        clear_cloud_cache()
+
+
+def clear_cloud_cache():
+    """캐시를 비우고 GPU 메모리를 반납한다. **씬 경계에서 부를 것** (안 부르면 한 씬분이 남는다)."""
+    _CLOUD_CACHE.clear()
+    if torch.cuda.is_available():
+        torch.cuda.empty_cache()
+
+
 def open_renderer(args, out_root: str, graph: dict = None, want_recon: bool = True,
                   fixed_focal: bool = None, video: str = None):
     """`--cloud_source` 에 따라 cloud 를 조달한다. -> (renderer, recon | None)
@@ -289,21 +327,53 @@ def open_renderer(args, out_root: str, graph: dict = None, want_recon: bool = Tr
                           seg_root=getattr(args, "seg_root", None),
                           seg_static_root=getattr(args, "seg_static_root", None))
 
+    if source == "memory" and graph is None:
+        with open(path.join(out_root, video, "scene_graph.json"), encoding="utf-8") as file:
+            graph = json.load(file)
+
+    # 캐시 키에는 cloud 내용을 정하는 인자를 전부 넣는다 (§_CLOUD_CACHE). `scale` 까지 넣는 이유는
+    # graph 를 **호출부가 넘기기** 때문이다 — 두 호출이 서로 다른 게이지를 넘겼는데 캐시가 첫
+    # 번째 것을 돌려주면 게이지가 조용히 갈린다.
+    key = None
+    if _CLOUD_CACHE_ON:
+        scale_key = None
+        if source == "memory":
+            _s = graph["scale"]
+            scale_key = (float(_s["S"]), float(_s["z_med_frame0"]),
+                         float(_s["parallax_ratio"]), str(_s["mode"]), int(_s["stride"]))
+        key = (source, video, out_root, vista4d_root, device,
+               getattr(args, "eval_data", None),
+               getattr(args, "seg_root", None), getattr(args, "seg_static_root", None),
+               bool(getattr(args, "preprocess", True)),
+               str(getattr(args, "depth_outliers", "gaussian")),
+               bool(getattr(args, "ignore_sky_mask", False)),
+               bool(getattr(args, "allow_empty_dynamic_mask", False)),
+               scale_key)
+        hit = _CLOUD_CACHE.get(key)
+        if hit is not None and (hit["recon"] is not None or not want_recon):
+            # 렌더러는 **새로** 만든다 — `subject_mask` 가 이전 호출에서 새어 오면 안 된다.
+            return (CloudRenderer(hit["cloud"], vista4d_root=vista4d_root,
+                                  device=device, fixed_focal=fixed_focal), hit["recon"])
+        if _CLOUD_CACHE:
+            clear_cloud_cache()          # 씬(또는 인자)이 바뀌었다 — 한 씬분만 들고 있는다
+
     if source == "npz":
         cloud_path = path.join(out_root, video, "cloud.npz")
         assert path.isfile(cloud_path), (
             f"cloud.npz 가 없다. 먼저 `python -m lbm.cloud --video {video}` "
             f"(또는 `--cloud_source memory`)")
-        renderer = CloudRenderer(cloud_path, vista4d_root=vista4d_root,
+        # 캐시가 켜져 있을 때만 dict 로 먼저 읽는다 (기본 경로는 예전처럼 경로를 그대로 넘긴다).
+        cloud = load_cloud(cloud_path, device=device) if key is not None else cloud_path
+        recon = _load_recon() if want_recon else None
+        renderer = CloudRenderer(cloud, vista4d_root=vista4d_root,
                                  device=device, fixed_focal=fixed_focal)
-        return renderer, (_load_recon() if want_recon else None)
+        if key is not None:
+            _CLOUD_CACHE[key] = {"cloud": cloud, "recon": recon}
+        return renderer, recon
 
     from .cloud import cloud_from_recon, import_vista4d as _import_vista4d      # noqa: PLC0415
 
     recon = _load_recon()
-    if graph is None:
-        with open(path.join(out_root, video, "scene_graph.json"), encoding="utf-8") as file:
-            graph = json.load(file)
     scale = graph["scale"]
     cloud = cloud_from_recon(
         recon, _import_vista4d(vista4d_root),
@@ -318,6 +388,8 @@ def open_renderer(args, out_root: str, graph: dict = None, want_recon: bool = Tr
         allow_empty_dynamic_mask=getattr(args, "allow_empty_dynamic_mask", False))
     renderer = CloudRenderer(cloud, vista4d_root=vista4d_root,
                              device=device, fixed_focal=fixed_focal)
+    if key is not None:
+        _CLOUD_CACHE[key] = {"cloud": cloud, "recon": recon}
     return renderer, recon
 
 

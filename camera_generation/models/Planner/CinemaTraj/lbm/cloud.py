@@ -88,6 +88,31 @@ def preprocess_recon(recon: dict, vista4d, depth_outliers: str = "gaussian", ign
     return processed
 
 
+_LINALG_WARMED = set()
+
+
+def warm_linalg(device: str = "cuda"):
+    """점군을 올리기 **전에** cuSOLVER 핸들을 만들어 둔다. 두 번째부터는 아무 일도 안 한다.
+
+    왜 필요한가: Vista4D `render_frame()` 첫 줄이 `cam_c2w.inverse()` 인데, 4x4 짜리인데도
+    torch 는 cuSOLVER 경로를 타고 첫 호출에서 `cusolverDnCreate` 를 부른다. 그 핸들은 torch
+    캐싱 할당자 **바깥에서** cudaMalloc 을 하므로, 점군이 이미 카드를 채운 뒤에 만들려 하면
+    `CUSOLVER_STATUS_INTERNAL_ERROR` 로 죽는다 — 4x4 역행렬이 메모리 부족으로 터지는 셈이라
+    로그만 보면 원인이 안 보인다 (D181 파일럿 첫 팬아웃에서 3샤드가 전부 여기서 죽었다).
+    핸들은 프로세스·디바이스 단위로 캐시되므로 한 번 미리 만들어 두면 그 뒤로는 안전하다.
+
+    비용은 핸들 생성 한 번뿐이고 결과값은 안 쓴다. 실패해도 그냥 넘어간다 — 여기서 못 만들면
+    어차피 뒤에서 같은 이유로 죽을 것이고, 이 함수가 새로운 실패 지점이 되면 안 된다.
+    """
+    if device in _LINALG_WARMED or not str(device).startswith("cuda"):
+        return
+    _LINALG_WARMED.add(device)
+    try:
+        torch.eye(4, device=device).inverse()
+    except RuntimeError as err:  # 카드가 이미 꽉 찼다 — 여기서 죽이지는 않는다
+        print(f"  [warm_linalg] cuSOLVER 예열 실패 (무시하고 진행): {err}", flush=True)
+
+
 def build_cloud(recon: dict, vista4d, device: str = "cuda", dtype=torch.float32):
     """recon_and_seg dict → (colors, points_world, visible, indices) torch tensor 들.
 
@@ -95,6 +120,7 @@ def build_cloud(recon: dict, vista4d, device: str = "cuda", dtype=torch.float32)
     모든 점이 자기 프레임에서만 보이게 되어 후보 렌더가 프레임 하나 분량의 점만 쓰고 텅 빈다.
     """
     K = vista4d["intrinsics_to_K"](recon["intrinsics"])
+    warm_linalg(device)  # 점군 업로드 전에 cuSOLVER 핸들 확보 (warm_linalg docstring 참조)
 
     to = lambda a, d=dtype: torch.as_tensor(a, device=device).to(d)
     colors, points_world, visible, indices = vista4d["unproject"](
@@ -222,6 +248,7 @@ def load_cloud(input_path: str, device: str = "cuda", dtype=torch.float32):
     assert str(data["format"]) == CLOUD_FORMAT, f"알 수 없는 cloud format: {data['format']}"
     num_frames = int(data["visible_num_frames"])
     visible = np.unpackbits(data["visible_packed"], axis=1, count=num_frames).astype(bool)
+    warm_linalg(device)  # 디스크 경로도 같은 예열이 필요하다 (build_cloud 와 동일 이유)
     return {
         "colors": torch.as_tensor(data["colors"], device=device).to(dtype),
         "points_world": torch.as_tensor(data["points_world"], device=device).to(dtype),

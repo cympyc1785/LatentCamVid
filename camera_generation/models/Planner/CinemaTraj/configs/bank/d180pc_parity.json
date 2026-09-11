@@ -1,0 +1,19 @@
+{
+  "_why": "D180 파리티 C팔 — A팔과 같은 `--exec subprocess`. 결정성 대조군. B팔(`d180pb`, `--exec inproc`)과 산출물 md5 를 대조해 in-process 전환이 결과를 안 바꾸는지 확인한다. C팔은 A팔을 한 번 더 돌린 것으로, **파이프라인 자체가 bitwise 결정적인지**를 재는 대조군이다 (A!=C 면 md5 비교 자체가 의미 없다).",
+
+  "_scope": "`tmp/d180/scenes3.txt` 3편. 전부 이미 `hole_bank_d179/canonical/canonical.json` 이 있는 편이라 **진행 중인 d179 8샤드가 다시 집지 않는다** (드라이버의 done 판정과 겹치지 않음).",
+
+  "_격리": "`tau_bank_dir`/`bank_dir`/`route.out` 을 전부 d179 와 다른 이름으로 바꿨다. 특히 `route.out` — d179 는 `preset_route_d179.json` 을 **씬 루트에** 쓰는데, 그걸 그대로 두면 파리티 실행이 라이브 코퍼스의 라우팅 파일을 덮는다.",
+
+  "extends": "d179_dynpose100k_bank.json",
+  "generation": "d180pc",
+  "tau_bank_dir": "bank_d180pc",
+  "bank_dir": "hole_bank_d180pc",
+  "route": {
+    "out": "preset_route_d180pc.json",
+    "args": [
+      "--num_external", "0",
+      "--max_dynamic_anchors", "3", "--max_static_anchors", "3"
+    ]
+  }
+}

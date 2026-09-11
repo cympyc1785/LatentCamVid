@@ -496,7 +496,11 @@ def main(args):
           f"--scales <rmax/1.9876>")
 
 
-if __name__ == "__main__":
+def build_parser():
+    """파서를 **함수로** 꺼내 둔 이유: `run_bank.py --exec inproc` 이 이 스크립트를 서브프로세스가
+    아니라 같은 프로세스에서 부른다 (D180). 파서가 `__main__` 블록 안에 있으면 import 로는
+    만들 수 없다. CLI 동작은 그대로다 — 아래 `__main__` 이 이 함수를 쓴다.
+    """
     parser = ArgumentParser(description="hole 뱅크 전량을 태그 N개짜리 canonical.json 하나로")
     parser.add_argument("--video", required=True)                       # 영상 이름 (out/<video>)
     parser.add_argument("--bank_dir", default="hole_bank")              # 뱅크 폴더 이름
@@ -533,4 +537,8 @@ if __name__ == "__main__":
     # 접힌 단: 충돌 천장이 낮아 4단이 같은 궤적이 된 경우. 기본은 남기고 `folded_onto` 로 표시.
     parser.add_argument("--drop_folded", dest="drop_folded", action="store_true", default=False)
     parser.add_argument("--no_drop_folded", dest="drop_folded", action="store_false")
-    main(parser.parse_args())
+    return parser
+
+
+if __name__ == "__main__":
+    main(build_parser().parse_args())

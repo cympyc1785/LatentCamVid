@@ -1617,7 +1617,11 @@ def main(args):
         print(f"-> {args.timing_json}")
 
 
-if __name__ == "__main__":
+def build_parser():
+    """파서를 **함수로** 꺼내 둔 이유: `run_bank.py --exec inproc` 이 이 스크립트를 서브프로세스가
+    아니라 같은 프로세스에서 부른다 (D180). 파서가 `__main__` 블록 안에 있으면 import 로는
+    만들 수 없다. CLI 동작은 그대로다 — 아래 `__main__` 이 이 함수를 쓴다.
+    """
     parser = ArgumentParser()
     parser.add_argument("--eval_data", default=EVAL_DATA_DEFAULT, type=str)
     parser.add_argument("--output_root", default=None, type=str)
@@ -1989,4 +1993,8 @@ if __name__ == "__main__":
     parser.add_argument("--tile_width", default=640, type=int)
     parser.add_argument("--tile_height", default=360, type=int)
     parser.add_argument("--center_box", default=0.80, type=float)
-    main(parser.parse_args())
+    return parser
+
+
+if __name__ == "__main__":
+    main(build_parser().parse_args())

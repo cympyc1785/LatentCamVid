@@ -102,7 +102,8 @@ def obb_center_sep(a: dict, b: dict):
 
 
 def pick_anchors(graph: dict, min_area_frac: float, max_dynamic: int = 3, max_static: int = 3,
-                 max_anchors: int = 0, min_anchor_sep: float = 0.0):
+                 max_anchors: int = 0, min_anchor_sep: float = 0.0, min_drift_u: float = 0.0,
+                 require_frame0: bool = False):
     """anchor = 동적 상위 `max_dynamic` 개 + 정적 상위 `max_static` 개.
 
     각 갈래 안에서는 화면을 제일 크게 차지하는 것부터, 동률이면 오래 보이는 것부터.
@@ -134,9 +135,31 @@ def pick_anchors(graph: dict, min_area_frac: float, max_dynamic: int = 3, max_st
     0 이면 옛 동작(안 거른다). 상한(`max_anchors`)보다 **먼저** 걸러야 부속물이 자리를 차지한
     채로 잘리는 일이 없다 — 그래서 `max_anchors` 를 `pick_main_anchors` 에 넘기지 않고
     여기서 자른다.
+
+    D181. `min_drift_u` — **면적이 아니라 이동량으로** 먼저 자른다 (0 = 끔, 옛 동작).
+    `--track_min_drift_u` 와는 거는 자리가 다르다: 그건 이미 뽑힌 anchor 의 슬롯에 `track_`
+    접두사를 붙일지만 정하고, 못 미치면 같은 anchor 로 **비-track** preset 을 굽는다.
+    "일정 이상 움직이는 대상만"을 원할 때 그 문턱으로는 안 되는 이유가 이것이다 — anchor 선택
+    자체는 여전히 `max_area_frac` 순서라, 화면을 크게 차지하는 정지 물체가 1등으로 뽑히고
+    이동량이 큰 물체는 상한 밖으로 밀린다. 여기서 자르면 애초에 후보에 안 들어온다.
+    캡을 걸기 **전에** 필터해야 이동량 상위 노드가 면적 순위에 밀려 잘리지 않는다.
+
+    D181. `require_frame0` — `track.frames` 에 프레임 0 이 없는 노드를 뺀다 (기본 off = 옛 동작).
+    뱅크가 anchor 를 **소스 frame 0 가시성**으로 한 번 더 떨어뜨리기 때문이다
+    (`skipped.json` 의 `no_surviving_anchors`, `subject_area: 0.0`). anchor 가 여럿이면 하나
+    죽어도 씬이 살지만 anchor 1개짜리 파일럿에서는 씬이 통째로 날아간다 — 스모크 3편 중 2편이
+    그랬다(f0=13 car, f0=2 hand). 이동량이 큰 물체일수록 나중에 프레임에 들어오므로
+    `min_drift_u` 와 **같이 걸릴 때 특히** 겹친다. 필요조건일 뿐 충분조건은 아니다: 프레임 0 에
+    보여도 그때 면적이 `min_area_frac` 미만이면 뱅크가 여전히 버린다.
     """
     cap = 0 if min_anchor_sep > 0 else max_anchors
-    anchors, _ = pick_main_anchors(graph["nodes"], min_area_frac, max_dynamic, max_static,
+    nodes = graph["nodes"]
+    if min_drift_u > 0:
+        nodes = [n for n in nodes if n.get("moving")
+                 and float(n.get("center_drift_u", 0.0)) > min_drift_u]
+    if require_frame0:
+        nodes = [n for n in nodes if 0 in (n.get("track") or {}).get("frames", [0])]
+    anchors, _ = pick_main_anchors(nodes, min_area_frac, max_dynamic, max_static,
                                    max_anchors=cap)
     if min_anchor_sep > 0:
         kept = []
@@ -447,8 +470,14 @@ def main(args):
         graph = json.load(file)
     anchors = pick_anchors(graph, args.min_area_frac,
                            args.max_dynamic_anchors, args.max_static_anchors,
-                           args.max_anchors, args.min_anchor_sep)
-    assert anchors, "anchor 후보가 없다 (max_area_frac 하한을 낮추거나 graph 를 확인)"
+                           args.max_anchors, args.min_anchor_sep,
+                           min_drift_u=args.anchor_min_drift_u,
+                           require_frame0=args.anchor_require_frame0)
+    assert anchors, ("anchor 후보가 없다 (max_area_frac 하한을 낮추거나 graph 를 확인"
+                     + (f"; --anchor_min_drift_u {args.anchor_min_drift_u} 로 걸렀다)"
+                        if args.anchor_min_drift_u > 0 else ")"))
+    # D181. 슬롯 화이트리스트. 빈 문자열이면 끔 = 옛 동작.
+    whitelist = tuple(s.strip() for s in args.slot_whitelist.split(",") if s.strip())
     # 쉼표 목록 -> tuple. 빈 문자열이면 세로 슬롯을 아예 안 넣는다(`--vertical_fallback` 만 남는다).
     vertical_gravity = tuple(m.strip() for m in args.vertical_gravity.split(",") if m.strip())
     grid = args.slot_plan == "grid2x2"
@@ -471,6 +500,15 @@ def main(args):
                                   orbit_fallback=args.orbit_fallback,
                                   orbit_min_span=args.orbit_min_span)
         full_first = full_first if full_first is not None else dict(slots)
+        if whitelist:
+            # D181. `route()` 의 슬롯 구성·방향(away/toward)·track 판정·reasons 를 그대로 쓰고
+            # **마지막에 골라내기만** 한다. 여기서 거르는 이유는 route() 안에서 거르면 bonus
+            # track 슬롯 해싱과 `num_track` 집계가 화이트리스트에 따라 달라져, 같은 씬의
+            # 전량 라우팅과 파일럿 라우팅이 서로 다른 preset 을 내기 때문 — 그러면 파일럿이
+            # 코퍼스의 부분집합이 아니게 된다.
+            reasons["slot_whitelist"] = list(whitelist)
+            reasons["slot_whitelist_dropped"] = [s for s, _ in slots if s not in whitelist]
+            slots = [(s, p) for s, p in slots if s in whitelist]
         backfill = []
         if grid:
             if keep_pair is None:
@@ -612,7 +650,11 @@ def main(args):
         print(f"-> {args.out}")
 
 
-if __name__ == "__main__":
+def build_parser():
+    """파서를 **함수로** 꺼내 둔 이유: `run_bank.py --exec inproc` 이 이 스크립트를 서브프로세스가
+    아니라 같은 프로세스에서 부른다 (D180). 파서가 `__main__` 블록 안에 있으면 import 로는
+    만들 수 없다. CLI 동작은 그대로다 — 아래 `__main__` 이 이 함수를 쓴다.
+    """
     parser = ArgumentParser()
     parser.add_argument("--video", required=True, type=str)
     parser.add_argument("--output_root", default=None, type=str)
@@ -671,6 +713,20 @@ if __name__ == "__main__":
     # 붙였는데 뱅크가 그 문턱으로 버리면 그 슬롯은 통째로 사라진다 (grid2x2 에서 2칸 중 1칸).
     # 0 이면 옛 동작(`moving` 불리언만 본다).
     parser.add_argument("--track_min_drift_u", default=0.05, type=float)
+    # D181 (사용자 지시 2026-09-11 "일정 이상 움직이는 dynamic target 있는 경우만"):
+    # anchor **후보 자체**를 이동량으로 자른다. 0 = 끔(옛 동작). `--track_min_drift_u` 와
+    # 다른 자리에 걸리는 이유는 `pick_anchors` docstring 에 있다. 이 문턱을 넘는 노드가 하나도
+    # 없으면 그 씬은 route 에서 죽는다 — 씬 목록을 미리 같은 문턱으로 거르고 쓰는 인자다.
+    parser.add_argument("--anchor_min_drift_u", default=0.0, type=float)
+    # D181: `track.frames` 에 프레임 0 이 없는 노드를 anchor 후보에서 뺀다 (기본 off = 옛 동작).
+    # 뱅크의 frame 0 가시성 게이트를 라우팅이 미리 아는 것 — 근거는 `pick_anchors` docstring.
+    parser.add_argument("--anchor_require_frame0", action="store_true", default=False)
+    # D181: 라우팅된 슬롯 중 **이것만** 남긴다 (쉼표 목록, 빈 문자열 = 끔 = 옛 동작).
+    # 슬롯 이름이지 preset 이름이 아니다 — `orbit` 은 away side 와 track 여부에 따라
+    # `track_orbit_left` / `orbit_right` 등으로 풀린다. preset 이름을 직접 적게 하지 않는 이유:
+    # 방향은 소스 카메라의 횡이동에서 나오는 씬별 값이라 고정하면 소스와 같은 쪽으로 도는
+    # 변이가 섞인다 (§route 의 away/toward).
+    parser.add_argument("--slot_whitelist", default="", type=str)
     parser.add_argument("--external_shapes", default=None, type=str)
     # D83: 2 → 4. 모양 뱅크가 12개(6라벨)에서 188개(47라벨)로 늘었는데 영상당 2개만 뽑으면
     # 코퍼스가 그 다양성을 못 본다. 4면 변이의 약 1/3 이 free-moving(실제 촬영 궤적)이 된다.
@@ -697,4 +753,8 @@ if __name__ == "__main__":
     parser.add_argument("--emit", default="table", type=str,
                         choices=("table", "args", "presets", "nodes"))
     parser.add_argument("--out", default=None, type=str)
-    main(parser.parse_args())
+    return parser
+
+
+if __name__ == "__main__":
+    main(build_parser().parse_args())

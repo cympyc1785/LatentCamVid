@@ -249,6 +249,16 @@
   다시 갈고 있었다. 스코프는 d179 가 흡수한다. config 는 근거와 함께 남긴다.
 
 ### Fixed
+- **D182 — graph 게이트 분모를 "도달 가능한 편"으로 (`tmp/d182/chain_static_graph.py`,
+  `--gate_basis`) (2026-09-12).** sam3 가 100% 성공했는데도 체인이 03:20:53 에 스스로 멈췄다.
+  `sam3_done()` 이 `seg_instances_static` 개수를 **목록 10,346편으로 나눠** 96.7% 를 내고
+  `--min_ratio 0.97` 게이트에 걸렸다. 그러나 `sam3_static_instances.py` 는 정적 명사가 0개인
+  편에서는 프롬프트가 없어 **아무것도 만들지 않는다** — 도달 가능 최댓값은 10,346 이 아니라
+  정적 명사 ≥1 인 **9,989편**이고, 실측은 9,989/9,989 (누락 0) + LBM 심볼릭 14편 = 10,003 이다.
+  게이트 기준을 `--gate_basis achievable`(기본, 명사 ≥1 인 편이 분모) / `all`(옛 동작, 목록
+  전체)로 분기하고, 구조적으로 정적 seg 가 불가능한 357편을 `tmp/d182/static_unavailable.txt`
+  로 남겨 dyn-only 잔여가 **조용히** 흘러가지 않게 했다. 재기동 후 게이트 9,989/9,989 = 100%
+  통과, graph 24샤드가 03:26:22 에 기동했다 (첫 4편 rc=0 153.3~164.2s).
 - **D176-c — `cloud.npz` 를 빈 `dynamic_mask` 위에서 굽는 사고를 막는 가드 (2026-09-10, 사용자
   질문 "cloud 가 static 으로 잘못 나온 이유가 뭐야?").** 원인은 **단계 순서 경합**이다:
   `scripts/dynpose_ingest.py:177` 의 recon 단계가 `seg_keywords=[]` 라 **all-zero placeholder**

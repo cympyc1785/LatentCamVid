@@ -5,7 +5,7 @@
 
   "_prereq": "① `eval_data/seg_instances_static/<v>/{meta.json,masks.npz}` — `tmp/d182/chain_static_graph.py --stage nouns,link,sam3` 이 만든다 (846편은 DynPose-LBM 것을 심볼릭으로 재사용). ② `out_dynpose/<v>/geocalib_gravity.json` 사이드카 (D172 가 10,346/10,346 완료). ③ `recon_and_seg/<v>/dynamic_mask` SAM3 합집합 (D169 완료).",
 
-  "_runtime": "graph 85.5 s/편 x 10,346 = 245.7 GPU-h. 24 샤드(GPU 0~3 x6)면 약 10 시간. 정적 노드가 붙으면 OBB/relations 가 늘어 편당 시간이 소폭 오를 수 있다 — 첫 샤드 로그로 재측정할 것.",
+  "_runtime": "**실측 기준선은 d172 샤드 로그**(`tmp/d172/graph_logs/*.log`, n=2,446, 24샤드 경합 하): dyn-only p50 163.7s / mean 205.3s / p90 380.2s / max 4326.1s. d182 정적 포함 스모크 1편은 253.3s (SAM3 12샤드 경합 하) — mean 대비 +23%. mean 250s 로 잡으면 10,346편 x 250s = 718 GPU-h, 24 샤드(GPU 0~3 x6)면 약 30 시간. d172 config 의 '85.5 s/편' 은 **다른 코퍼스 주석이지 이 10,346편 측정치가 아니다** — 비교 기준으로 쓰지 말 것.",
 
   "generation": "d182",
   "output_root": "out_dynpose",

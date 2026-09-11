@@ -20,9 +20,11 @@
   "입력이 바뀌면 재사용 무효" — args 는 그대로지만 **입력에 정적 seg 루트가 새로 생겼다**).
   `graph.args` 는 d172 와 글자 단위로 같다.
   · 스모크 1편(`0013e08a`, 정적 명사 5개) rc=0 253.3s — 노드 **16개(stat 10 / dyn 6)**,
-  `dyn_1 supported_by=stat_1`, `near` 엣지가 stat 쪽으로 붙는다. d172 dyn-only 대비 노드가
-  6 → 16 이라 편당 시간도 85.5s → 250s 대로 오른다 (측정 당시 같은 카드에서 SAM3 12샤드가
-  동시에 돌고 있었으므로 상한값이다).
+  `dyn_1 supported_by=stat_1`, `near` 엣지가 stat 쪽으로 붙는다. 같은 코퍼스 dyn-only 실측은
+  d172 샤드 로그 n=2,446 에서 **p50 163.7s / mean 205.3s / p90 380.2s / max 4326.1s** 이므로
+  정적 노드가 붙어 늘어난 폭은 mean 대비 **+23%** 다 (스모크는 같은 카드에서 SAM3 12샤드가
+  동시에 돌던 중이라 상한값). d172 config `_runtime` 의 "85.5 s/편" 은 **다른 코퍼스에서 받아온
+  주석이고 이 10,346편에서 측정한 값이 아니다** — 그 수치로 비교하면 3배 느려진 것처럼 보인다.
   · 선행 단계는 `tmp/d182/chain_static_graph.py --stage nouns|link|sam3|graph` 가 돌린다
   (tmp 는 git 미추적). nouns = 16 샤드 `vlm_nouns.json` 병합 후 `extract_static_nouns.py`
   → 10,339/10,346 (7편은 VLM `source="exhausted"` 라 record 가 없고, `metadata.csv` 에

@@ -25,6 +25,11 @@
   `source="exhausted"` 7편. sam3 완료분 실측 4.3% 가 stat track 0개다.
   · `d181_track_orbit_pilot.json` 은 `extends: d179...` 라 같은 `.graph_d157` 을 물려받는다 —
   되살릴 때 `require_markers` 를 같이 고칠 것.
+  · (2026-09-12) 그 강등 재실행을 `tmp/d182/chain_static_graph.py --stage demote` 로 배선했다.
+  `dynpose_dynamic_mask_from_seg.py` 에는 `--num_shards` 가 없어 드라이버가 목록을 쪼개
+  프로세스 `--demote_shards`(기본 8) 개로 띄운다. CPU(numpy+PIL) 전용이라 GPU 를 안 잡고,
+  `.graph_d182` 가 `--min_ratio` 아래면 굽지 않는다 (graph 뒤·route 앞 순서 강제).
+  dry-run 20편 실측 0.35 s/편, 강등 4노드/20편 · 픽셀 뒤집힘 평균 0.85%.
 - **D182 — dynpose-100k graph 를 정적 노드 포함으로 전량 재굽기
   (`configs/bank/d182_dynpose100k_graph.json`) (2026-09-11, 사용자 지시 "우선 static 포함해서
   graph까지 먼저 다 완료하는걸 목표로 다시 돌리자").** D172 가 구운 graph 에 `stat_*` 노드가

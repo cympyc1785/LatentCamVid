@@ -329,6 +329,20 @@
   다시 갈고 있었다. 스코프는 d179 가 흡수한다. config 는 근거와 함께 남긴다.
 
 ### Fixed
+- **인스턴스 병합이 `frames` 만 합집합으로 만들어 bbox/score 가 밀리던 것
+  (`scene_graph/instances.py`, `scripts/build_scene_graph.py`) (2026-09-13).**
+  `merge_duplicates` 가 `points_by_frame` 과 `frames` 는 합집합으로 만들면서 `boxes_xyxy` /
+  `scores` 는 root 인스턴스 것을 그대로 뒀다. `build_node` 의
+  `zip(inst["frames"], inst["boxes_xyxy"])` 가 짧은 쪽에서 **조용히 잘리고**, 합집합이 root 보다
+  앞선 프레임을 포함하면 프레임↔박스가 **한 칸씩 밀려 짝지어진다**.
+  · 크래시 — D182 10,346편 중 **73편(0.71%)** 이 `KeyError` 로 사망. 예외 키가 48×40 / 47×9 로
+    꼬리에 몰렸다 (`best_frame` 이 잘린 구간에 떨어진 경우).
+  · **조용한 오염** — 안 죽으면 `bbox_xyxy_best` / `track.conf` 가 밀린 채 framing 게이트로 간다.
+    scene_graph 800편 실측 `len(track.conf) != num_visible_frames`: merged 838개 중 **34개(4.1%)**,
+    비-merged 7663개 중 0개. 병합은 씬의 54%(322/600)에서 일어난다.
+  · 이제 `scores`/`boxes_xyxy` 를 합집합 `frames` 에 맞춰 재구성한다(root 우선, 빈 프레임만 채움 =
+    겹칠 때 기존 동작 유지). `build_node` 에는 길이 assert 를 세워 **밀린 bbox 를 내보내느니
+    노드 id/label/merged_from 과 함께 죽게** 했다. 근거는 `FIX.log` 2026-09-13.
 - **`--max_rounds` 를 기다림이 갉아먹던 것 + `--min_ready`
   (`scripts/chain_bank_rounds.py`) (2026-09-13).** D184 가 8093/10346 에서 `--max_rounds 60
   소진` 으로 조용히 멈췄다. 죽은 게 아니라 캡을 다 쓴 것 — 선행 graph 를 따라잡은 뒤로

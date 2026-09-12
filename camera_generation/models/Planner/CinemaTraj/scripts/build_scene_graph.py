@@ -162,6 +162,14 @@ def build_node(inst: dict, node_id: str, num_frames: int, cam_centers_g: np.ndar
 
     best_pos = int(np.argmax([inst["area_frac_by_frame"].get(f, 0.0) for f in frames]))
     best_frame = frames[best_pos]
+    #    `zip` 은 짧은 쪽에서 **조용히 자른다**. 길이가 어긋나면 프레임↔박스가 한 칸씩 밀려
+    #    짝지어지는데, 그건 KeyError 로 죽기 전에 이미 bbox 가 틀린 상태다 (D182 실측: merged
+    #    노드 4.1%가 이 상태로 살아서 framing 게이트에 들어갔다). 원인은 `merge_duplicates` 가
+    #    `frames` 만 합집합으로 만들고 `boxes_xyxy` 는 root 것을 두던 것이고 거기서 고쳤지만,
+    #    다른 경로로 또 어긋나면 **밀린 bbox 를 내보내느니 여기서 죽는 게 낫다**.
+    assert len(inst["frames"]) == len(inst["boxes_xyxy"]), (
+        f"{node_id}({inst['label']}): frames {len(inst['frames'])} != "
+        f"boxes {len(inst['boxes_xyxy'])}  merged_from={inst.get('merged_from', [])}")
     bbox_by_frame = {f: box for f, box in zip(inst["frames"], inst["boxes_xyxy"])}
 
     return {

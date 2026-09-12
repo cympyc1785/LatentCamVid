@@ -292,6 +292,23 @@ def merge_duplicates(instances: list, voxel_u: float = 0.02, iou_threshold: floa
         base["points_by_frame"] = points_by_frame
         base["frames"] = sorted({f for i in members for f in instances[i]["frames"]})
         base["num_visible_frames"] = len(base["frames"])
+        #    **`frames` 와 나란한 것은 전부 같이 합쳐야 한다.** 예전에는 `frames` 만 합집합으로
+        #    바꾸고 `boxes_xyxy`/`scores` 는 root 것을 그대로 뒀다. 그러면 build_node 의
+        #    `zip(inst["frames"], inst["boxes_xyxy"])` 가 **짧은 쪽에서 잘리고**, 합집합이 root
+        #    보다 앞선 프레임을 포함하면 프레임↔박스가 **한 칸씩 밀려 짝지어진다**.
+        #    증상 둘: (a) `best_frame` 이 잘린 꼬리면 `KeyError: 48` 로 씬 전체가 죽는다 —
+        #    D182 10,346편 중 73편(0.71%)이 이걸로 죽었고 예외 프레임이 48/47 에 49건 몰렸다.
+        #    (b) 안 죽으면 `bbox_xyxy_best`/`track.conf` 가 **조용히 밀린 채** framing 게이트로
+        #    간다 — scene_graph 800편 실측 merged 노드 838개 중 34개(4.1%), 비-merged 7663개는 0개.
+        #    root 를 먼저 깔고 나머지 멤버로 빈 프레임만 채운다 (겹치면 root 값 유지 = 기존 동작).
+        by_frame = {}
+        for i in [root] + [m for m in members if m != root]:
+            inst = instances[i]
+            for f, score, box in zip(inst["frames"], inst["scores"], inst["boxes_xyxy"]):
+                by_frame.setdefault(f, (score, box))
+        base["scores"] = [by_frame[f][0] for f in base["frames"]]
+        base["boxes_xyxy"] = [by_frame[f][1] for f in base["frames"]]
+        assert len(base["scores"]) == len(base["frames"]) == len(base["boxes_xyxy"])
         base["max_area_frac"] = max(instances[i]["max_area_frac"] for i in members)
         base["mean_score"] = float(np.mean([instances[i]["mean_score"] for i in members]))
         base["merged_from"] = [f"{instances[i]['kind']}#{instances[i]['track_id']}" for i in members]

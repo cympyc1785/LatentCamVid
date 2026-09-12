@@ -7,6 +7,31 @@
 ## [Unreleased]
 
 ### Added
+- **D185 — grid5 (씬당 카메라 5개) 전량 뱅크 config (`configs/bank/d185_dynpose100k_grid5.json`)
+  (2026-09-12, 사용자 지시 "anchor 2 (static, dynamic) x preset 2 (object-centric or
+  tracking(dynamic이 일정 이상 움직이는 경우만)) + free-moving 하나해서 scene당 카메라 총
+  5개 ... fallback도 추가했었던 것들 돌리도록").** D166/D169 의 grid5 라우팅을 D182 graph 위
+  10,346편 전량에 건다. **D184(씬당 1대)가 끝난 뒤** 도는 다음 세대다 — anchor 2 × 슬롯 2 = 4
+  + free-moving 1 = 씬당 최대 5 카메라. route 는 `--max_dynamic_anchors 2
+  --max_static_anchors 2 --max_anchors 2 --min_anchor_sep 2.0 --slot_plan grid2x2
+  --slot_pair_fill substitute --free_moving rotate --track_min_drift_u 0.05
+  --target_variants 5 --skip_if_empty`, fit/emit 은 d179 를 글자 그대로 물려받는다.
+  · anchor 구성은 **d169 그대로(동적 우선)** 로 사용자가 확정했다. `pick_main_anchors` 가
+    dyn-first 라 D182 graph 600편 표본에서 (dyn,stat) = (2,2) 381 / (2,1) 104 / (2,0) 62 /
+    (1,2) 31 / (1,0) 11 / (0,2) 6 / (1,1) 5 → **dyn≥2 가 91.2%** 로 채워진다. stat anchor 는
+    동적 노드가 1개뿐인 씬에서만 들어온다 (dyn≥1 ∧ stat≥1 인 씬은 86.8%). 이걸 알고 고른 배선이다.
+  · **`--fallback_ladder` 는 tau 의 `--variant_pool full` 없이는 no-op 이다**
+    (`fit_hole_ladder.py:791,868` 이 τ 뱅크의 `plan_tier` 를 읽는데 `budget`(기본) 이면 층이
+    전부 0). d179/d183 은 fit 에만 `--fallback_ladder --fallback_target 5` 가 있고 tau 에
+    그 인자가 없어서 fallback 이 **한 번도 안 돌았다**. D185 tau 에 `--variant_pool full` 을
+    넣어 고친다 — τ 뱅크는 약 2배가 되지만 fit 은 예산(5)이 차면 멈춘다.
+  · 슬롯은 `GRID_ALLOWED_SLOTS` = advance/recede/arc/orbit/vertical/static — **s_curve 는
+    없다**(사용자 지시 2026-09-08). track 여부는 `--track_min_drift_u 0.05` 가 정한다:
+    문턱을 넘는 anchor 의 `TRACK_KEEP_SLOTS` 에만 `track_` 이 붙고, 못 미치면 같은 슬롯을
+    비-track 으로 굽는다 (= "dynamic 이 일정 이상 움직이는 경우만 tracking").
+  · 격리: `route.out` = `preset_route_d185.json`, 세대 디렉토리 `bank_d185`/`hole_bank_d185`.
+    강등은 D184 라운드에서 `.graph_d182` 기준으로 이미 끝나 있다.
+
 - **D184 — 씬당 카메라 1개 전량 뱅크 (`configs/bank/d184_dynpose100k_single.json`)
   (2026-09-12, 사용자 지시 "내가 카메라 개수 제한하라고 하지 않았니?").** 2026-09-11 지시
   ("track + object-centric ... 카메라 하나만 fitting되도록")가 `d181_track_orbit_pilot.json`

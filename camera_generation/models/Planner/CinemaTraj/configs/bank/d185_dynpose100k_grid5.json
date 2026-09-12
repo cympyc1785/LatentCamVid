@@ -1,0 +1,52 @@
+{
+  "_why": "D185 (사용자 지시 2026-09-12 \"anchor 2 (static, dynamic) x preset 2 (object-centric or tracking(dynamic이 일정 이상 움직이는 경우만)) + free-moving 하나해서 scene당 카메라 총 5개 나오도록하고 fallback도 추가했었던 것들 돌리도록\") — D166/D169 의 **grid5 라우팅**을 D182 graph 위 10,346편 전량에 건다. D184(씬당 1대) 다음 세대다. anchor 2 x 슬롯 2 = 4 + free-moving 1 = **씬당 최대 5 카메라**.",
+
+  "_anchor_구성": "`--max_dynamic_anchors 2 --max_static_anchors 2 --max_anchors 2` = d169 와 글자 단위로 같다 (사용자 확정 2026-09-12 \"d169 그대로 (동적 우선)\"). `pick_main_anchors` 가 동적 우선이라 D182 graph 600편 표본에서 **dyn+dyn 91.2% / dyn+stat 6.0% / stat만 1.0%** 로 채워진다. stat anchor 는 동적이 1개뿐인 씬에서만 들어온다 — 그 사실을 알고 고른 배선이다 (대안인 dyn1+stat1 강제는 표본 86.8% 가 dyn+stat 였다).",
+
+  "_preset_2개": "`--slot_plan grid2x2` 가 anchor 마다 슬롯 2개를 고른다 (`GRID_SLOT_PAIRS` 8쌍을 video 해시로 회전, `GRID_ALLOWED_SLOTS` = advance/recede/arc/orbit/vertical/static — **s_curve 는 여기 없다**, 사용자 지시 2026-09-08). `--slot_pair_fill substitute`(D169) 는 씨앗 쌍의 살아남은 짝을 유지하고 빠진 자리만 후보풀에서 메운다. track 여부는 `--track_min_drift_u 0.05` 가 정한다 — 이동량이 문턱을 넘는 anchor 의 `TRACK_KEEP_SLOTS` 에만 `track_` 이 붙고, 못 미치면 같은 슬롯을 비-track 으로 굽는다 (= \"dynamic 이 일정 이상 움직이는 경우만 tracking\").",
+
+  "_fallback": "**`tau` 에 `--variant_pool full` 이 있어야 fallback 이 실제로 돈다.** `fit_hole_ladder` 의 `--fallback_ladder` 는 τ 뱅크의 `plan_tier` 를 읽어 본 슬롯이 `clamped_low` 로 죽었을 때 예비 변이로 갈아끼우는데, `--variant_pool budget`(기본) 이면 층이 전부 0 이라 **no-op** 이다 (`fit_hole_ladder.py:791,868`). d179/d183 은 fit 에만 `--fallback_ladder --fallback_target 5` 가 있고 tau 에 `--variant_pool full` 이 없어서 그 인자가 놀고 있었다 — 대신 route 가 `--preset_route` 를 안 넘겨 `plan_variants` 가 옛 동작(anchor 전량 x preset 합집합)으로 떨어지며 편당 26.49 카메라가 나왔다. 이 세대는 그 두 군데를 같이 고친다. τ 뱅크는 약 2배가 되지만 fit 은 예산(5)이 차면 멈추므로 fit 시간은 실패한 만큼만 는다.",
+
+  "_d183과_다른_점": "route 전부 + tau 의 `--variant_pool full` 하나. fit/emit 은 d179 를 글자 그대로 물려받는다 (`--fallback_target 5`, `--retry_status clamped_low`, `--retry_suspect` 4종, `--suspect_hole 0.35`, `--min_subject_visible 0.6`, `--follow_keyframes 6 --follow_kf_interp cubic`). d169 fit 과 다른 점은 `--min_subject_visible` 0 -> 0.6 (D171-b 로 판정 승격) 과 `--cloud_source memory`(D178) 뿐이다.",
+
+  "_route_실측": "굽기 전 CPU 만으로 route 만 8편에 돌려 확인했다 (`.graph_d182` 선두 8편, 편당 ~0.2s): **8/8 이 anchor 2개(전부 dyn+dyn) × 슬롯 2 + free-moving 1 = 카메라 5개**, `object_budget` 4 + free 1. `track_` 접두가 붙은 슬롯은 편마다 0/1/4 로 갈렸다 — `--track_min_drift_u 0.05` 가 anchor 이동량으로 정하는 대로다. 그때 쓴 `preset_route_d185.json` 은 본 실행이 덮어쓴다.",
+
+  "_격리": "`route.out` = `preset_route_d185.json`, 세대 디렉토리 `bank_d185`/`hole_bank_d185`. 이름을 안 바꾸면 d179/d183/d184 의 라우팅 파일을 덮는다.",
+
+  "_실행": "D184 가 끝난 뒤 같은 드라이버로 돈다 — `scripts/chain_bank_rounds.py --config configs/bank/d185_dynpose100k_grid5.json --videos tmp/d172/videos_10346.txt --work tmp/d185 --graph_marker .graph_d182 --bank_dir hole_bank_d185 --bank_shards 8`. 강등은 D184 라운드에서 이미 `.graph_d182` 기준으로 끝나 있으므로 `needs_demote` 가 전부 건너뛴다.",
+
+  "extends": "d179_dynpose100k_bank.json",
+  "generation": "d185",
+  "tau_bank_dir": "bank_d185",
+  "bank_dir": "hole_bank_d185",
+  "require_markers": [".graph_d182"],
+  "route": {
+    "out": "preset_route_d185.json",
+    "args": [
+      "--num_external", "0",
+      "--max_dynamic_anchors", "2", "--max_static_anchors", "2", "--max_anchors", "2",
+      "--min_anchor_sep", "2.0",
+      "--slot_plan", "grid2x2",
+      "--slot_pair_fill", "substitute",
+      "--free_moving", "rotate",
+      "--track_min_drift_u", "0.05",
+      "--target_variants", "5",
+      "--skip_if_empty"
+    ]
+  },
+  "tau": {
+    "args": [
+      "--cloud_source", "memory",
+      "--tau_ladder", "0.10", "0.20", "0.35", "0.60", "1.00",
+      "--variant_pool", "full",
+      "--aim_keyframes", "6", "--keyframe_aim", "auto", "--keyframe_ease", "smooth_kf",
+      "--fixed_focal", "--deroll", "--no_preview", "--skip_on_empty", "--device", "cuda",
+      "--orbit_fixed_sweep", "--min_sweep_deg", "20", "--behind_src_frames", "49",
+      "--tau_ref", "follow",
+      "--track_dynamic_only", "--track_min_drift_u", "0.05",
+      "--trackings", "lock", "--preset_tracking",
+      "--behind_min_zcam", "0.02",
+      "--tau_denom", "S"
+    ]
+  }
+}

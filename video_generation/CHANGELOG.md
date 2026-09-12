@@ -30,6 +30,16 @@
   프로세스 `--demote_shards`(기본 8) 개로 띄운다. CPU(numpy+PIL) 전용이라 GPU 를 안 잡고,
   `.graph_d182` 가 `--min_ratio` 아래면 굽지 않는다 (graph 뒤·route 앞 순서 강제).
   dry-run 20편 실측 0.35 s/편, 강등 4노드/20편 · 픽셀 뒤집힘 평균 0.85%.
+  · (2026-09-12, 사용자 지시 "gpu 안놀게 bank랑 묶어서 해줘") `tmp/d179/chain_bank_10k.py` 를
+  세대 상수만 인자로 뽑아 **`scripts/chain_bank_rounds.py`** 로 승격하고, graph 가 도는 동안
+  끝난 편부터 주워 강등→뱅크를 굽도록 배선했다. graph 단계는 순수 CPU 라(`build_scene_graph.py`
+  는 `nvidia-smi --query-compute-apps` 가 빈 목록) graph 만 돌리면 GPU 4장이 전부 논다.
+  뱅크의 tau/fit 은 `--device cuda` 라 겹쳐 돌리면 CPU 는 graph, GPU 는 뱅크가 쓴다.
+  · **강등 재실행 판정을 mtime 으로 고쳤다.** d179 는 `from_seg.json` 의 `demote_static_objects`
+  필드만 봐서 "예전(dyn-only) graph 로 강등된" 323편을 건너뛴다 — D182 처럼 graph 를 다시 구우면
+  그 판정이 낡는다. 이제 `from_seg.json` 이 `.graph_d182` 보다 오래되면 다시 강등한다.
+  · 스모크 2편 rc=0 (`route 0.2-0.3s / tau 109.0-111.2s / fit 242.5-247.1s / emit 5.7-6.1s`,
+  편당 357.5·364.7s). GPU 점유 26,598·28,336 MiB/프로세스 → 80 GiB H100 1장당 2개 = 8 샤드.
 - **D182 — dynpose-100k graph 를 정적 노드 포함으로 전량 재굽기
   (`configs/bank/d182_dynpose100k_graph.json`) (2026-09-11, 사용자 지시 "우선 static 포함해서
   graph까지 먼저 다 완료하는걸 목표로 다시 돌리자").** D172 가 구운 graph 에 `stat_*` 노드가

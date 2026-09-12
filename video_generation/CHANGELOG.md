@@ -7,6 +7,21 @@
 ## [Unreleased]
 
 ### Added
+- **두 세대를 동시에 굽기 — `chain_bank_rounds.py --require_bank_dir` + `--work` lock
+  (2026-09-12, 사용자 지시 "gpu 활용률이 저조한데 버전 나눠서 카메라 5개짜리 버전도 같이
+  돌려줘").** D182 graph(24샤드) + D184 뱅크(8샤드)가 도는데 GPU 는 0% 와 54 GB 사이를
+  오간다 — route 와 cloud 전처리가 CPU 라 GPU 가 구간마다 논다 (124코어 중 load 44).
+  · `--require_bank_dir <다른 세대 bank_dir>`: **그 세대가 끝낸 편만** ready 로 본다.
+    두 체인이 같은 편을 동시에 집으면 강등(`dynamic_mask/*.png`)을 한쪽이 쓰는 중에 다른
+    쪽이 읽는다. 선행 체인은 라운드마다 `강등 -> 뱅크` 순서라, 그 뱅크가 끝난 편은 강등이
+    이미 끝나 있다 — 뒤따르는 쪽은 `--stage bank` 로 강등을 건너뛰어도 같은 마스크를 쓴다.
+  · 종료 조건도 같이 고쳤다 (`more_coming`): 선행 세대가 전량을 안 끝냈으면 `ps` 에 샤드가
+    잠깐 0개여도(선행의 강등 구간) 기다린다. 안 그러면 조기 종료한다.
+  · `<work>/chain.lock` (PID): 같은 `--work` 에 드라이버가 이미 돌면 기동하지 않는다.
+    screen 창 입력 버퍼에 기동 명령이 큐잉된 채 남아(앞 작업이 foreground) 나중에 자동
+    실행될 뻔한 사고를 프로세스 쪽에서 막는다. 죽은 PID 의 lock 은 뺏는다.
+  · 기본값은 둘 다 옛 동작 (`--require_bank_dir ""`; lock 은 단일 드라이버면 무영향).
+
 - **D185 — grid5 (씬당 카메라 5개) 전량 뱅크 config (`configs/bank/d185_dynpose100k_grid5.json`)
   (2026-09-12, 사용자 지시 "anchor 2 (static, dynamic) x preset 2 (object-centric or
   tracking(dynamic이 일정 이상 움직이는 경우만)) + free-moving 하나해서 scene당 카메라 총

@@ -32,8 +32,15 @@ env: vista4d (뱅크가 torch/cuda 를 쓴다)
         --graph_pattern "run_bank.py --config configs/bank/d182_"
     # 강등만
     python scripts/chain_bank_rounds.py ... --stage demote
+    # D185 — D184 와 **동시에**. 선행(d184) 뱅크가 끝낸 편만 집고 강등은 건너뛴다
+    python scripts/chain_bank_rounds.py --config configs/bank/d185_dynpose100k_grid5.json \
+        --videos /data1/.../tmp/d172/videos_10346.txt --work /data1/.../tmp/d185 \
+        --graph_marker .graph_d182 --bank_dir hole_bank_d185 \
+        --require_bank_dir hole_bank_d184 --stage bank \
+        --graph_pattern "run_bank.py --config configs/bank/d184_"
 """
 import json
+import os
 import re
 import subprocess
 import sys
@@ -69,17 +76,31 @@ def graph_alive(pattern):
     return any(pattern in ln and "chain_bank_rounds" not in ln for ln in out.splitlines())
 
 
-def ready_videos(vids, marker, bank_dir):
-    """graph 는 끝났고 이 세대 뱅크는 아직 없는 편."""
+def done_bank(root, bank_dir):
+    """이 세대 뱅크가 그 편을 끝냈는가 (canonical 이 나왔거나 skipped 로 접었거나)."""
+    bank = path.join(root, bank_dir)
+    return (path.exists(path.join(bank, "canonical", "canonical.json"))
+            or path.exists(path.join(bank, "skipped.json")))
+
+
+def ready_videos(vids, marker, bank_dir, require_bank_dir=""):
+    """graph 는 끝났고 이 세대 뱅크는 아직 없는 편.
+
+    `require_bank_dir` (D185): **다른 세대 뱅크가 이미 끝낸 편만** ready 로 본다. 두 세대를
+    동시에 돌릴 때 강등(`dynamic_mask`)이 겹치는 것을 막는 용도다 — 강등은 두 체인이 공유하는
+    파일을 다시 쓰므로, 같은 편을 동시에 집으면 한쪽이 쓰는 중인 마스크를 다른 쪽이 읽는다.
+    선행 체인은 라운드마다 `강등 -> 뱅크` 순서라, 그 뱅크가 끝난 편은 **강등이 이미 끝나 있다**.
+    그래서 뒤따르는 체인은 `--stage bank` 로 강등을 건너뛰어도 같은 마스크 위에서 굽는다.
+    기본값 "" 이면 옛 동작 그대로 (선행 조건 없음).
+    """
     out = []
     for v in vids:
         root = path.join(ROOT, OUT_ROOT, v)
         if not path.exists(path.join(root, marker)):
             continue
-        bank = path.join(root, bank_dir)
-        if path.exists(path.join(bank, "canonical", "canonical.json")):
+        if require_bank_dir and not done_bank(root, require_bank_dir):
             continue
-        if path.exists(path.join(bank, "skipped.json")):
+        if done_bank(root, bank_dir):
             continue
         out.append(v)
     return out
@@ -193,18 +214,55 @@ def baked(vids, bank_dir):
                for v in vids)
 
 
+def more_coming(args, vids):
+    """다음 라운드에 새 ready 가 생길 여지가 있는가.
+
+    graph 드라이버가 살아 있거나, `--require_bank_dir` 선행 세대가 아직 전량을 안 끝냈으면
+    기다린다. 후자는 `ps` 가 아니라 **디스크 상태**로 보므로 선행 체인의 강등 구간(샤드가
+    잠깐 0개)에 루프가 조기 종료되지 않는다.
+    """
+    if graph_alive(args.graph_pattern):
+        return True
+    return bool(args.require_bank_dir) and baked(vids, args.require_bank_dir) < len(vids)
+
+
+def take_lock(work):
+    """`--work` 하나에 드라이버 하나. 이미 살아 있으면 False.
+
+    WHY: 같은 `--work`/`--bank_dir` 로 두 개가 돌면 같은 편을 동시에 집어 **한 씬의 뱅크
+    디렉토리에 두 프로세스가 쓴다**. 2026-09-12 에 screen 창 입력 버퍼에 기동 명령이 큐잉된
+    채 남아(앞 작업이 foreground 라 실행되지 않고 대기) 나중에 자동 실행될 뻔했다 — 그런
+    사고를 프로세스 쪽에서 막는다. 죽은 프로세스의 lock 은 그냥 뺏는다 (PID 생존으로 판정).
+    """
+    lock = path.join(work, "chain.lock")
+    if path.exists(lock):
+        try:
+            with open(lock, encoding="utf-8") as fh:
+                old = int(fh.read().split()[0])
+        except (ValueError, IndexError, OSError):
+            old = -1
+        if old > 0 and path.exists(f"/proc/{old}"):
+            log(f"이 --work 에 드라이버가 이미 돈다 (pid {old}, {lock}) — 기동 안 함")
+            return False
+    with open(lock, "w", encoding="utf-8") as fh:
+        fh.write(f"{os.getpid()} {datetime.now():%Y-%m-%d %H:%M:%S}\n")
+    return True
+
+
 def main(args):
     makedirs(args.work, exist_ok=True)
+    if not take_lock(args.work):
+        return 0
     vids = videos(args.videos)
     for rnd in range(1, args.max_rounds + 1):
         tag = f"r{rnd:02d}"
-        ready = ready_videos(vids, args.graph_marker, args.bank_dir)
-        alive = graph_alive(args.graph_pattern)
+        ready = ready_videos(vids, args.graph_marker, args.bank_dir, args.require_bank_dir)
+        alive = more_coming(args, vids)
         log(f"=== 라운드 {tag} — ready {len(ready)}/{len(vids)}, "
-            f"이미 구움 {baked(vids, args.bank_dir)}, graph {'진행 중' if alive else '종료'}")
+            f"이미 구움 {baked(vids, args.bank_dir)}, 선행 {'진행 중' if alive else '종료'}")
         if not ready:
             if not alive:
-                log("ready 0 이고 graph 도 끝났다 — 종료")
+                log("ready 0 이고 선행(graph/앞 세대)도 끝났다 — 종료")
                 return 0
             log(f"ready 0 — {args.poll / 60:.0f}분 뒤 재스캔")
             sleep(args.poll)
@@ -219,9 +277,9 @@ def main(args):
             return 0
         run_bank(args, ready, tag)
         log(f"라운드 {tag} 끝 — 누적 구움 {baked(vids, args.bank_dir)}/{len(vids)}")
-        if not graph_alive(args.graph_pattern) and not ready_videos(
-                vids, args.graph_marker, args.bank_dir):
-            log("graph 종료 + ready 0 — 전량 완료")
+        if not more_coming(args, vids) and not ready_videos(
+                vids, args.graph_marker, args.bank_dir, args.require_bank_dir):
+            log("선행 종료 + ready 0 — 전량 완료")
             return 0
     log(f"--max_rounds {args.max_rounds} 소진")
     return 0
@@ -235,6 +293,9 @@ if __name__ == "__main__":
     parser.add_argument("--eval_data", default="/data1/cympyc1785/LatentCamVid/DATA/DynPose-100K")
     parser.add_argument("--graph_marker", default=".graph_d182")  # 이게 있어야 ready
     parser.add_argument("--bank_dir", default="hole_bank_d183")   # config 의 bank_dir 과 같아야
+    # 두 세대를 **동시에** 돌릴 때: 선행 세대 뱅크가 끝낸 편만 집는다 (강등 경합 회피, §ready_videos).
+    # 뒤따르는 쪽은 `--stage bank` 로 강등을 건너뛴다. "" 이면 옛 동작.
+    parser.add_argument("--require_bank_dir", default="")
     # graph 드라이버가 살아 있는지 볼 `ps` 부분문자열. 죽고 ready 0 이면 루프를 끝낸다.
     parser.add_argument("--graph_pattern", default="run_bank.py --config configs/bank/d182_")
     parser.add_argument("--stage", default="all", choices=("all", "demote", "bank"))

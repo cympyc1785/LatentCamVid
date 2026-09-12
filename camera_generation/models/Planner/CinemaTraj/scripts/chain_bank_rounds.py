@@ -254,19 +254,30 @@ def main(args):
     if not take_lock(args.work):
         return 0
     vids = videos(args.videos)
-    for rnd in range(1, args.max_rounds + 1):
-        tag = f"r{rnd:02d}"
+    #    **`--max_rounds` 는 "구운 라운드" 수다 — 기다림은 안 센다.** 예전에는 `for rnd in
+    #    range(max_rounds)` 라 ready 0 으로 쉬는 것도 한 라운드를 먹었고, 선행 graph 를 따라잡은
+    #    뒤로는 ready 6~8 짜리 1분 라운드가 줄줄이 돌아 D184 가 8093/10346 에서 `--max_rounds 60
+    #    소진` 으로 조용히 끝났다 (2026-09-13). 캡은 폭주 방지용이지 대기 예산이 아니다.
+    rnd = 0
+    while rnd < args.max_rounds:
         ready = ready_videos(vids, args.graph_marker, args.bank_dir, args.require_bank_dir)
         alive = more_coming(args, vids)
-        log(f"=== 라운드 {tag} — ready {len(ready)}/{len(vids)}, "
-            f"이미 구움 {baked(vids, args.bank_dir)}, 선행 {'진행 중' if alive else '종료'}")
-        if not ready:
+        #    선행이 살아 있는데 ready 가 `--min_ready` 에 못 미치면 굽지 않고 쉰다. 라운드마다
+        #    드는 고정비(강등 샤드 기동 + 뱅크 샤드 기동)가 편당 비용을 압도하는 구간을 피한다.
+        #    기본 0 = **기존 동작 그대로** (ready 1편이어도 바로 굽는다).
+        thin = bool(args.min_ready) and alive and 0 < len(ready) < args.min_ready
+        if not ready or thin:
             if not alive:
                 log("ready 0 이고 선행(graph/앞 세대)도 끝났다 — 종료")
                 return 0
-            log(f"ready 0 — {args.poll / 60:.0f}분 뒤 재스캔")
+            why = (f"ready {len(ready)} < --min_ready {args.min_ready}" if thin else "ready 0")
+            log(f"{why} — {args.poll / 60:.0f}분 뒤 재스캔 (구운 라운드 {rnd}/{args.max_rounds})")
             sleep(args.poll)
             continue
+        rnd += 1
+        tag = f"r{rnd:02d}"
+        log(f"=== 라운드 {tag} — ready {len(ready)}/{len(vids)}, "
+            f"이미 구움 {baked(vids, args.bank_dir)}, 선행 {'진행 중' if alive else '종료'}")
         if args.round_cap and len(ready) > args.round_cap:
             # 한 라운드가 너무 길면 그동안 끝난 편이 다음 라운드까지 논다. 앞에서 잘라 쓴다.
             log(f"  라운드 상한 {args.round_cap}편으로 자름 (나머지는 다음 라운드)")
@@ -302,6 +313,9 @@ if __name__ == "__main__":
     parser.add_argument("--bank_shards", default=4, type=int)     # GPU 1장당 1개
     parser.add_argument("--demote_shards", default=8, type=int)   # CPU 전용 (numpy+PIL)
     parser.add_argument("--round_cap", default=0, type=int)       # 0 = 무제한
+    # **구운 라운드만** 센다 (기다림은 안 센다, §main). 폭주 방지용 상한이다.
     parser.add_argument("--max_rounds", default=40, type=int)
+    # 선행이 살아 있을 때 이 편수 미만이면 굽지 않고 --poll 만큼 쉰다. 0 = 기존 동작.
+    parser.add_argument("--min_ready", default=0, type=int)
     parser.add_argument("--poll", default=900, type=int)          # ready 0 일 때 재스캔 간격(초)
     sys.exit(main(parser.parse_args()))

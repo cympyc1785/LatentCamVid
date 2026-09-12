@@ -329,6 +329,15 @@
   다시 갈고 있었다. 스코프는 d179 가 흡수한다. config 는 근거와 함께 남긴다.
 
 ### Fixed
+- **`--max_rounds` 를 기다림이 갉아먹던 것 + `--min_ready`
+  (`scripts/chain_bank_rounds.py`) (2026-09-13).** D184 가 8093/10346 에서 `--max_rounds 60
+  소진` 으로 조용히 멈췄다. 죽은 게 아니라 캡을 다 쓴 것 — 선행 graph 를 따라잡은 뒤로
+  `ready 6~8` 짜리 **1분 라운드**가 줄줄이 돌았다 (마지막 30 라운드 중 21개가 ready ≤10).
+  `ready 0` 로 쉬는 것까지 `for rnd in range(max_rounds)` 가 한 라운드로 셌다.
+  · 이제 `--max_rounds` 는 **구운 라운드**만 센다. 캡은 폭주 방지용이지 대기 예산이 아니다.
+  · `--min_ready N` (기본 0 = 기존 동작): 선행이 살아 있는데 ready 가 N 미만이면 굽지 않고
+    `--poll` 만큼 쉰다. 라운드 고정비(강등 8샤드 + 뱅크 8샤드 기동)가 편당 비용을 압도하는
+    구간을 피한다. D184 는 `--min_ready 40` 으로 재기동했다.
 - **2+2 preset depth-warp 릴이 전편 실패해도 `ALL DONE` + exit 0 이던 것
   (`scripts/run_preset_warp_{sample,max_shard}.sh`) (2026-09-12).** d185 뱅크 릴 4편이 전부
   죽었는데 래퍼는 성공처럼 끝났다. 세 가지를 고쳤다 — 증상·근거는 `FIX.log` 2026-09-12 두 항목.

@@ -21,6 +21,10 @@
     screen 창 입력 버퍼에 기동 명령이 큐잉된 채 남아(앞 작업이 foreground) 나중에 자동
     실행될 뻔한 사고를 프로세스 쪽에서 막는다. 죽은 PID 의 lock 은 뺏는다.
   · 기본값은 둘 다 옛 동작 (`--require_bank_dir ""`; lock 은 단일 드라이버면 무영향).
+  · **동시 실행 시 샤드 합계를 GPU 수로 나눠 볼 것.** `run_bank.py:159 _run()` 이 `--gpu`
+    없으면 `fan_out` 의 `GPUS[shard % 4]` 를 쓰므로 8+8 샤드는 장당 4 다 — 네 장 전부
+    75~80 GB(상한 81.5)에 닿아 CUDA OOM 이 났다. D185 를 4샤드로 내려 합계 12(장당 3),
+    피크 77 GB, OOM 0건. 근거·증상은 `FIX.log` 2026-09-12 항목.
 
 - **D185 — grid5 (씬당 카메라 5개) 전량 뱅크 config (`configs/bank/d185_dynpose100k_grid5.json`)
   (2026-09-12, 사용자 지시 "anchor 2 (static, dynamic) x preset 2 (object-centric or

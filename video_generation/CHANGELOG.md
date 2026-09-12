@@ -329,6 +329,19 @@
   다시 갈고 있었다. 스코프는 d179 가 흡수한다. config 는 근거와 함께 남긴다.
 
 ### Fixed
+- **2+2 preset depth-warp 릴이 전편 실패해도 `ALL DONE` + exit 0 이던 것
+  (`scripts/run_preset_warp_{sample,max_shard}.sh`) (2026-09-12).** d185 뱅크 릴 4편이 전부
+  죽었는데 래퍼는 성공처럼 끝났다. 세 가지를 고쳤다 — 증상·근거는 `FIX.log` 2026-09-12 두 항목.
+  · **`CLOUD` env (기본 `auto`)**: `<ROOT>/<video>/cloud.npz` 가 있으면 예전처럼 `npz`, 없으면
+    `--cloud_source memory`. D178 이후 굽기가 cloud.npz 를 안 남겨서 릴이 `AssertionError:
+    cloud.npz 가 없다` 로 죽었다 (백로그 D178-b 가 미배선인 채 처음 물린 것). `npz`/`memory`
+    명시 시 강제. cloud.npz 가 남아 있는 옛 세대는 **문자 그대로 기존 커맨드**다.
+  · **`eval_data` 를 ROOT 가 아니라 씬 존재로 고른다**: 출력 루트 `out_dynpose` 밑에 코퍼스가
+    둘이다(DynPose-LBM 880편 / DynPose-100K 10,346편). `case "$ROOT"` 로 LBM 에 못 박혀
+    `ValueError: Could not open video file` 이 났다. 이제 표본 첫 편이 실제로 있는 루트를
+    후보 목록에서 고르고, 못 찾으면 exit 1 로 세운다. `out` 은 예전대로 렌더러 기본값.
+  · **실패를 프로세스 rc 로 올린다**: 러너가 편별 rc 를 세어 `실패 N` 을 찍고 exit 1,
+    실패 편마다 로그 마지막 줄(예외 메시지)을 같이 출력한다. 래퍼도 그 rc 를 그대로 넘긴다.
 - **route 의 "anchor 0" 을 크래시에서 기록되는 skip 으로
   (`scripts/route_presets.py --skip_if_empty`, `scripts/run_bank.py`) (2026-09-12).**
   `route_presets.main` 은 anchor 후보가 0개면 `assert` 로 죽는다(rc=1). D181 파일럿은 씬 목록을

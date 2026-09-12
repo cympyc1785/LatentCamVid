@@ -31,12 +31,22 @@ VIDEOS="${VIDEOS:-}"
 #    dynpose·trumans 뱅크도 같은 릴로 보려고 열었다 (`ROOT=out_dynpose EVAL=DynPose-LBM`).
 ROOT="${ROOT:-out}"
 EVAL="${EVAL:-}"
+#    cloud 조달 방식. 기본 `auto` = **cloud.npz 가 있으면 예전처럼 npz, 없으면 memory**.
+#    왜: D178(`--cloud_source memory`) 이후로 굽기가 cloud.npz 를 디스크에 안 남긴다. 이 러너는
+#    `--cloud_source` 를 아예 안 붙여서 `render_bank_videos.py` 기본값 npz 로 떨어졌고,
+#    d185 4편이 전부 `AssertionError: cloud.npz 가 없다` 로 rc=1 이었다 — **샤드는 rc 를 찍고
+#    넘어가므로 래퍼는 exit 0 이고, 릴 폴더에 mp4 가 0개인 것으로만 드러난다.**
+#    `npz`/`memory` 를 명시로 주면 그대로 강제한다.
+CLOUD="${CLOUD:-auto}"
 PY=/data1/cympyc1785/miniconda3/envs/vista4d/bin/python
 HERE=/data1/cympyc1785/LatentCamVid/camera_generation/models/Planner/CinemaTraj
 cd "$HERE" || exit 1
 mkdir -p "$OUTDIR"
 
 i=0
+#    렌더 실패 수. 예전에는 rc 를 찍고 넘어가기만 해서 **전편 실패도 exit 0** 이었다 —
+#    d185 릴 4편이 전부 죽었는데 래퍼는 `ALL DONE` 을 찍었다. 실패가 있으면 exit 1 로 알린다.
+NFAIL=0
 LIST=${VIDEOS:-$(ls -d "$ROOT"/*/"$BANK"/bank.csv 2>/dev/null | sed "s|$ROOT/||;s|/$BANK/bank.csv||")}
 for V in $LIST; do
     if [ $((i % NSHARD)) -ne "$SHARD" ]; then i=$((i + 1)); continue; fi
@@ -76,11 +86,18 @@ PYEOF
     FF=$($PY -c "import json,sys;print('--fixed_focal' if json.load(open(sys.argv[1])).get('fixed_focal') else '')" \
          "$ROOT/$V/$BANK/bank.json" 2>/dev/null)
     N=$(echo "$IDS" | wc -w)
-    echo "[s$SHARD] RENDER $V  tiles=$N  focal=${FF:-perframe}  $(date +%H:%M:%S)"
+    #    cloud 조달 (위 CLOUD 참조). auto 는 파일 유무로 고른다 — cloud.npz 가 남아 있는 옛
+    #    세대는 예전 커맨드와 문자 그대로 같고, D178 이후 세대만 memory 로 간다.
+    CS="$CLOUD"
+    if [ "$CS" = "auto" ]; then
+        if [ -f "$ROOT/$V/cloud.npz" ]; then CS="npz"; else CS="memory"; fi
+    fi
+    echo "[s$SHARD] RENDER $V  tiles=$N  focal=${FF:-perframe}  cloud=$CS  $(date +%H:%M:%S)"
     #    ROOT/EVAL 이 기본이면 아래 두 인자는 안 붙어서 예전 커맨드와 문자 그대로 같다.
     EXTRA=""
     [ "$ROOT" != "out" ] && EXTRA="$EXTRA --output_root $ROOT"
     [ -n "$EVAL" ] && EXTRA="$EXTRA --eval_data $EVAL"
+    [ "$CS" != "npz" ] && EXTRA="$EXTRA --cloud_source $CS"
     # shellcheck disable=SC2086
     CUDA_VISIBLE_DEVICES=$GPU $PY scripts/render_bank_videos.py \
         --video "$V" --bank_dir "$BANK" --variant_ids $IDS $EXTRA $FF \
@@ -88,6 +105,14 @@ PYEOF
         --name "$NAME" > "/data1/cympyc1785/LatentCamVid/tmp/warpmax_$V.log" 2>&1
     RC=$?
     echo "[s$SHARD] RENDER $V rc=$RC  $(date +%H:%M:%S)"
-    [ $RC -eq 0 ] && cp "$ROOT/$V/$BANK/$NAME" "$OUTDIR/$NAME"
+    if [ $RC -eq 0 ]; then
+        cp "$ROOT/$V/$BANK/$NAME" "$OUTDIR/$NAME"
+    else
+        NFAIL=$((NFAIL + 1))
+        #    로그 마지막 줄(= 예외 메시지)을 바로 보여준다. 로그 경로만 찍으면 안 열어본다.
+        echo "[s$SHARD]   $(tail -1 "/data1/cympyc1785/LatentCamVid/tmp/warpmax_$V.log")"
+    fi
 done
-echo "[s$SHARD] ALL DONE $(date +%H:%M:%S)"
+echo "[s$SHARD] ALL DONE $(date +%H:%M:%S)  실패 $NFAIL"
+[ "$NFAIL" -gt 0 ] && exit 1
+exit 0

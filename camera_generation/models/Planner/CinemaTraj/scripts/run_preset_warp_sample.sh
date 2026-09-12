@@ -30,15 +30,17 @@ GPU=$1; BANK=$2; OUTDIR=$3; ROOT="${4:-out}"
 #    표본 수 override — 기본 2+2.
 NMOV="${NMOV:-2}"
 NSTAT="${NSTAT:-2}"
-#    `--eval_data` override. **안 주면 output_root 로 추정**한다 (out→기본 Vista4D-Eval-Data,
-#    out_dynpose→DynPose-LBM). 추정을 넣은 이유: `--output_root out_dynpose` 만 주고 eval_data 를
-#    빼면 렌더러가 dynpose 씬을 Vista4D 데이터셋에서 찾다가 조용히 다른 소스로 warp 한다.
-if [ -z "${EVAL:-}" ]; then
-    case "$ROOT" in
-        out_dynpose) EVAL=/data1/cympyc1785/data/DynPose-LBM ;;
-        *)           EVAL="" ;;
-    esac
-fi
+#    `--eval_data` override. **안 주면 표본 씬이 실제로 있는 루트를 골라** 쓴다 (아래 EVAL 탐색).
+#    추정이 필요한 이유: `--output_root out_dynpose` 만 주고 eval_data 를 빼면 렌더러가 dynpose
+#    씬을 Vista4D 데이터셋에서 찾다가 조용히 다른 소스로 warp 한다.
+#
+#    왜 `case "$ROOT"` 한 줄로는 안 되나: `out_dynpose` 한 출력 루트 밑에 **코퍼스가 둘** 있다 —
+#    DynPose-LBM(880편, d129~d157) 과 DynPose-100K(10,346편, d172 이후). ROOT 만 보고 LBM 으로
+#    못 박아서 d185 릴 4편이 `ValueError: Could not open video file: .../DynPose-LBM/eval_data/
+#    recon_and_seg/<video>/video.mp4` 로 죽었다. 그래서 **표본 첫 편이 어느 루트에 있는지**로
+#    고른다 (표본은 한 뱅크에서 나오므로 코퍼스가 섞이지 않는다).
+EVAL_CANDS="/data1/cympyc1785/LatentCamVid/DATA/DynPose-100K /data1/cympyc1785/data/DynPose-LBM"
+EVAL_GIVEN="${EVAL:-}"
 PY=/data1/cympyc1785/miniconda3/envs/vista4d/bin/python
 HERE=/data1/cympyc1785/LatentCamVid/camera_generation/models/Planner/CinemaTraj
 cd "$HERE" || exit 1
@@ -55,11 +57,34 @@ if [ $RC -ne 0 ] || [ -z "$VIDEOS" ]; then
 fi
 echo "[sample] bank=$BANK root=$ROOT -> $VIDEOS"
 
+#    EVAL 탐색 (위 헤더 참조). 명시로 줬으면 그대로, `out` 이면 빈 값 = 렌더러 기본값
+#    (Vista4D-Eval-Data) 이라 **예전 커맨드와 문자 그대로 같다**.
+EVAL="$EVAL_GIVEN"
+if [ -z "$EVAL" ] && [ "$ROOT" != "out" ]; then
+    V0=$(echo "$VIDEOS" | awk '{print $1}')
+    for C in $EVAL_CANDS; do
+        if [ -d "$C/eval_data/recon_and_seg/$V0" ]; then EVAL="$C"; break; fi
+    done
+    if [ -z "$EVAL" ]; then
+        echo "[sample] eval_data 를 못 찾았다 — $V0 이 후보 루트 어디에도 없다: $EVAL_CANDS"
+        echo "[sample] EVAL=<경로> 로 명시할 것"; exit 1
+    fi
+    echo "[sample] eval_data 추정 -> $EVAL  ($V0 기준)"
+fi
+
 #    렌더는 기존 러너. 샤드 1개(0/1)로 순차 실행한다 — 4편이라 나눌 이유가 없고,
 #    나누면 GPU 하나에 두 프로세스가 붙어 진행 중인 뱅크 굽기와 3중으로 겹친다.
 #    ROOT/EVAL 은 **env 로 넘겨야** 한다 — 러너가 자기 안에서 `${ROOT:-out}` 로 읽는데
 #    여기서 assign 만 하면 export 가 안 돼 dynpose 뱅크가 `out` 을 보고 EMPTY 로 떨어진다.
-VIDEOS="$VIDEOS" BANK="$BANK" ROOT="$ROOT" EVAL="$EVAL" \
+#    `CLOUD` 도 그대로 흘린다 — 기본 `auto` 는 cloud.npz 유무로 npz/memory 를 고른다
+#    (D178 이후 세대는 cloud.npz 가 없다).
+VIDEOS="$VIDEOS" BANK="$BANK" ROOT="$ROOT" EVAL="$EVAL" CLOUD="${CLOUD:-auto}" \
     bash scripts/run_preset_warp_max_shard.sh "$GPU" 0 1 "$OUTDIR"
-echo "[sample] ALL DONE $(date +%H:%M:%S)  -> $OUTDIR"
+RC=$?
 ls -la "$OUTDIR"
+#    렌더가 하나라도 죽으면 여기서 **exit 1**. 예전에는 러너가 rc 를 찍고도 0 으로 끝나서
+#    mp4 가 0개인 릴 폴더를 `ALL DONE` 으로 넘겼다 (d185 4/4 실패, 2026-09-12).
+if [ $RC -ne 0 ]; then
+    echo "[sample] 렌더 실패 rc=$RC — 위 로그 참조.  -> $OUTDIR"; exit 1
+fi
+echo "[sample] ALL DONE $(date +%H:%M:%S)  -> $OUTDIR"

@@ -50,7 +50,7 @@ from contextlib import redirect_stderr, redirect_stdout
 from importlib import import_module
 from importlib.util import module_from_spec, spec_from_file_location
 from io import StringIO
-from json import load as json_load
+from json import dump as json_dump, load as json_load
 from os import environ, execv, makedirs, path
 from subprocess import run as sp_run, PIPE
 from sys import executable, stderr
@@ -240,6 +240,17 @@ def process_video(cfg, video, stages, gpu, log_dir, skip_done, tag, threads=0, m
                             + ["--emit", "args", "--out", path.join(root, spec["out"])],
                             log_path, gpu, capture=True, threads=threads, mode=mode)
             line = text.strip().splitlines()[-1] if text.strip() else ""
+            # D184. rc=3 = `route_presets --skip_if_empty` 가 "이 씬엔 anchor(또는 슬롯)가
+            # 없다"고 정상 종료한 것. 크래시가 아니므로 `skipped.json` 을 남겨 다음 라운드가
+            # 건너뛰게 한다 — 안 남기면 라운드마다 같은 씬을 다시 집는다.
+            if rc == 3:
+                makedirs(bank_dir, exist_ok=True)
+                with open(path.join(bank_dir, "skipped.json"), "w", encoding="utf-8") as file:
+                    json_dump({"format": "lbm_camera_bank_skipped_v1", "video": video,
+                               "reason": "no_surviving_anchors", "stage": "route",
+                               "detail": "route_presets --skip_if_empty: anchor 또는 슬롯이 0개",
+                               "log": log_path}, file, ensure_ascii=False, indent=1)
+                return "SKIP(앵커 0)"
             if rc != 0 or not line:
                 return f"FAIL(route rc={rc})"
             route_args = line.split()

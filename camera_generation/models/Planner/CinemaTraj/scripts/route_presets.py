@@ -473,9 +473,13 @@ def main(args):
                            args.max_anchors, args.min_anchor_sep,
                            min_drift_u=args.anchor_min_drift_u,
                            require_frame0=args.anchor_require_frame0)
-    assert anchors, ("anchor 후보가 없다 (max_area_frac 하한을 낮추거나 graph 를 확인"
-                     + (f"; --anchor_min_drift_u {args.anchor_min_drift_u} 로 걸렀다)"
-                        if args.anchor_min_drift_u > 0 else ")"))
+    why = ("anchor 후보가 없다 (max_area_frac 하한을 낮추거나 graph 를 확인"
+           + (f"; --anchor_min_drift_u {args.anchor_min_drift_u} 로 걸렀다)"
+              if args.anchor_min_drift_u > 0 else ")"))
+    if not anchors and args.skip_if_empty:
+        print(why, file=sys.stderr)
+        raise SystemExit(3)
+    assert anchors, why
     # D181. 슬롯 화이트리스트. 빈 문자열이면 끔 = 옛 동작.
     whitelist = tuple(s.strip() for s in args.slot_whitelist.split(",") if s.strip())
     # 쉼표 목록 -> tuple. 빈 문자열이면 세로 슬롯을 아예 안 넣는다(`--vertical_fallback` 만 남는다).
@@ -574,6 +578,14 @@ def main(args):
             routed[0]["reasons"]["free_moving"] = free
             if free not in presets:
                 presets.append(free)
+
+    # D184. 화이트리스트가 anchor 의 슬롯을 전부 걷어내면 preset 이 0개다 — anchor 0 과 같은
+    # 결말(변이 0)이므로 같은 rc=3 으로 내보낸다. 켜지 않으면 옛 동작대로 빈 `--presets` 를
+    # 그대로 출력한다.
+    if args.skip_if_empty and not presets:
+        print(f"슬롯이 0개 — --slot_whitelist '{args.slot_whitelist}' 뒤에 남은 슬롯이 없다",
+              file=sys.stderr)
+        raise SystemExit(3)
 
     # D166. scene 당 변이 예산. `target_count` 가 상한(요구가 아니다 — 사용자 지시
     # "최대 5개"), `object_budget` 은 그중 anchor 를 쓰는 몫이다. 뱅크가 이 둘을 읽어
@@ -753,6 +765,12 @@ def build_parser():
     parser.add_argument("--emit", default="table", type=str,
                         choices=("table", "args", "presets", "nodes"))
     parser.add_argument("--out", default=None, type=str)
+    # D184: anchor 가 0개(또는 화이트리스트 뒤 슬롯이 0개)면 assert 로 죽는 대신 **rc=3** 으로
+    # 나간다. 기본 off = 옛 동작(assert). 전량 굽기에서만 켠다 — `--anchor_min_drift_u` 를
+    # 코퍼스 중앙값으로 두면 절반 이상의 씬이 여기서 걸리는데, 크래시로 처리하면 `skipped.json`
+    # 이 안 남아 라운드마다 같은 씬을 영원히 다시 집는다. `run_bank.py` 가 rc=3 을 받아
+    # `skipped.json(no_surviving_anchors)` 를 남긴다.
+    parser.add_argument("--skip_if_empty", action="store_true", default=False)
     return parser
 
 

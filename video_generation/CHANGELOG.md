@@ -7,6 +7,27 @@
 ## [Unreleased]
 
 ### Added
+- **D184 — 씬당 카메라 1개 전량 뱅크 (`configs/bank/d184_dynpose100k_single.json`)
+  (2026-09-12, 사용자 지시 "내가 카메라 개수 제한하라고 하지 않았니?").** 2026-09-11 지시
+  ("track + object-centric ... 카메라 하나만 fitting되도록")가 `d181_track_orbit_pilot.json`
+  **파일럿에만** 반영돼 있었다. D183 은 d179 전량 라인을 그대로 물려받아 route 가
+  `--max_dynamic_anchors 3 --max_static_anchors 3`, fit 이 `--fallback_target 5` 라
+  **편당 26.49 카메라**(중앙값 24, anchor 2.56/편 × 10.37 카메라/anchor, 371편 실측)를 냈다.
+  D184 는 D181 의 제약을 D182 graph 위 10,346편 **전량**에 건다: route 에
+  `--max_dynamic_anchors 1 --max_static_anchors 0 --max_anchors 1 --anchor_min_drift_u 0.30
+  --anchor_require_frame0 --slot_whitelist orbit --track_mode replace --target_variants 1`,
+  fit 에 `--fallback_target 1`. tau args 는 d183 과 **글자 단위 동일**(병합 실행해 확인) —
+  τ 사다리·조준·추종을 바꾸면 코퍼스가 파일럿의 상위집합이 아니게 된다.
+  · D183 은 371편에서 중단했다 (`hole_bank_d183` 은 남겨 뒀다 — 삭제는 승인 뒤).
+  · 스모크 16편: `SKIP(앵커 0) 10 / OK 6`, 1.0분. 구워진 7편 전부 **카메라 정확히 1개**,
+    preset 은 `track_orbit_left` 5 / `track_orbit_right` 2. 편당 51.1s
+    (route 0.2 / tau 22.0 / fit 24.4 / emit 4.5) — d183 341s 대비 6.7배 빠르다 (카메라 수).
+  · **수율은 씬당 1대 × 10,346 이 아니다.** anchor 가 1개뿐이라 `--anchor_min_drift_u 0.30`
+    이나 `--anchor_require_frame0` 에 걸리면 씬이 통째로 빠진다. 스모크 37.5%, D181 파일럿
+    이동량 문턱 통과율 45.9%(2,137편 중 981편) → 카메라가 나오는 편은 4~5천 편으로 본다.
+  · `--max_static_anchors 0` 이라 D182 가 새로 넣은 stat 노드는 이 세대에서 target 이 아니다.
+    `--composition` 의 구도·가림 판정에는 그대로 들어간다.
+
 - **D183 — D182 graph 위의 뱅크 config (`configs/bank/d183_dynpose100k_bank.json`)
   (2026-09-12, 사용자 지시 "앞으로 돌릴 것도 배선 문제 없는지 미리 확인해놔줘").** d179 를
   D182 뒤에 그대로 돌리면 **두 군데서 조용히 잘못된다**. ① `require_markers: [".graph_d157"]`
@@ -264,6 +285,18 @@
   다시 갈고 있었다. 스코프는 d179 가 흡수한다. config 는 근거와 함께 남긴다.
 
 ### Fixed
+- **route 의 "anchor 0" 을 크래시에서 기록되는 skip 으로
+  (`scripts/route_presets.py --skip_if_empty`, `scripts/run_bank.py`) (2026-09-12).**
+  `route_presets.main` 은 anchor 후보가 0개면 `assert` 로 죽는다(rc=1). D181 파일럿은 씬 목록을
+  같은 문턱으로 미리 걸러서 문제가 안 됐지만, D184 는 전량이라 **절반 이상**이 여기서 걸린다.
+  크래시로 두면 `skipped.json` 이 안 남아 `chain_bank_rounds` 가 라운드마다 같은 씬을 다시
+  집고, 로그에는 `FAIL(route rc=1)` 이 쌓인다 (스모크 4편 중 3편이 그랬다). 새 플래그를 주면
+  rc=3 으로 정상 종료하고 `run_bank` 가 `hole_bank_*/skipped.json(no_surviving_anchors)` 를
+  남긴다. 화이트리스트 뒤 슬롯이 0개인 경우도 같은 경로다. **기본값 off = 옛 동작(assert).**
+- **`chain_bank_rounds` 의 라운드 요약이 편별 실패를 안 셌다 (2026-09-12).** `fan_out` 이 세는
+  건 샤드 **프로세스의 rc** 라, 샤드가 정상 종료하면 그 안에서 몇 편이 FAIL 했는지 안 보인다
+  — 스모크에서 3/4 편이 route 로 죽었는데 "실패 0/4" 로 찍혔다. 이제 샤드 로그의 `=== 요약 ===`
+  표를 파싱해 `SKIP(앵커 0) 10  OK 6` 처럼 편별 상태 분포를 같이 낸다.
 - **D182 — graph 게이트 분모를 "도달 가능한 편"으로 (`tmp/d182/chain_static_graph.py`,
   `--gate_basis`) (2026-09-12).** sam3 가 100% 성공했는데도 체인이 03:20:53 에 스스로 멈췄다.
   `sam3_done()` 이 `seg_instances_static` 개수를 **목록 10,346편으로 나눠** 96.7% 를 내고

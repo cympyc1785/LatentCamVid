@@ -1,0 +1,53 @@
+{
+  "_why": "D184 (사용자 지시 2026-09-12 \"내가 카메라 개수 제한하라고 하지 않았니?\") — D183 은 d179 전량 뱅크 라인을 그대로 물려받아 편당 26.5 카메라를 냈다. 2026-09-11 지시(\"track + object-centric ... 카메라 하나만 fitting되도록\")는 `d181_track_orbit_pilot.json` 에만 반영돼 있었고 전량 뱅크에는 안 옮겨져 있었다. 이 config 는 **D181 의 제약을 D182 graph 위 10,346편 전량에** 적용한다.",
+
+  "_d183과_다른_점": "route 5개 인자 + fit 의 `--fallback_target` 1(5에서). tau 는 글자 그대로 d179 를 물려받는다 — τ 사다리·조준·추종을 바꾸면 코퍼스가 파일럿의 상위집합이 아니게 된다. `_scope` 도 그대로 `tmp/d172/videos_10346.txt` 전량이다 (D181 처럼 목록을 미리 거르지 않는다 — 아래 참고).",
+
+  "_수율": "`--anchor_min_drift_u 0.30` 과 `--anchor_require_frame0` 은 **anchor 후보를 자른다**. anchor 가 1개뿐이라 둘 중 하나에 걸리면 씬이 통째로 `skipped.json(no_surviving_anchors)` 이다 — 그 경로를 위해 `--skip_if_empty` 를 켠다 (D181 파일럿은 씬 목록을 미리 걸러서 이 경우가 route assert 로 죽었다; 전량에서는 절반 이상이라 크래시로 두면 라운드마다 같은 씬을 다시 집는다). D181 파일럿 실측으로 신선 graph 2,137편 중 이동량 문턱을 넘는 편이 981편(45.9%)이었으므로, 10,346편에서 카메라가 나오는 편은 **~4,700편**으로 본다. `씬당 1대 × 10,346` 이 아니다. 문턱 0.30 은 코퍼스 중앙값이고 기존 배선값 0.05 는 96.4% 를 통과시켜 '일정 이상'이 안 된다.",
+
+  "_stat_앵커": "`--max_static_anchors 0` 이라 **D182 가 새로 넣은 stat 노드는 이 세대에서 target 으로 안 쓰인다.** graph 재굽기가 헛일이 되는 것은 아니다 — stat 노드는 `--composition` 의 구도 평가와 충돌/가림 판정에 그대로 들어간다. stat 을 target 으로 쓰려면 별도 세대를 판다.",
+
+  "_격리": "`route.out` 을 `preset_route_d184.json` 으로 뒀다 — 씬 루트에 쓰는 파일이라 이름을 안 바꾸면 d179/d183 의 라우팅 파일을 덮는다. bank_dir 도 세대 디렉토리를 새로 판다.",
+
+  "extends": "d179_dynpose100k_bank.json",
+  "generation": "d184",
+  "tau_bank_dir": "bank_d184",
+  "bank_dir": "hole_bank_d184",
+  "require_markers": [".graph_d182"],
+  "route": {
+    "out": "preset_route_d184.json",
+    "args": [
+      "--num_external", "0", "--free_moving", "off",
+      "--max_dynamic_anchors", "1", "--max_static_anchors", "0", "--max_anchors", "1",
+      "--anchor_min_drift_u", "0.30", "--anchor_require_frame0",
+      "--slot_whitelist", "orbit",
+      "--track_mode", "replace",
+      "--target_variants", "1",
+      "--skip_if_empty"
+    ]
+  },
+  "fit": {
+    "args": [
+      "--cloud_source", "memory",
+      "--hole_ladder", "0.20",
+      "--fallback_ladder", "--fallback_target", "1",
+      "--retry_status", "clamped_low",
+      "--retry_suspect", "aim_target_subject_lost", "hole_over_budget",
+      "motion_preset_no_motion", "static_start_collision",
+      "--suspect_hole", "0.35",
+      "--aim_keyframes", "6", "--keyframe_aim", "auto", "--keyframe_ease", "smooth_kf",
+      "--fixed_focal", "--deroll",
+      "--orbit_fixed_sweep", "--min_sweep_deg", "20", "--behind_src_frames", "49",
+      "--tau_ref", "follow", "--tracking", "lock", "--preset_tracking",
+      "--behind_min_zcam", "0.02", "--behind_clear_src_ratio", "0",
+      "--collision_time_match", "--collision_source", "depth",
+      "--area_timeline", "--composition",
+      "--composition_min_area", "0.004", "--composition_max_nodes", "3",
+      "--device", "cuda",
+      "--tau_denom", "S",
+      "--tau_knob_min", "0.005",
+      "--min_subject_visible", "0.6",
+      "--follow_keyframes", "6", "--follow_kf_interp", "cubic"
+    ]
+  }
+}

@@ -34,11 +34,12 @@ env: vista4d (뱅크가 torch/cuda 를 쓴다)
     python scripts/chain_bank_rounds.py ... --stage demote
 """
 import json
+import re
 import subprocess
 import sys
 from argparse import ArgumentParser
 from datetime import datetime
-from os import environ, makedirs, path
+from os import environ, listdir, makedirs, path
 from time import sleep, time
 
 ROOT = path.dirname(path.dirname(path.abspath(__file__)))
@@ -162,8 +163,28 @@ def run_bank(args, vids, round_tag):
                 "--stages", "route,tau,fit,emit",
                 "--num_shards", str(args.bank_shards), "--shard_id", str(shard)]
 
-    return fan_out(args.work, f"뱅크({round_tag})", argv, args.bank_shards,
-                   f"bank_logs_{round_tag}")
+    bad = fan_out(args.work, f"뱅크({round_tag})", argv, args.bank_shards,
+                  f"bank_logs_{round_tag}")
+    log(f"  뱅크({round_tag}) 편별 — {tally(args.work, f'bank_logs_{round_tag}')}")
+    return bad
+
+
+def tally(work, log_name):
+    """샤드 로그의 `=== 요약 ===` 표를 세서 편별 상태 분포를 낸다.
+
+    `fan_out` 이 세는 건 **샤드 프로세스의 rc** 라, 샤드가 정상 종료하면 그 안에서 몇 편이
+    FAIL 했는지 안 보인다 (d184 스모크에서 3/4 편이 route 로 죽었는데 "실패 0/4" 로 찍혔다).
+    """
+    # 상태 문자열에 공백이 있다("SKIP(앵커 0)"). 칸 구분은 **2칸 이상 공백**이다.
+    row = re.compile(r"^ {2}(\S+) {2,}(.+?) {2,}[\d.]+s$")
+    counts = {}
+    for name in sorted(listdir(path.join(work, log_name))):
+        with open(path.join(work, log_name, name), encoding="utf-8", errors="replace") as fh:
+            for line in fh:
+                hit = row.match(line.rstrip())
+                if hit:
+                    counts[hit.group(2)] = counts.get(hit.group(2), 0) + 1
+    return "  ".join(f"{k} {v}" for k, v in sorted(counts.items(), key=lambda kv: -kv[1])) or "없음"
 
 
 def baked(vids, bank_dir):

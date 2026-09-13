@@ -6,6 +6,17 @@
 
 ## [Unreleased]
 
+### Added
+- **`chain_bank_rounds.py --bank_exec {subprocess,inproc}` (2026-09-13, D188).**
+  `run_bank.py --exec` 는 D180 에서 생겼는데 체인 드라이버가 그 인자를 **안 넘겨 줘서**
+  체인으로 도는 세대는 전부 `subprocess` 로만 돌고 있었다 (씬당 import 21.9 s +
+  tau/fit 중복 cloud 14.7 s = `run_bank._run_inproc` 주석의 실측 25% 를 그대로 냈다).
+  실측 근거(d188 r01, 샤드 4, EMIT 완주 61편): tau 46.5 s / fit 60.2 s / emit 5.4 s /
+  route 0.3 s → 씬당 실효 **37.7 s**, 남은 10,285편에 4.5일.
+  기본값 `subprocess` = 옛 동작 비트 동일 — in-process 는 한 단계의 전역 오염이 샤드를
+  물고 가므로 켜는 쪽이 명시적이어야 한다. **d188 현행 체인은 재기동하지 않았다**
+  (사용자 2026-09-13 "지금 그대로 굽는다"), 다음 세대부터 쓸 수 있게 배선만 해 둔 것.
+
 ### Fixed
 - **`--pick_budget` 1순위 키를 `plan_tier` → **track 여부**로 (2026-09-13, D188 ③,
   FIX-D188-d).** `plan_tier` 는 "track 이냐"가 아니라 **"라우터가 예산 안에 넣은 슬롯이냐"**다

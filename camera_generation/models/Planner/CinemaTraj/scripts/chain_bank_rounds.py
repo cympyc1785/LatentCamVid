@@ -194,6 +194,7 @@ def run_bank(args, vids, round_tag):
                 "--config", args.config, "--videos", listing,
                 "--log_dir", path.join(args.work, "bank_scene_logs"),
                 "--stages", "route,tau,fit,emit",
+                "--exec", args.bank_exec,
                 "--num_shards", str(args.bank_shards), "--shard_id", str(shard)]
 
     bad = fan_out(args.work, f"뱅크({round_tag})", argv, args.bank_shards,
@@ -335,6 +336,14 @@ if __name__ == "__main__":
     parser.add_argument("--graph_pattern", default="run_bank.py --config configs/bank/d182_")
     parser.add_argument("--stage", default="all", choices=("all", "demote", "bank"))
     parser.add_argument("--bank_shards", default=4, type=int)     # GPU 1장당 1개
+    # D188. `run_bank.py --exec` 를 체인에서도 고를 수 있게 한다 — 그 인자가 D180 에서 생겼는데
+    # 여기서 안 넘겨 줘서 체인으로 도는 세대는 **전부 subprocess 로만** 돌고 있었다.
+    # 실측(d188 r01, 샤드 4): 씬당 실효 37.7s = tau 46.5 + fit 60.2 + emit 5.4 + route 0.3 을 4로
+    # 나눈 값. 이 중 씬당 import 21.9s + tau/fit 중복 cloud 14.7s 가 프로세스 경계 비용이다
+    # (`run_bank._run_inproc` 주석의 실측). 기본값은 `subprocess` = 옛 동작 비트 동일 —
+    # in-process 는 한 단계의 전역 오염이 샤드를 물고 가므로 켜는 쪽이 명시적이어야 한다.
+    parser.add_argument("--bank_exec", default="subprocess",
+                        choices=("subprocess", "inproc"))
     parser.add_argument("--demote_shards", default=8, type=int)   # CPU 전용 (numpy+PIL)
     parser.add_argument("--round_cap", default=0, type=int)       # 0 = 무제한
     # **구운 라운드만** 센다 (기다림은 안 센다, §main). 폭주 방지용 상한이다.

@@ -276,7 +276,11 @@ def main(args):
         if ((keep_status and variant["status"] not in keep_status)
                 or (keep_anchor and variant["anchor_id"] not in keep_anchor)
                 or (keep_preset and variant["preset"] not in keep_preset)
-                or (keep_hole and rung_of(variant) not in keep_hole)):
+                or (keep_hole and rung_of(variant) not in keep_hole)
+                # D188 ③. `fit_hole_ladder --pick_budget` 이 고른 행만. 다른 필터와 같은 성격
+                # (뱅크는 안 자르고 소비자가 고른다) 이지만 판정이 **씬 단위**라는 게 다르다 —
+                # 사다리가 suspect 때문에 3층을 다 내려가도 여기서 예산 개수로 접힌다.
+                or (args.picked_only and not variant.get("picked"))):
             dropped["filter"] += 1
             continue
         if args.drop_folded and vid in folded:
@@ -534,6 +538,10 @@ def build_parser():
     parser.add_argument("--presets", default=None)                      # 쉼표 구분 preset
     parser.add_argument("--holes", default=None)                        # 쉼표 구분 target_hole
     parser.add_argument("--min_path_len", default=0.0, type=float)      # 이 아래는 뺀다 (u)
+    # D188 ③. `picked` 열이 찬 행만 내보낸다 (= 씬당 `--pick_budget` 대). 열이 없는 옛 뱅크에
+    # 주면 0 행이 되므로, 뱅크를 `--pick_budget` 으로 구웠을 때만 켠다.
+    parser.add_argument("--picked_only", dest="picked_only", action="store_true", default=False)
+    parser.add_argument("--no_picked_only", dest="picked_only", action="store_false")
     # 접힌 단: 충돌 천장이 낮아 4단이 같은 궤적이 된 경우. 기본은 남기고 `folded_onto` 로 표시.
     parser.add_argument("--drop_folded", dest="drop_folded", action="store_true", default=False)
     parser.add_argument("--no_drop_folded", dest="drop_folded", action="store_false")

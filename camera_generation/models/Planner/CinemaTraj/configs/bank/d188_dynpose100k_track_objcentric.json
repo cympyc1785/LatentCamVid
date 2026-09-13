@@ -15,7 +15,9 @@
 
   "_예산과_10k": "카메라 1대/씬 x 10,346편 = 상한 10,346. d185 실측 solved>=1 비율이 86.9% 이므로 어휘를 object-centric 으로 좁힌 이 세대는 그 아래다 — 파일럿으로 재고, 10k 에 못 미치면 그 차이를 보고한 뒤 (a) `vertical` 을 `--vertical_fallback` 으로 넓히거나 (b) `static` 슬롯을 복구하거나 (c) 남는 씬만 예산 2로 굽는 것을 선택한다. 임의로 늘리지 않는다.",
 
-  "_예산이_1인데_anchor_가_2인_이유": "`--max_anchors 1` 의 천장이 75.5% 다 (d185 census 2,283편: solved>=1 1,983편 중 dyn_0 이 1,723편 = 전체의 75.5%, 나머지 11.4 pt 는 dyn_1/stat_* 가 구했다). anchor 를 2로 두면 `plan_variants` 가 anchor 마다 tier0 를 1개씩 앉히지만, fit 이 `--fallback_target 1` 에서 **처음 solved 하나로 멈추므로** emit 되는 카메라는 여전히 1대다. 후보를 늘리는 것과 카메라를 늘리는 것은 다른 축이고 d184 가 둘을 같이 1로 묶어서 죽었다.",
+  "_예산이_1인데_anchor_가_2인_이유": "`--max_anchors 1` 의 천장이 75.5% 다 (d185 census 2,283편: solved>=1 1,983편 중 dyn_0 이 1,723편 = 전체의 75.5%, 나머지 11.4 pt 는 dyn_1/stat_* 가 구했다). anchor 를 2로 두면 `plan_variants` 가 anchor 마다 tier0 를 1개씩 앉힌다. 후보를 늘리는 것과 카메라를 늘리는 것은 다른 축이고 d184 가 둘을 같이 1로 묶어서 죽었다. 카메라를 1대로 접는 건 anchor 수가 아니라 `--pick_budget 1` 이다.",
+
+  "_왜_pick_budget": "`--fallback_target 1` 은 \"카메라 1대\"를 뜻하지 않는다. 그 인자가 세는 `variant_usable()` 은 `--retry_suspect` 도 보므로 `hole_over_budget`(hole > `--suspect_hole` 0.35) 이 붙은 solved 행은 **안 세어진다**. 2차 파일럿 58편 실측: solved 92행 중 57행이 그 태그(`hole_mode excess` 라 `hole_static` 이 크면 예산 자체가 0.35 를 넘는다), 23/58 편이 `usable` 0 으로 끝나 사다리가 3층을 다 돌았고 뱅크에 solved 가 씬당 최대 6행 쌓였다 — 씬당 행수 [(0,9),(1,29),(2,9),(3,3),(4,6),(6,2)].\n태그를 무시하도록 고치면 반대 방향으로 깨진다: \"hole 0.6 짜리 tier0\" 가 \"hole 0.2 짜리 tier1\" 을 이겨서 어휘는 맞고 품질이 무너진다. 그래서 **탐색과 선택을 분리**했다 (`fit_hole_ladder --pick_budget`, D188 ③). 사다리는 그대로 깨끗한 변이를 찾아 내려가고, 다 돌고 나서 씬당 1행을 고른다 — 1순위 usable / 2순위 status 만 통과한 best-effort, 같은 등급 안에서는 `plan_tier` → `hole_fraction` 오름차순. tier 가 먼저라 어휘 우선순위(track+object-centric → object-centric)가 유지되고, 행은 안 지우고 `picked` 열만 단다. `emit_bank --picked_only` 가 그 열만 내보낸다.",
 
   "_격리": "`route.out` = `preset_route_d188.json`, 세대 디렉토리 `bank_d188`/`hole_bank_d188`. d185 는 손대지 않는다 (사용자 지시).",
 
@@ -62,6 +64,7 @@
       "--cloud_source", "memory",
       "--hole_ladder", "0.20",
       "--fallback_ladder", "--fallback_target", "1",
+      "--pick_budget", "1",
       "--retry_status", "clamped_low", "static", "unreached", "shape_limited",
       "collision_limited", "obb_limited", "elev_limited", "ground_limited",
       "approach_limited", "occlusion_limited",
@@ -82,5 +85,8 @@
       "--min_subject_visible", "0.6",
       "--follow_keyframes", "6", "--follow_kf_interp", "cubic"
     ]
+  },
+  "emit": {
+    "args": ["--picked_only"]
   }
 }

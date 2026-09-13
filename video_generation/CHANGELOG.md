@@ -7,6 +7,27 @@
 ## [Unreleased]
 
 ### Added
+- **`fit_hole_ladder.py --pick_budget` + `emit_bank.py --picked_only` — 씬당 카메라 수를
+  **사다리와 분리해서** 정하는 손잡이 (2026-09-13, D188 ③).** `--fallback_target 1` 이
+  "카메라 1대"를 뜻하지 않는다는 게 파일럿 58편의 결론이다 (아래 Fixed 항목). 사다리는
+  **어디까지 내려갈지**를 정하지 무엇을 내보낼지는 안 정한다. 그래서 사다리는 그대로 두고,
+  다 돌고 난 뒤 씬당 `--pick_budget` 개를 고른다:
+  · 1순위 `usable`(status 통과 + suspect 없음) → 2순위 status 만 통과한 best-effort,
+    같은 등급 안에서는 `plan_tier` 오름차순 → `hole_fraction` 오름차순.
+    tier 가 먼저이므로 "움직이면 track+object-centric, 아니면 object-centric" 이라는 어휘
+    우선순위가 유지되고, 같은 층 안에서만 hole 로 고른다.
+  · **행은 하나도 안 지운다** — `picked` 열만 단다 (뱅크는 재고 목록, D39/D45).
+    `emit_bank.py --picked_only` 가 그 열을 소비한다. 기본값 `--pick_budget 0` = 열이 빈 칸,
+    옛 뱅크와 비트 동일. 열이 없는 옛 뱅크에 `--picked_only` 를 주면 0행이 된다.
+  · 뱅크 JSON 에 `pick{budget, picked[], tiers[], grade[]}` 를 싣는다 — 뱅크만 보고
+    "이 씬은 best-effort 밖에 없었다"를 알 수 있어야 한다.
+  · d188 config 가 `fit: --pick_budget 1` + `emit: {"args": ["--picked_only"]}` 로 쓴다.
+  · 파일럿 59편 투사: 카메라 **50편 × 1대 (0대 9편, 84.7%)**, 등급 usable 36 / best_effort 14,
+    tier [(0,20),(1,25),(2,5)], track 비중 20/50 = 40.0%.
+- **`chain_bank_rounds.py --wait_for` — 앞선 GPU 작업이 끝나야 기동 (2026-09-13, D188).**
+  `rebake_scenes.py --wait_for` 와 같은 것. GPU 4장에 뱅크 프로세스가 2개씩 올라가면 실측
+  55.9 GiB(피크 55,947 MiB, proc 당 ~28 GiB) 라 3번째 세대는 81.5 GB 카드에 안 들어간다 —
+  "빈 GPU 가 보이면 띄운다"가 아니라 **앞 작업이 끝나야** 띄운다. 기본값 빈 문자열 = 안 기다림.
 - **`configs/bank/d188_dynpose100k_track_objcentric.json` + `route_presets.py --track_pair` /
   `--slot_rotate` — 씬당 카메라 1대를 **object-centric 어휘로 못박은** 세대 (2026-09-13, 사용자
   지시 "씬당 카메라 하나가 나오되 움직이는 dynamic anchor면 track+object centric 아니면
@@ -409,6 +430,19 @@
   다시 갈고 있었다. 스코프는 d179 가 흡수한다. config 는 근거와 함께 남긴다.
 
 ### Fixed
+- **`--fallback_target 1` 이 "씬당 카메라 1대"가 아니었던 것 (2026-09-13, FIX-D188-b).**
+  그 인자는 `variant_usable()` 이 참인 변이를 세는데, 그 함수(`fit_hole_ladder.py:921-926`)는
+  `--retry_status` 뿐 아니라 **`--retry_suspect` 도** 본다. d179 부모 config 가 물려준
+  `--retry_suspect` 에 `hole_over_budget`(= `hole_fraction > --suspect_hole` 0.35) 이 들어 있고,
+  `--hole_mode excess` 에서는 목표가 `hole_static + Δ0.20` 이라 `hole_static` 이 큰 씬은
+  **정상적으로 0.35 위에서 풀린다**. 그 행들이 안 세어지니 예산이 영원히 안 차고 사다리가
+  3층을 다 내려갔다.
+  · 실측(사다리가 켜진 파일럿 58편): solved 92행 중 **57행이 `hole_over_budget`** 태그,
+    `usable` 0 으로 끝난 씬 **23/58**, 뱅크에 solved 가 씬당 최대 6행.
+    씬당 solved [(0,9),(1,29),(2,9),(3,3),(4,6),(6,2)] / 씬당 usable [(0,23),(1,35)].
+  · **태그를 무시하게 고치지 않았다** — 그러면 "hole 0.6 짜리 tier0" 가 "hole 0.2 짜리 tier1" 을
+    이겨서 어휘는 맞고 품질이 무너진다. 대신 탐색(사다리)과 선택(`--pick_budget`)을 분리했다
+    (위 Added 항목).
 - **`scripts/rebake_scenes.py` 가 config 의 `extends` 를 안 풀어 뱅크 단계에서 즉사하던 것
   (2026-09-13, FIX-D186-b).** `quarantine()` / `stage_bank()` / `main()` 이 config 를 `json_load`
   로 그대로 읽었는데, 뱅크 config 는 대부분 `"extends": "d179_dynpose100k_bank.json"` 이라

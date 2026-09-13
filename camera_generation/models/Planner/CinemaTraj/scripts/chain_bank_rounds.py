@@ -76,6 +76,18 @@ def graph_alive(pattern):
     return any(pattern in ln and "chain_bank_rounds" not in ln for ln in out.splitlines())
 
 
+def alive_procs(pattern):
+    """`pattern` 을 명령줄에 가진 프로세스 수. `--wait_for` 전용 (D188).
+
+    `graph_alive` 와 같은 자가 매칭 함정을 피한다 — 여기는 **개수**를 돌려주므로
+    "몇 개 남았나"를 로그에 쓸 수 있다. `bash -c` 래퍼도 뺀다 (nohup 기동 한 줄이 잡힌다).
+    """
+    out = subprocess.run(["ps", "-eo", "args", "--no-headers"],
+                         capture_output=True, text=True).stdout
+    return sum(1 for ln in out.splitlines()
+               if pattern in ln and "chain_bank_rounds" not in ln and "bin/bash -c" not in ln)
+
+
 def done_bank(root, bank_dir):
     """이 세대 뱅크가 그 편을 끝냈는가 (canonical 이 나왔거나 skipped 로 접었거나)."""
     bank = path.join(root, bank_dir)
@@ -253,6 +265,18 @@ def main(args):
     makedirs(args.work, exist_ok=True)
     if not take_lock(args.work):
         return 0
+    # D188. 앞선 GPU 작업이 끝나기를 기다렸다 시작한다 (`rebake_scenes.py --wait_for` 와 같은 것).
+    # GPU 4장에 뱅크 프로세스가 2개씩 올라가면 실측 55.9 GiB 라 3번째는 80 GiB 카드에 안 들어간다
+    # (2026-09-13 샘플 6회: 피크 55,947 MiB / proc 당 ~28 GiB). 그래서 "빈 GPU 가 보이면 띄운다"가
+    # 아니라 **앞 작업이 끝나야** 띄운다 — 안 그러면 남의 학습/굽기까지 같이 OOM 으로 죽는다
+    # (2026-09-13 실제로 d185 3편이 그렇게 죽었다).
+    if args.wait_for:
+        n = alive_procs(args.wait_for)
+        if n:
+            log(f"선행 대기 — '{args.wait_for}' {n}개 살아 있음")
+            while alive_procs(args.wait_for):
+                sleep(args.poll)
+            log("선행 종료 — 진행")
     vids = videos(args.videos)
     #    **`--max_rounds` 는 "구운 라운드" 수다 — 기다림은 안 센다.** 예전에는 `for rnd in
     #    range(max_rounds)` 라 ready 0 으로 쉬는 것도 한 라운드를 먹었고, 선행 graph 를 따라잡은
@@ -318,4 +342,8 @@ if __name__ == "__main__":
     # 선행이 살아 있을 때 이 편수 미만이면 굽지 않고 --poll 만큼 쉰다. 0 = 기존 동작.
     parser.add_argument("--min_ready", default=0, type=int)
     parser.add_argument("--poll", default=900, type=int)          # ready 0 일 때 재스캔 간격(초)
+    # D188. 이 문자열을 명령줄에 가진 프로세스가 전부 끝날 때까지 기다렸다 시작한다.
+    # GPU 당 뱅크 프로세스 2개가 이미 한계라(실측 55.9 GiB / 80 GiB), 세 번째 세대를 겹치면
+    # 남의 작업까지 OOM 으로 죽는다. 빈 문자열(기본) = 안 기다린다.
+    parser.add_argument("--wait_for", default="")
     sys.exit(main(parser.parse_args()))

@@ -1268,6 +1268,42 @@ def main(args):
         for row in rows:
             row["suspect"] = ""
 
+    # ── D188 ③ 씬당 예산. 사다리는 **어디까지 내려갈지**를 정하지 무엇을 내보낼지는 안 정한다.
+    #
+    # `--fallback_target 1` 이 "카메라 1대"를 뜻하지 않는다는 게 d188 파일럿 58편의 결론이다.
+    # 그 인자는 `variant_usable()` 이 참인 변이를 세는데, 그 함수는 `--retry_suspect` 도 보므로
+    # `hole_over_budget`(hole > `--suspect_hole` 0.35) 이 붙은 solved 행은 **안 세어진다**.
+    # 실측: solved 92행 중 57행이 그 태그였고(`hole_mode excess` 라 `hole_static` 이 크면 예산
+    # 자체가 0.35 를 넘는다), 23/58 편이 `usable` 0 으로 끝나며 사다리가 3층을 다 돌았다 —
+    # 그 결과 뱅크에 solved 가 씬당 최대 6행 쌓였다. 태그를 무시하게 고치면 반대로 "hole 0.6
+    # 짜리 tier0" 가 "hole 0.2 짜리 tier1" 를 이겨서 어휘는 맞고 품질이 무너진다.
+    #
+    # 그래서 **탐색과 선택을 분리**한다. 사다리는 지금처럼 깨끗한(usable) 변이를 찾아 계속
+    # 내려가고, 다 돌고 나서 여기서 씬당 `--pick_budget` 개를 고른다:
+    #     1순위  usable (status 통과 + suspect 없음)   2순위  status 만 통과한 best-effort
+    #     같은 등급 안에서는 `plan_tier` 오름차순 → `hole_fraction` 오름차순
+    # tier 가 먼저이므로 "움직이면 track+object-centric, 아니면 object-centric" 이라는 어휘
+    # 우선순위가 그대로 유지되고, 같은 층 안에서만 hole 로 고른다.
+    # 행은 **하나도 안 지운다** — `picked` 열만 단다 (뱅크는 재고 목록이라는 D39/D45 규칙).
+    # `emit_bank.py --picked_only` 가 그 열을 소비한다. 기본값 0 = 열이 빈 칸, 예전 뱅크와 동일.
+    if args.pick_budget:
+        def pick_key(row):
+            # `variant_usable()` 을 다시 부르지 않는다 — 그 함수는 `tag_suspects` 를 호출해
+            # `suspect` 열을 **다시 쓴다**. `--no_suspect` 면 위에서 비운 열이 되살아난다.
+            # 여기서는 이미 확정된 열만 읽는다 (같은 판정, 부작용 없음).
+            tags = set(str(row.get("suspect", "") or "").split("|")) - {""}
+            grade = 1 if tags & set(retry_suspect) else 0
+            hole = row.get("hole_fraction")
+            return (grade, int(row.get("plan_tier", 0) or 0),
+                    float(hole) if isinstance(hole, (int, float)) else float("inf"))
+        ok = [r for r in rows
+              if not any(str(r["status"]).startswith(t) for t in retry_status)]
+        for row in rows:
+            row["picked"] = ""
+        for row in sorted(ok, key=pick_key)[:int(args.pick_budget)]:
+            row["picked"] = "1"
+    picked_rows = [r for r in rows if r.get("picked")]
+
     # 상한표: hole 사다리 맨 윗단이 그 preset·anchor 의 크기 상한이다.
     cap_hole = args.cap_hole if args.cap_hole else max(ladder)
     caps = {}
@@ -1314,6 +1350,15 @@ def main(args):
                          "retry_status": sorted(retry_status),
                          "retry_suspect": sorted(retry_suspect),
                          "usable": sorted(f"{a}__{p}" for a, p in usable_variants)},
+            # D188 ③ 씬당 예산. `budget: 0` 이면 안 골랐다는 뜻이고 `picked` 열은 전부 빈 칸이다.
+            # `grade` 는 고른 행이 깨끗한 것(usable)인지 best-effort 인지 — 뱅크만 보고
+            # "이 씬은 suspect 밖에 없었다"를 알 수 있어야 한다.
+            "pick": {"budget": int(args.pick_budget),
+                     "picked": [r["variant_id"] for r in picked_rows],
+                     "tiers": [int(r.get("plan_tier", 0) or 0) for r in picked_rows],
+                     "grade": ["usable" if not (set(str(r.get("suspect", "") or "").split("|"))
+                                                - {""}) & set(retry_suspect) else "best_effort"
+                               for r in picked_rows]},
             "measure": {"bisect_frames": args.bisect_frames, "verify_frames": args.verify_frames,
                         "height": args.tile_height, "width": args.tile_width,
                         "center_box": args.center_box,
@@ -1465,6 +1510,8 @@ def main(args):
                "min_subject_visible",
                # D168 ②. 이 변이가 온 층 (0 = 본 슬롯, 1/2/3 = retry 로 열린 예비).
                "plan_tier",
+               # D188 ③. 씬당 예산이 고른 행 (`--pick_budget`). 빈 칸 = 안 골랐거나 탈락.
+               "picked",
                # D119. shot scale 시간축. `--no_area_timeline` 이면 빈 칸이고 예전 뱅크와 같다.
                # `subject_area_seq` 는 `measured_frames` 와 인덱스가 1:1 인 배열이다.
                "subject_area_start", "subject_area_end", "subject_area_seq",
@@ -1594,6 +1641,16 @@ def main(args):
 
     # `calls_total` 은 이분법 **호출** 수 + 최종 검증 프레임 수다. 그중 `gated_probes` 만큼은
     # 물리 게이트에서 잘려 실제 래스터가 0회였다 — 이 숫자가 안 보이면 D113 이 켜졌는지도 모른다.
+    # D188 ③. 씬당 예산이 무엇을 골랐나. 이게 곧 `emit_bank --picked_only` 가 낼 카메라다.
+    if args.pick_budget:
+        for row in picked_rows:
+            tags = set(str(row.get("suspect", "") or "").split("|")) - {""}
+            print(f"{'pick':<14}{row['variant_id']}   tier {row.get('plan_tier')}   "
+                  f"hole {row.get('hole_fraction')}   "
+                  f"{'best_effort(' + '|'.join(sorted(tags & set(retry_suspect))) + ')' if tags & set(retry_suspect) else 'usable'}")
+        if not picked_rows:
+            print(f"{'pick':<14}0 / 예산 {args.pick_budget} — status 를 통과한 행이 없다")
+
     gated = (f"   게이트 선차단 {gated_probes[0]:,}" if args.gate_before_render else "")
     print(f"\n변이 {len(rows)}   렌더 {calls_total:,}{gated}   -> {folder}")
 
@@ -1977,6 +2034,10 @@ def build_parser():
     # (`clamped_low` 가 `clamped_low+tau_floor` 도 잡는다).
     parser.add_argument("--retry_status", nargs="*", default=["clamped_low"])
     parser.add_argument("--retry_suspect", nargs="*", default=[])
+    # D188 ③. 씬당 내보낼 변이 수. 0 = 안 고른다 (기본, 예전 뱅크와 비트 동일).
+    # `--fallback_target` 과 **다른 축**이다 — 저건 사다리를 어디서 멈출지, 이건 다 돌고 나서
+    # 무엇을 내보낼지. 사다리가 suspect 때문에 끝까지 내려가도 여기서 1개로 접힌다.
+    parser.add_argument("--pick_budget", default=0, type=int)
     # D119. shot scale 시간축. `verify_frames` 프레임에서 이미 재고 있던 면적비를 median 으로
     # 접기 전에 그대로 싣는다 — **렌더가 안 늘어난다**. 끄면 세 열이 빠지고 예전 뱅크와 같다.
     parser.add_argument("--area_timeline", action="store_true", default=True)

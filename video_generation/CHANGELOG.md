@@ -537,6 +537,14 @@
   아무것도 못 찾음" 이 구분되지 않았다. `*.png` 만 읽는 `load_masks` 에는 영향 없다.
 
 ### Changed
+- **`build_scene_graph.py` 의 "살아남은 노드가 없다" assert 가 후보 수를 같이 찍는다
+  (2026-09-13).** 기존 메시지는 `dropped=0` 만 줘서 "아무것도 안 떨어뜨렸는데 아무것도 안
+  남았다" 로 읽혔다 — 실제 원인은 **입력 instance 가 0개**(SAM3 가 준 명사로 아무것도 못 찾음)
+  인데 코드 버그처럼 보인다. 이제 `후보 N개 / 탈락 M개` 를 찍고, 후보가 0이면
+  "seg_instances 가 비었다 (SAM3 가 0개를 냈다). 이 씬은 subject 가 없다." 를 덧붙인다.
+  · 실측: d182 graph 실패 3편(`217fbf3b…` / `21bfdd94…` / `50beb1f0…`)이 **전부** 이 경우다.
+    `seg_instances/<v>/meta.json` 의 `instances` 가 빈 리스트 — recon/seg 디렉토리는 있다.
+    10,346 중 3편이라 수율 영향은 없지만, subject 가 없으니 카메라도 못 만든다.
 - **D179 — `run_bank.py --threads` (기본 8): BLAS/OpenMP 스레드 상한. graph 단계가 CPU 를 48배
   태우고 있었다 (2026-09-11, 사용자 질문 "더 빠르게 최적화 못함?").** 같은 씬
   (`bb3bd56c-6993-40ef-8164-ba6635694d4d`) · 같은 인자 · `/usr/bin/time -v` A/B:

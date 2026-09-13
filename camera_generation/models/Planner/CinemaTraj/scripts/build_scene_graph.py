@@ -352,7 +352,14 @@ def main(args):
             counters[inst["kind"]] -= 1
             continue
         nodes.append(node)
-    assert nodes, f"{args.video}: 살아남은 노드가 없다. dropped={len(dropped)}"
+    # `dropped=0` 은 "아무것도 안 떨어뜨렸는데 아무것도 안 남았다"로 읽혀 원인을 가린다 —
+    # 실제로는 **입력 instance 가 0개**인 경우가 있다 (SAM3 가 준 명사로 아무것도 못 찾음).
+    # 2026-09-13 실측: d182 graph 실패 3편이 전부 이 경우(`seg_instances/<v>/meta.json` 의
+    # `instances` 가 빈 리스트)였고, 메시지만 보고 코드 버그로 20분을 뒤졌다. 후보 수를 같이 찍는다.
+    assert nodes, (f"{args.video}: 살아남은 노드가 없다. "
+                   f"후보 {len(instances)}개 / 탈락 {len(dropped)}개"
+                   + ("  ← seg_instances 가 비었다 (SAM3 가 0개를 냈다). 이 씬은 subject 가 없다."
+                      if not instances else ""))
 
     # GT subject (TRUMANS 전용, D106). depth 점군 OBB 는 보이는 면만 있는 shell 이라 systematically
     # 작고 조준점이 카메라 쪽으로 쏠린다 — 9편 실측: 높이비 median 0.73, 조준 오차 median

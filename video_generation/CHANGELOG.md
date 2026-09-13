@@ -98,6 +98,20 @@
     뽑았다 — tier-first 가 막던 바로 그 경우다. 새 pick 의 track 비중 7/10.
 
 ### Changed
+- **d188 tau 사다리 5칸 → 3칸 (2026-09-14, 사용자 지시 "d188은 tau ladder 3개로 줄여서 돌려줘").**
+  `configs/bank/d188_dynpose100k_track_objcentric.json` 의 `--tau_ladder` 를
+  `0.10 0.20 0.35 0.60 1.00` → **`0.10 0.35 1.00`**. TAU 가 이 세대 병목이다 — 실측 씬당
+  93.6s 중 TAU 58.9s / FIT 34.3s / EMIT 0.1s 이고 TAU 는 (프리셋 9 × 사다리 칸) × 5프레임
+  렌더에 선형이라 45변이 → 27변이로 TAU ~35s, 씬당 ~70s 가 된다.
+  · **양 끝을 남겼다** — `sample_camera_bank.py` 의 `tau_saturated`/`dropped_saturated`/
+    `tau_start_exceeds_ladder` 가 전부 `max(ladder)` 를 읽으므로 `1.00` 은 필수고, `0.10` 은
+    저운동 씬의 유일한 칸이다. `plan_tier` 는 (node, preset) 단위라 칸 수와 **독립** —
+    track+object-centric → object-centric 폴백 순서는 그대로다.
+  · **재시작 없이 적용된다** — `chain_bank_rounds.fan_out` 이 라운드마다 `run_bank.py` 샤드를
+    새로 띄우고 그때 config 를 다시 읽는다.
+  · **혼합 코퍼스 주의**: `run_bank.py:290` 이 `<tau_dir>/bank.json`/`skipped.json` 존재 시
+    tau 단계를 건너뛰므로, 변경 시점에 이미 τ 뱅크가 있던 **988편은 5칸 그대로** 남는다.
+    fit 이 `target_tau` 를 버려서 뱅크 열로는 사후 구분이 안 된다.
 - **`audit_bank_status.py` 에 pick 수율 절 추가 (2026-09-13, D188).** `--pick_budget` 로 뽑힌
   행(`picked` 열)의 씬당 대수 · tier 분포 · track 비중 · hole med/mean · preset 상위를 찍는다.
   `status` 집계만으로는 "10k 목표 대비 몇 대인가"가 안 보인다. 분모는 변이 행이 아니라

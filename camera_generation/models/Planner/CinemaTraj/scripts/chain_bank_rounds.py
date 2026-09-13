@@ -52,7 +52,7 @@ from time import sleep, time
 ROOT = path.dirname(path.dirname(path.abspath(__file__)))
 PY = sys.executable
 OUT_ROOT = "out_dynpose"                      # ROOT 기준 상대 (config 의 output_root 와 같아야)
-GPUS = ["0", "1", "2", "3"]                   # 사용자 지시: GPU 4~7 은 안 쓴다
+GPUS = "0,1,2,3"                              # `--gpus` 기본값. 세대끼리 카드를 갈라 쓸 때만 바꾼다
 
 
 def log(msg):
@@ -141,14 +141,19 @@ def needs_demote(vids, eval_data, marker):
     return out
 
 
-def fan_out(work, name, argv_of_shard, num_shards, log_name, gpus=True):
-    """샤드 num_shards 개를 동시에 띄우고 전부 끝날 때까지 기다린다. -> 실패 샤드 수."""
+def fan_out(work, name, argv_of_shard, num_shards, log_name, gpus=None):
+    """샤드 num_shards 개를 동시에 띄우고 전부 끝날 때까지 기다린다. -> 실패 샤드 수.
+
+    `gpus` 는 카드 번호 리스트(예 `["5","6","7"]`) 이거나 None(= CPU 전용 단계). 예전에는
+    모듈 상수 `GPUS` 를 바로 읽었는데, 그러면 **두 세대를 동시에 돌릴 때 카드를 못 가른다** —
+    상수를 고치면 이미 도는 다른 체인까지 같은 카드로 끌려온다 (2026-09-13 d185/d188).
+    """
     makedirs(path.join(work, log_name), exist_ok=True)
     procs = []
     for shard in range(num_shards):
         env = dict(environ)
         if gpus:
-            env["CUDA_VISIBLE_DEVICES"] = GPUS[shard % len(GPUS)]
+            env["CUDA_VISIBLE_DEVICES"] = gpus[shard % len(gpus)]
             env["PYTORCH_CUDA_ALLOC_CONF"] = "expandable_segments:True"
         fh = open(path.join(work, log_name, f"shard{shard:02d}.log"), "w")
         procs.append((shard, fh, subprocess.Popen(argv_of_shard(shard), cwd=ROOT,
@@ -180,7 +185,7 @@ def run_demote(args, vids, round_tag):
                 "--demote_static_objects", "--videos"] + lists[shard]
 
     return fan_out(args.work, f"강등({round_tag})", argv, len(lists),
-                   f"demote_logs_{round_tag}", gpus=False)
+                   f"demote_logs_{round_tag}", gpus=None)
 
 
 def run_bank(args, vids, round_tag):
@@ -198,7 +203,7 @@ def run_bank(args, vids, round_tag):
                 "--num_shards", str(args.bank_shards), "--shard_id", str(shard)]
 
     bad = fan_out(args.work, f"뱅크({round_tag})", argv, args.bank_shards,
-                  f"bank_logs_{round_tag}")
+                  f"bank_logs_{round_tag}", gpus=[g for g in args.gpus.split(",") if g])
     log(f"  뱅크({round_tag}) 편별 — {tally(args.work, f'bank_logs_{round_tag}')}")
     return bad
 
@@ -335,7 +340,12 @@ if __name__ == "__main__":
     # graph 드라이버가 살아 있는지 볼 `ps` 부분문자열. 죽고 ready 0 이면 루프를 끝낸다.
     parser.add_argument("--graph_pattern", default="run_bank.py --config configs/bank/d182_")
     parser.add_argument("--stage", default="all", choices=("all", "demote", "bank"))
-    parser.add_argument("--bank_shards", default=4, type=int)     # GPU 1장당 1개
+    parser.add_argument("--bank_shards", default=4, type=int)     # GPU 1장당 1~2개
+    # D188-c. 샤드를 어느 카드에 올릴지. 세대를 두 개 동시에 돌리면 기본값(0~3)으로는 같은
+    # 카드에 8개가 몰려 서로를 느리게 한다 (실측 d185 r09 225.5분 / d188 r01 188.1분).
+    # 기본값 = 옛 동작 그대로. **카드 1장에 2개가 실측 상한**(~28 GiB/proc, 피크 55.9/80 GiB)
+    # 이므로 `--bank_shards` 를 카드 수의 2배보다 크게 주지 말 것.
+    parser.add_argument("--gpus", default=GPUS)                   # 예: "5,6,7"
     # D188. `run_bank.py --exec` 를 체인에서도 고를 수 있게 한다 — 그 인자가 D180 에서 생겼는데
     # 여기서 안 넘겨 줘서 체인으로 도는 세대는 **전부 subprocess 로만** 돌고 있었다.
     # 실측(d188 r01, 샤드 4): 씬당 실효 37.7s = tau 46.5 + fit 60.2 + emit 5.4 + route 0.3 을 4로

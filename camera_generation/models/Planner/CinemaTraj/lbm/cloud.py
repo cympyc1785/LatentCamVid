@@ -145,6 +145,13 @@ def subject_point_mask(indices: torch.Tensor, track_masks: np.ndarray):
     return lut[f, h, w]
 
 
+# D188-b. 이 가드가 터졌다는 것을 **로그 한 줄로** 알아볼 수 있게 하는 토큰. `run_bank.py` 의
+# tau 단계가 이 토큰을 보고 크래시가 아니라 `skipped.json(empty_dynamic_mask)` 로 처리한다 —
+# 안 그러면 이 씬들이 라운드마다 다시 ready 에 들어와 영원히 재시도된다 (실측: 10,346편 중 45편).
+# 한국어 문장을 매칭하면 문구를 다듬는 순간 조용히 안 잡히므로 토큰을 따로 둔다.
+EMPTY_DYNMASK_TOKEN = "[EMPTY_DYNAMIC_MASK]"
+
+
 def assert_dynamic_mask_nonempty(dyn_frac: float, video: str, eval_data: str):
     """§empty_dynmask (D176, 2026-09-10) 가드.
 
@@ -165,6 +172,7 @@ def assert_dynamic_mask_nonempty(dyn_frac: float, video: str, eval_data: str):
         return
     seg_npz = path.join(eval_data, "eval_data", "seg_instances", video, "masks.npz")
     raise AssertionError(
+        f"{EMPTY_DYNMASK_TOKEN} "
         f"{video}: dynamic_mask 가 전부 0 이다 — cloud 를 구우면 전 픽셀이 정적이 되어 "
         f"동적 물체가 49개 사본으로 남는다.\n"
         f"  seg_instances masks.npz {'있음' if path.isfile(seg_npz) else '없음'}: {seg_npz}\n"

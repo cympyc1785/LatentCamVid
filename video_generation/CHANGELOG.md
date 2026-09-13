@@ -18,6 +18,21 @@
   (사용자 2026-09-13 "지금 그대로 굽는다"), 다음 세대부터 쓸 수 있게 배선만 해 둔 것.
 
 ### Fixed
+- **빈 `dynamic_mask` 씬을 뱅크가 `skipped.json` 으로 닫는다 (2026-09-13, D188-b,
+  FIX-D188-f).** D176-c 가드(`lbm/cloud.py assert_dynamic_mask_nonempty`)는 옳게 막았는데
+  막힌 사실을 디스크에 안 남겨서, `chain_bank_rounds.ready_videos()` 가 그 씬을 **라운드마다
+  다시 집었다**. 실측: 10,346편 중 **108편** (64편 = dynmask 단계 미실행 placeholder,
+  44편 = SAM3 동적 트랙 0 또는 D177 강등이 전부 뺌). `--max_rounds 200` 이라 코퍼스를 다
+  구운 뒤에도 108편짜리 라운드가 계속 돌 상태였다.
+  · `lbm/cloud.py` 에 `EMPTY_DYNMASK_TOKEN = "[EMPTY_DYNAMIC_MASK]"` 를 두고 가드 메시지
+    맨 앞에 붙였다. 한국어 문구로 매칭하면 문구를 다듬는 순간 조용히 안 잡힌다.
+  · `run_bank.py` tau 단계는 rc≠0 + 그 토큰이면 `skipped.json{reason:"empty_dynamic_mask"}`
+    를 쓰고 `SKIP(동적마스크 0)` 로 끝낸다 — `route rc=3 → no_surviving_anchors` 와 같은 처리다.
+    **게이트를 내린 것이 아니다** (`--allow_empty_dynamic_mask` 는 그대로 꺼져 있다).
+  · 고칠 수 있는 64편은 `dynpose_dynamic_mask_from_seg.py --demote_static_objects` 로
+    **63편 복구**(mean 0.018~0.916). 남은 45편은 입력을 고쳐도 안 바뀌는 구조적 탈락이다.
+  · 현행 d188/d185 체인은 재기동하지 않았다 — `run_bank.py` 샤드는 라운드마다 새로 뜨므로
+    다음 라운드부터 저절로 적용된다.
 - **`--pick_budget` 1순위 키를 `plan_tier` → **track 여부**로 (2026-09-13, D188 ③,
   FIX-D188-d).** `plan_tier` 는 "track 이냐"가 아니라 **"라우터가 예산 안에 넣은 슬롯이냐"**다
   (`sample_camera_bank.plan_variants:226` — 예산 안이면 무조건 0). 그래서 anchor 가 움직여도

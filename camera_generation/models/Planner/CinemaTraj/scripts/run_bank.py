@@ -97,6 +97,22 @@ def _cmd(stage, extra):
     return [executable] + (["-m", target] if kind == "module" else [target]) + list(extra)
 
 
+def _empty_dynmask(log_path):
+    """tau 로그가 D176-c 의 빈 `dynamic_mask` 가드로 끝났나 (D188-b).
+
+    토큰을 `lbm.cloud` 에서 **가져다 쓰는** 이유: 여기에 문자열을 복사해 두면 가드 문구를 고칠 때
+    한쪽만 바뀌어 조용히 안 잡히고, 그러면 다시 라운드마다 재시도되는 옛 동작으로 돌아간다.
+    import 을 함수 안에 둔 것은 `lbm.cloud` 가 torch 를 끌고 오기 때문이다 — subprocess 모드
+    드라이버는 torch 가 필요 없고, 이 경로는 실패했을 때만 지난다.
+    """
+    from lbm.cloud import EMPTY_DYNMASK_TOKEN
+    try:
+        with open(log_path, encoding="utf-8", errors="replace") as file:
+            return EMPTY_DYNMASK_TOKEN in file.read()
+    except OSError:
+        return False
+
+
 # ── in-process 실행 (D180) ───────────────────────────────────────────────────────
 # 왜: 씬당 205.8s 중 **51.3s(25%)가 프로세스 경계 비용**이다 (8샤드 구간 실측).
 #     import   route 0.45s + tau 7.27s + fit 6.74s + emit ~7.4s = 21.9s   <- 씬마다 다시 낸다
@@ -264,6 +280,25 @@ def process_video(cfg, video, stages, gpu, log_dir, skip_done, tag, threads=0, m
                          + route_args + spec["args"],
                          log_path, gpu, threads=threads, mode=mode)
             if rc != 0 and not path.exists(path.join(tau_dir, "skipped.json")):
+                # D188-b. `dynamic_mask` 가 전부 0 인 씬은 `assert_dynamic_mask_nonempty` 가
+                # 막는다 (D176-c 가드). 그게 **정상 동작**인데 여기서 FAIL 로 끝내면 뱅크에
+                # 아무 흔적도 안 남아 `chain_bank_rounds.ready_videos()` 가 라운드마다 같은 씬을
+                # 다시 집는다 — route rc=3 과 똑같은 문제고, 똑같이 `skipped.json` 으로 닫는다.
+                # 실측 (2026-09-13, 10,346편): 45편이 이 상태였고 `--max_rounds 200` 이면
+                # 코퍼스를 다 구운 뒤에도 45편짜리 라운드가 계속 돌았을 것이다.
+                # 고칠 수 있는 씬(dynmask 단계 미실행)은 이 커밋 전에 63편 복구했다. 남은 것은
+                # SAM3 가 동적 물체를 하나도 못 찾았거나 D177 강등이 전부 뺀 씬이라 **입력을
+                # 고쳐도 안 바뀐다** — 게이트를 내리는 게 아니라 구조적 탈락으로 기록하는 것이다.
+                if _empty_dynmask(log_path):
+                    makedirs(bank_dir, exist_ok=True)
+                    with open(path.join(bank_dir, "skipped.json"), "w", encoding="utf-8") as file:
+                        json_dump({"format": "lbm_camera_bank_skipped_v1", "video": video,
+                                   "reason": "empty_dynamic_mask", "stage": "tau",
+                                   "detail": "dynamic_mask 가 전부 0 — SAM3 동적 트랙 0개 또는 "
+                                             "D177 강등이 전부 뺐다. 되살리려면 seg_instances 를 "
+                                             "다시 뽑거나 --allow_empty_dynamic_mask 로 굽는다.",
+                                   "log": log_path}, file, ensure_ascii=False, indent=1)
+                    return "SKIP(동적마스크 0)"
                 return f"FAIL(tau rc={rc})"
 
         elif stage == "fit":

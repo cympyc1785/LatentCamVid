@@ -852,7 +852,12 @@ def main(args):
     # `--magnitude` 를 명시하면 D121~D175 문장이 그대로 돌아온다.
     magnitude = False if args.magnitude is None else bool(args.magnitude)
 
-    if args.videos == ["all"]:
+    if args.videos_file:
+        # 굽기가 도는 중에는 현재 라운드 목록을 뺀 편만 넘긴다 (샤드가 같은 `bank.json` 을
+        # 쓰는 중이면 읽다가 깨진 JSON 을 만난다). `--videos` 보다 우선한다.
+        with open(args.videos_file, encoding="utf-8") as file:
+            videos = [line.strip() for line in file if line.strip()]
+    elif args.videos == ["all"]:
         videos = sorted(v for v in events
                         if path.isfile(path.join(out_root, v, args.bank_dir, "bank.json")))
     else:
@@ -980,6 +985,7 @@ def main(args):
 if __name__ == "__main__":
     parser = ArgumentParser()
     parser.add_argument("--videos", nargs="*", default=["all"])       # all = 뱅크 있는 전량
+    parser.add_argument("--videos_file", default="", type=str)        # 한 줄 1편. --videos 보다 우선
     parser.add_argument("--bank_dir", default="hole_bank_k6", type=str)
     parser.add_argument("--output_root", default=None, type=str)
     parser.add_argument("--metadata_csv", default=METADATA_DEFAULT, type=str)

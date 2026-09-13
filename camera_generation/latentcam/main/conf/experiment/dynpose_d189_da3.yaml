@@ -1,0 +1,84 @@
+# @package _global_
+# D189 — **anchor 당 카메라 1대**로 다시 고른 d188 뱅크 위의 da3 단독 arm.
+#
+# ═══ 코퍼스가 이전 dynpose arm 들과 무엇이 다른가 ════════════════════════════════════════
+# ① **뱅크 선택 규칙**. d137/d157 은 씬당 뱅크 변이를 전부(또는 preset 필터로 걸러) 내보냈고,
+#    그래서 같은 씬의 같은 물체를 여러 각도로 찍은 변이가 한 씬 안에 수십 개씩 들어갔다.
+#    D189 는 `lbm/pick.py:pick_rows(per_anchor=True)` 로 **(scene, anchor) 마다 1대**만 남긴다
+#    (사용자 확정 2026-09-14 "같은 scene 같은 anchor 안 곂치게"). 정렬 키는 D188 것 그대로 —
+#    track 먼저 → `plan_tier` → 등급 → `hole_fraction`. 즉 "동적 anchor 면 track+object-centric,
+#    아니면 object-centric" 이라는 폴백이 선택 단계에서 집행된다.
+#    실측 1.195 대/씬 (씬당 1대 규칙이면 0.783, anchor 당 1대면 0.935/시도씬).
+#    `--dd10` 같은 preset 비율 필터를 **안 쓴다** — 고르는 일이 이미 pick 에서 끝났다.
+# ② **캡션에 크기 부사가 없다** (사용자 지시 "caption (정도부사 빼고)"). `captions_d189.json` 은
+#    `build_bank_captions.py --no_magnitude` 로 구웠다. "slowly/dramatically" 류가 빠지고
+#    target + motion 절만 남는다. 강도 축은 이 세대에서 학습 신호가 아니다.
+# ③ **holdout 이 해시 분할**. `--test_hash_mod 20` (`md5(scene) % 20 == 0`). d188 이 아직 굽는
+#    중이라 코퍼스가 자란다 — UUID 접두사 분할은 이미 구운 풀이 정렬 순서로 편향돼서 `00`~`0b`
+#    가 865편 중 513편(59.3%)을 잡았다. 해시는 코퍼스 크기와 무관하게 같은 씬을 같은 쪽에
+#    두므로 d188 완주 후 다시 내보내도 test 가 train 으로 새지 않는다.
+#
+# ═══ 부분 코퍼스임을 명시한다 ════════════════════════════════════════════════════════════
+# 이 arm 이 보는 것은 **865편 / 카메라 1,030대** 다. d188 전량(10,346편)이 구워지면 목표는
+# ~9,700대이고, 그때 같은 규칙으로 다시 내보내 별도 arm 으로 돌린다 (`.repicked` 마커 +
+# `--skip_done` 이 증분이라 re-pick 자체는 몇 분이다). 즉 **d188 완주판과 지표를 나란히 두면
+# 안 된다** — 씬 수가 11배 다르다.
+#
+# ═══ 모델축은 d137_da3 와 글자 그대로 같다 ═══════════════════════════════════════════════
+# geo/pose/scale/intr 계열 값은 `dynpose_d137_da3.yaml` 에서 그대로 가져왔다. 이번 세대에서
+# 움직인 축은 **데이터 하나**이므로 모델 하이퍼를 같이 건드리면 원인을 못 가른다.
+#
+# ═══ geo raw 캐시 ════════════════════════════════════════════════════════════════════════
+# 캐시 키가 scene 이름이고 내용은 **소스 영상의 geo feature** 라 target 뱅크와 무관하다.
+# 그런데 d129 캐시는 273편뿐이고 여기 씬 865편은 대부분 새 씬이다 — 남의 root 밑에 590편을
+# 새로 쓰면 d129/d137/d157 이 공유하는 디렉토리가 조용히 다른 물건이 된다. 그래서 d189 전용
+# 디렉토리를 판다 (씬당 ~42 MB → ~36 GB).
+#
+# ═══ 재현 ════════════════════════════════════════════════════════════════════════════════
+#   python scripts/repick_bank.py --config configs/bank/d188_dynpose100k_track_objcentric.json \
+#       --per_anchor --videos_file <완료편 목록>
+#   python scripts/build_bank_captions.py --bank_dir hole_bank_d188 --out_name captions_d189.json \
+#       --style nl --no_magnitude --videos_file <같은 목록>
+#   python scripts/vista4d_bank_to_dl3dv.py --cine_out out_dynpose --bank_dir hole_bank_d188 \
+#       --captions_name captions_d189.json --picked_only --chunk_prefix dynpose \
+#       --meta_csv meta_dynpose.csv --seg_list_prefix seg_list_dynpose \
+#       --test_videos --test_hash_mod 20 --out_root <root>
+exp_name: dynpose_d189_da3
+dl3dv_root: /data1/cympyc1785/data/DynPose-LBM/latentcam_dynpose_d189
+meta_csv: meta_dynpose.csv
+train_seg_list: /data1/cympyc1785/data/DynPose-LBM/latentcam_dynpose_d189/seg_list_dynpose_train.txt
+test_seg_list: /data1/cympyc1785/data/DynPose-LBM/latentcam_dynpose_d189/seg_list_dynpose_test.txt
+coverage_blacklist_path: null
+
+text_len: 128   # D123 이후 전 arm 동일. 부사를 뺀 판본이라 더 짧아졌고 잘림은 없다.
+
+pose_source: da3
+target_pose_source: da3_target_poses   # target 만 <scene>/da3/target_poses.npz 로 교체
+scale_mode: avg_scale
+avg_scale_ref: context_first_cam       # 디렉토리 avg_scale_context_first_cam <- scene_graph S
+intr_norm: rel                         # vae_20260302_300 = frame-0-relative-intrinsics ckpt
+cam_dim: 64                            # = 그 ckpt 의 latent_dim
+
+geo_encoder: da3
+geo_cam_embed: null
+geo_latent_cache_dir: null
+geo_posed: true
+geo_shuffle_order: false
+da3_geo_model: da3nested-giant-large
+da3_geo_input_hw: [252, 448]
+da3_geo_layers: last
+
+geo_view_sampling: context_uniform  # context range = 영상 전체 [0,49) = 소스 영상 전체
+geo_num_views: 6                    # _even_indices(49,6) = [0,10,19,29,38,48]
+geo_first_view_target_s: true       # view0 = 프레임 s(=0). 이미 첫 픽이라 집합이 안 바뀐다.
+
+geo_raw_cache_dir: /data1/cympyc1785/data/DynPose-LBM/latentcam_dynpose_d189/geo_raw_cache_da3
+da3_cam_token_per_sample: true   # 캐시는 B=1 로 구워진다 — 켜야 on-the-fly 폴백과 일치
+
+anchor_pred_frame0: true
+
+video_latent_dim: 0   # video CA 블록 자체를 만들지 않는다 (D117 이전과 비트 동일)
+
+batch_size: 8
+epochs: 100          # 실제 집행자는 conf/config.yaml 의 `epoch_cap: 100`.
+ckpt_at_epochs: [50, 100]

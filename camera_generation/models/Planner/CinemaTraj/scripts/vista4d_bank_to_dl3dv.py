@@ -78,6 +78,13 @@ from lbm.presets import row_preset                          # noqa: E402
 RECON_DEFAULT = "/data1/cympyc1785/data/Vista4D-Eval-Data/eval_data/recon_and_seg"
 
 
+def is_test_hash(video: str, mod: int) -> bool:
+    """씬 이름 해시로 홀드아웃 판정. `hash()` 가 아니라 md5 인 이유는 **프로세스 간 불변**이다
+    (PYTHONHASHSEED 가 다르면 같은 씬이 run 마다 반대편으로 간다)."""
+    from hashlib import md5                                          # noqa: PLC0415
+    return int(md5(video.encode("utf-8")).hexdigest(), 16) % mod == 0
+
+
 def scaled_K(K0, scale):
     """frame0 K → 이미지를 `scale` 배로 줄였을 때의 K. cx/cy 도 같이 줄여야 hw_list 가 맞는다."""
     K = np.asarray(K0, dtype=np.float64).copy()
@@ -90,7 +97,7 @@ def convert_scene(job):
     import imageio.v3 as iio                    # worker 안에서 import
 
     (video, chunk, out_root, image_dir, image_scale, recon_root, cine_out, bank_dir,
-     refs, skip_done, dedup, captions_name, drop_status, drop_suspect) = job
+     refs, skip_done, dedup, captions_name, drop_status, drop_suspect, picked_only) = job
     dst = path.join(out_root, *chunk.split("/"))
     da3, img = path.join(dst, "da3"), path.join(dst, image_dir)
     try:
@@ -147,6 +154,21 @@ def convert_scene(job):
                     continue
                 kept.append(i)
             n_drop, keep = n_drop + len(keep) - len(kept), kept
+
+        # ---- picked 필터 (D189). 위 둘과 **또 다른 축**이다 — 저 둘은 행마다 독립으로 "이건
+        #    쓰면 안 된다"를 보지만, 이건 씬/anchor 단위 **예산**의 결과다 (`lbm/pick.py`).
+        #    뱅크는 재고 목록이라 사다리가 만든 행을 다 들고 있고, 그중 무엇을 코퍼스로 쓸지는
+        #    `picked` 열이 정한다. `emit_bank.py --picked_only` 와 같은 열·같은 판정이다.
+        #    기본 꺼짐 = 열이 없던 예전 뱅크와 비트 동일. 켰는데 열이 비어 있으면 그 씬은 0행이
+        #    되므로 (조용한 전멸) 아래 `n_unpicked` 를 요약에 싣는다.
+        n_unpicked = 0
+        if picked_only:
+            pick_by_id = {v["variant_id"]: bool(v.get("picked")) for v in bank["variants"]}
+            kept = [i for i in keep if pick_by_id.get(bank_ids[i])]
+            n_unpicked, keep = len(keep) - len(kept), kept
+            if n_unpicked:
+                drop_hist["unpicked"] = drop_hist.get("unpicked", 0) + n_unpicked
+            n_drop += n_unpicked
 
         # ---- 사다리 붕괴 중복 제거.
         #    hole 사다리 4단은 게이트(obb/ground/approach/elev/shape/collision)가 물리면
@@ -282,6 +304,12 @@ def main():
     # scene 단위 holdout. 영상 이름 **접두사**로 매칭한다. 비우면 base.py 랜덤 분할로 떨어진다.
     parser.add_argument("--test_videos", nargs="*",
                         default=["camel", "avocado-slice", "bmx-bumps", "couple-hug"])
+    # D189. 이름 **해시**로 홀드아웃을 정한다 (`md5(video) % mod == 0`). 0 이면 꺼짐 = 예전대로
+    # `--test_videos` 접두사만. DynPose 처럼 씬이 UUID 이고 코퍼스가 **자라는 중**일 때 필요하다:
+    # 접두사 분할은 이미 구운 풀이 정렬 순서로 편향돼 있어 `00`~`0b` 12/256(=4.7% 기대)이 실제로는
+    # 865편 중 513편(59.3%)을 잡았다. 해시는 코퍼스가 몇 편이든 같은 씬을 같은 쪽에 두므로
+    # d188 이 다 구워진 뒤 다시 내보내도 test 가 train 으로 새지 않는다.
+    parser.add_argument("--test_hash_mod", default=0, type=int)
     parser.add_argument("--seg_list_prefix", default="seg_list_vista4d")
     parser.add_argument("--image_dir", default="images_4")     # dl3dv IMAGE_DIR_NAMES 첫 후보
     # 소스는 1280x720. 0.5 면 640x360 -> geo_image_hw (256,448) 로 갈 때 여전히 축소라
@@ -307,6 +335,10 @@ def main():
                         choices=["aim_free_subject_lost", "static_start_collision",
                                  "motion_preset_no_motion"],
                         help="예: --drop_suspect aim_free_subject_lost  (토큰 매칭, 기본 없음)")
+    # D189. `picked` 열이 고른 행만 내보낸다 (`lbm/pick.py` / `emit_bank.py --picked_only` 와
+    # 같은 열). 기본 꺼짐 = 열이 없던 예전 뱅크와 비트 동일.
+    parser.add_argument("--picked_only", action="store_true", default=False)
+    parser.add_argument("--no_picked_only", dest="picked_only", action="store_false")
     parser.add_argument("--workers", default=8, type=int)
     parser.add_argument("--skip_done", action="store_true", default=True)
     parser.add_argument("--no_skip_done", dest="skip_done", action="store_false")
@@ -334,9 +366,10 @@ def main():
         jobs.append((video, chunk, args.out_root, args.image_dir, args.image_scale,
                      args.recon_root, args.cine_out, args.bank_dir, args.avg_scale_refs,
                      args.skip_done, args.dedup, args.captions_name, list(args.drop_status),
-                     list(args.drop_suspect)))
+                     list(args.drop_suspect), args.picked_only))
 
     print(f"{'bank_dir':22s} {args.bank_dir}")
+    print(f"{'picked_only':22s} {args.picked_only}")
     print(f"{'drop_status':22s} {args.drop_status or '(없음 — 예전과 비트 동일)'}")
     print(f"{'drop_suspect':22s} {args.drop_suspect or '(없음 — 예전과 비트 동일)'}")
     print(f"{'scenes (video)':22s} {len(jobs)}")
@@ -369,12 +402,14 @@ def main():
             writer.writerow([chunk, r["h"], r["w"], r["n"]])
 
     seg_paths = {}
-    if args.test_videos and args.chunk_prefix:
+    if (args.test_videos or args.test_hash_mod) and args.chunk_prefix:
         lists = {"train": [], "test": []}
         for r in sorted(ok, key=lambda x: x["video"]):
             chunk = f"{args.chunk_prefix}/{r['video']}"
-            side = "test" if any(r["video"].startswith(p) for p in args.test_videos) else "train"
-            lists[side] += [f"{chunk}/{seg}" for seg in range(r["n_var"])]
+            held = any(r["video"].startswith(p) for p in args.test_videos)
+            if args.test_hash_mod:
+                held = held or is_test_hash(r["video"], args.test_hash_mod)
+            lists["test" if held else "train"] += [f"{chunk}/{seg}" for seg in range(r["n_var"])]
         for side, ids in lists.items():
             p = path.join(args.out_root, f"{args.seg_list_prefix}_{side}.txt")
             with open(p, "w") as file:

@@ -5,6 +5,176 @@ All notable changes to the latentcam sub-project. Follows [Keep a Changelog](htt
 ## [Unreleased]
 
 ### Added
+- **`conf/experiment/dynpose_d189_da3.yaml` — anchor 당 1대로 다시 고른 d188 뱅크 위의 da3 arm
+  (2026-09-14, D189).** 모델축 값은 `dynpose_d137_da3` 에서 **글자 그대로** 가져왔다 — 이번
+  세대에서 움직인 축은 데이터 하나이므로 모델 하이퍼를 같이 건드리면 원인을 못 가른다.
+  코퍼스가 다른 점 셋: ① `lbm/pick.py:pick_rows(per_anchor=True)` 로 (scene, anchor) 마다 1대
+  (실측 1.195 대/씬) — `dd10` 같은 preset 비율 필터를 **안 쓴다**, 고르는 일이 pick 에서 끝났다.
+  ② 캡션에 크기 부사가 없다 (사용자 지시 "caption (정도부사 빼고)", `--no_magnitude`).
+  ③ holdout 이 `--test_hash_mod 20` 해시 분할 — d188 이 굽는 중이라 코퍼스가 자라고, UUID
+  접두사 분할은 이미 구운 풀이 정렬 순서로 편향돼 865편 중 513편(59.3%)을 잡았다.
+  `geo_raw_cache_dir` 만 d189 전용으로 새로 판다: 캐시 키가 scene 이름이라 target 뱅크와
+  무관해 공유해도 맞지만, d129 캐시는 273편뿐이고 여기 865편 중 대부분이 새 씬이라 남의 root
+  밑에 590편을 새로 쓰면 d129/d137/d157 이 읽는 디렉토리가 조용히 다른 물건이 된다.
+  **부분 코퍼스임을 config 주석에 박아 뒀다** — 865편 / 1,030대는 d188 이 12% 구워진 스냅샷이고,
+  완주판(~9,700대)과 지표를 나란히 두면 안 된다.
+- **`scripts/viz/molmo2_attn_map.py` — Molmo2 최종층 attention map 시각화 (D164, 2026-09-08,
+  사용자 지시 "Molmo2에 비디오, 텍스트 먹였을 때 final hidden state 기준 attention map 시각화해서
+  보고싶어" → "map + swap 먼저").** `--stage map,swap,sweep` 단일 python 드라이버.
+  · **`output_attentions=True` 를 쓰지 않는다** — L≈4390 / 32 head / 36층이면 fp32 로 43.5 GB 다.
+    `modeling_molmo2.eager_attention_forward` 를 감싸 대상 층의 tail 행만 떠낸다
+    ((1,32,78,4390) fp32 = 44 MB). 원본 함수를 그대로 호출하므로 수치는 eager 와 동일.
+    config 기본이 `sdpa` 라 훅 동안만 `eager` 로 바꾼다 (`modeling_molmo2.py:710` 분기).
+  · `swap` 은 코퍼스가 씬마다 이미 만들어 둔 여러 `target_text` 를 쓴다 (camel 5종,
+    car-roundabout 11종). 문장·motion·framing 이 전부 같고 **타겟 명사구만** 다른 대조군이
+    공짜로 나오므로, 히트맵이 그 물체로 옮겨가는지를 변이 간 코사인으로 잰다.
+  · 읽을 때 필요한 보정을 전부 수치로 낸다: attention sink 질량, 9x9 테두리 질량(uniform 39.5%),
+    앞 3프레임 질량(uniform 6.1%), head 별 video 질량 분포(GQA 32:8 이라 평균만 보면 뭉개진다).
+
+- **`scripts/viz/molmo2_attn_video.py` — 모델을 GPU 에 올려둔 채 (video, text) 를 받아 attention
+  map 오버레이 **영상**을 저장하는 서버 (D164, 2026-09-08, 사용자 지시 "내가 텍스트를 넣으면
+  attention map을 시각화한 영상을 저장하는 코드로 그냥 짜줘" → "모델 gpu에 올려두고 video,
+  text 보낼때마다 돌려서 저장하도록 못함?").** `--serve stdin` 대화형 / `--serve http` /
+  `--serve off` 한 방. 텍스트 토큰 -> video patch attention 을 프레임당 9x9 히트맵으로 올려
+  mp4 로 쓴다 (원본|오버레이 나란히 + `(T,9,9)` 원본 `.npy` + 진단 수치 `.json`).
+  · **재사용 두 겹.** 모델 로드(17.7s)는 프로세스당 1회. 그리고 **ViT(49프레임 x 729패치 x
+    27층)는 텍스트와 무관하다** — chat template 이 `<|video|>` 를 맨 앞으로 올리고 LM 이 causal
+    이라 patch 위치는 뒤의 텍스트를 못 본다. 영상당 1회 `merge_visual_inputs` +
+    `build_input_embeddings` 로 prefix `inputs_embeds` 를 캐시하고 텍스트마다 tail 임베딩만
+    이어 붙인다 (`cache_molmo2_embeddings.scene_prefix`/`tail_hidden` 과 같은 발상).
+    실측 **요청당 1.8~2.1s** (영상 교체 시에만 ViT 재실행).
+  · `--verify` 로 prefix 재사용의 정당성을 실측한다: prefix emb |Δ|max **0**, tail hidden
+    |Δ|max **0**, **attention map 코사인 1.000000** — bit-exact 다.
+    · 단, verify 는 **두 경로를 같은 attention 구현으로 맞춰야 한다.** 처음엔 재사용 경로만
+      훅(eager) 아래 두고 대조 경로를 sdpa 로 둬서 |Δ|max 1.5 가 나왔는데, 이건 재사용 오차가
+      아니라 **eager vs sdpa 의 bf16 누적 차이**였다 (|h|max 210 대비 0.7%). 이 차이는 실재하므로
+      **이 진단 수치를 학습 캐시(sdpa 로 구움)와 직접 비교할 때는 감안할 것.**
+  · **기본 층 15** — D164 sweep 실측 최적. `--layer -1` 로 최종층.
+  · `--span` 으로 query 토큰 구간을 부분 문자열 지정, `--span_tail N` 으로 마지막 N 토큰만,
+    `--head N` 으로 단일 head (GQA 32:8 이라 평균은 뭉개진다), `--probe cache` 로 학습 캐시와
+    같은 조건, `--frames_dir` 로 코퍼스 밖 프레임 폴더.
+  · 요청마다 찍는 진단: video 질량 / sink 질량 / **테두리 질량(uniform 39.5%)** / 앞 3프레임
+    (uniform 6.1%) / 프레임 엔트로피 / peak 프레임 / head 별 분포. 테두리가 uniform 을 크게
+    넘으면 물체가 아니라 위치 artifact 다.
+  · mp4 는 `imageio-ffmpeg` 번들 바이너리로 쓴다 (시스템 `ffmpeg` 는 `infcam` env 에만 있다).
+    컬러맵을 numpy 로 직접 만들어 matplotlib 의존을 뺐다.
+  · env 는 **`latentcam`** (transformers 4.57.6 + imageio-ffmpeg 0.6.0). `infcam` 은
+    transformers 4.46.2 라 Molmo2 remote code 가 안 돈다.
+  · 실측 1건씩: `Point to the larger pale camel.` 층15 -> video 질량 40.6%, 테두리 39.4%
+    (uniform 39.5% = 위치 artifact 0), f0 peak 가 낙타 몸통. 같은 층 35 -> video 20.3%,
+    테두리 62.8%, 앞3프레임 47.8%. `Point to the white golf ball.`(golf 씬) -> f0 peak 가
+    클럽 헤드 옆 공 위치에 붙지만 f20(공이 몇 픽셀)에서는 놓친다 — 9x9 격자의 한계.
+
+- **`scripts/viz/molmo2_attn_client.py` — 파일 위쪽 상수만 고쳐 `python` 으로 실행하는 클라이언트
+  (D164, 2026-09-08, 사용자 지시 "코드에서 hardcoding해서 video 경로 및 텍스트를 입력으로 주고
+  python으로 실행하면 미리 올라가 있는 다른 process로 띄운 모델에 보내서 돌리는형식은 안됨?").**
+  `VIDEO` / `JOBS(text, span)` / `LAYER` 등을 파일 상단에서 고치고 실행하면 이미 GPU 에 올라간
+  `--serve http` 서버로 보내 mp4 를 받는다. stdlib `urllib` 만 써서 env 무관. 실측 job 당 1.9~2.2s.
+  서버가 없으면 띄우는 명령을 안내하고 종료한다.
+
+- **`scripts/viz/molmo2_attn_grid.py` — 텍스트 형식 x 36층 격자 탐색 (D164, 2026-09-08, 사용자
+  지시 "text, layer 가능한 조합들 다 job에 넣어서 가장 잘 나오는거 찾아봐줘봐").**
+  판정 지표를 새로 세웠다 — "타겟을 바꾸면 map 이 움직인다"만 보면 **노이즈가 이긴다**.
+  코퍼스 `anchor_label` 로 물체 클래스를 알 수 있으므로:
+    `within`  같은 클래스 쌍의 map 코사인 (낙타↔다른 낙타) — 높아야 함
+    `between` 다른 클래스 쌍 — 낮아야 함
+    `score = within - between`  (노이즈는 둘 다 낮추므로 score 를 못 올린다)
+  층은 forward 1회로 36개가 다 나오고(`Runner.maps_all_layers`) ViT 는 씬당 1회다.
+
+- **`scripts/viz/molmo2_point_track.py` — Molmo2 의 point/track **생성 출력**을 뽑는 대조군
+  (D164, 2026-09-08, 사용자 지시 "molmo2 최종 point track output도 나오도록해서 실제로 track은
+  되는지 먼저 확인해줘").** 디코딩은 체크포인트 `README.md` 의 `extract_video_points` 를 그대로
+  옮겼다. `--attn_npy` 로 attention 히트맵을 주면 생성 점(초록)과 attention argmax(마젠타)를
+  같은 프레임에 나란히 그린다. `--prompt` 는 여러 개를 받아 모델 로드 1회로 다 돈다.
+
+- **`scripts/viz/molmo2_latent_sweep.py` — 어느 latent 를 카메라 디코더에 꽂을지 lever sweep
+  (D164, 2026-09-08, 사용자 지시 "fps 5로 잡고 가능한 lever들 sweep 돌려서 어느 latent를 쓰는게
+  좋을지 판단해줘. attention map을 써고 point head sub patch에 attention이 높은 정보가 있다던지
+  이런걸 분석해줘").**
+  · **[정정] 이 체크포인트에는 point head 가 없다.** `modeling_molmo2.py` 의 클래스는
+    `Molmo2ForConditionalGeneration` 하나뿐이고 `patch_logits`/`subpatch_logits`/
+    `location_logits`/`MolmoPoint` 가 **존재하지 않는다** (grep 확인). pointing/tracking 은
+    별도 head 가 아니라 **좌표를 텍스트 토큰으로 생성**해서 한다 — README 가 나열한
+    `allenai/Molmo2-VideoPoint` 는 별도 아티팩트다. 따라서 subpatch head 를 탭할 수 없다.
+    (이전 대화에서 언급한 4-head 구조는 이 체크포인트가 아니다.)
+  · 대신 **생성 좌표를 pseudo-GT** 로 써서 질문을 정확히 만들었다: "각 latent 에서 대상의
+    프레임별 위치가 얼마나 바로 읽히는가". 학습 파라미터 0개 readout — 프레임 f 에서 텍스트
+    쿼리와 그 프레임 81개 patch latent 를 맞대어 9x9 분포를 만들고 argmax 를 예측으로 삼는다.
+  · sweep 축: 층 0~35 x query(target 마지막/target 평균/tail 평균) x
+    readout(`attn` / `attnv`=attention x ||v|| / `dot` / `cos` / `pc1`,`pc4`=상위 주성분 제거).
+    forward 1회로 36층 attention + 37층 hidden 을 동시에 잡고, pc 기저는 층당 1회
+    `torch.pca_lowrank` 로 구한다. 8씬 22샘플, fps 5, `--trim_level full`.
+  · **설계 함정 하나 기록**: 프레임별 평균 patch 벡터를 빼는 것(`cdot`)은 **프레임당 상수 이동**
+    이라 argmax 를 바꾸지 못한다 (실측에서 `dot` 과 소수점까지 동일했다). global 성분 제거는
+    상수 shift 가 아니라 **방향 제거**(주성분 제거)여야 한다 — 그래서 `pc1`/`pc4` 로 바꿨다.
+
+### 발견 (D164 latent sweep, 8씬 22샘플, fps 5)
+- **기준선: center(항상 화면 중심) 126px / fixed(그 타겟 GT 의 시간평균) 17px / grid(균등) 228px.**
+  `fixed` 가 17px 이라는 것은 **물체가 클립 내에서 거의 안 움직인다**는 뜻이고, 이게 진짜로
+  이겨야 하는 상대다.
+- **어떤 latent 도 파라미터 없는 readout 으로는 프레임별 위치를 쓸 만하게 노출하지 않는다.**
+  최고 조합 `tgt_mean / dot / 층0` = **168.2px** (hit@1cell 12%, hit@2cell 29%).
+  center(126px) 에도 42px 지고, `fixed`(17px) 보다 **10배** 나쁘다. readout 별 최고:
+  `dot` 168.2 / `attn` 199.0 / `cos` 205.0 / `pc4` 207.2 / `pc1` 221.3 / **`attnv` 303.9**
+  — ||v|| 가중(Kobayashi et al.)은 여기서 오히려 크게 해롭다.
+- **다만 신호가 없는 것은 아니다 — 중앙에서 먼 타겟에서는 이긴다.** 샘플별 best 로 보면
+  22개 중 9개가 center 를 이기고, 이긴 것은 거의 전부 주변부 타겟이다:
+  cows 물통 241->34.5px, fashion-walk man 214->71.5, basketball man 268->72.3,
+  cows 울타리 212->81.3, couple-rocks 이끼 205->82.8, camel 울타리 201->105.5.
+  진 것은 전부 화면 중앙에 앉은 주 피사체다 (camel center 15px, car vehicle 18px,
+  golf human 11px — 여기선 상수 예측이 무적이다).
+  즉 latent 는 **"대상이 대략 이 사분면"** 수준은 알지만 셀 단위 국소화는 못 한다.
+- **attention 은 프레임 0 에서만 쓸 만하고, 최적층이 지표에 따라 다르다.**
+  `attn` 의 f0 오차: 층0 334px -> **층20 110px** (17~21 이 118~134px 로 평지),
+  전체 프레임 평균은 203px. 즉 시간이 갈수록 무너진다.
+  · **지표가 층 선택을 바꾼다**: 판별력(within-between)은 층 **15** 가 최고였는데
+    픽셀 정확도(f0)는 층 **20** 이 최고다. 이래서 최종 판정은 하류 지표여야 한다.
+- **결론 — 무엇을 꽂을 것인가**
+  1. **국소화는 hidden state 가 아니라 생성 좌표를 쓴다.** fps 5 에서 클립당 20점(0.5초 간격),
+     5씬 17타겟 + 이번 22샘플 전부 정상 생성. 카메라 디코더에 **명시적 기하 입력**으로 넣거나
+     **aux supervision 타깃**으로 쓴다 — d157_dilo 의 겨냥 실패에 직접 대응한다.
+     비용: 생성 약 10s/클립 -> d157 875씬 주 피사체 1개씩이면 약 2.4시간(1 GPU).
+  2. **텍스트 조건은 층 15 hidden** (판별력 sweep 기준, `point`/`track` 형식). 지금 캐시가 쓰는
+     층 35 는 두 지표 모두에서 최하위다. 단 이건 "텍스트 조건"이고 "국소화"가 아니다.
+  3. **미검증 레버 — 학습된 probe.** 위 결과는 전부 **내적(파라미터 0)** readout 이다.
+     patch latent -> (x,y) 로 **선형/MLP probe 를 학습**하면 달라질 수 있고, 이게 남은 가장
+     중요한 미검증 축이다. 40px 수준이 나오면 중간층 patch latent 가 국소화 피처로 살아난다.
+     "정보가 없다" 가 아니라 "텍스트-patch 직접 정렬로는 안 읽힌다" 까지만 확인된 것이다.
+
+- **`scripts/viz/molmo2_vs_obb.py` — Molmo2 생성 좌표 ↔ scene_graph OBB track 2D 투영 일치도
+  (D164, 2026-09-08, 사용자 지시 "돌려줘").** `CinemaTraj/scripts/export_target_track.py` 를
+  d121 코퍼스에 실행(52 scenes, 전 변이 valid, missing anchor 0) 한 뒤,
+  `track_world`(DA3 world)를 `pose.npz` 의 `extrinsics`(**w2c**, (49,3,4)) / `intrinsics`
+  (cx,cy=320,180 = 640x360 규약) 로 투영해 Molmo2 `Track {target_text}` 생성 좌표와 비교한다.
+  anchor 를 `dyn_*`(움직이는 피사체) / `stat_*`(정적 배경) 으로 나눠 본다.
+  · **둘 다 추정이라 정답 대조가 아니다** — 일치하면 "같은 물체를 봤다"는 강한 증거이고,
+    불일치는 어느 쪽이 틀렸는지 말해주지 않는다.
+
+### 발견 (D164 Molmo2 ↔ OBB 일치도, 8씬 29 anchor, fps 5)
+| | n | Δf0 median | Δmean median | <50px | <100px |
+|---|---|---|---|---|---|
+| **dyn (움직이는 피사체)** | 15 | 21.7px | **18.6px** | 73% | 87% |
+| stat (정적 배경) | 14 | 35.3px | 41.5px | 57% | 79% |
+| 전체 | 29 | 31.9px | 37.5px | 66% | 83% |
+
+- **움직이는 피사체에서 두 독립 추정이 640x360 프레임의 ~3%(19px) 안에서 일치한다.** 방법이
+  완전히 다른데도(VLM 텍스트 grounding 생성 vs DA3 recon + 분할 + OBB 중심 + 투영) 그렇다.
+  대표: `camel dyn_1` Δf0 **1.8px**, `car-roundabout dyn_1` **2.1px**,
+  `fashion-walk dyn_1` **5.6px**, `car-roundabout dyn_0` 22.4px.
+- **`Track the blue car driving on the left side of the road` 가 Δf0 2.1px** — 앞서 관계절을
+  자른 `Track the blue car` 는 파란 표지판으로 갔었다. **관계절이 필수 단서라는 반대 증거가
+  독립 지표로 재확인**되었다. `--trim_level full` 이 맞다.
+- **불일치는 거의 전부 "어느 인스턴스인가" 모호성**이고 "어디인가" 오차가 아니다:
+  `car-roundabout stat_2 building` 294.8px (양쪽에 건물이 있고 "beige building with a white
+  corner" 가 애매), `camel stat_0 fence` 59.9px (좌/우 + larger/smaller),
+  `couple-rocks moss` 84/74px (large/small + left/right), `fashion-walk stat_1 fence` 114px.
+- **유일한 실질 국소화 실패는 골프공** (`golf dyn_0` 167px, molmo2 (385,224) vs obb (317,74)).
+  공은 지면에 있으므로 **Molmo2 가 맞고 OBB 가 틀렸다** — 작은 물체에서 분할/OBB 가 깨진다.
+- 함의: **Molmo2-as-선택기는 움직이는 피사체(=겨냥 대상)에 대해 검증되었다.** 정적 배경의
+  불일치는 코퍼스의 라벨 모호성 문제이고, 그 anchor 들은 대개 `aim=free` 변이(48~49%)라
+  정밀 겨냥이 목적이 아니다. OBB 라벨 품질은 dyn 에서 수십 px 수준 — aux supervision 용으로
+  충분하다.
+
 - **`main/conf/experiment/dynpose_d157_dilo_{da3,molmo2,da3_molmo2}.yaml` — `dolly_in_look_at`
   단일 preset 코퍼스 위의 3-arm 모델축 비교 (D163, 2026-09-07, 사용자 지시 "scene 늘려서 dolly
   in look at 만 학습했을 때 da3 vs molmo2 vs da3+molmo2를 비교하고 싶은데" → "지금 181씬으로
@@ -19,6 +189,258 @@ All notable changes to the latentcam sub-project. Follows [Keep a Changelog](htt
   · 캐시는 전부 공유 + 증분: geo raw 는 d129 루트(160편 hit, 6편 추가), molmo2 video 는 d137
     루트(160편 hit, 6편 추가), molmo2 text 만 d157 루트에 새로 (`(scene_key, caption)` 키라
     캡션이 바뀌면 재사용 불가).
+
+### 발견 (D164 실측, vista4d/camel, dolly_in_look_at)
+- **최종층(35)의 텍스트→video attention 은 타겟을 판별하지 못한다.** 타겟 명사구를
+  낙타/다른 낙타/오른쪽 울타리/왼쪽 울타리/배경 나무 5종으로 바꿔도 attention map 의
+  비대각 코사인이 **0.994** (min 0.989), top1 셀은 5종 전부 `[8,5]` 동일, centroid 이동 0.13 셀.
+  대신 9x9 테두리에 62.5% (uniform 39.5%), 앞 3프레임에 43.8% (uniform 6.1%) 가 쏠린다 —
+  물체가 아니라 **위치 artifact** 다.
+- **층 13~16 에는 판별력이 있다.** 36층 sweep 에서 비대각 코사인 층13 **0.711** / 층15 0.722 /
+  층14 0.848 / 층16 0.880, 나머지는 전부 0.91~0.99. 층 13 의 코사인 행렬은 의미 구조를 갖는다:
+  낙타↔낙타 0.952, 울타리↔울타리 0.971, 낙타↔울타리 0.75~0.80, 배경 나무↔나머지 0.50~0.55.
+  층 13 에서 target 그룹 video 질량 34.3% vs probe 5.9% (최종층은 22.6% vs 16.9% 로 미분화),
+  테두리 질량 40.4% ≈ uniform. 층 17 부터 테두리 50~62% / 앞 3프레임 33~58% 로 붕괴한다.
+- **캡션에서 무엇을 빼야 하나 — `--caption_mode` 3종 실측.** 사용자 지시 2026-09-08
+  ("다른 명사들 빼고 camel과 motion 설명만" → "내 말은 target에 관련된 text만 쓰자는거야
+  camera motion, framing 같은거 빼고" → "along the fence 이런 것도 빼줘").
+
+  | 모드 | 캡션 |
+  |---|---|
+  | `concise` | `The camera significantly dollies straight forward toward the larger pale camel walking along the fence, keeping it in a medium shot ... with the larger wooden fence ... and the smaller pale camel ... also in frame.` |
+  | `target_only` | `The larger pale camel.` |
+  | `minimal` | `The camera significantly dollies straight forward toward the camel.` |
+
+  `target_only` 는 motion·framing·composition 절을 다 버리고 `target_text` 만 문장으로 세운
+  뒤, **다른 물체를 지목하는 관계절까지 잘라낸다** (`trim_relations`). 판별 기준은 전치사 뒤의
+  **정관사**다 — `along the fence` / `in the background` / `on the right side of the enclosure`
+  는 씬의 다른 물체를 가리키므로 자르고, `in a striped shirt` / `with green leaves` 는 타겟
+  자신의 서술이라 남긴다. 잘린 뒤 매달린 분사(`... camel walking`)도 뗀다.
+
+  같은 3부류(낙타/울타리/나무)로 맞춘 비교 (`--target_row_tail` 은 target 구간 마지막 N 토큰만):
+
+  | 설정 | 비대각(전체) | 비대각(3부류) | centroid | video 질량 |
+  |---|---|---|---|---|
+  | **`target_only` 층15 (4행)** | **0.695** | **0.584** | 1.06 셀 | **36.7%** |
+  | `concise` 층13 (8행) | 0.711 | 0.596 | 1.11 셀 | 33.5% |
+  | `concise` 층13 (마지막 2행) | 0.708 | 0.610 | 1.12 셀 | 31.1% |
+  | `target_only` 층13 (4행) | 0.729 | 0.635 | 0.98 셀 | 33.3% |
+  | `minimal` 층13 (2행) | 0.846 | 0.846 | 0.49 셀 | 32.3% |
+  | `concise` 층35 | 0.994 | 0.993 | 0.13 셀 | 21.1% |
+  | `target_only` 층35 | 0.997 | 0.995 | 0.11 셀 | 22.5% |
+  | `minimal` 층35 | **1.000** | 1.000 | 0.08 셀 | 22.3% |
+
+  · **`target_only` 가 최선이다.** 판별력 최고(0.584)이고 video 질량도 최고(36.7%)이며,
+    쓸 만한 층의 띠가 가장 넓다 — 비대각 <0.9 인 층이 `target_only` 는 3·11~16 (7개),
+    `concise` 는 13~16 (4개), `minimal` 은 3·5·9·11·13·15 (산발). 최적층도 다르다
+    (`target_only`/`minimal` 층15, `concise` 층13).
+  · **카메라 motion·framing 텍스트는 잉여이고 약하게 해롭다.** 빼면 판별력과 video 질량이
+    같이 올라간다. 반면 **타겟의 서술 수식어는 국소화를 지고 있다** — `minimal` 처럼 맨 부류
+    명사(`the camel`)만 남기면 0.846 으로 급락한다. 즉 버릴 것은 "카메라가 무엇을 하는가",
+    지킬 것은 "타겟이 무엇처럼 생겼는가" 다.
+  · 행 수는 원인이 아니다 — `concise` 를 마지막 2행으로 깎아 `minimal` 과 행 수를 맞춰도
+    0.610 으로 그대로다.
+  · 최종층에서는 세 모드 전부 무효다 (0.994 / 0.997 / **1.000**). `minimal` 은 낙타·울타리·
+    나무가 **완전히 구별 불가**다.
+  · 층 15 `target_only` 의 공간 분포는 눈으로도 맞는다 — 나무는 f0·f7·f21·f34·f48 전부
+    좌상단 나뭇잎, 울타리는 우측 목재, 낙타는 f0 에서 몸통/혹. 다만 시간합 top1 셀은
+    9x9 해상도에서 여전히 불안정해 과신하면 안 된다 (코사인·centroid 로 판정할 것).
+- **Molmo2 학습 분포형 지시문 형식 + `--trim_level`** (사용자 지시 2026-09-08 "Molmo2가 학습한
+  텍스트 분포에 맞춰서 형식을 바꿔줘봐. Track하라던지 질문형식이라던지", "walking 같은 행위도
+  포함한 버전과 그냥 the larger pale camel walking along the fence 형태도 다시 돌려봐줘").
+  · 체크포인트 `README.md` 의 예시를 글자 그대로 옮겨 `--caption_mode point/track/question/count`
+    를 추가했다: `Point to {t}.` / `Track {t}`(**마침표 없음**) / `Where is {t} in the video?` /
+    `Count {t}.` 이 형식들은 지시문이 프롬프트 전부라 **`PROBE` 를 붙이지 않는다**
+    ("Describe the camera trajectory ..." 를 덧붙이면 off-distribution).
+  · `--trim_level {full,action,noun}` — 타겟 구절을 어디까지 깎나:
+    `the larger pale camel walking along the fence` / `... camel walking` / `... camel`.
+  · **`chat_template.jinja` 는 `<|video|>` 를 항상 맨 앞에 놓는다** — content 리스트의
+    text->video 순서와 무관하다. 즉 README 예시(text 먼저)와 우리 코드(video 먼저)는 같은
+    토큰열이 되고, `cache_molmo2_embeddings.py` 의 순서는 문제가 아니다. 확인 완료.
+  · 템플릿의 `DEMO_STYLES` 는 학습 태스크 이름 화이트리스트인데, 여기 없는 `style` 값만
+    `"{style}: "` 로 앞에 붙는다. 즉 태스크 토큰이 프롬프트에 주입되지는 않는다.
+  · 1건 실측(`Point to the larger pale camel.`, 층15, span=명사구 4토큰): **video 질량 40.6%**
+    (target_only 36.7% / concise 33.5% 대비 최고), **테두리 질량 39.4% = uniform 39.5%**
+    (위치 artifact 0), 앞 3프레임 17.4%, 프레임0 의 peak 가 **낙타 몸통**에 앉는다.
+    지시문 형식 4종 x trim_level 3종의 swap 판별력 비교는 아직 안 돌렸다.
+- **[결정적] Molmo2 는 대상을 정확히 알고 track 한다 — raw attention 이 그걸 못 보여줄 뿐이다.**
+  `Track {t}` 로 생성시켜 좌표를 디코딩한 결과 (vista4d/camel, 49프레임, fps 10):
+
+  | 프롬프트 | t=0 좌표(1000 스케일) | 픽셀(640x360) | 실제 위치 |
+  |---|---|---|---|
+  | `Track the larger pale camel` | 497, 438 | (318, 158) | 큰 낙타 등/혹 |
+  | `Track the smaller pale camel` | 352, 352 | (225, 127) | 뒤쪽 작은 낙타 |
+  | `Track the tree with green leaves` | 470, 086 | (301, 31) | 상단 나뭇잎 |
+  | `Track the larger wooden fence` | 162, 311 | (104, 112) | 좌측 울타리 |
+
+  · 네 타겟이 전부 정확히 분리되고 궤적도 매끄럽다 (카메라가 들어가면서 전부 왼쪽으로 드리프트).
+  · 출력은 **0.5초 간격 10점 = 2Hz** — `video_preprocessor_config.json` 의 `sampling_fps: 2` /
+    `max_fps: 2.0` 과 일치한다. 49프레임/10fps = 4.9s -> 10점. **프레임 커버리지 20% 는 실패가
+    아니라 모델의 native track rate 다.**
+  · `Point to {t}.` 는 t=0 단일 점을 내고 track 첫 점과 일치한다 (낙타 495,450 vs 497,438).
+  · **생성 track(초록) vs 층15 attention argmax(마젠타)**: f0 에서만 거의 일치하고 f10 부터
+    마젠타가 나뭇잎·울타리·땅으로 흩어진다. 즉 **정보는 있고 attention 이라는 렌즈가 눈이 먼 것**
+    이다. 이 대조 없이는 "모델이 모른다" 와 구별할 수 없었다 — attention map 단독 판정의 한계.
+
+- **track 출력의 시간 해상도는 입력 프레임이 아니라 Molmo2 의 학습 샘플링 격자(2Hz)가 정한다**
+  (사용자 질문 2026-09-08 "왜 track이 전프레임에 있지 않음?", "49프레임 다 들어가는건 맞지?").
+  · **49프레임은 전부 들어간다.** 실측: `video_grids [[49, 9, 9]]`,
+    `pixel_values_videos (49, 729, 588)`, patch 토큰 3969 = 49 x 81. `--fps` 를 바꿔도
+    **시각 텐서는 글자 그대로 동일**하다 — fps 는 프롬프트의 timestamp 문구에만 들어간다.
+  · 프롬프트는 프레임마다 초 단위 타임스탬프를 소수 1자리로 붙인다:
+    fps 10 -> `0.0 0.1 0.2 ... 4.8` (49종) / fps 25 -> `0.0 0.0 0.1 0.1 0.2 0.2 ...` (중복 발생)
+    / fps 2 -> `0.0 0.5 1.0 ...`
+  · 그런데 **출력은 항상 0.5초 격자**다 = `video_preprocessor_config.json` 의 `sampling_fps: 2`
+    / `max_fps: 2.0`. 즉 track 점 개수 ≈ duration / 0.5:
+    fps 10(4.9s) -> 10점(49프레임의 20%) / fps 25(1.96s) -> 4점 / fps 2(24.5s) -> 48점.
+  · **fps 를 낮춰 점을 늘리는 것은 함정이다.** fps 2 로 두면 48점이 나오지만 좌표가
+    `509 453` 으로 **전부 고정된 degenerate track** 이 된다 — 실제로는 0.1초 간격인 프레임을
+    0.5초 간격이라고 속인 off-distribution 입력이라 모델이 정지 궤적을 낸다.
+  · 결론: 프레임당 위치가 필요하면 10개 anchor 를 보간하거나 겹치는 윈도로 나눠 돌려야 한다.
+    커버리지 20% 는 실패가 아니라 모델의 native track rate 다.
+
+- **다른 4개 씬 재현 (golf / basketball-four / car-roundabout / couple-walk, 씬당 타겟 5종,
+  `Track {trim_noun}`, fps 10).** 사용자 지시 "다른 영상으로도 돌려봐줘 한 4개정도".
+
+  | scene | 타겟 | 점 평균 | step 평균 | 좌표쌍 최소거리 | 중앙 |
+  |---|---|---|---|---|---|
+  | golf | 2 | 9.0 | 18.1 | 83.7px | 83.7px |
+  | basketball-four | 5 | 10.0 | 17.0 | 140.2px | 239.2px |
+  | car-roundabout | 5 | 8.8 | 16.4 | **0.0px** | 174.3px |
+  | couple-walk | 5 | 10.0 | 8.4 | 57.7px | 213.2px |
+
+  · **17/17 타겟에서 좌표가 나왔고 대부분 서로 57~140px 이상 떨어져 구분된다.** 눈으로 확인한
+    것: golf 공은 f0 에서 클럽 헤드 옆에 붙고 타격 후 공중으로 점프(t=3.5 에 y 650->103),
+    couple-walk 의 fire hydrant 는 작은 정적 물체인데 전 구간 정확.
+  · **실패 1 — 좌/우 앞바퀴를 구분하지 못한다.** `the right front wheel` 과
+    `the left front wheel` 이 동일 좌표(0.0px). 관계절을 되살려
+    `... of the dark car` 를 붙여도 Δ 약 4/1000 (~2.5px) 로 여전히 구분 못 한다.
+    부분(part) 수준의 좌/우 disambiguation 은 이 모델의 한계다.
+  · **실패 2 — 그리고 이것이 앞선 `trim_level` 결론을 제한한다.** `Track the blue car` 는
+    t=3.0 부터 (962,453)->(686,464) 로 **파란 원형 도로표지판**(f42 부터 진입)을 따라갔다.
+    이 49프레임에 파란 차는 없다. 그런데 잘리지 않은 원문
+    `Track the blue car driving on the left side of the road` 를 주면 t=0.0~1.0 에
+    (194,492)->(041,503) — **좌측의 실제 차**를 잡고 프레임을 벗어날 때 정확히 멈춘다.
+    즉 **`driving on the left side of the road` 는 잉여가 아니라 필수 단서였다.**
+    attention 지표(`score`)에서는 `tgt_noun` > `tgt_full` 이었지만, **생성 출력에서는 관계절이
+    타겟을 결정하는 경우가 있다.** 관계절 제거는 기본값으로 두면 안 된다 —
+    "다른 물체를 지목하는 절"과 "타겟을 유일하게 특정하는 절"이 문법적으로 같은 모양이다.
+
+- **`--main` 주 피사체 선택 + `--fps_sweep`** (사용자 지시 2026-09-08 "main 물체로 track해줘.
+  가운데 차라던지. 그리고 fps 별로 track 성능 차이 없어?").
+  · **최빈 target 은 주 피사체가 아니다.** car-roundabout 의 최빈은 `right front wheel`(88건)
+    이고 주 피사체 `large dark grey vehicle`(86건) 이 2위다. 그래서 `SUBJ_PRIO`
+    (vehicle/car/person/human/man/woman/camel/... 순) 로 라벨 우선순위를 두고 고른다.
+  · 5씬 main track 전부 10/10 점, 눈으로 확인해 전부 정확했다 (`--trim_level full` 원문 사용):
+    car-roundabout `the large dark grey vehicle driving on the road` -> 가운데 회색 Mini 차체,
+    golf 는 공이 아니라 `the human in a light blue shirt ... swinging a golf club` -> 골퍼 몸통,
+    basketball-four `the man in a white tank top carrying a woman on his back`,
+    camel, couple-walk 도 동일하게 주 피사체.
+
+- **fps 별 track 성능 차이가 크다 — 낮추면 궤적이 붕괴한다.** 같은 main 타겟, fps 만 바꿈.
+  프롬프트의 timestamp 간격 = 1/fps(소수 1자리), 출력 격자는 항상 0.5초 -> 점 개수 ≈ 2T/fps.
+
+  | fps | 모델이 본 길이 | 점 | step(px) | 최대편차(px) | fps10 과 평균거리(px) |
+  |---|---|---|---|---|---|
+  | | | | car / bball | car / bball | car / bball |
+  | 1 | 49.00s | 97 | 0.0 / 0.0 | **0.0 / 0.0** | 7.4 / 45.7 |
+  | 2 | 24.50s | 48 | 0.0 / 0.0 | **0.0 / 0.0** | 8.1 / 45.3 |
+  | 4 | 12.25s | 25 | 1.5 / 6.5 | 23.8 / 69.7 | **4.3 / 2.8** |
+  | 5 | 9.80s | 20 | 2.2 / 8.2 | 22.4 / 70.8 | **2.8 / 2.9** |
+  | 10 | 4.90s | 10 | 3.2 / 16.0 | 19.5 / 73.3 | 0.0 / 0.0 (기준) |
+  | 20 | 2.45s | 5 | 6.2 / 28.6 | 16.3 / 69.0 | 1.8 / 6.1 |
+  | 25 | 1.96s | 4 | 7.6 / 38.2 | 15.2 / 72.5 | 2.8 / 9.3 |
+  | 30 | 1.63s | 4 | 7.4 / 43.2 | 14.2 / 70.0 | 3.1 / 7.3 |
+
+  · **fps <= 2 는 쓰면 안 된다.** 점은 48~97개로 가장 많지만 좌표가 한 점에 고정된
+    **정지 궤적**이다 (최대편차 0.0). 입력 timestamp 간격(0.5~1.0s)이 출력 격자와 같거나
+    커지면서, 실제로는 0.1초 간격인 프레임을 "0.5초/1초 간격"이라고 속인 셈이 되어
+    모델이 "이 장면은 정지"라고 판정한다. fps10 과의 거리도 이 구간이 가장 크다
+    (빠른 움직임인 basketball 에서 45.7px).
+  · **fps 4~5 가 최적이다.** 20~25점(프레임 2개당 1점)으로 밀도가 높으면서 움직임이 보존되고
+    (최대편차 22~24 / 70), fps10 과의 일치도도 가장 좋다 (2.8~4.3px).
+  · **fps >= 20 은 점이 4~5개뿐**이고 일치도가 나빠진다 (car 1.8->3.1, bball 6.1->9.3).
+    시간 커버리지 자체는 유지된다 (0.0~1.5s 를 프레임 0/15/30/45 로 펼침).
+  · 규칙: **fps 를 과소 신고하면 안 된다.** 과대 신고(20~30)는 출력이 거칠어지는 것으로
+    끝나지만, 과소 신고(1~2)는 모델이 정지로 판정해 track 자체가 무의미해진다.
+  · 주의: "fps10 과 평균거리" 는 GT 가 아니라 **자기일관성**이다. fps 4/5/10 이 서로 잘 맞는
+    것은 세 값이 모두 in-distribution 이라는 뜻이고 정확도의 증거는 아니다.
+  · 참고: `main/cache_molmo2_embeddings.py` 의 `--fps` 기본값은 25.0 인데 실제 데이터는 10fps
+    가정이다. 임베딩 캐시에서 fps 는 timestamp 문구에만 들어가지만, **최소한 사실과 맞는
+    값(10)** 을 쓰는 것이 맞다. track 을 목적으로 쓸 때는 4~5 가 낫다.
+
+- **[결정적] 현재 캐시 프롬프트(`concise + PROBE`)는 좌표를 아예 내지 않는다** — Molmo2 를
+  captioning 모드에 넣고 있다 (사용자 지시 2026-09-09 "concise vs Track으로 실제 최종 output
+  track 차이 있는지 결과 시각화"). camel / car-roundabout 의 `dolly_in_look_at` 변이, fps 5,
+  같은 씬·같은 타겟에 프롬프트만 4종:
+
+  | 프롬프트 | 생성 형식 | 좌표 | t=0 위치 (camel) |
+  |---|---|---|---|
+  | `concise` (코퍼스 완성문) | `<points>` 20 타임스탬프 | 20점 **but 좌표 고정** | (321,159) |
+  | **`concise + PROBE`** (현재 캐시) | **산문 서술** | **0점** | — |
+  | `{target_text}.` | `<points>` 1 타임스탬프 | 1점 | (317,163) |
+  | **`Track {target_text}`** | `<tracks>` 20 타임스탬프 | **20점, 매끄러운 궤적** | (318,158) |
+
+  · `concise + PROBE` 생성 원문: *"The camera moves forward in a straight line, gradually
+    closing the distance between itself and the larger pale camel. This forward movement
+    causes the frame to tighten..."* — PROBE 가 요구한 대로 **카메라 궤적을 산문으로 서술**한다.
+    즉 현재 프롬프트는 grounding 모드가 아니라 captioning 모드다.
+  · `concise` 단독은 **형식이 깨진다**: camel 은 `502 442` 가 20번 반복(고정점),
+    car-roundabout 은 인스턴스 id 가 `1,2,3,4,…` 로 매 타임스탬프 바뀌며 좌표가
+    `973 403`(x=623, 우측 끝)에 고정 — 궤적이 아니라 **서로 다른 물체 목록**을 뱉는다.
+    서술문이라 태스크가 정의되지 않아서다.
+  · **그런데 t=0 좌표는 네 형식이 5px 안에서 일치한다** (camel 318/317/321,
+    car-roundabout 343/345/344). 즉 **"어디"는 어느 형식에서도 알고 있고, 형식이 정하는 것은
+    "어떤 프로토콜로 뱉느냐"** 다. 이 해석이 중요하다 — grid 의 score 차이(+0.335 vs +0.225)는
+    정보의 유무가 아니라 **얼마나 읽기 쉬운 형태로 정리되어 있느냐**의 차이이고, hidden state
+    를 쓸 때도 같은 논리가 적용된다.
+
+- **`Track {target_text}` 로 바꿨을 때의 캐시 규모 실측 (d121 전량).**
+  | | distinct 텍스트 | min | p50 | p95 | max |
+  |---|---|---|---|---|---|
+  | 현재 `concise + PROBE` | 13,183 | 31 | 78 | 90 | **100** |
+  | 신규 `Track {target_text}` | **292** | 11 | 20 | 23 | **25** |
+
+  · `text_len` **128 → 25**. 그래서 **span 축소(target 구절만)는 불필요하다** — 형식 교체가
+    이미 흡수한다. tail 17토큰 중 non-target 행이 9개뿐이고, 그 중
+    `<|im_start|>assistant\n` 는 답을 내려는 위치라 융합 정보가 응축될 자리인데 자를 근거가 없다
+    (video 질량 13.8% 만 봤고 정보량은 안 봤다).
+  · 캐시 키가 `(scene_key, caption)` 13,679 → `(scene_key, target_text)` 약 292 조합.
+    **`(13679,128,2560) fp16 8.96 GB → (292,25,2560) fp16 38 MB`, 약 240배.** 굽는 시간도
+    씬당 캡션 수백 개 → 3~6 개로 줄어든다.
+  · 대신 **molmo2 스트림이 변이를 구분하지 못하게 된다** — 같은 씬·같은 타겟이면 `dolly_in`
+    이든 `orbit_left` 든 텍스트가 동일하다. 의도한 역할 분담(molmo2=grounding, T5=motion/
+    framing)이지만 **전제가 붙는다: T5 스트림이 제대로 작동해야 한다.** 지금 `text_cross_attn`
+    은 `h = CA(h,...)` 로 residual 을 덮으므로(`:309`) 뒤의 geo CA 가 T5 의 motion 정보를 지울
+    수 있다. 현재는 molmo2 텍스트에 motion 이 중복돼 그 손실이 가려져 있는데, 형식을 바꾸면
+    중복이 사라져 이 결함이 드러난다. **-> 전 스트림 zero-init gated residual 을 먼저 고칠 것.**
+
+- **텍스트 형식 x 층 격자 실측 (3 씬 평균: camel / car-roundabout / basketball-four).**
+  score = within - between, 각 씬 타겟 5종 (클래스 3~4종):
+
+  | format | 최적 층 | score | video 질량 |
+  |---|---|---|---|
+  | `point`   `Point to {t}.` | **15** | **+0.335** | 38.2% |
+  | `track`   `Track {t}` | 15 | +0.329 | 38.2% |
+  | `question` `Where is {t} in the video?` | 15 | +0.324 | 35.6% |
+  | `tgt_noun` `The larger pale camel.` | 15 | +0.302 | 35.0% |
+  | `tgt_action` `... camel walking.` | 15 | +0.292 | 35.2% |
+  | `tgt_full` `... camel walking along the fence.` | 15 | +0.267 | 34.7% |
+  | `motion_noun` `The camera ... toward the camel.` | 13 | +0.263 | 35.6% |
+  | `concise` (코퍼스 완성문) | 13 | +0.225 | 34.5% |
+  | `concise_probe` (**학습이 쓰는 조건**) | 13 | +0.224 | 34.5% |
+
+  · **학습 설정이 두 축 모두에서 최하위다** — 텍스트는 `concise_probe`(9/9위), 층은 35
+    (score +0.01, 판별력 사실상 0). 층 12~18 이 유일한 판별 구간이고 19층부터 0.02 로 붕괴한다.
+  · 순서가 단조롭고 해석이 된다: **학습 분포형 지시문 > 타겟 문장 > 관계절 포함 > motion 절 추가
+    > 코퍼스 완성문.** 즉 카메라 motion·framing·관계절은 잉여이고, 타겟 서술 수식어는 유지해야
+    하며, Molmo2 가 학습한 지시문 형식으로 감싸는 것이 가장 좋다.
+  · `probe` 유무는 무관하다 (+0.225 vs +0.224).
+  · 단, 이 격자는 **attention 지표 기준**이다. 위 항목이 보여준 대로 attention 은 가설 생성기이고
+    최종 판정은 하류 지표(층15 vs 층35 피처로 학습한 카메라 모델의 CLaTr/collision/framing)여야 한다.
+- 즉 `main/cache_molmo2_embeddings.py` 가 굽는 **최종층 text hidden 은 타겟 국소화가 가장 약한
+  층**이다. GR00T N1.5 가 36층 중 12층을 쓰는 것과 같은 결론이 우리 데이터에서 재현되었다
+  (층 13/36 = 0.36 깊이 vs 12/36 = 0.33).
 
 ### Fixed
 - **`scripts/data/cache_geo_raw_da3.py` — `is_done` 의 동일성 비교에서 `meta['exp']` 제외

@@ -7,6 +7,36 @@
 ## [Unreleased]
 
 ### Added
+- **`lbm/pick.py` + `scripts/repick_bank.py` — 재굽기 없이 `picked` 열만 다시 단다
+  (2026-09-14, D189).** `pick` 은 사다리가 끝난 뒤의 **순수 후처리**다: 행을 지우지 않고
+  (`bank.json` 은 재고 목록), `poses.npz` 에는 안 고른 행의 pose 까지 전부 들어 있다
+  (`fit_hole_ladder.py:1557` 이 `rows` 전량을 저장한다). 그래서 선택 규칙을 바꾸려고 τ→fit 을
+  다시 돌릴 이유가 없다 — 실측 862편 relabel+emit 이 **114초** (같은 범위 재굽기는 ~14시간).
+  · `pick_rows(..., per_anchor=True)` 가 D189 에서 새로 붙은 축이다. 씬 단위 예산은 anchor 가
+    둘이어도 한 대만 내보내서 두 번째 anchor 가 통째로 버려진다 — d188 뱅크 실측 씬당
+    **0.783 대**. anchor 마다 예산을 주면 **0.935 대**(+19.5%, 전량 환산 9,734 대)가 되고,
+    같은 (scene, anchor) 는 여전히 한 대뿐이라 같은 물체를 두 번 굽지 않는다
+    (사용자 확정 2026-09-14 "같은 scene 같은 anchor 안 곂치게").
+  · 규칙을 모듈로 뺀 이유: 두 벌 두면 "다시 고른 뱅크"와 "새로 구운 뱅크"가 조용히 갈라진다.
+    `fit_hole_ladder.py` 쪽 배선(`--pick_per_anchor`)은 d188 굽기가 끝난 뒤 같은 함수로 연결한다
+    (inproc 샤드가 execv 때마다 그 파일을 다시 읽어서 지금 건드리면 도는 세대가 바뀐다).
+  · `repick_bank.py` 는 `bank.csv` 의 `picked` **열만** 갈아끼운다 — 이 writer 는 따옴표 없이
+    배열 열을 `|` 로 잇기 때문에 행을 재작성하면 포맷이 조용히 달라진다.
+- **`vista4d_bank_to_dl3dv.py --picked_only` (2026-09-14, D189).** `picked` 필터가 **없었다** —
+  D189 코퍼스를 그냥 내보냈으면 고른 1,034 대 대신 **4,110 변이 전량**이 나갔고, re-pick 자체가
+  무의미해질 뻔했다. `drop_status`/`drop_suspect` 와 다른 축이다: 저 둘은 행마다 독립으로
+  "이건 쓰면 안 된다"를 보고, 이건 씬/anchor 단위 **예산**의 결과다. 기본 꺼짐 = 열이 없던
+  예전 뱅크와 비트 동일.
+- **`vista4d_bank_to_dl3dv.py --test_hash_mod` — 이름 해시 holdout (2026-09-14, D189).**
+  `md5(video) % mod == 0`. 접두사 분할을 버린 근거: DynPose UUID 접두사 `00`~`0b` 는 12/256 이라
+  4.7% 를 기대했는데 실측 **865편 중 513편(59.3%)** 이 잡혔다 — d188 이 정렬 순서로 굽는 중이라
+  지금 구워진 풀이 낮은 접두사 쪽으로 편향돼 있다. 해시는 코퍼스가 몇 편이든 같은 씬을 같은
+  쪽에 두므로 d188 완주 후 재-export 해도 test 가 train 으로 새지 않는다. `mod=20` 실측
+  43편/865 = 5.0%. 기본값 0 = 꺼짐 = 예전대로 `--test_videos` 접두사만.
+  `hash()` 가 아니라 md5 인 이유는 PYTHONHASHSEED 가 다르면 같은 씬이 run 마다 반대편으로 간다.
+- **`build_bank_captions.py --videos_file` (2026-09-14, D189).** 굽기가 도는 중에는 현재 라운드
+  목록을 뺀 편만 넘겨야 한다 (샤드가 쓰는 중인 `bank.json` 을 읽으면 깨진 JSON 을 만난다).
+  `--videos` 보다 우선한다. `repick_bank.py` 도 같은 인자를 가진다.
 - **`chain_bank_rounds.py --gpus` — 세대별로 카드를 갈라 쓴다 (2026-09-13, D188-c).**
   샤드의 `CUDA_VISIBLE_DEVICES` 를 모듈 상수 `GPUS` 에서 바로 읽고 있어서, **두 세대를
   동시에 돌리면 카드를 나눌 방법이 없었다** — 상수를 고치면 이미 도는 다른 체인까지 같은

@@ -1015,9 +1015,9 @@ if __name__ == "__main__":
     # D121. anchor referring expression (`instance_desc.json`). 끄면 예전처럼 라벨만 쓴다.
     parser.add_argument("--anchor_desc", action="store_true", default=True)
     parser.add_argument("--no_anchor_desc", dest="anchor_desc", action="store_false")
-    # 크기 부사(barely..dramatically). **3-state**: 안 주면 형식이 정한다 (nl 켬 / fields 끔).
-    # fields 가 끄는 이유는 어휘를 preset 하나로 좁히기 위해서였고, nl 은 문장이 하나뿐이라
-    # 강도를 실을 데가 거기밖에 없다 (사용자 지시).
+    # 크기 부사(barely..dramatically). **3-state 지만 안 주면 형식과 무관하게 끔** (D176,
+    # 사용자 지시 2026-09-10 — §:850 이 집행자다). D175 까지는 nl 이 켰었고 이 주석이 그
+    # 옛 동작을 그대로 적고 있었다. 다시 켜려면 `--magnitude` 를 명시할 것.
     parser.add_argument("--magnitude", action="store_true", default=None)
     parser.add_argument("--no_magnitude", dest="magnitude", action="store_false")
     # D119. shot scale 시간축. 뱅크에 `subject_area_seq` 가 있어야 효과가 있고(없으면 조용히

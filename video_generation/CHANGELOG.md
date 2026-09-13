@@ -7,6 +7,20 @@
 ## [Unreleased]
 
 ### Added
+- **`scripts/rebake_scenes.py` — 지정 씬만 마커 무시하고 graph/뱅크 재굽기 (2026-09-13, D186).**
+  코드 버그를 고친 뒤에는 "이미 구웠다"는 마커가 적이 된다. 마커를 **지우지 않고**
+  `run_bank.py --no_skip_done` 으로 우회하고, 뱅크 산출물은 지우는 대신
+  `<work>/quarantine/<gen>/<video>/` 로 **옮긴다**.
+  · 옮겨야 하는 이유: `skipped.json` 과 `canonical/canonical.json` 은 **서로를 지우지 않는다**.
+    예전에 "앵커 0"으로 `skipped.json` 이 남은 씬이 이번엔 앵커를 얻으면 `canonical.json` 만
+    새로 생기고 `skipped.json` 은 그대로다 — 반대도 마찬가지. `baked()` 숫자는 맞는데 한 씬이
+    두 결론을 동시에 들게 된다.
+  · `--wait_for <ps 문자열>`: 그 문자열을 명령줄에 가진 프로세스가 전부 끝나면 시작한다.
+    선행 재굽기와 GPU 를 안 겹치게 하는 용도.
+  · `--no_quarantine`: **드라이버가 도는 세대**에 쓴다. 격리하면 그 씬들이 드라이버의 ready
+    집합으로 되돌아와 두 프로세스가 같은 씬 디렉토리를 동시에 쓴다. 제자리 덮어쓰기면
+    `canonical.json` 이 계속 존재해 드라이버가 계속 baked 로 보고 안 집는다.
+  · GPU 는 `GPUS = ["0","1","2","3"]` 고정 (CLAUDE.md).
 - **두 세대를 동시에 굽기 — `chain_bank_rounds.py --require_bank_dir` + `--work` lock
   (2026-09-12, 사용자 지시 "gpu 활용률이 저조한데 버전 나눠서 카메라 5개짜리 버전도 같이
   돌려줘").** D182 graph(24샤드) + D184 뱅크(8샤드)가 도는데 GPU 는 0% 와 54 GB 사이를

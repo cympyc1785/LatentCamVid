@@ -405,22 +405,35 @@ def main():
                         choices=("subprocess", "inproc"),
                         help="subprocess = 단계마다 새 프로세스(기본, 예전 동작). "
                              "inproc = 같은 프로세스에서 단계 main() 호출 — import 가 씬당이 "
-                             "아니라 샤드당 1회가 되고 tau/fit 의 cloud 재구축이 캐시된다 (§_run_inproc)")
+                             "아니라 샤드당 1회가 되고 tau/fit 의 cloud 재구축이 캐시된다 (§_run_inproc). "
+                             "**config 에 최상위 `\"exec\"` 키가 있으면 그쪽이 이긴다** (§exec_mode)")
     parser.add_argument("--inproc_recycle", default=50, type=int,
                         help="inproc 모드에서 N편마다 샤드를 **자기 자신으로 재실행**(execv)해 "
                              "누적 메모리를 턴다. 0 = 끔. 재실행 비용은 import 1회(~8s)뿐이고 "
                              "`--skip_done` 이 이미 끝낸 편을 건너뛰므로 진행은 이어진다.")
     args = parser.parse_args()
 
+    # config 를 **env 를 심기 전에** 읽는다 — `load_config` 는 순수 JSON 이라 무거운 import 가
+    # 없고, 아래 exec_mode 결정이 config 를 봐야 한다.
+    cfg = load_config(args.config)
+
+    # §exec_mode — 실행 방식은 **config 가 CLI 를 이긴다**. 뒤집힌 우선순위인 이유:
+    # `chain_bank_rounds.fan_out` 이 `--exec` 를 **늘 명시로** 넘기므로 argparse 쪽에는
+    # "안 줬음"이 존재하지 않는다. 그래서 CLI 우선으로 두면 config 키가 영영 안 먹는다.
+    # 이 키의 쓸모는 **도는 체인을 안 죽이고 세대 설정만 고쳐 다음 라운드부터 바꾸는 것**이다
+    # (fan_out 이 라운드마다 샤드를 새로 띄우며 config 를 다시 읽는다).
+    # 키가 없으면 CLI 값 그대로라 옛 동작은 비트 동일하다.
+    exec_mode = cfg.get("exec", args.exec_mode)
+    assert exec_mode in ("subprocess", "inproc"), f"모르는 exec: {exec_mode}"
+
     # in-process 모드는 이 프로세스가 곧 단계 프로세스다 — CUDA/OpenMP 는 **첫 import 전에**
     # env 를 읽으므로 여기서 못 박아야 한다 (나중에 바꾸면 안 먹는다).
-    if args.exec_mode == "inproc":
+    if exec_mode == "inproc":
         if args.gpu is not None:
             environ["CUDA_VISIBLE_DEVICES"] = str(args.gpu)
         if args.threads > 0:
             environ.update({key: str(args.threads) for key in THREAD_ENV_KEYS})
 
-    cfg = load_config(args.config)
     stages = [s for s in (args.stages.split(",") if args.stages else cfg["stages"])]
     unknown = [s for s in stages if s not in STAGE_ORDER]
     assert not unknown, f"모르는 stage: {unknown} (가능: {STAGE_ORDER})"
@@ -433,11 +446,11 @@ def main():
     makedirs(args.log_dir, exist_ok=True)
     tag = f"{cfg.get('generation', '?')}/s{args.shard_id}"
     print(f"[{tag}] {len(mine)}/{len(videos)}편  stages={','.join(stages)}  "
-          f"bank={cfg['bank_dir']}  gpu={args.gpu}  exec={args.exec_mode}  "
+          f"bank={cfg['bank_dir']}  gpu={args.gpu}  exec={exec_mode}  "
           f"threads={args.threads or '캡 없음'}  {_now()}", flush=True)
 
     clear_cache = None
-    if args.exec_mode == "inproc":
+    if exec_mode == "inproc":
         from lbm.render import clear_cloud_cache, set_cloud_cache                # noqa: PLC0415
         set_cloud_cache(True)            # tau -> fit 의 cloud 재구축 제거 (씬당 14.7s)
         clear_cache = clear_cloud_cache
@@ -448,7 +461,7 @@ def main():
         t0 = time()
         try:
             status = process_video(cfg, video, stages, args.gpu, args.log_dir, args.skip_done, tag,
-                                   threads=args.threads, mode=args.exec_mode)
+                                   threads=args.threads, mode=exec_mode)
         except Exception as exc:                      # 한 편이 죽어도 샤드는 계속 간다
             status = f"ERROR({type(exc).__name__}: {exc})"
         if clear_cache is not None:
@@ -458,7 +471,7 @@ def main():
             print(f"[{tag}] {status:24s} {video}", flush=True)
         if status.startswith("OK"):
             done += 1
-        if args.exec_mode == "inproc" and args.inproc_recycle > 0 and done >= args.inproc_recycle:
+        if exec_mode == "inproc" and args.inproc_recycle > 0 and done >= args.inproc_recycle:
             # 누수가 있어도 8샤드가 새벽에 OOM 으로 죽지 않게 하는 보호장치. `--skip_done` 이
             # 이미 끝낸 편을 건너뛰므로 같은 인자로 다시 띄우면 그 자리에서 이어진다.
             print(f"[{tag}] recycle — {done}편 처리 후 재실행  {_now()}", flush=True)

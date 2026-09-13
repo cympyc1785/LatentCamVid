@@ -97,6 +97,23 @@
   · 검증: 수정 후 구워진 14편 중 `0143de60` 이 **tier 2 `track_pull_out_arc_right`** 를
     뽑았다 — tier-first 가 막던 바로 그 경우다. 새 pick 의 track 비중 7/10.
 
+### Added
+- **`run_bank.py` 가 최상위 config 키 `"exec"` 를 읽는다 — 도는 체인을 안 죽이고 실행 방식을
+  바꾼다 (2026-09-14, 사용자 지시 "d185를 tau/fit/emit 한 번 load로 이어서 돌려줘").**
+  D180 의 in-process 경로는 `--exec` CLI 인자로만 켤 수 있었는데, `chain_bank_rounds.fan_out`
+  이 그 인자를 **늘 명시로** 넘기므로 이미 `subprocess` 로 기동된 체인은 **재시작 말고는
+  바꿀 방법이 없었다**. d185 가 그 상태였다(씬당 135.3s, d188 은 inproc 으로 93.6s).
+  · `main()` 이 `load_config` 를 env 심기 **전에** 부르고 `exec_mode = cfg.get("exec",
+    args.exec_mode)` 로 푼다. **config 가 CLI 를 이긴다** — 위 이유로 argparse 에는
+    "안 줬음"이 존재하지 않아서, CLI 우선이면 키가 영영 안 먹는다 (§exec_mode 주석).
+  · 키가 없으면 CLI 값 그대로라 **옛 동작은 비트 동일**. d188 은 CLI `--exec inproc` 을
+    계속 쓴다.
+  · `configs/bank/d185_dynpose100k_grid5.json` 에 `"exec": "inproc"` 추가. `fan_out` 이
+    라운드마다 샤드를 새로 띄우며 config 를 다시 읽으므로 **다음 라운드(r11)부터** 적용되고,
+    이미 구운 편은 `--skip_done` 이 건너뛴다. 스모크 1편(`01e0922b`, 현재 라운드 밖) 실전
+    통과: ROUTE 0.0s / TAU 72.7s / FIT 43.8s / **EMIT 0.2s**(subprocess 에서는 4.8s) = 116.8s.
+    이 수치는 d185 4샤드 + d188 6샤드가 도는 중의 경합값이라 정상 상태 값이 아니다.
+
 ### Changed
 - **d188 tau 사다리 5칸 → 3칸 (2026-09-14, 사용자 지시 "d188은 tau ladder 3개로 줄여서 돌려줘").**
   `configs/bank/d188_dynpose100k_track_objcentric.json` 의 `--tau_ladder` 를

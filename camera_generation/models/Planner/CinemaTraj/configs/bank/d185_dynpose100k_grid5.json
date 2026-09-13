@@ -17,8 +17,11 @@
 
   "_샤드_4개인_이유": "GPU 는 0~3 네 장을 D184 와 공유한다. `run_bank.py:159 _run()` 은 `--gpu` 가 없으면 `fan_out` 의 `GPUS[shard % 4]` 를 쓰므로 **샤드 합계가 장당 부하**다. 처음에 D185 도 8샤드로 띄웠더니 8+8=16 = 장당 4 로 네 장 전부 75~80 GB(상한 81.5) 에 닿아 CUDA OOM 이 났다 — D184 r07 이 `FAIL(tau rc=1) 27 / FAIL(fit rc=1) 23` (직전 라운드들은 0~5). 4 로 줄여 합계 12 = 장당 3, 피크 77 GB, OOM 0건. 자세한 건 `video_generation/FIX.log` 2026-09-12 항목.",
 
+  "_exec_inproc": "사용자 지시 2026-09-14 (\"d185를 tau/fit/emit 한 번 load로 이어서 돌려줘\"). 이 체인은 `--bank_exec subprocess`(기본) 로 띄워져 있었다 — D180 의 in-process 경로가 d188 에만 걸려 있었다. 실측 차이: d185 씬당 135.3s(r09: 400편/4샤드/225.5분) 대 d188 씬당 93.6s 이고, 그 격차의 대부분이 **프로세스 경계 비용 51.3s**(단계별 import 21.9s + tau/fit 이 cloud 를 각각 다시 만드는 14.7s, §run_bank.py in-process 절) 다. 남은 6,477편 기준 약 60.9h → 44h.\n**체인을 안 죽이고 바꾸려고 config 키를 쓴다**: `--exec` 는 `chain_bank_rounds.fan_out` 이 늘 명시로 넘기는 CLI 인자라 argparse 로는 못 뒤집는다. `run_bank.py` 가 최상위 `exec` 키를 CLI 보다 우선하게 고쳤고(§exec_mode), `fan_out` 은 라운드마다 샤드를 새로 띄우며 config 를 다시 읽으므로 **다음 라운드부터** 적용된다. 이미 구운 편은 `--skip_done` 이 건너뛴다.",
+
   "extends": "d179_dynpose100k_bank.json",
   "generation": "d185",
+  "exec": "inproc",
   "tau_bank_dir": "bank_d185",
   "bank_dir": "hole_bank_d185",
   "require_markers": [".graph_d182"],

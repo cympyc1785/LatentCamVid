@@ -12,10 +12,16 @@
   "카메라 1대"를 뜻하지 않는다는 게 파일럿 58편의 결론이다 (아래 Fixed 항목). 사다리는
   **어디까지 내려갈지**를 정하지 무엇을 내보낼지는 안 정한다. 그래서 사다리는 그대로 두고,
   다 돌고 난 뒤 씬당 `--pick_budget` 개를 고른다:
-  · 1순위 `usable`(status 통과 + suspect 없음) → 2순위 status 만 통과한 best-effort,
-    같은 등급 안에서는 `plan_tier` 오름차순 → `hole_fraction` 오름차순.
-    tier 가 먼저이므로 "움직이면 track+object-centric, 아니면 object-centric" 이라는 어휘
-    우선순위가 유지되고, 같은 층 안에서만 hole 로 고른다.
+  · 정렬은 **`plan_tier` ↑ → 등급(usable 먼저) → `hole_fraction` ↑.** tier 가 맨 앞이라
+    "움직이면 track+object-centric, 아니면 object-centric" 어휘 우선순위가 유지되고,
+    fallback 은 **위층에 status 통과 행이 아예 없을 때만** 내려간다.
+    ⚠ 초안은 등급을 먼저 봤는데 실측에서 바로 틀렸다 — 9ec42125 는 tier0
+    `dyn_0__track_pull_out_arc_right` 가 **solved** 인데 `hole_over_budget`(0.3676 > 0.35)
+    하나 때문에 tier1 평범 짝에게 졌다. 그 태그는 `--hole_mode excess` 에서 잘못된 잣대다
+    (목표 `hole_static + Δ0.20` 은 `solved` 가 이미 집행했다) — **거짓 경보가 어휘 지시를
+    덮은 것**이라 tier 를 앞으로 옮겼다. 파일럿 59편 재투사: 수율은 그대로 50편/0대 9편,
+    tier [(0,20),(1,25),(2,5)] → **[(0,24),(1,22),(2,4)]**, track **40.0% → 44.0%**,
+    hole 평균 0.3193 → 0.3296 (median 0.2962 → 0.3060).
   · **행은 하나도 안 지운다** — `picked` 열만 단다 (뱅크는 재고 목록, D39/D45).
     `emit_bank.py --picked_only` 가 그 열을 소비한다. 기본값 `--pick_budget 0` = 열이 빈 칸,
     옛 뱅크와 비트 동일. 열이 없는 옛 뱅크에 `--picked_only` 를 주면 0행이 된다.

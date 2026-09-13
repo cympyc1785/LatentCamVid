@@ -106,9 +106,24 @@ def _empty_dynmask(log_path):
     드라이버는 torch 가 필요 없고, 이 경로는 실패했을 때만 지난다.
     """
     from lbm.cloud import EMPTY_DYNMASK_TOKEN
+    return _log_has(log_path, EMPTY_DYNMASK_TOKEN)
+
+
+def _no_emittable(log_path):
+    """emit 로그가 "이 씬은 카메라 0개" 로 끝났나 (D188-d).
+
+    `emit_bank.py` 는 rc=1 을 **세 곳**에서 낸다 — 재구성 잔차 초과 / `--dump_poses` 오용 /
+    변이 0. 앞의 둘은 진짜 오류라 재시도 가치가 있지만 세 번째는 게이트 판정이라 다시 돌려도
+    똑같다. 토큰으로만 가른다 (§`emit_bank.NO_EMITTABLE_TOKEN`).
+    """
+    from scripts.emit_bank import NO_EMITTABLE_TOKEN
+    return _log_has(log_path, NO_EMITTABLE_TOKEN)
+
+
+def _log_has(log_path, token):
     try:
         with open(log_path, encoding="utf-8", errors="replace") as file:
-            return EMPTY_DYNMASK_TOKEN in file.read()
+            return token in file.read()
     except OSError:
         return False
 
@@ -322,6 +337,24 @@ def process_video(cfg, video, stages, gpu, log_dir, skip_done, tag, threads=0, m
             rc, _ = _run(stage, _base_args(cfg, video, cfg["bank_dir"], stage) + spec["args"],
                          log_path, gpu, threads=threads, mode=mode)
             if rc != 0:
+                # D188-d. "변이 0" 은 **게이트 판정**이지 크래시가 아니다. 그런데 여기서 FAIL 로
+                # 끝내면 뱅크에 `canonical.json` 도 `skipped.json` 도 안 남아
+                # `chain_bank_rounds.done_bank()` 가 False 를 내고, 그 씬이 라운드마다 다시
+                # ready 로 들어온다 — tau 가 캐시돼 있어 route+fit+emit 만 90초쯤 태우고 똑같이
+                # 실패한다. 실측(2026-09-13): 새 라운드가 집은 50편 중 **49편**이 옛 emit 실패의
+                # 재탕이었고, 실패분이 ready 앞쪽에 쌓이는 구조라 라운드마다 낭비가 커진다.
+                # route rc=3 / 빈 dynamic_mask 와 같은 처방이고, **게이트를 내린 것이 아니다**.
+                if _no_emittable(log_path):
+                    makedirs(bank_dir, exist_ok=True)
+                    with open(path.join(bank_dir, "skipped.json"), "w", encoding="utf-8") as file:
+                        json_dump({"format": "lbm_camera_bank_skipped_v1", "video": video,
+                                   "reason": "no_emittable_variants", "stage": "emit",
+                                   "detail": "fit 된 변이는 있는데 emit 필터가 전부 뺐다 — d188 "
+                                             "실측 56편은 전부 `--picked_only` 인데 picked=0 "
+                                             "(변이 3~12개). 되살리려면 `fit_hole_ladder` 의 "
+                                             "pick 게이트를 고쳐 다시 fit 해야 한다.",
+                                   "log": log_path}, file, ensure_ascii=False, indent=1)
+                    return "SKIP(카메라 0)"
                 return f"FAIL(emit rc={rc})"
         print(f"[{tag}] {stage.upper():5s} {video} rc=0 {time() - t0:6.1f}s  {_now()}", flush=True)
     return "OK"

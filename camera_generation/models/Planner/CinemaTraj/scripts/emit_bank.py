@@ -99,6 +99,12 @@ FIXED_FALLBACK = SHAPE_DEFAULTS
 # 실측 사례(경계까지 1.8e-6)보다 한 자릿수 촘촘하다.
 RECOVER_STEPS = 40
 
+# D188-d. "이 씬은 카메라 0개" 를 크래시와 가르는 기계 토큰. `run_bank.py` 의 emit 단계가 이걸
+# 보고 `skipped.json(no_emittable_variants)` 로 닫는다 — 안 닫으면 `chain_bank_rounds` 가 그 씬을
+# **라운드마다 다시 집는다** (실측 2026-09-13: 새 라운드가 집은 50편 중 49편이 옛 emit 실패의
+# 재탕이었다). `lbm/cloud.EMPTY_DYNMASK_TOKEN` 과 같은 처방.
+NO_EMITTABLE_TOKEN = "[NO_EMITTABLE_VARIANTS]"
+
 
 def decision_from_variant(graph: dict, node: dict, variant: dict, fixed: dict):
     """뱅크 행 하나 → `lbm_decision_v1`. `fit_hole_ladder.decision_at` 의 역함수다.
@@ -417,7 +423,14 @@ def main(args):
                         "folded": vid in folded, "pose_rebuild_error": error})
 
     if not cameras:
-        raise SystemExit("내보낼 변이가 하나도 없다 — 필터를 확인할 것.")
+        # D188-d. 이 종료는 **크래시가 아니라 "이 씬은 카메라 0개"** 라는 판정이다. 같은 rc=1 을
+        # 내는 다른 두 곳(재구성 잔차 초과 / `--dump_poses` 오용)과 구분해야 `run_bank.py` 가
+        # 이것만 `skipped.json` 으로 닫을 수 있다. 한국어 문구를 매칭하면 문구를 다듬는 순간
+        # 조용히 안 잡히므로 토큰을 따로 둔다 ([[EMPTY_DYNMASK_TOKEN]] 과 같은 처방).
+        raise SystemExit(f"{NO_EMITTABLE_TOKEN} "
+                         f"내보낼 변이가 하나도 없다 — 필터를 확인할 것 "
+                         f"(뱅크 변이 {len(bank['variants'])}개, 필터 {dropped['filter']} / "
+                         f"접힌 단 {dropped['folded']} / path {dropped['path_len']}).")
 
     output_folder = args.out_dir or path.join(bank_folder, "canonical")
     makedirs(output_folder, exist_ok=True)

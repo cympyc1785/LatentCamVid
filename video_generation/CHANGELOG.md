@@ -32,6 +32,26 @@
   (사용자 2026-09-13 "지금 그대로 굽는다"), 다음 세대부터 쓸 수 있게 배선만 해 둔 것.
 
 ### Fixed
+- **emit "변이 0" 씬도 `skipped.json` 으로 닫는다 (2026-09-13, D188-d, FIX-D188-g).**
+  D188-b 와 **구조가 같은 두 번째 재집기 루프**다. `emit_bank.py` 가 "내보낼 변이가 하나도
+  없다" 로 rc=1 을 내면 뱅크에 `canonical.json` 도 `skipped.json` 도 안 남고,
+  `chain_bank_rounds.done_bank()` 는 그 둘만 보므로 (`bank.csv` 는 안 센다) 그 씬이 **라운드마다
+  다시 ready 로 들어온다**. tau 가 캐시돼 있어 route+fit+emit 만 90초쯤 태우고 똑같이 실패한다.
+  실측(2026-09-13): 옛 r01+r02 에서 emit rc=1 이 **103편**, 새 r01 이 집은 첫 91편 중
+  **90편이 그 재탕**이었다 (나머지 1편은 D188-b 가 잡은 `SKIP(동적마스크 0)`). 실패분이 정렬된
+  ready 앞쪽에 쌓이는 구조라 라운드마다 낭비가 커지고, 끝내 100% 재탕 라운드로 고인다.
+  · `emit_bank.py` 에 `NO_EMITTABLE_TOKEN = "[NO_EMITTABLE_VARIANTS]"` 를 두고 그 `SystemExit`
+    에만 붙였다. `emit_bank.py` 는 rc=1 을 **세 곳**에서 낸다 — 재구성 잔차 초과 /
+    `--dump_poses` 오용 / 변이 0. 앞의 둘은 진짜 오류라 재시도 가치가 있고 세 번째만 게이트
+    판정이라, rc 로는 못 가른다. 한국어 문구 매칭은 문구를 다듬는 순간 조용히 죽으므로 토큰.
+  · `run_bank.py` emit 단계는 rc≠0 + 그 토큰이면
+    `skipped.json{reason:"no_emittable_variants"}` 를 쓰고 `SKIP(카메라 0)` 으로 끝낸다.
+    `_empty_dynmask` 와 공통 로직을 `_log_has(log, token)` 으로 뺐다.
+  · **게이트를 내린 것이 아니다** — `--picked_only` 도 `fit_hole_ladder` 의 pick 게이트도
+    그대로다. 원인 자체는 따로 남아 있다: 표본 56편이 전부 `picked=0`(변이 3~12개)이고,
+    이게 코퍼스를 10k 목표 대비 깎는 진짜 원인이다 (r01 emit 실패 15% → r02 30%).
+  · 확인된 0-카메라 씬 90편은 `--stages emit --no_skip_done` 으로 backfill 했다
+    (편당 9.0s). 나머지는 샤드가 라운드마다 새로 뜨므로 다음 라운드에 저절로 닫힌다.
 - **빈 `dynamic_mask` 씬을 뱅크가 `skipped.json` 으로 닫는다 (2026-09-13, D188-b,
   FIX-D188-f).** D176-c 가드(`lbm/cloud.py assert_dynamic_mask_nonempty`)는 옳게 막았는데
   막힌 사실을 디스크에 안 남겨서, `chain_bank_rounds.ready_videos()` 가 그 씬을 **라운드마다

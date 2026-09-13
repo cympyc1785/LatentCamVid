@@ -7,6 +7,72 @@
 ## [Unreleased]
 
 ### Added
+- **`configs/bank/d188_dynpose100k_track_objcentric.json` + `route_presets.py --track_pair` /
+  `--slot_rotate` — 씬당 카메라 1대를 **object-centric 어휘로 못박은** 세대 (2026-09-13, 사용자
+  지시 "씬당 카메라 하나가 나오되 움직이는 dynamic anchor면 track+object centric 아니면
+  object centric으로 나오도록 fallback도 넣어서 돌리는거야. 이렇게 10k개 카메라 맞춰줘").**
+  D187 을 대체한다 — D187 은 preset 화이트리스트가 없어 d185 어휘를 그대로 물려받았고,
+  나오는 1대가 `dolly_out`/`pan_*` 같은 aim=free 인 경우가 절반 이상이었다.
+  · **어휘**: object-centric = `lbm/presets.py` 의 `aim="look_at"`. 슬롯은 `arc,orbit,vertical`
+    3종. `static` 은 뺐다 — `static_look_at` 은 손잡이가 없어 status 가 항상 `static` 이고
+    `solved` 가 구조적으로 안 나온다 (tau/fit 시간만 먹는다). `advance` 도 **실측으로 뺐다** —
+    `dolly_in_look_at`/`track_dolly_in_look_at` 의 solved 가 d188 파일럿 59편 **0/165**,
+    d185 400편 **0/505** 로 세대·라우팅과 무관하게 0이다 (탈락의 절반이
+    `obb_limited`+`approach_limited`: 전진하며 조준을 유지하면 subject OBB 와
+    `--min_subject_visible 0.6`/approach 여유를 동시에 만족하는 구간이 안 남는다).
+    슬롯별 solved (파일럿 59편): `pull_out_arc_left` 77.5 / `track_pull_out_arc_left` 69.0 /
+    `track_pull_out_arc_right` 65.1 / `pull_out_arc_right` 57.9 / `orbit_right` 35.0 /
+    `track_orbit_right` 31.0 / `track_orbit_left` 25.6 / `orbit_left` 22.8 /
+    `crane_up` 11.8 / `track_crane_up` 11.1 / `dolly_in_look_at` 0.0 %.
+  · **`route_presets.py --emit_route` (신규, 기본 off).** `--emit args` 는 `--preset_route <out>`
+    을 `grid2x2` 이거나 `--free_moving` 이 켜졌을 때만 붙였다. d188 은 `--slot_plan full` +
+    `--free_moving off` 라 둘 다 거짓 → `sample_camera_bank.py:897` 의 `target_count` 가 0 →
+    `plan_variants` 가 tiers 를 `{}` 로 돌려줌 → `fit_hole_ladder` 의
+    `fallback_on = ... and any(tier_of.values())` 가 False. 즉 **예산도 사다리도 통째로 꺼진 채**
+    fit 이 (anchor × preset) 격자를 다 돌았다 — 1차 파일럿 58편이 씬당 최대 9대(solved 175행),
+    track 비중 42.9% 로 나온 원인이다. `--emit_route` 가 그 경로를 연다.
+  · **`--track_pair` (신규, 기본 off).** `--track_mode replace` 는 슬롯을 track 판으로
+    **갈아끼우기만** 해서 비-track 짝이 후보 풀에서 사라진다 → `--fallback_ladder` 를 켜도
+    1층(비-track 조준)이 비어 추종 실패가 다른 추종으로만 떨어진다 (같은 anchor 변위 = 같은 벽).
+    `--track_pair` 는 갈아끼운 track 슬롯의 평범한 짝을 backfill 에 같이 실어 그 1층을 채운다.
+    `variant_tier` 가 비-track look_at 을 1, track 을 2로 매기므로 사다리가 자동으로
+    [track(0) → 평범(1) → 남은 track(2)] 이 된다. 정지 anchor 에는 `track_` 이 안 붙어 no-op.
+  · **`--slot_rotate` (신규, 기본 off).** 예산이 1이면 `plan_variants` 가 뽑는 건 `pool[0]`
+    하나인데 `route()` 의 슬롯 순서가 고정이라 화이트리스트 뒤 **가장 앞 슬롯**이 코퍼스
+    전량에서 같아진다. 400편 실측: 회전 없으면 `advance` 계열 60.8% / `vertical` 0건,
+    회전하면 crane_up 22.5 / dolly_in_look_at 22.5 / orbit_* 23.0 / pull_out_arc_* 18.2 %
+    (이 측정은 `advance` 를 빼기 전 4슬롯 기준이다).
+    grid2x2+substitute 로는 안 고쳐진다 (keep_pair 안에서 다시 route 순서로 정렬된다).
+  · **`--retry_status` 확대.** d187 파일럿 40편에서 solved 없이 끝난 7편 중 5편이 **행 1개**였다
+    (`approach_limited` 3 / `obb_limited` 1 / `collision_limited` 1) — `variant_usable()` 이
+    `clamped_low` 만 재시도 대상으로 보고 `*_limited` 를 "쓸 만함"으로 세어
+    `--fallback_target 1` 에서 첫 행에 멈췄고 사다리를 한 층도 안 내려갔다. d188 은 비-solved
+    어휘를 전부 올린다 (뱅크 행은 그대로 다 남으므로 코퍼스 `--drop_status` 와는 독립이다).
+  · anchor 예산은 2 (`--max_anchors 2`) — `--max_anchors 1` 의 천장이 75.5% 다 (d185 census
+    2,283편: solved≥1 1,983편 중 dyn_0 이 1,723편). fit 이 첫 solved 에서 멈추므로 emit 은 1대.
+  · 격리: `bank_d188` / `hole_bank_d188` / `preset_route_d188.json`. d185 는 손대지 않는다.
+- **`configs/bank/d187_dynpose100k_single.json` — D184 게이트 수정판, 씬당 카메라 1개
+  (2026-09-13, 사용자 지시 "d184 게이트를 먼저 고치자"). ⚠️ 파일럿 40편에서 멈췄고 **D188 이
+  대체**한다 — 어휘가 object-centric 이 아니었다 (위 항목).** D184 는 "씬당 1대"라는 목표는
+  지켰지만 수율이 **10,273편 중 solved 715행(7.0%)** 이라 코퍼스가 안 됐다. D187 은 목표를
+  그대로 두고 **게이트만** 고친다 — d185(grid5) 라우팅을 글자 그대로 쓰고 **예산만 1로** 잡는다
+  (`route --target_variants 1` + `fit --fallback_target 1`).
+  · **수율 해부 (route 만 CPU 로 300편 ablation):** `--anchor_min_drift_u 0.30` 하나가
+    앵커 생존 46.0% → 96.3% (**+42.3 pt**) 로 범인이고, `--anchor_require_frame0` 이 +8.0 pt,
+    `--slot_whitelist orbit` 은 후보 풀을 8개(본슬롯 2 + backfill 6)에서 1개로 줄인다.
+    `--max_static_anchors` 는 `--max_anchors 1` 에서 `pick_main_anchors` 가 동적 우선이라 효과 0
+    (그래서 d184 의 `0` 은 무해했다).
+  · **`--fallback_ladder` 가 d184 에서 no-op 이었다.** `fit_hole_ladder.py:790-794` 는 τ 뱅크 행의
+    `plan_tier` 가 전부 0이면 `fallback_on=False` 로 떨어지고, `plan_tier` 를 싣는 것은
+    `sample_camera_bank.py --variant_pool full` 이다. d184 는 `tau` 블록이 없어 d179 를
+    물려받았고 d179 tau 에는 그 플래그가 없다 → 씬당 시도가 문자 그대로 한 번.
+    d187 은 `tau` 에 `--variant_pool full` 을 명시한다.
+  · **"후보를 늘리는 것"과 "카메라를 늘리는 것"은 다른 축이다.** route 는 최대 9개(본 2 +
+    backfill 6 + free 1)를 제안하지만 fit 이 쓸 만한 변이 1개에서 멈추므로 emit 은 1대다.
+    d184 는 이 둘을 같이 1로 묶어서 죽었다.
+  · 2026-09-11 지시("일정 이상 움직이는 dynamic 만 tracking")는 `--track_min_drift_u 0.05` 가
+    집행한다 — d184 가 이를 앵커 **생존** 문턱으로 한 번 더 집행한 것이 과잉이었다.
+  · 격리: `bank_d187` / `hole_bank_d187` / `preset_route_d187.json`.
 - **`scripts/rebake_scenes.py` — 지정 씬만 마커 무시하고 graph/뱅크 재굽기 (2026-09-13, D186).**
   코드 버그를 고친 뒤에는 "이미 구웠다"는 마커가 적이 된다. 마커를 **지우지 않고**
   `run_bank.py --no_skip_done` 으로 우회하고, 뱅크 산출물은 지우는 대신
@@ -343,6 +409,15 @@
   다시 갈고 있었다. 스코프는 d179 가 흡수한다. config 는 근거와 함께 남긴다.
 
 ### Fixed
+- **`scripts/rebake_scenes.py` 가 config 의 `extends` 를 안 풀어 뱅크 단계에서 즉사하던 것
+  (2026-09-13, FIX-D186-b).** `quarantine()` / `stage_bank()` / `main()` 이 config 를 `json_load`
+  로 그대로 읽었는데, 뱅크 config 는 대부분 `"extends": "d179_dynpose100k_bank.json"` 이라
+  `output_root` 가 부모에만 있다. graph config 는 `extends` 가 없어 ①단계는 통과했고 ③-a 의
+  `d184_*` 에서 `KeyError: 'output_root'` — `launch.sh` 가 `set -e` 라 ③-b(d185 뱅크 313편)까지
+  같이 멈춰 13:53~14:31 유휴였다. `load_config()`(= `run_bank.load_config` 과 같은 얕은 병합)를
+  추가하고 세 호출부를 전부 바꿨다. ③-a(d184 386편)는 **건너뛴다** — d184 는 폐기 세대라 쓰는
+  데가 없고, 남은 역할이 도는 d185 드라이버의 `--require_bank_dir hole_bank_d184` 게이트 하나인데
+  ③-a 의 격리가 바로 그 디렉토리를 옮겨 게이트를 깨뜨린다.
 - **인스턴스 병합이 `frames` 만 합집합으로 만들어 bbox/score 가 밀리던 것
   (`scene_graph/instances.py`, `scripts/build_scene_graph.py`) (2026-09-13).**
   `merge_duplicates` 가 `points_by_frame` 과 `frames` 는 합집합으로 만들면서 `boxes_xyxy` /

@@ -1,0 +1,77 @@
+{
+  "_why": "D187 (사용자 지시 2026-09-13 \"d184 게이트를 먼저 고치자\") — D184 는 \"씬당 카메라 1개\" 라는 목표는 지켰지만 수율이 **10,273편 중 solved 715행(7.0%)** 이라 코퍼스가 안 됐다. 이 세대는 같은 목표(씬당 1대)를 유지하면서 **게이트만** 고친다. 즉 d185(grid5) 의 라우팅을 글자 그대로 쓰고 **예산만 1로 잡는다** — anchor 1개, 카메라 1대. 라우팅을 새로 설계하지 않는 이유는 d185 가 이미 같은 graph·같은 fit 게이트 위에서 86.9% 를 내고 있기 때문이다.",
+
+  "_d184_수율_해부": "d184 x d185 교차 (양쪽 뱅크가 다 있는 2,259편, 2026-09-13 실측):\n    d184 skipped(앵커0)  x d185 solved  1,186  (52.5%)  <- 맞춰보기도 전에 앵커에서 죽음\n    d184 변이생성/전부실패  x d185 solved    617\n    d184 변이생성/전부실패  x d185 실패      192\n    d184 solved          x d185 solved    159\n    d184 skipped(앵커0)  x d185 실패      103\n    d184 solved          x d185 실패        2\n                                   d184 7.1%   vs   d185 86.9%\n구조된 카메라의 성격: preset 은 dolly_out 1527 / pan_left 865 / track_pull_out_arc_right 612 /\npan_right 591 ... 로 **non-track 3,806 : track 1,679** (69% 가 비-track). d184 는 `--slot_whitelist orbit`\n라 이 중 어느 것도 제안조차 못 한다.",
+
+  "_게이트_ablation": "route 만 CPU 로 300편(.graph_d182 선두)에 돌려 게이트별 기여를 분리했다:\n    A0 d184 그대로                 앵커생존 138/300 (46.0%)  본슬롯 1.00  backfill 0.00\n    A1 -anchor_require_frame0     162/300 (54.0%)          1.00        0.00   +8.0 pt\n    A2 anchor_min_drift .30->.05  289/300 (96.3%)          1.00        0.00  +42.3 pt  <- 범인\n    A3 +max_static_anchors 1      289/300 (96.3%)          1.00        0.00   +0.0 pt\n    A4 -slot_whitelist orbit      289/300                  2.00        6.00   후보 1->8\n    A5 +free_moving rotate        289/300                  2.00        6.00   +free 1\n`--anchor_min_drift_u 0.30` 하나가 손실의 대부분이다. d184 의 `_수율` 주석은 '45.9% 통과'를 예상했고\n실측 46.0% 로 **예상대로 동작했다** — 틀린 것은 배선이 아니라 그 문턱을 코퍼스 전체에 건 결정이다.\n`--max_static_anchors 1` 은 `--max_anchors 1` 에서 `pick_main_anchors` 가 동적 우선이라 효과가 0이다\n(그래서 d184 의 `0` 은 무해했다). 여기서는 동적 anchor 가 아예 없는 씬을 위해 1 로 둔다.",
+
+  "_fallback이_d184에서_no_op였다": "`fit_hole_ladder.py:790-794` 는 τ 뱅크 행의 `plan_tier` 가 전부 0 이면\n`fallback_on=False` 로 떨어진다. `plan_tier` 를 싣는 것은 `sample_camera_bank.py --variant_pool full` 이다.\nd184 는 `tau` 블록이 없어 d179 를 물려받았고 d179 tau 에는 `--variant_pool full` 이 **없다**. 따라서\nd184 의 `--fallback_ladder --fallback_target 1` 은 처음부터 no-op 이었고, 씬당 시도가 문자 그대로\n**한 번**이었다. `clamped_low+tau_floor` 1,541행 / `approach_limited` 888행이 그 결과다.\n이 세대는 d185 와 같이 `tau` 에 `--variant_pool full` 을 명시한다 — 그래야 route 의 backfill 6개가\n층(1=non-track / 2=track / 3=free-moving)으로 구워져 fit 이 갈아끼울 수 있다.",
+
+  "_왜_예산만_1인가": "`--target_variants 1` 은 route 가 `target_count`/`object_budget` 을 1로 적게 하고,\nfit 의 `--fallback_target 1` 이 **쓸 만한 변이 1개가 모이면 중단**한다 (`fit_hole_ladder.py:868` 주석).\n즉 route 는 본슬롯 2 + backfill 6 + free 1 = 최대 9개를 제안하지만 **emit 되는 카메라는 1대**다.\n'후보를 늘리는 것'과 '카메라를 늘리는 것'은 다른 축이고, d184 는 둘을 같이 1로 묶어서 죽었다.",
+
+  "_비용": "τ 뱅크가 씬당 1행에서 최대 9행으로 는다 (d185 와 같은 규모). fit 은 1개 solved 에서 멈추므로\nfit 시간은 실패한 만큼만 는다. d185 실측 속도(4샤드 ~145편/h)를 상한으로 본다.",
+
+  "_track_문턱은_그대로": "사용자 지시 2026-09-11 \"dynamic 이 일정 이상 움직이는 경우만 tracking\" 은\n`--track_min_drift_u 0.05` 가 집행한다 (문턱을 넘는 anchor 의 `TRACK_KEEP_SLOTS` 에만 `track_` 이 붙는다).\nd184 가 그 지시를 **anchor 생존 문턱**(`--anchor_min_drift_u 0.30`)으로도 한 번 더 집행한 것이 과잉이었다.",
+
+  "_격리": "`route.out` = `preset_route_d187.json`, 세대 디렉토리 `bank_d187`/`hole_bank_d187`.",
+
+  "extends": "d179_dynpose100k_bank.json",
+  "generation": "d187",
+  "tau_bank_dir": "bank_d187",
+  "bank_dir": "hole_bank_d187",
+  "require_markers": [".graph_d182"],
+  "route": {
+    "out": "preset_route_d187.json",
+    "args": [
+      "--num_external", "0",
+      "--max_dynamic_anchors", "1", "--max_static_anchors", "1", "--max_anchors", "1",
+      "--min_anchor_sep", "2.0",
+      "--slot_plan", "grid2x2",
+      "--slot_pair_fill", "substitute",
+      "--free_moving", "rotate",
+      "--track_mode", "add",
+      "--track_min_drift_u", "0.05",
+      "--target_variants", "1",
+      "--skip_if_empty"
+    ]
+  },
+  "tau": {
+    "args": [
+      "--cloud_source", "memory",
+      "--tau_ladder", "0.10", "0.20", "0.35", "0.60", "1.00",
+      "--variant_pool", "full",
+      "--aim_keyframes", "6", "--keyframe_aim", "auto", "--keyframe_ease", "smooth_kf",
+      "--fixed_focal", "--deroll", "--no_preview", "--skip_on_empty", "--device", "cuda",
+      "--orbit_fixed_sweep", "--min_sweep_deg", "20", "--behind_src_frames", "49",
+      "--tau_ref", "follow",
+      "--track_dynamic_only", "--track_min_drift_u", "0.05",
+      "--trackings", "lock", "--preset_tracking",
+      "--behind_min_zcam", "0.02",
+      "--tau_denom", "S"
+    ]
+  },
+  "fit": {
+    "args": [
+      "--cloud_source", "memory",
+      "--hole_ladder", "0.20",
+      "--fallback_ladder", "--fallback_target", "1",
+      "--retry_status", "clamped_low",
+      "--retry_suspect", "aim_target_subject_lost", "hole_over_budget",
+      "motion_preset_no_motion", "static_start_collision",
+      "--suspect_hole", "0.35",
+      "--aim_keyframes", "6", "--keyframe_aim", "auto", "--keyframe_ease", "smooth_kf",
+      "--fixed_focal", "--deroll",
+      "--orbit_fixed_sweep", "--min_sweep_deg", "20", "--behind_src_frames", "49",
+      "--tau_ref", "follow", "--tracking", "lock", "--preset_tracking",
+      "--behind_min_zcam", "0.02", "--behind_clear_src_ratio", "0",
+      "--collision_time_match", "--collision_source", "depth",
+      "--area_timeline", "--composition",
+      "--composition_min_area", "0.004", "--composition_max_nodes", "3",
+      "--device", "cuda",
+      "--tau_denom", "S",
+      "--tau_knob_min", "0.005",
+      "--min_subject_visible", "0.6",
+      "--follow_keyframes", "6", "--follow_kf_interp", "cubic"
+    ]
+  }
+}

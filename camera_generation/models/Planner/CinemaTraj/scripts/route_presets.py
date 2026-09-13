@@ -513,6 +513,36 @@ def main(args):
             reasons["slot_whitelist"] = list(whitelist)
             reasons["slot_whitelist_dropped"] = [s for s, _ in slots if s not in whitelist]
             slots = [(s, p) for s, p in slots if s in whitelist]
+        # D188. 슬롯 **순서**를 video 해시로 회전한다. 예산이 1일 때 `plan_variants` 가 뽑는 건
+        # `pool[0]` 하나뿐인데, `route()` 의 슬롯 순서는 (recede, advance, lateral, rotate, arc,
+        # orbit, vertical, static) 로 고정이라 화이트리스트를 씌우면 **살아남은 것 중 가장 앞**이
+        # 코퍼스 전량에서 같은 슬롯이 된다. 400편 실측: `advance` 계열이 tier0 의 60.8%,
+        # `vertical` 은 0건 (grid2x2 + substitute 를 써도 keep_pair 안에서 다시 route 순서로
+        # 정렬되기 때문에 같은 쏠림이 남는다). 회전하면 4슬롯이 각 ~25% 로 갈린다.
+        # 회전 씨앗이 `node["id"]` 가 아니라 video 인 이유는 D166 과 같다 — `dyn_0` 같은 이름은
+        # 씬 안에서만 유일해서 코퍼스 전체가 한 슬롯으로 쏠린다.
+        if args.slot_rotate and slots:
+            off = stable_hash(args.video) % len(slots)
+            slots = slots[off:] + slots[:off]
+            reasons["slot_rotate"] = off
+        # D188 (사용자 지시 2026-09-13 "움직이는 dynamic anchor면 track+object centric 아니면
+        # object centric으로 나오도록 **fallback도 넣어서**"). `--track_mode replace` 는 슬롯을
+        # track 판으로 **갈아끼우기만** 해서 비-track 짝이 후보 풀에서 통째로 사라진다 —
+        # `sample_camera_bank.plan_variants` 의 pool 은 여기서 낸 slots+backfill 이 전부라,
+        # 그 상태로 `--fallback_ladder` 를 켜도 1층(비-track 조준)이 비어 있어 추종이 실패하면
+        # 다른 추종으로만 떨어진다 (같은 anchor 변위에 같은 벽 — D166 이 층 2를 1보다 뒤에 둔
+        # 바로 그 이유). `--track_pair` 는 갈아끼운 track 슬롯의 **평범한 짝을 backfill 에**
+        # 같이 실어 그 1층을 채운다. `variant_tier` 가 비-track look_at 을 1, track 을 2로
+        # 매기므로 사다리는 자동으로 [track(0) → 평범(1) → 남은 track(2) → free(3)] 이 된다.
+        # 정지 anchor 에는 애초에 `track_` 이 안 붙으므로 이 블록이 no-op 이고, 그 씬은 0층이
+        # 곧 object-centric 이다. 기본값 off = 옛 동작 비트 동일.
+        pair_backfill = []
+        if args.track_pair:
+            for s, p in slots:
+                plain = p[len("track_"):] if p.startswith("track_") else None
+                if plain and plain in PRESET_NAMES:
+                    pair_backfill.append((s, plain))
+            reasons["track_pair"] = [p for _, p in pair_backfill]
         backfill = []
         if grid:
             if keep_pair is None:
@@ -532,6 +562,12 @@ def main(args):
             reasons["grid_seed_pair"] = list(GRID_SLOT_PAIRS[stable_hash(args.video)
                                                              % len(GRID_SLOT_PAIRS)])
             reasons["slot_pair_fill"] = args.slot_pair_fill
+        # 평범한 짝은 **항상 backfill 뒤쪽**이다 (grid 를 안 쓰면 backfill 이 이것뿐). keep_pair
+        # 밖 슬롯(전부 track)보다 뒤에 두는 건 순서 때문이 아니라 — fit 은 `variant_tier` 로
+        # 다시 정렬한다 — `pool.index` 가 같은 층 안의 동점을 가를 때 쓰이기 때문이다.
+        backfill = backfill + [sp for sp in pair_backfill
+                               if sp[1] not in {p for _, p in backfill}
+                               and sp[1] not in {p for _, p in slots}]
         if args.external_shapes and args.num_external > 0:
             picked = pick_external(args.external_shapes, f"{args.video}/{node['id']}",
                                    args.num_external, {s for s, _ in slots})
@@ -620,9 +656,17 @@ def main(args):
     if args.emit == "args":
         # anchor 마다 preset 목록이 다르면 합집합만으론 격자가 부풀므로 JSON 경로를 같이 넘긴다.
         # `--free_moving` 만 켜도 그렇다 — 그 preset 이 합집합에 들어가면 anchor 전부에 걸린다.
-        per_anchor = grid or args.free_moving != "off"
+        # D188. `--slot_plan full` + `--target_variants N` 조합에서는 위 조건이 **둘 다 거짓**이라
+        # `--preset_route` 가 안 나갔다. 그러면 `sample_camera_bank` 의 `target_count` 가 0 이고
+        # (`:897` 은 그 JSON 에서만 읽는다), `plan_variants` 가 `if not target_count` 가지로
+        # 빠져 tiers 를 `{}` 로 돌려주며, 그 결과 `fit_hole_ladder` 의
+        # `fallback_on = ... and any(tier_of.values())` 가 False 가 된다 — **예산도 사다리도
+        # 통째로 무력화**된다. d188 파일럿 60편이 씬당 카메라 1대 대신 최대 9대를 냈고
+        # (solved 175행/58편) track 비중도 42.9% 로 주저앉은 게 이 경로다.
+        # `--emit_route` 가 그 경로를 연다. 기본 off = 옛 동작 비트 동일.
+        per_anchor = grid or args.free_moving != "off" or args.emit_route
         assert not per_anchor or args.out, \
-            "--slot_plan grid2x2 / --free_moving 은 --out 이 있어야 한다 (--preset_route 로 넘긴다)"
+            "--slot_plan grid2x2 / --free_moving / --emit_route 는 --out 이 있어야 한다 (--preset_route 로 넘긴다)"
         print(f"--nodes {' '.join(a['anchor_id'] for a in routed)} "
               f"--presets {' '.join(presets)}"
               + (f" --preset_route {args.out}" if per_anchor else ""))
@@ -725,6 +769,12 @@ def build_parser():
     # 붙였는데 뱅크가 그 문턱으로 버리면 그 슬롯은 통째로 사라진다 (grid2x2 에서 2칸 중 1칸).
     # 0 이면 옛 동작(`moving` 불리언만 본다).
     parser.add_argument("--track_min_drift_u", default=0.05, type=float)
+    # D188: track 슬롯의 **비-track 짝**을 backfill 에 같이 싣는다 (fallback 사다리 1층 채우기).
+    parser.add_argument("--track_pair", dest="track_pair", action="store_true", default=False)
+    parser.add_argument("--no_track_pair", dest="track_pair", action="store_false")
+    # D188: 슬롯 순서를 video 해시로 회전 (예산 1일 때 tier0 가 한 슬롯으로 쏠리는 것을 막는다).
+    parser.add_argument("--slot_rotate", dest="slot_rotate", action="store_true", default=False)
+    parser.add_argument("--no_slot_rotate", dest="slot_rotate", action="store_false")
     # D181 (사용자 지시 2026-09-11 "일정 이상 움직이는 dynamic target 있는 경우만"):
     # anchor **후보 자체**를 이동량으로 자른다. 0 = 끔(옛 동작). `--track_min_drift_u` 와
     # 다른 자리에 걸리는 이유는 `pick_anchors` docstring 에 있다. 이 문턱을 넘는 노드가 하나도
@@ -765,6 +815,10 @@ def build_parser():
     parser.add_argument("--emit", default="table", type=str,
                         choices=("table", "args", "presets", "nodes"))
     parser.add_argument("--out", default=None, type=str)
+    # D188: `--emit args` 가 `--preset_route <out>` 을 **항상** 붙인다 (기본은 grid2x2/free 일 때만).
+    # 예산(`--target_variants`)과 fallback 사다리는 그 JSON 을 통해서만 하류에 전달된다.
+    parser.add_argument("--emit_route", dest="emit_route", action="store_true", default=False)
+    parser.add_argument("--no_emit_route", dest="emit_route", action="store_false")
     # D184: anchor 가 0개(또는 화이트리스트 뒤 슬롯이 0개)면 assert 로 죽는 대신 **rc=3** 으로
     # 나간다. 기본 off = 옛 동작(assert). 전량 굽기에서만 켠다 — `--anchor_min_drift_u` 를
     # 코퍼스 중앙값으로 두면 절반 이상의 씬이 여기서 걸리는데, 크래시로 처리하면 `skipped.json`

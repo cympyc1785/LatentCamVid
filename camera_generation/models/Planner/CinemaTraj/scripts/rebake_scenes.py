@@ -83,13 +83,30 @@ def fan_out(work, name, argv_of_shard, shards, log_name):
 
 # ------------------------------------------------------------------ 격리
 
+def load_config(cfg_path):
+    """`run_bank.load_config` 과 같은 얕은 `extends` 병합. -> dict.
+
+    FIX (2026-09-13). 여기가 원래 `json_load` 하나였는데, 뱅크 config 대부분이
+    `"extends": "d179_dynpose100k_bank.json"` 으로 `output_root` 를 **부모에만** 두고 있다.
+    graph config(`d182_*`)는 `extends` 가 없어 단계 ①은 통과했고, ③-a 의 `d184_*` 에서
+    `KeyError: 'output_root'` 로 죽었다 — `set -e` 라 ③-b 까지 같이 멈췄다.
+    """
+    with open(cfg_path, encoding="utf-8") as fh:
+        cfg = json_load(fh)
+    parent = cfg.pop("extends", None)
+    if parent is None:
+        return cfg
+    base = load_config(path.join(path.dirname(cfg_path), parent))
+    base.update(cfg)
+    return base
+
+
 def quarantine(work, cfg_path, vids):
     """이 세대의 뱅크 산출물을 `<work>/quarantine/<gen>/<video>/` 로 **옮긴다**(안 지운다).
 
     -> (옮긴 씬 수, 원래 없던 씬 수)
     """
-    with open(cfg_path, encoding="utf-8") as fh:
-        cfg = json_load(fh)
+    cfg = load_config(cfg_path)
     out_root, gen = cfg["output_root"], cfg["generation"]
     dirs = [cfg["tau_bank_dir"], cfg["bank_dir"]]
     qroot = path.join(work, "quarantine", gen)
@@ -132,8 +149,7 @@ def stage_graph(args, vids):
 
 
 def stage_bank(args, vids, cfg_path):
-    with open(cfg_path, encoding="utf-8") as fh:
-        gen = json_load(fh)["generation"]
+    gen = load_config(cfg_path)["generation"]
     listing = path.join(args.work, "rebake_videos.txt")
     log_dir = path.join(args.work, f"bank_scene_logs_{gen}")
     makedirs(log_dir, exist_ok=True)
@@ -169,9 +185,7 @@ def main(args):
         bad["graph"] = stage_graph(args, vids)
     if args.stage in ("bank", "all"):
         for cfg_path in [c for c in args.bank_configs.split(",") if c]:
-            with open(cfg_path, encoding="utf-8") as fh:
-                gen = json_load(fh)["generation"]
-            bad[gen] = stage_bank(args, vids, cfg_path)
+            bad[load_config(cfg_path)["generation"]] = stage_bank(args, vids, cfg_path)
 
     log(args.work, "=== 요약 ===")
     for key in sorted(bad):

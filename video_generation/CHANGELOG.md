@@ -6,6 +6,38 @@
 
 ## [Unreleased]
 
+### Fixed
+- **`--pick_budget` 1순위 키를 `plan_tier` → **track 여부**로 (2026-09-13, D188 ③,
+  FIX-D188-d).** `plan_tier` 는 "track 이냐"가 아니라 **"라우터가 예산 안에 넣은 슬롯이냐"**다
+  (`sample_camera_bank.plan_variants:226` — 예산 안이면 무조건 0). 그래서 anchor 가 움직여도
+  그 슬롯이 평범 preset 이면 tier 0 을 받고, 정작 `track_*` 은 예비층(tier 2)에 앉는다.
+  tier 를 1순위로 두면 **track 이 "예비층에 있다"는 이유만으로 진다.**
+  · 실측(첫 20편): 뽑힌 카메라 15대 중 **11대(73.3%)가 `moving` anchor 인데 non-track**.
+    원인 3분할 — (a) track 행이 아예 없다 6편 (`track_ok` 의 `--track_min_drift_u` 가 걸러
+    정상), (b) track 행이 `retry_status` 로 전멸 1편 (fallback 정상), (c) **solved track 이
+    있는데 안 뽑혔다 4편 = 정렬 결함**. (c) 예: `00602d55` 가 tier1 `pull_out_arc_left`
+    (hole 0.415) 를 뽑고 tier2 `track_pull_out_arc_left`(hole **0.293**) 를 버렸다.
+  · 뱅크 82편 재투사(`tmp/d188/project_pick_keys.py`, 두 키를 같은 행에 둘 다 적용):
+    수율 **양쪽 다 68대 / 0대 14편으로 동일**, track **39.7% → 57.4%**,
+    hole mean **0.3516 → 0.3463** (median 0.3328 → 0.3238). 갈린 12편 중 8편 개선 / 4편 악화.
+    **어휘↔품질 맞교환이 아니라 tier 가 그냥 틀린 키였다** (앞선 tier-first 전환에서 hole 이
+    +0.01 나빠졌던 것도 같은 원인이었다).
+  · 정렬은 이제 **track ↑ → `plan_tier` ↑ → 등급 → `hole` ↑**. `track_ok()` 가
+    `--track_dynamic_only` + `--track_min_drift_u` 로 이미 걸러 track 행은 **충분히 움직이는
+    anchor 에만 존재**하므로 여기서 `moving` 을 다시 볼 필요가 없다 — track 행의 존재 자체가
+    "움직인다"의 증거고, 없으면 자동으로 object-centric 이 1순위가 되어 지시의 "아니면"
+    갈래도 성립한다.
+  · 뱅크 JSON `pick` 에 `track[]` 추가 — 뱅크만 보고 어휘가 맞는지 판정할 수 있어야 한다.
+    이 키의 유무가 곧 "옛 규칙으로 구운 뱅크"의 자기 서술적 판별자다.
+  · 검증: 수정 후 구워진 14편 중 `0143de60` 이 **tier 2 `track_pull_out_arc_right`** 를
+    뽑았다 — tier-first 가 막던 바로 그 경우다. 새 pick 의 track 비중 7/10.
+
+### Changed
+- **`audit_bank_status.py` 에 pick 수율 절 추가 (2026-09-13, D188).** `--pick_budget` 로 뽑힌
+  행(`picked` 열)의 씬당 대수 · tier 분포 · track 비중 · hole med/mean · preset 상위를 찍는다.
+  `status` 집계만으로는 "10k 목표 대비 몇 대인가"가 안 보인다. 분모는 변이 행이 아니라
+  **씬**이다 (예산이 씬당이므로). `picked` 열이 없는 옛 뱅크에서는 이 절이 통째로 안 찍힌다.
+
 ### Added
 - **`fit_hole_ladder.py --pick_budget` + `emit_bank.py --picked_only` — 씬당 카메라 수를
   **사다리와 분리해서** 정하는 손잡이 (2026-09-13, D188 ③).** `--fallback_target 1` 이

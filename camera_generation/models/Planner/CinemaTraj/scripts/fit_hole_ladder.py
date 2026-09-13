@@ -1280,9 +1280,7 @@ def main(args):
     #
     # 그래서 **탐색과 선택을 분리**한다. 사다리는 지금처럼 깨끗한(usable) 변이를 찾아 계속
     # 내려가고, 다 돌고 나서 여기서 씬당 `--pick_budget` 개를 고른다:
-    #     `plan_tier` 오름차순  →  등급(usable 먼저)  →  `hole_fraction` 오름차순
-    # tier 가 맨 앞이므로 "움직이면 track+object-centric, 아니면 object-centric" 이라는 어휘
-    # 우선순위가 유지되고, fallback 은 **위층에 status 통과 행이 아예 없을 때만** 내려간다.
+    #     track 먼저  →  `plan_tier` 오름차순  →  등급(usable 먼저)  →  `hole_fraction` 오름차순
     # 행은 **하나도 안 지운다** — `picked` 열만 단다 (뱅크는 재고 목록이라는 D39/D45 규칙).
     # `emit_bank.py --picked_only` 가 그 열을 소비한다. 기본값 0 = 열이 빈 칸, 예전 뱅크와 동일.
     if args.pick_budget:
@@ -1293,16 +1291,27 @@ def main(args):
             tags = set(str(row.get("suspect", "") or "").split("|")) - {""}
             grade = 1 if tags & set(retry_suspect) else 0
             hole = row.get("hole_fraction")
-            # **tier 가 grade 보다 먼저다.** 지시는 "움직이는 dynamic anchor 면 track+object-centric,
-            # **아니면** object-centric" 이므로 fallback 은 **위층이 비었을 때** 내려가야지 위층이
-            # suspect 태그를 달았다고 내려가면 안 된다. 초안은 grade 를 먼저 봤고 실측에서 바로
-            # 틀렸다 — 9ec42125 는 tier0 `dyn_0__track_pull_out_arc_right` 가 **solved** 인데
-            # `hole_over_budget`(0.3676 > 0.35) 하나 때문에 tier1 평범 짝에게 졌다. 그런데 그
-            # 태그는 `--hole_mode excess` 에서 잘못된 잣대다 (목표는 `hole_static + Δ0.20` 이고
-            # 그 예산은 `solved` 가 이미 집행했다) — **거짓 경보가 어휘 지시를 덮은 것이다.**
-            # grade 는 같은 층 안에서만 쓴다. 거기서는 `aim_target_subject_lost` 같은 진짜 경보가
-            # 깨끗한 행을 앞세우는 게 맞다. hole 은 마지막 동점 처리.
-            return (int(row.get("plan_tier", 0) or 0), grade,
+            # **`plan_tier` 가 아니라 track 여부가 1순위다.** 지시는 "움직이는 dynamic anchor 면
+            # track+object-centric, 아니면 object-centric" 인데 `plan_tier` 는 그 뜻이 아니다 —
+            # tier 0 은 "라우터가 예산 안에 넣은 슬롯"이고 (`sample_camera_bank.plan_variants`
+            # :226 이 예산 안이면 무조건 0 을 준다) 그 슬롯은 anchor 가 움직여도 평범 preset 일
+            # 수 있다. tier 를 1순위로 두면 track 은 예비층(tier 2)에 있다는 이유만으로 진다.
+            #
+            # 실측(뱅크 82편, `tmp/d188/project_pick_keys.py`): tier 먼저는 track 39.7%,
+            # track 먼저는 57.4%. 수율은 **양쪽 다 68대 / 0대 14편으로 동일**하고 hole 은 오히려
+            # 좋아진다 (mean 0.3516 -> 0.3463). 갈린 12편 중 8편 개선 / 4편 악화. 즉 이건
+            # 어휘↔품질 맞교환이 아니라 tier 가 그냥 틀린 키였던 것이다.
+            #
+            # track 행은 `track_ok()` 가 `--track_dynamic_only` + `--track_min_drift_u` 로 이미
+            # 걸러 **충분히 움직이는 anchor 에만 존재**한다. 그래서 여기서 `moving` 을 다시 볼
+            # 필요가 없다 — track 행이 있다는 것 자체가 "움직인다"의 증거다. 없으면 자동으로
+            # object-centric 이 1순위가 되므로 지시의 "아니면" 갈래도 그대로 성립한다.
+            #
+            # tier 는 2순위로 남긴다 (같은 track 끼리는 라우터가 고른 슬롯이 먼저). grade 는 그
+            # 다음 — 거짓 경보(`hole_over_budget`)가 어휘를 덮지 않게 하려던 fc56306 의 의도는
+            # 유지된다. hole 은 마지막 동점 처리.
+            return (0 if row["preset"].startswith("track_") else 1,
+                    int(row.get("plan_tier", 0) or 0), grade,
                     float(hole) if isinstance(hole, (int, float)) else float("inf"))
         ok = [r for r in rows
               if not any(str(r["status"]).startswith(t) for t in retry_status)]
@@ -1364,6 +1373,9 @@ def main(args):
             "pick": {"budget": int(args.pick_budget),
                      "picked": [r["variant_id"] for r in picked_rows],
                      "tiers": [int(r.get("plan_tier", 0) or 0) for r in picked_rows],
+                     # `track` 이 1순위 키다 (§pick_key). false 인데 이 anchor 에 track 행이
+                     # 있었다면 그건 전부 `retry_status` 로 탈락했다는 뜻 = fallback 정상 작동.
+                     "track": [r["preset"].startswith("track_") for r in picked_rows],
                      "grade": ["usable" if not (set(str(r.get("suspect", "") or "").split("|"))
                                                 - {""}) & set(retry_suspect) else "best_effort"
                                for r in picked_rows]},

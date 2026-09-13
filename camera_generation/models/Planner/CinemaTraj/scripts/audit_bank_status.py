@@ -95,10 +95,27 @@ def main():
     relax_binding_ct = Counter()
     per_video = defaultdict(Counter)
     relax_rows, all_rows = [], []
+    # D188 `--pick`. 씬당 뽑힌 카메라(`picked` 열)를 집계한다. 수율(10k 목표 대비 몇 대인가)과
+    # 어휘 비중(track 이 몇 %인가)이 여기서 나온다 — `status` 집계만으로는 안 보인다.
+    pick_per_video, pick_tier_ct, pick_preset_ct = Counter(), Counter(), Counter()
+    pick_holes, pick_track, pick_rows = [], 0, 0
 
     for p in paths:
         video = p.split(path.sep)[-3]
         for row in read_bank(p):
+            if row.get("picked"):
+                pick_rows += 1
+                pick_per_video[video] += 1
+                pick_tier_ct[row.get("plan_tier", "") or "(blank)"] += 1
+                vid = row.get("variant_id", "")
+                pick_preset_ct[row.get("preset", "") or "(blank)"] += 1
+                # 어휘 판정은 preset 이름의 `track_` 접두사 (variant_id 는 anchor 접두사가 붙는다).
+                if "track_" in vid or (row.get("preset", "")).startswith("track_"):
+                    pick_track += 1
+                try:
+                    pick_holes.append(float(row.get("hole_fraction", "")))
+                except (TypeError, ValueError):
+                    pass
             st = row.get("status", "")
             bd = row.get("binding", "") or "(blank)"
             status_ct[st] += 1
@@ -126,6 +143,28 @@ def main():
     print("\n== binding 분포 (첫 발화 게이트)")
     for bd, n in binding_ct.most_common(args.top):
         print(f"  {bd:<28}{n:>7}  {100.0 * n / total:5.1f}%")
+
+    if pick_rows:
+        # 수율의 분모는 **변이 행이 아니라 씬**이다 (`--pick_budget` 은 씬당 예산이므로).
+        zero = len(paths) - len(pick_per_video)
+        holes = sorted(pick_holes)
+        med = holes[len(holes) // 2] if holes else float("nan")
+        mean = sum(holes) / len(holes) if holes else float("nan")
+        print(f"\n== pick 수율 (`picked` 열)")
+        print(f"  {'카메라':<28}{pick_rows:>7}  / 씬 {len(paths)}  "
+              f"= {100.0 * pick_rows / len(paths):5.1f}%")
+        print(f"  {'0대로 끝난 씬':<28}{zero:>7}  {100.0 * zero / len(paths):5.1f}%")
+        print(f"  {'track 어휘':<28}{pick_track:>7}  {100.0 * pick_track / pick_rows:5.1f}%")
+        print(f"  {'hole  med / mean':<28}{med:>7.4f}  / {mean:.4f}")
+        over = Counter(pick_per_video.values())
+        for k, n in sorted(over.items()):
+            print(f"  {f'씬당 {k}대':<28}{n:>7}")
+        print("  -- plan_tier (0=routed track, 1=평범 짝, 2=나머지 track)")
+        for t, n in sorted(pick_tier_ct.items()):
+            print(f"  {'  tier ' + str(t):<28}{n:>7}  {100.0 * n / pick_rows:5.1f}%")
+        print("  -- preset 상위")
+        for pr, n in pick_preset_ct.most_common(12):
+            print(f"  {'  ' + pr:<28}{n:>7}  {100.0 * n / pick_rows:5.1f}%")
 
     nrelax = len(relax_rows)
     print(f"\n== 완화 후보 ({RELAX_PREFIX}*) {nrelax}행  {100.0 * nrelax / total:5.1f}%")

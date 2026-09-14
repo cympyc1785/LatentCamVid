@@ -346,6 +346,9 @@ class CamDataset(torch.utils.data.Dataset):
         self._peav_video_mem, self._peav_text = {}, None
         self.peav_video_cache_dir = getattr(cfg, 'peav_video_cache_dir', None) or None
         self.peav_text_cache = getattr(cfg, 'peav_text_cache', None) or None
+        # [new 2026-09-14, D194] 캐시가 마지막 층(`emb`) 옆에 중간 층(`emb_l{N}`) 도 들고 있을 때
+        # 어느 쪽을 학습에 먹일지. null(기본)이면 `emb` — 예전 arm 과 글자 그대로 같다.
+        self.peav_layer = getattr(cfg, 'peav_layer', None)
         if self.peav_video_cache_dir or self.peav_text_cache:
             self._preload_peav()
 
@@ -424,6 +427,12 @@ class CamDataset(torch.utils.data.Dataset):
         scope, scope_note = self._peav_scope()
         if scope_note:
             print(f"[peav]{scope_note}")
+        # 층 선택은 **읽는 키 하나**로 끝난다 — 캐시가 두 층을 같은 파일에 들고 있기 때문이다.
+        # 안 쓰는 층은 바로 버린다(fork 로 뜨는 worker 가 죽은 4.5 GB 를 같이 지고 가지 않게).
+        ekey = 'emb' if self.peav_layer is None else f'emb_l{int(self.peav_layer)}'
+        if self.peav_layer is not None:
+            print(f"[peav] layer={self.peav_layer} -> 캐시 키 '{ekey}' 를 읽는다 "
+                  f"(ln_f 이전 raw 출력. proj 앞 LayerNorm `peav_in_ln` 이 켜져 있어야 한다)")
         if self.peav_video_cache_dir:
             keys = sorted({self.geo_raw_key(s[4]) for s in scope})
             miss = []
@@ -432,8 +441,11 @@ class CamDataset(torch.utils.data.Dataset):
                 if not osp.exists(p):
                     miss.append(k)
                     continue
-                self._peav_video_mem[k] = torch.load(
-                    p, map_location='cpu', weights_only=False)['emb']
+                d = torch.load(p, map_location='cpu', weights_only=False)
+                assert ekey in d, (f"[peav] video 캐시 {p} 에 '{ekey}' 가 없다 — "
+                                   f"`--extra_layer {self.peav_layer}` 로 다시 구울 것 "
+                                   f"(있는 키: {sorted(d)})")
+                self._peav_video_mem[k] = d[ekey]
             nb = sum(v.numel() * v.element_size() for v in self._peav_video_mem.values())
             print(f"[peav] video {len(self._peav_video_mem)}/{len(keys)} scenes "
                   f"({nb / 1e6:.1f} MB) from {self.peav_video_cache_dir}")
@@ -443,6 +455,12 @@ class CamDataset(torch.utils.data.Dataset):
                     f"cache_peav_embeddings.py 를 먼저 돌릴 것 — 부분 캐시는 배치를 깨뜨린다")
         if self.peav_text_cache:
             c = torch.load(self.peav_text_cache, map_location='cpu', weights_only=False)
+            assert ekey in c, (f"[peav] text 캐시에 '{ekey}' 가 없다 — "
+                               f"`--extra_layer {self.peav_layer}` 로 다시 구울 것 "
+                               f"(있는 키: {sorted(k for k in c if k.startswith('emb'))})")
+            # 하류(`__getitem__`)는 `emb` 만 본다. 여기서 고른 층을 그 자리에 앉히고 나머지 층은
+            # 버려서, 층 선택이 이 한 줄 밖으로 새지 않게 한다.
+            c = {**{k: v for k, v in c.items() if not k.startswith('emb_l')}, 'emb': c[ekey]}
             self._peav_text = c
             miss = [s[4] for s in scope if s[4] not in c['by_name']]
             print(f"[peav] text {c['emb'].shape[0]} distinct captions "

@@ -17,6 +17,24 @@
   그대로라 안 주면 예전 코퍼스와 비트 동일하다.
 
 ### Added
+- **molmo2 캐시에 중간층(`--extra_layer`) + 샤딩(`--num_shards/--shard_id/--merge_shards`)
+  (2026-09-14, D194 사용자 지시).** 마지막 층은 `lm_head` 직전이라 다음 토큰 예측에 필요한 것만
+  남기는 쪽으로 이미 기울어 있다 — 카메라 궤적에 쓸모 있는 게 그 압축 전인지 후인지는 **둘 다
+  구워 놓고 학습으로 갈라야** 안다. 그래서 `emb`(= `ln_f` 이후) 옆에 `emb_l{N}`(= 블록 N 의 raw
+  출력, `ln_f` **이전**) 을 같은 파일에 같이 저장한다. 두 번 굽지 않으려는 것이다. 층 하나를
+  붙잡는 데 `output_hidden_states=True` 를 안 쓴 이유는 그러면 37개 층을 전부 들고 있게 돼
+  tail 배치(B=8, ~4.5k tok)에서 그것만 6.6 GB 이기 때문 — `blocks[N]` 에 forward hook 하나만
+  건다. 디코더 블록은 `model.model.transformer.blocks` 다 (바깥 `model.model` 은 vision backbone
+  까지 든 껍데기라 `blocks` 가 없다 — 첫 판이 여기서 죽었다). 샤딩은 씬을 `i % n` 으로 갈라
+  GPU 여러 장에 흩는다. video 는 씬당 1파일이라 충돌이 없고, text 는 전체 1파일이라
+  `<text_out>.shard{i}of{n}` 으로 떨군 뒤 `--merge_shards`(GPU 불필요) 가 합치면서 **전역
+  인덱스를 새로 매기고** `by_name` 을 다시 만든다 (샤드의 `pidx` 는 샤드 안에서만 유효하다).
+  `--extra_layer` 없고 `--num_shards 1` 이면 저장물은 D124/D191 과 **비트 동일**하다.
+- **학습에서 어느 층을 먹일지 고르는 `peav_layer` (2026-09-14).** null(기본)이면 `emb` 라
+  예전 arm 과 비트 동일하고, 숫자 N 이면 `emb_l{N}` 을 읽어 `emb` 자리에 앉힌다 — 층 선택이
+  `dataset_dl3dv._preload_peav` 의 키 한 줄 밖으로 안 샌다. 안 쓰는 층은 바로 버린다 (fork 로
+  뜨는 DataLoader worker 가 죽은 4.5 GB 를 같이 지고 가지 않게). 층마다 스케일이 크게 달라
+  (D194 실측 |x| p50: 마지막 1.076 / layer 21 0.519) `peav_in_ln: true` 가 전제다.
 - **probe frustum/gizmo 따로 끄기 + 색 지정 (2026-09-14).** 자리를 정하고 나면 gizmo 화살표가
   프러스텀을 가려서 "이 카메라가 뭘 보나"를 확인할 수가 없는데, 프러스텀이 gizmo 의 **자식**이라
   부모를 숨기면 같이 사라졌다. 프러스텀을 `/probe{i}/cam` → `/probe{i}_cam` **형제 노드**로 떼고

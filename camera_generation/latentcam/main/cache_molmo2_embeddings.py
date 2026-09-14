@@ -30,14 +30,31 @@ stage 전에 video·text attention 이 끝난" 지점.
 캡션 배치는 그 prefix 를 expand 해서 `inputs_embeds` 로만 넣는다 (ViT 재실행 0회).
 `lm_head` 도 안 태운다 — vocab 151,936 x 4,345 위치는 모델 본체보다 FLOP 이 크다.
 
+중간층도 같이 굽는다 (`--extra_layer`, D194 사용자 지시 "layer 0~35에서 layer 21도"):
+  마지막 층은 `lm_head` 직전이라 **다음 토큰 예측에 필요한 것만 남기는** 쪽으로 이미 기울어
+  있다. 중간층은 그 압축 전이라 시각·공간 정보가 더 남아 있다는 게 VLM probing 의 통설이고,
+  어느 쪽이 카메라 궤적에 쓸모 있는지는 **둘 다 구워 놓고 학습으로 갈라야** 안다. 그래서
+  기본 `emb` 옆에 `emb_l{N}` 을 같이 저장한다 — 두 번 굽지 않으려는 것이다.
+  주의: `emb` 는 `ln_f` **이후**고 `emb_l{N}` 은 블록 N 의 raw 출력(ln_f 이전)이다. 층마다
+  스케일이 크게 다르므로 하류는 `peav_in_ln: true`(proj 앞 LayerNorm) 를 켠 채 써야 한다.
+  층 번호는 `blocks[N]` 의 출력 = 사용자가 말한 0~35 인덱스와 같다.
+  `--extra_layer` 를 안 주면 저장물은 D124/D191 과 **비트 동일**하다.
+
+샤딩 (`--num_shards/--shard_id`): 씬을 `i % num_shards` 로 갈라 GPU 여러 장에 흩는다.
+  video 는 씬당 1파일이라 충돌이 없고, text 는 전체 1파일이라 샤드마다
+  `<text_out>.shard{i}of{n}` 으로 떨어뜨린 뒤 `--merge_shards` 로 합친다 (GPU 불필요).
+
 사용 예시:
   python main/cache_molmo2_embeddings.py --gpu 2 --verify --limit_scenes 1   # 스모크
   python main/cache_molmo2_embeddings.py --gpu 2                             # 전량
   python main/cache_molmo2_embeddings.py --gpu 3 --root <d189> --seg_prefix dynpose \
       --text_override_json <tmp>/molmo2_text_track.json                      # D191 Track {target}
+  python main/cache_molmo2_embeddings.py --gpu 6 --root <d194> --seg_prefix dynpose \
+      --extra_layer 21 --num_shards 3 --shard_id 0 ...                       # D194 샤드
+  python main/cache_molmo2_embeddings.py --merge_shards --num_shards 3 ...   # 합치기
 """
 
-from argparse import ArgumentParser
+from argparse import ArgumentParser, Namespace
 from os import path as osp, makedirs, environ
 import json
 import sys
@@ -111,9 +128,39 @@ def split_prefix(proc, batch, caption):
 
 # ------------------------------------------------------------------ forward
 
+class LayerTap:
+    """블록 하나의 출력만 붙잡는 forward hook.
+
+    `output_hidden_states=True` 로도 되지만 그러면 37개 층을 전부 들고 있게 된다 —
+    tail 배치(B=8, ~4.5k 토큰)에서 그것만 6.6 GB 라 층 하나 쓰자고 낼 비용이 아니다.
+
+    디코더 블록은 `Molmo2Model.transformer`(= `Molmo2TextModel`) 아래에 있다 — `core` 로 넘어오는
+    `model.model` 은 vision backbone 까지 들고 있는 바깥 껍데기라 `blocks` 가 없다.
+    `blocks` 는 `config.num_hidden_layers` 보다 길 수 있어(:1043 이 앞에서 잘라 쓴다) 범위 검사는
+    **실제로 도는 층 수**로 한다. `blocks[N]` 의 출력 = 사용자가 말한 layer N (0~35) 이다.
+    """
+
+    def __init__(self, core, layer):
+        txt = getattr(core, 'transformer', core)
+        assert hasattr(txt, 'blocks'), 'blocks 가 없다 — modeling_molmo2 구조가 바뀌었다'
+        n = int(getattr(txt.config, 'num_hidden_layers', len(txt.blocks)))
+        assert 0 <= layer < n, f'layer {layer} 가 0~{n - 1} 밖이다'
+        self.h = None
+        self._handle = txt.blocks[layer].register_forward_hook(self._grab)
+
+    def _grab(self, _mod, _inp, out):
+        self.h = out[0] if isinstance(out, tuple) else out
+
+    def close(self):
+        self._handle.remove()
+
+
 @torch.inference_mode()
-def scene_prefix(model, batch, prefix_ids, device, dtype):
-    """씬당 1회: ViT 를 태워 prefix 의 `inputs_embeds` 와 patch 위치 hidden state 를 얻는다."""
+def scene_prefix(model, batch, prefix_ids, device, dtype, tap=None):
+    """씬당 1회: ViT 를 태워 prefix 의 `inputs_embeds` 와 patch 위치 hidden state 를 얻는다.
+
+    `tap` 을 주면 (마지막 층, 중간 층) 두 개를 돌려준다. 중간 층은 `ln_f` 이전 값이다.
+    """
     core = model.model
     images, pooling = core.merge_visual_inputs(
         input_ids=prefix_ids[None].to(device),
@@ -125,12 +172,16 @@ def scene_prefix(model, batch, prefix_ids, device, dtype):
     out = core(inputs_embeds=emb,
                attention_mask=torch.ones(1, emb.shape[1], dtype=torch.long, device=device),
                use_cache=False)
-    return emb, out.last_hidden_state[0]
+    extra = None
+    if tap is not None:
+        assert tap.h is not None, 'LayerTap 이 안 걸렸다 — hook 대상 블록이 안 불렸다'
+        extra = tap.h[0]
+    return emb, out.last_hidden_state[0], extra
 
 
 @torch.inference_mode()
-def tail_hidden(model, prefix_emb, tails, text_len, device):
-    """캡션 배치 -> (B, text_len, 2560) hidden + (B, text_len) mask.
+def tail_hidden(model, prefix_emb, tails, text_len, device, tap=None):
+    """캡션 배치 -> (B, text_len, 2560) hidden + (B, text_len) mask (+ 중간층 hidden).
 
     prefix 는 expand 로 공유하고 ViT 를 다시 안 돈다. **right padding** 이라 causal attn 상
     꼬리 위치는 pad 를 못 본다 (left padding 이면 position 이 밀려 틀린다)."""
@@ -144,11 +195,15 @@ def tail_hidden(model, prefix_emb, tails, text_len, device):
     emb = torch.cat([prefix_emb.expand(B, -1, -1), tail_emb], 1)
     am = torch.cat([torch.ones(B, P, dtype=torch.long), msk], 1).to(device)
     h = core(inputs_embeds=emb, attention_mask=am, use_cache=False).last_hidden_state[:, P:]
-    out = torch.zeros(B, text_len, h.shape[-1], dtype=torch.float16)
-    out[:, :L] = h.float().half().cpu()
     om = torch.zeros(B, text_len, dtype=torch.bool)
     om[:, :L] = msk.bool()
-    return out, om
+
+    def pad(x):
+        o = torch.zeros(B, text_len, x.shape[-1], dtype=torch.float16)
+        o[:, :L] = x.float().half().cpu()
+        return o
+
+    return pad(h), om, (pad(tap.h[:, P:]) if tap is not None else None)
 
 
 def pool_video(hid, patch_mask, n_frames, side, pool):
@@ -160,6 +215,76 @@ def pool_video(hid, patch_mask, n_frames, side, pool):
     v = v.view(n_frames, side, side, -1).permute(0, 3, 1, 2).float()
     v = torch.nn.functional.adaptive_avg_pool2d(v, (pool, pool))
     return v.permute(0, 2, 3, 1).reshape(n_frames * pool * pool, -1)
+
+
+# ------------------------------------------------------------------ 샤드
+
+def shard_text_path(args):
+    """샤드면 `<text_out>.shard{i}of{n}`, 아니면 `<text_out>` 그대로."""
+    if args.num_shards <= 1:
+        return args.text_out
+    base, ext = osp.splitext(args.text_out)
+    return f'{base}.shard{args.shard_id}of{args.num_shards}{ext}'
+
+
+def merge_shards(args):
+    """샤드 text 파일들 -> 전역 `text.pt` 한 개. GPU 를 안 쓴다.
+
+    각 샤드의 `pidx` 는 그 샤드 안에서만 유효하므로, pairs 를 합치면서 **전역 인덱스를 새로
+    매기고** `by_name` 은 여기서 `collect` 로 다시 만든다 (샤드는 자기 씬만 알기 때문).
+    """
+    parts, offset, pair_idx = [], 0, {}
+    embs, masks, extras, texts = [], [], [], []
+    extra_key = None
+    for sid in range(args.num_shards):
+        p = shard_text_path(Namespace(**{**vars(args), 'shard_id': sid}))
+        assert osp.isfile(p), f'샤드 파일이 없다: {p}'
+        d = torch.load(p, map_location='cpu')
+        assert d.get('shard', [None, None])[1] == args.num_shards, f'{p}: num_shards 불일치'
+        for i, t in enumerate(d['text']):
+            assert t not in pair_idx, f'샤드 {sid} 에 중복 pair: {t!r} — 씬 분할이 겹쳤다'
+            pair_idx[t] = offset + i
+        offset += len(d['text'])
+        texts += d['text']
+        embs.append(d['emb'])
+        masks.append(d['mask'])
+        xk = [k for k in d if k.startswith('emb_l')]
+        if xk:
+            assert extra_key in (None, xk[0]), f'{p}: 중간층 키가 샤드마다 다르다 {xk[0]}'
+            extra_key = xk[0]
+            extras.append(d[xk[0]])
+        parts.append((p, len(d['text']), d))
+
+    ref = parts[0][2]
+    items = collect(args.root, args.splits.split(','), args.seg_prefix)
+    if args.text_override_json:
+        ov = json.load(open(args.text_override_json))
+        for it in items:
+            it['concise'] = ov[it['data_name']].strip()
+    by_name = {}
+    for it in items:
+        key = f"{it['scene_key']}\t{it['concise']}"
+        assert key in pair_idx, f"{it['data_name']}: 어느 샤드에도 없다 ({key!r})"
+        by_name[it['data_name']] = pair_idx[key]
+
+    out = {'by_name': by_name, 'emb': torch.cat(embs), 'mask': torch.cat(masks),
+           'text': texts, 'template': ref['template'], 'text_len': ref['text_len'],
+           'text_override_json': ref['text_override_json'],
+           'extra_layer': ref.get('extra_layer'), 'probe': ref['probe']}
+    if extras:
+        assert len(extras) == args.num_shards, '중간층이 일부 샤드에만 있다 — 재굽기 필요'
+        out[extra_key] = torch.cat(extras)
+    makedirs(osp.dirname(args.text_out), exist_ok=True)
+    torch.save(out, args.text_out)
+
+    print(f'{"what":14s} {"count":>8s}')
+    print('-' * 30)
+    for p, n, _ in parts:
+        print(f'{osp.basename(p)[-18:]:14s} {n:8d}')
+    print(f'{"pairs":14s} {len(texts):8d}')
+    print(f'{"by_name":14s} {len(by_name):8d}')
+    print(f'{"extra":14s} {extra_key or "(없음)":>8s}')
+    print(f'\n-> {args.text_out}')
 
 
 # ------------------------------------------------------------------ main
@@ -197,6 +322,10 @@ def main(args):
         assert prev[1] == it['frame_idx'], (
             f"{it['scene_key']}: frame_idx 가 세그먼트마다 다르다 — 씬 단위 캐시 불가")
     keys = sorted(scenes)[:args.limit_scenes] if args.limit_scenes else sorted(scenes)
+    if args.num_shards > 1:
+        # 인터리브(i % n). 연속 블록으로 자르면 chunk 마다 씬 수가 달라 샤드 부하가 기운다.
+        keys = [k for i, k in enumerate(keys) if i % args.num_shards == args.shard_id]
+        print(f'[shard] {args.shard_id}/{args.num_shards}  씬 {len(keys)}', flush=True)
     # dedup 키가 **(scene_key, caption)** 인 이유는 모듈 docstring 참조.
     pairs = sorted({(it['scene_key'], it['concise']) for it in items if it['scene_key'] in set(keys)})
     pidx = {p: i for i, p in enumerate(pairs)}
@@ -216,8 +345,16 @@ def main(args):
           f'max {lens[-1]}  -> text_len {L}', flush=True)
 
     makedirs(args.video_out, exist_ok=True)
-    embs = torch.zeros(len(pairs), L, model.config.text_config.hidden_size, dtype=torch.float16)
+    D = model.config.text_config.hidden_size
+    embs = torch.zeros(len(pairs), L, D, dtype=torch.float16)
     masks = torch.zeros(len(pairs), L, dtype=torch.bool)
+    tap = None
+    embs_x = None
+    if args.extra_layer is not None:
+        tap = LayerTap(model.model, args.extra_layer)
+        embs_x = torch.zeros(len(pairs), L, D, dtype=torch.float16)
+        print(f'[layer] 마지막(ln_f 이후) + blocks[{args.extra_layer}] raw 출력, 둘 다 저장',
+              flush=True)
     prefix_ref, side, ndone = None, None, 0
 
     for n, sk in enumerate(keys):
@@ -238,20 +375,28 @@ def main(args):
         # 씬이 달라도 프레임 수·fps 가 같으면 prefix 토큰열은 글자 그대로 같아야 한다.
         assert torch.equal(prefix_ids, prefix_ref), f'{sk}: prefix 토큰열이 다르다'
 
-        prefix_emb, hid = scene_prefix(model, batch, prefix_ids, device, dtype)
+        prefix_emb, hid, hid_x = scene_prefix(model, batch, prefix_ids, device, dtype, tap)
         vp = osp.join(args.video_out, f'{sk}.pt')
         if not (args.skip_done and osp.exists(vp)):
-            v = pool_video(hid.float(), (prefix_ids == PATCH_ID).to(device),
-                           int(video.shape[0]), side, args.video_pool)
-            torch.save({'emb': v.half().cpu(), 'frames': int(video.shape[0])}, vp)
+            pmask = (prefix_ids == PATCH_ID).to(device)
+            payload = {'emb': pool_video(hid.float(), pmask, int(video.shape[0]), side,
+                                         args.video_pool).half().cpu(),
+                       'frames': int(video.shape[0])}
+            if hid_x is not None:
+                payload[f'emb_l{args.extra_layer}'] = pool_video(
+                    hid_x.float(), pmask, int(video.shape[0]), side,
+                    args.video_pool).half().cpu()
+            torch.save(payload, vp)
 
         for i in range(0, len(caps), args.bs):
             cb = caps[i:i + args.bs]
-            h, m = tail_hidden(model, prefix_emb, [tails_all[c] for c in cb], L, device)
+            h, m, hx = tail_hidden(model, prefix_emb, [tails_all[c] for c in cb], L, device, tap)
             for j, c in enumerate(cb):
                 embs[pidx[(sk, c)]], masks[pidx[(sk, c)]] = h[j], m[j]
+                if hx is not None:
+                    embs_x[pidx[(sk, c)]] = hx[j]
             ndone += len(cb)
-        del prefix_emb, hid
+        del prefix_emb, hid, hid_x
         torch.cuda.empty_cache()
         print(f'  [{n + 1}/{len(keys)}] {sk}  captions {len(caps)}  '
               f'({ndone}/{len(pairs)})  {time.time() - t0:.0f}s', flush=True)
@@ -259,22 +404,34 @@ def main(args):
         if args.verify and n == 0:
             verify(model, proc, video, caps, args, prefix_ids, embs, masks, pidx, sk, device, dtype)
 
+    if tap is not None:
+        tap.close()
+
+    text_path = shard_text_path(args)
     if not args.limit_scenes:
-        makedirs(osp.dirname(args.text_out), exist_ok=True)
-        torch.save({'by_name': {it['data_name']: pidx[(it['scene_key'], it['concise'])]
-                                for it in items},
-                    'emb': embs, 'mask': masks,
-                    'text': [f'{sk}\t{c}' for sk, c in pairs],
-                    'template': ('molmo2_override+probe' if args.text_override_json
-                                 else 'molmo2_concise+probe'), 'text_len': L,
-                    'text_override_json': args.text_override_json,
-                    'probe': PROBE}, args.text_out)
+        makedirs(osp.dirname(text_path), exist_ok=True)
+        payload = {'emb': embs, 'mask': masks,
+                   'text': [f'{sk}\t{c}' for sk, c in pairs],
+                   'template': ('molmo2_override+probe' if args.text_override_json
+                                else 'molmo2_concise+probe'), 'text_len': L,
+                   'text_override_json': args.text_override_json,
+                   'extra_layer': args.extra_layer, 'probe': PROBE}
+        if embs_x is not None:
+            payload[f'emb_l{args.extra_layer}'] = embs_x
+        if args.num_shards > 1:
+            # 샤드는 `by_name` 을 못 만든다 — pidx 가 샤드 안에서만 유효하다. 전역 인덱스는
+            # `--merge_shards` 가 pairs 를 합치면서 새로 매긴다.
+            payload['shard'] = [args.shard_id, args.num_shards]
+        else:
+            payload['by_name'] = {it['data_name']: pidx[(it['scene_key'], it['concise'])]
+                                  for it in items}
+        torch.save(payload, text_path)
 
     print()
     print(f'{"what":14s} {"count":>8s}  note')
     print('-' * 62)
     print(f'{"scenes":14s} {len(keys):8d}  video {args.video_out}')
-    print(f'{"pairs":14s} {len(pairs):8d}  text  {args.text_out if not args.limit_scenes else "(skipped)"}')
+    print(f'{"pairs":14s} {len(pairs):8d}  text  {text_path if not args.limit_scenes else "(skipped)"}')
     print(f'{"video tok":14s} {49 * args.video_pool ** 2:8d}  + text {L} = '
           f'{49 * args.video_pool ** 2 + L}  (da3 geo = 3456)')
     print(f'{"text emb":14s} {embs.numel() * 2 / 1e9:8.2f}  GB fp16')
@@ -334,4 +491,15 @@ if __name__ == '__main__':
     p.add_argument('--skip_done', dest='skip_done', action='store_true', default=True)
     p.add_argument('--no_skip_done', dest='skip_done', action='store_false')
     p.add_argument('--gpu', default='2')
-    main(p.parse_args())
+    # D194: 마지막 층 옆에 블록 N(0~35) 의 raw 출력도 같이 저장한다. None 이면 D124 와 비트 동일.
+    p.add_argument('--extra_layer', type=int, default=None)
+    p.add_argument('--num_shards', type=int, default=1)               # 씬을 i%n 으로 분할
+    p.add_argument('--shard_id', type=int, default=0)
+    p.add_argument('--merge_shards', action='store_true')             # 샤드 text 합치기 (GPU 불필요)
+    _a = p.parse_args()
+    assert 0 <= _a.shard_id < _a.num_shards, f'shard_id {_a.shard_id} / num_shards {_a.num_shards}'
+    if _a.merge_shards:
+        assert _a.num_shards > 1, '--merge_shards 는 --num_shards > 1 일 때만 뜻이 있다'
+        merge_shards(_a)
+    else:
+        main(_a)

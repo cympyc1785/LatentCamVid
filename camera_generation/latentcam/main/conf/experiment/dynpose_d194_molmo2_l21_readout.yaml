@@ -1,0 +1,49 @@
+# @package _global_
+# D195-A — `dynpose_d194_molmo2_l21.yaml` 과 **모델 배선 한 군데만** 다른 사본.
+# 데이터축(코퍼스·holdout·캡션·캐시·층 21)은 전부 그대로다.
+#
+# ═══ 무엇이 바뀌나 ═══════════════════════════════════════════════════════════════════════
+# D194 까지: molmo2 캐시 토큰(video 3136 + text 128 = 3264)이 LayerNorm + Linear 하나만 거쳐
+#            **곧장** video CA 의 key/value 가 됐다. frozen encoder 의 좌표계를 DiT 가 층마다
+#            직접 읽는 구조라, "어느 물체가 subject 이고 그게 어디로 가는가"를 중간에서
+#            정리해 주는 자리가 없었다.
+# 여기서는: 49개 learnable query 가 [self-attn(질의끼리) → cross-attn(캐시 토큰) → MLP] 를
+#            2번 돌아 요약을 만들고, **그 49 토큰이 video CA 의 key/value 를 대신한다**.
+#            (models/camera_diffusion_model_latent.py §PeavReadout)
+#
+# ═══ 보조 손실 (사용자 지시 2026-09-15) ═══════════════════════════════════════════════════
+# readout 출력에 MLP head 를 달아 **프레임별 subject OBB center** 를 맞히게 한다. query i 가
+# 프레임 i 에 대응하도록 queries=49=프레임수 로 둔 이유가 이것이다.
+# head 출력은 DiT 로 되돌아가지 않는다 — forward 가 (요약, aux예측) 을 따로 돌려주고 요약만
+# CA 로 흘러가므로, **추론에서 aux 를 안 읽으면 그게 곧 "MLP 를 뗀" 상태**다 (별도 분기 불필요).
+# 실측: aux 만 backward 하면 `out.weight.grad is None`, DiT 손실만 backward 하면
+# `aux_head.weight.grad is None`, `readout.query` 에는 양쪽 grad 가 들어온다.
+#
+# ═══ aux_w 를 0.1 로 둔 근거 (D194 코퍼스 453 씬 실측) ════════════════════════════════════
+# 타깃은 concat arm 이 쓰는 것과 **같은** `target_track.npz` 를 cam_param 게이지로 옮긴 값
+# (frame-s 카메라 좌표 / norm_scale). 그 분포가
+#     x std 0.177 / y std 0.115 / z mean +0.603 std 0.287
+#     per-coord MSE  pred=0 -> 0.164,  pred=전역평균 -> 0.042
+# 이라, 학습 초기 aux ≈ 0.16 대 DiT 손실 ≈ 0.25, 후기 aux ≈ 0.01 대 DiT ≈ 0.014 로 **두 손실이
+# 같은 자릿수**다. w=1 이면 보조가 주손실과 맞먹어 카메라 학습을 밀어낸다. w=0.1 이면 전 구간에서
+# 총손실의 6~7% 를 차지 — 요약을 subject 쪽으로 밀되 주손실을 덮지 않는 크기다.
+#
+# ═══ 데이터 전제 ═════════════════════════════════════════════════════════════════════════
+# `<scene>/da3/target_track.npz` 가 있어야 한다. d194 코퍼스는 2026-09-15 에
+# `CinemaTraj/scripts/export_target_track.py --corpus dynpose --out_root out_dynpose` 로
+# 전량 생성했다 (6,894/6,894 변이, valid 100%, missing anchor 0).
+# 파일이 없으면 dataset 이 **터진다** — 조용히 zero 조건으로 학습되면 이 arm 이 l21 대조군과
+# 같아져 버리고 로그에 흔적이 안 남기 때문이다.
+defaults:
+  - dynpose_d194_molmo2_l21
+
+exp_name: dynpose_d194_molmo2_l21_readout
+
+peav_readout_layers: 2      # "shallow". 0 이면 모듈 미생성 = l21 arm 과 비트 동일.
+peav_readout_queries: 49    # = 프레임 수. 부수 효과로 video CA key/value 가 3264 -> 49.
+peav_readout_aux_dim: 3     # subject OBB center xyz. 0 이면 head 미생성 + 손실 None.
+peav_readout_aux_w: 0.1     # ↑ 근거 참조. aux_dim>0 인데 0 이면 학습 진입점에서 assert.
+
+# x_t 채널 concat 은 **끄는** 게 이 arm 의 요점이다 — subject 위치를 조건으로 주는 게 아니라
+# readout 이 스스로 알아내게 하는 것. dataset 은 aux_dim>0 만 봐도 target_track 키를 만든다.
+target_track_dim: 0

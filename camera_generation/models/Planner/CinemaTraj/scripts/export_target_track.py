@@ -22,8 +22,12 @@ scene_graph 에 없는 anchor 는 valid=False + track 0 으로 남긴다 (조용
 env: 아무거나 (numpy 만 쓴다)
 
 예시:
-    python scripts/export_target_track.py                       # 전 scene
+    python scripts/export_target_track.py                       # 전 scene (vista4d)
     python scripts/export_target_track.py --videos camel --dry_run
+    # dynpose D194 (7,801편) — corpus 하위폴더와 scene_graph 위치가 둘 다 다르다
+    python scripts/export_target_track.py \
+        --dl3dv_root /data1/cympyc1785/data/DynPose-LBM/latentcam_dynpose_d194 \
+        --corpus dynpose --out_root <CinemaTraj>/out_dynpose
 """
 import json
 import sys
@@ -60,7 +64,7 @@ def node_track_world(node, T_wg, num_frames):
 
 def main(args):
     out_root = args.out_root or path.join(CINEMATRAJ_ROOT, "out")
-    scene_dirs = sorted(glob(path.join(args.dl3dv_root, "vista4d", "*")))
+    scene_dirs = sorted(glob(path.join(args.dl3dv_root, args.corpus, "*")))
     if args.videos:
         scene_dirs = [d for d in scene_dirs if path.basename(d) in set(args.videos)]
 
@@ -86,7 +90,11 @@ def main(args):
         keys = [str(k) for k in poses["keys"].tolist()]
         variant_ids = [str(v) for v in poses["variant_id"].tolist()]
         T = int(poses["extrinsics"].shape[1])
-        assert T == num_frames, f"{video}: target T {T} != scene_graph num_frames {num_frames}"
+        if T != num_frames:
+            # 코퍼스 단위(7,801편)로 돌 때 한 편의 프레임수 불일치로 전량이 죽으면 안 된다.
+            # 조용히 넘기지 않고 skip 사유로 남겨 표에 찍는다.
+            skipped.append((video, f"T {T} != scene_graph num_frames {num_frames}"))
+            continue
 
         track = np.zeros((len(keys), T, 3), dtype=np.float32)
         valid = np.zeros(len(keys), dtype=bool)
@@ -111,19 +119,39 @@ def main(args):
                      keys=np.array(keys), anchor_id=np.array(anchors))
         rows.append((video, len(keys), int(valid.sum()), sorted(missing)))
 
-    print(f"\n{'video':<22}{'variants':>9}{'valid':>7}  missing anchors")
-    print("-" * 70)
-    for video, n, nv, miss in rows:
-        print(f"{video:<22}{n:>9}{nv:>7}  {','.join(miss) if miss else '-'}")
-    for video, why in skipped:
-        print(f"{video:<22} SKIP  {why}")
-    print(f"\nscenes {len(rows)}  skipped {len(skipped)}  dry_run {args.dry_run}")
+    # 코퍼스 단위(dynpose 7,801편)에서는 편별 행이 표가 아니라 로그 덤프가 된다.
+    # --max_rows 를 넘으면 집계만 찍고, 문제 있는 편(valid < variants)만 골라서 보여준다.
+    print(f"\n{'video':<40}{'variants':>9}{'valid':>7}  missing anchors")
+    print("-" * 88)
+    shown = rows if len(rows) <= args.max_rows else [r for r in rows if r[2] < r[1]]
+    for video, n, nv, miss in shown[:args.max_rows]:
+        print(f"{video:<40}{n:>9}{nv:>7}  {','.join(miss) if miss else '-'}")
+    if len(shown) > args.max_rows:
+        print(f"... (valid<variants 인 편 {len(shown)}개 중 {args.max_rows}개만 표시)")
+    elif len(rows) > args.max_rows and not shown:
+        print("(전 편 valid == variants)")
+
+    skip_kinds = {}
+    for _video, why in skipped:
+        skip_kinds[why.split(" ")[0]] = skip_kinds.get(why.split(" ")[0], 0) + 1
+    for video, why in skipped[:args.max_rows]:
+        print(f"{video:<40} SKIP  {why}")
+    if len(skipped) > args.max_rows:
+        print(f"... skip {len(skipped)}건 사유별: {skip_kinds}")
+
+    tot_v = sum(r[1] for r in rows)
+    tot_ok = sum(r[2] for r in rows)
+    print(f"\nscenes {len(rows)}  skipped {len(skipped)}  "
+          f"variants {tot_v}  valid {tot_ok} ({tot_ok / max(tot_v, 1):.1%})  "
+          f"dry_run {args.dry_run}")
 
 
 if __name__ == "__main__":
     parser = ArgumentParser(description=__doc__)
     parser.add_argument("--dl3dv_root", default=DL3DV_ROOT_DEFAULT)
+    parser.add_argument("--corpus", default="vista4d")    # dl3dv_root 아래 코퍼스 하위폴더 (dynpose 등)
     parser.add_argument("--out_root", default=None)      # CinemaTraj out/ (scene_graph 위치)
     parser.add_argument("--videos", nargs="+", default=None)
+    parser.add_argument("--max_rows", type=int, default=60)   # 표에 찍을 최대 행 수
     parser.add_argument("--dry_run", action="store_true")
     main(parser.parse_args())

@@ -1,0 +1,18 @@
+# @package _global_
+# D195-B 의 **캡션 복원판** (사용자 지시 2026-09-15: "새로 만든 arm 두개를 정도부사, framing
+# 없는 caption 과 있는 caption 두가지 경우에 대해").
+#
+# `dynpose_d194_molmo2_l21_track_d5` 에서 움직인 축은 `prompts_file` 한 줄뿐이다.
+# target_track_dim 4 / dropout 0.5 / val_drop true 는 전부 상속한다 — 그쪽 머리말이 게이지와
+# null 정의(전 채널 0, valid 포함)를 다 갖고 있다.
+#
+# 캡션 재굽기 경로 / 코퍼스 재-export 를 안 하는 이유 / text_len 근거는
+# `dynpose_d196_da3.yaml` 머리말 참조.
+#
+# ⚠ molmo2 텍스트(`Track {target_text}.`)와 `target_track.npz` 는 둘 다 이 변경과 무관하다.
+# 캐시·npz 재굽기 0.
+defaults:
+  - dynpose_d194_molmo2_l21_track_d5
+
+exp_name: dynpose_d196_molmo2_l21_track_d5
+prompts_file: prompts_mag.json   # ★ d195-B arm 과의 유일한 차이

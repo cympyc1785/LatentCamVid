@@ -1,0 +1,35 @@
+# @package _global_
+# D195-B — `dynpose_d194_molmo2_l21.yaml` 에 **subject OBB 궤적 concat 조건**을 dropout 0.5 로
+# 얹은 사본 (사용자 지시 2026-09-15). 모델 코드는 한 줄도 안 바뀐다 — V4D-PGT 9b
+# (`vista4d_pgt_k6_track_d5.yaml`) 가 쓰던 경로를 d194 코퍼스 위에서 그대로 켠다.
+#
+# ═══ 무엇을 보려는 건가 ══════════════════════════════════════════════════════════════════
+# D195-A(readout+aux) 는 subject 위치를 **맞히게** 한다. 이 arm 은 반대로 subject 위치를
+# **그냥 준다** — x_t 채널에 (x,y,z,valid) 4채널을 붙인다. 대신 절반(dropout 0.5)을 null 로
+# 봐서 track 없는 경로도 같이 학습하고, **추론은 track 없이** 돌린다. 즉 궤적 조건은 학습 때만
+# 쓰는 보조 정보이고, 평가 눈금은 l21 대조군과 같다.
+# 그래서 `target_track_val_drop: true` 가 필수다 — val 을 실제 track 으로 돌리면 곡선이
+# "track 있을 때"만 보여 주고, 정작 우리가 쓸 조건(track 없음)의 성능이 학습 중에 안 보인다.
+#
+# ═══ dropout 0.5 의 뜻 ═══════════════════════════════════════════════════════════════════
+# per-sample. null 은 "채널을 뺀다"가 아니라 **전 채널 0** 이다 (valid 채널 포함) — concat 조건은
+# uncond forward 에도 채널 수가 있어야 하므로 CFG 를 '빼기'가 아니라 null 값으로 정의한다
+# (train_latent_cam_dm.build_track_cond). 추론에서 cond=None 이면 모델이 같은 0 을 채운다.
+#
+# ═══ 게이지 ══════════════════════════════════════════════════════════════════════════════
+# 조건은 world 좌표가 아니라 cam_param 과 **같은 자**로 들어간다: frame-s 카메라 좌표계로 옮긴 뒤
+# norm_scale(avg_scale_context_first_cam) 로 나눈 값. 분모까지 같아야 모델이 카메라 t 와 subject
+# 위치를 한 눈금으로 읽는다 (dataset_dl3dv._track_cond).
+# D194 코퍼스 453 씬 실측 분포: x std 0.177 / y std 0.115 / z mean +0.603 std 0.287.
+#
+# ═══ 데이터 전제 ═════════════════════════════════════════════════════════════════════════
+# `<scene>/da3/target_track.npz` 필요. 2026-09-15 에 `export_target_track.py --corpus dynpose`
+# 로 전량 생성 (6,894/6,894 변이, valid 100%). 없으면 dataset 이 터진다 (의도된 동작).
+defaults:
+  - dynpose_d194_molmo2_l21
+
+exp_name: dynpose_d194_molmo2_l21_track_d5
+
+target_track_dim: 4          # [x,y,z,valid] -> cam_in 입력이 cam_dim+4
+target_track_dropout: 0.5    # ★ per-sample null. 추론에서 track 없이 쓰려고 남기는 경로
+target_track_val_drop: true  # ★ val = cond None. 눈금을 l21 대조군과 맞춘다

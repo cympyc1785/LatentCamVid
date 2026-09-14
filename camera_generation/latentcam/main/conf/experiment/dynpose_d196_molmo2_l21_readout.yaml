@@ -1,0 +1,22 @@
+# @package _global_
+# D195-A 의 **캡션 복원판** (사용자 지시 2026-09-15: "새로 만든 arm 두개를 정도부사, framing
+# 없는 caption 과 있는 caption 두가지 경우에 대해").
+#
+# `dynpose_d194_molmo2_l21_readout` 에서 움직인 축은 `prompts_file` 한 줄뿐이다. readout /
+# aux head / aux_w 0.1 / target_track_dim 0 은 전부 상속한다 — 그쪽 머리말이 근거를 다 갖고
+# 있고, 여기서 값을 다시 적으면 두 파일이 따로 늙는다.
+#
+# 캡션을 어떻게 다시 구웠는지(뱅크 --magnitude/--nl_framing → prompts_mag.json), 왜 코퍼스를
+# 다시 export 하지 않는지, text_len 128 을 왜 그대로 두는지는 `dynpose_d196_da3.yaml` 머리말.
+#
+# ⚠ molmo2 스트림은 이 변경과 **무관**하다. molmo2 가 읽는 텍스트는 `--text_override_json` 의
+# `Track {target_text}.` 이고 `target_text` 는 6,894/6,894 세그먼트에서 d194 와 바이트 단위로
+# 같다. 바뀌는 건 umt5 가 읽는 문장 하나뿐이라 `molmo2_cache/text.pt` 를 다시 굽지 않는다.
+#
+# ⚠ `<scene>/da3/target_track.npz` 전제도 그대로다 (캡션 교체와 무관한 파일). 2026-09-15
+# `export_target_track.py --corpus dynpose` 로 전량 생성됨 (6,894/6,894, valid 100%).
+defaults:
+  - dynpose_d194_molmo2_l21_readout
+
+exp_name: dynpose_d196_molmo2_l21_readout
+prompts_file: prompts_mag.json   # ★ d195-A arm 과의 유일한 차이

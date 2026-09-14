@@ -1,0 +1,43 @@
+# @package _global_
+# D196 — `dynpose_d194_da3.yaml` 과 **캡션 한 축만** 다른 사본 (사용자 지시 2026-09-15).
+#
+# ═══ 무엇이 바뀌나 ═══════════════════════════════════════════════════════════════════════
+# D176 에서 nl 기본 문장이 `target` + `camera` 두 축으로 줄면서 **크기 부사와 framing 절이
+# 통째로 빠졌다**. d194 3 arm 이 그 짧은 문장으로 돌고 있고 caption f1 이 잘 안 오른다.
+# 이 arm 은 같은 카메라·같은 코퍼스 위에서 **문장만 D176 이전으로 되돌린다**:
+#
+#   d194  The camera dollies straight forward toward the man in a light grey shirt and cap
+#         standing by the grill.
+#   d196  The camera slightly dollies straight forward toward the man in a light grey shirt
+#         and cap standing by the grill, keeping him in a medium wide shot that tightens to a
+#         medium close-up shot with the white camper with a maroon stripe parked under a green
+#         roof also in frame.
+#
+# ═══ 어떻게 얹었나 — 코퍼스를 다시 export 하지 않는다 ════════════════════════════════════
+#   build_bank_captions.py --videos_file tmp/d194/videos_d192.txt --bank_dir hole_bank_d192 \
+#       --output_root out_dynpose --out_name captions_d196.json --prompt_style nl \
+#       --magnitude --nl_framing          # ← d194 는 --no_magnitude, nl_framing 기본 꺼짐
+#   latentcam/scripts/data/make_prompts_simple.py --root <corpus> --meta_csv meta_dynpose.csv \
+#       --out_name prompts_mag.json --captions_root <CinemaTraj>/out_dynpose \
+#       --captions_bank_dir hole_bank_d192 --captions_name captions_d196.json
+# 그 외 플래그는 d194 와 글자 그대로 같다 (`--framing_min_in_frame 0.85` / `framing_on_free`
+# 기본값 = D143·D154 게이트 그대로). 즉 움직인 축은 `--magnitude` 와 `--nl_framing` 둘뿐이다.
+#
+# 세그먼트 키 / `frame_idx` / `variant_id` / pose 는 한 글자도 안 바뀌었다 (6,894 세그먼트
+# 전량 대조 확인, `target_text` 도 6,894/6,894 동일). 따라서
+#   - `target_poses.npz` / `target_track.npz` / `avg_scale*` / seg list 전부 그대로 유효
+#   - molmo2 캐시도 그대로 유효 — text 쪽은 `Track {target_text}.` 오버라이드라 이 변경과 무관
+#   - `.latentcam_index` 는 `prompts_file` 이 키에 들어가므로 별도 캐시가 새로 만들어진다
+#     (dataset_dl3dv `_load_index`: `__pfprompts_mag`). d194 캐시는 안 건드린다.
+#
+# ═══ text_len ═══════════════════════════════════════════════════════════════════════════
+# 문장이 두 배 가까이 길어졌지만 umt5 토큰 실측(6,894 세그먼트 전량)으로
+#   prompts.json      mean 24.6  p99 31  max 35
+#   prompts_mag.json  mean 47.1  p99 68  max 76
+# 라 `text_len: 128` 에서 잘리는 세그먼트가 **0 건**이다. 그래서 d194 값을 그대로 둔다 —
+# 여기서 text_len 을 같이 올리면 캡션축과 시퀀스축이 같이 움직여 원인을 못 가른다.
+defaults:
+  - dynpose_d194_da3
+
+exp_name: dynpose_d196_da3
+prompts_file: prompts_mag.json   # ★ d194 arm 과의 유일한 차이

@@ -23,7 +23,45 @@ All notable changes to the latentcam sub-project. Follows [Keep a Changelog](htt
   `readout.query` 에만 양쪽 grad 가 모인다. 즉 추론에서 head 를 안 부르는 것이 곧 "MLP 를 뗀"
   상태다. readout 2층 + aux head 기준 +8.70 M param (41 키). 코퍼스에 `target_track.npz` 가
   없으면 손실이 조용히 `None` 이 되므로, aux 를 쓸 코퍼스엔 `export_target_track.py` 가
-  선행돼야 한다 (2026-09-15 기준 d121 52/52, dynpose d194 **0/7801**).
+  선행돼야 한다 (d121 52/52. dynpose d194 는 처음 0/7801 이었고 2026-09-15 에 전량 생성해
+  6,894/6,894 변이 · valid 100% · missing anchor 0 이 됐다).
+- **`dataset_dl3dv` 가 `peav_readout_aux_dim > 0` 일 때도 `target_track` 을 내보낸다
+  (2026-09-15, D195-A).** 전까지는 `target_track_dim > 0` 일 때만 만들었다. readout+aux arm 은
+  조건으로는 track 을 **안 쓰면서**(`target_track_dim: 0`) 보조 손실 타깃으로는 필요하다 —
+  둘을 같은 플래그에 묶어 두면 aux 손실이 조용히 `None` 이 되고, 그러면 그 arm 이 l21 대조군과
+  같아진 채로 로그에는 아무 흔적이 안 남는다.
+- **`make_prompts_simple.py --captions_root` — 뱅크에서 다시 구운 캡션을 코퍼스에 얹는다
+  (2026-09-15, D196).** 기존 두 경로(`--fields` / 축약)는 코퍼스 안의 `caption_fields` 를
+  **재조립**할 뿐이라, `build_bank_captions.py` 의 플래그(`--magnitude` / `--nl_framing` 등)를
+  바꿔 `caption_fields` 자체가 달라진 경우엔 쓸 수 없다. 그 값은 CinemaTraj 뱅크의
+  `captions_*.json` 에만 있다. 이 경로는 `<captions_root>/<scene>/<bank_dir>/<captions_name>`
+  을 읽어 `<root>/<chunk>/da3/<out_name>` 으로 쓴다 — **전량 re-export(7.8k편, 115편/분 ≈ 68분)
+  없이 캡션만 교체**된다. 조인 키는 `variant_id` 다 (`tau_max` 같은 실현치를 키로 쓰면 조용히
+  0행 — D191 에 같은 사고가 있었다). 캡션이나 변이를 못 찾으면 끝에서 `raise` 한다
+  (`--allow_missing` 으로 완화). 플래그를 안 주면 기존 두 경로가 그대로다.
+- **`conf/experiment/dynpose_d196_{da3,molmo2_nogeo,molmo2_l21}.yaml` (2026-09-15, 사용자 지시
+  "정도부사랑 framing을 이전과 똑같이 달아주고 3arm 학습").** d194 3 arm 과 **캡션 한 축만**
+  다른 사본으로, 본문은 `prompts_file: prompts_mag.json` 한 줄이다. D176 에서 nl 기본 문장이
+  `target`+`camera` 두 축으로 줄며 크기 부사와 framing 절이 빠졌던 것을 되돌린다. 코퍼스는
+  d194 와 **같은 디렉토리**를 그대로 읽는다 — 6,894 세그먼트 전량 대조로 키 집합 ·
+  `frame_idx` · `variant_id` · `target_text` 가 동일함을 확인했고, 그래서 `target_poses.npz` /
+  `target_track.npz` / `avg_scale*` / seg list / molmo2 캐시(video 110 GB + text 4.5 GB) /
+  `geo_raw_cache_da3` 를 하나도 다시 굽지 않는다. `dataset_dl3dv._load_index` 가 인덱스 캐시
+  키에 `__pfprompts_mag` 를 붙이므로 d194 캐시를 조용히 재사용할 수도 없다. `text_len` 은 128
+  그대로 — umt5 토큰 실측(6,894 전량)이 `prompts.json` max 35 / `prompts_mag.json` max 76 이라
+  잘리는 세그먼트가 0 건이고, 여기서 같이 올리면 캡션축과 시퀀스축이 함께 움직인다.
+- **`conf/experiment/dynpose_d19{4,6}_molmo2_l21_{readout,track_d5}.yaml` (2026-09-15, D195).**
+  D195 두 arm(readout+aux / track concat dropout 0.5) × 캡션 2종의 4 조합. d196 쪽 둘은 d194
+  쪽 둘에 `prompts_file: prompts_mag.json` 한 줄만 얹은 사본이라 모델 하이퍼는 상속만 한다.
+- **`scripts/train/queue_runs.py` (2026-09-15, D195 사용자 지시 "학습 queue 걸어놔줘").**
+  GPU 풀과 job 큐를 분리해, 비는 GPU 에 앞에서부터 experiment 를 꽂는 대기열 드라이버.
+  기존 `scripts/relaunch_after_stop.sh` 는 run 하나 : GPU 하나가 고정이라 어느 arm 이 먼저
+  끝날지 모르는 상황에서 먼저 빈 GPU 를 놀린다. 빈 GPU 판정은 **AND 두 조건**이다 —
+  ① `nvidia-smi` memory.used 가 임계 밑 (프로세스만 보면 DataLoader worker 가 GPU 를 물고 있는
+  창에 꽂아 OOM), ② `/proc/<pid>/environ` 의 `CUDA_VISIBLE_DEVICES` 로 그 GPU 를 선점한 학습
+  프로세스가 없을 것 (메모리만 보면 molmo2 arm 이 110 GB 캐시를 읽느라 수 분간 0 MiB 인 창에
+  꽂아 같은 GPU 에 두 개가 겹친다 — 2026-09-15 dry_run 에서 실제로 GPU2/3 이 이렇게 찍혔다).
+  `--dry_run` 은 지금 꽂으면 어디로 가는지만 출력한다.
 - **`cache_molmo2_embeddings.py --text_override_json` / `--probe` (2026-09-14, D191).**
   둘 다 안 주면 D124 이후 기존 동작과 비트 동일하다. `--text_override_json` 은
   `{data_name: text}` JSON 으로 **molmo2 가 읽는 문장만** 갈아끼운다 — 디스크 위 코퍼스

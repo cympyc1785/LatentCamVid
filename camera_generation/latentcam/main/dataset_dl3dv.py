@@ -1123,7 +1123,7 @@ class CamDataset(torch.utils.data.Dataset):
             p = osp.join(self.scene_dir_list[scene_idx], 'da3', 'target_track.npz')
             if not osp.isfile(p):
                 raise FileNotFoundError(
-                    f"target_track_dim>0 인데 파일이 없다: {p} — "
+                    f"target_track_dim>0 (또는 peav_readout_aux_dim>0) 인데 파일이 없다: {p} — "
                     f"CinemaTraj/scripts/export_target_track.py 를 먼저 돌릴 것")
             z = np.load(p, allow_pickle=True)
             cache = {'track': torch.from_numpy(np.asarray(z['track_world'], dtype=np.float32)),
@@ -1646,7 +1646,11 @@ class CamDataset(torch.utils.data.Dataset):
         # [new 2026-08-27] subject OBB track concat 조건. 기본 target_track_dim=0 = 이 블록을
         # 아예 안 탄다 (기존 arm 비트 동일). extrinsics 는 위에서 이미 target 궤적으로 교체된
         # 뒤라 E_s = 그 변이의 frame0 w2c (= 소스 frame0 카메라, 뱅크가 frame0 공유).
-        if int(getattr(self.cfg, 'target_track_dim', 0) or 0) > 0:
+        # [2026-09-15 / D195-A] `peav_readout_aux_dim>0` 도 같은 키를 쓴다 — 그쪽은 x_t 에
+        # concat 하지 않고 **보조 손실의 타깃**으로만 읽는다 (train_latent_cam_dm.readout_aux_loss).
+        # 둘 다 0 이면 키 자체가 안 생기고 손실이 조용히 None 이 되므로, 배선은 여기 한 줄이다.
+        if (int(getattr(self.cfg, 'target_track_dim', 0) or 0) > 0
+                or int(getattr(self.cfg, 'peav_readout_aux_dim', 0) or 0) > 0):
             out['target_track'] = self._track_cond(
                 scene_idx, data_name.split('_')[-1], extrinsics, norm_scale)
 

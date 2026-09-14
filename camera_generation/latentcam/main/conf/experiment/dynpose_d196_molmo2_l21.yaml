@@ -1,0 +1,11 @@
+# @package _global_
+# D196 — `dynpose_d194_molmo2_l21.yaml` 의 캡션 복원판 (사용자 지시 2026-09-15).
+# `dynpose_d196_molmo2_nogeo` 에 `peav_layer: 21` 한 줄만 얹는다 — d194 쪽 nogeo/l21 관계와
+# 같은 모양이라 두 세대를 나란히 읽을 수 있다.
+# 캡션 재굽기 / 캐시 재사용 근거는 `dynpose_d196_da3.yaml` 과 `dynpose_d196_molmo2_nogeo.yaml`
+# 머리말 참조.
+defaults:
+  - dynpose_d196_molmo2_nogeo
+
+exp_name: dynpose_d196_molmo2_l21
+peav_layer: 21             # ← nogeo arm 과의 유일한 차이. null 이면 마지막 층(ln_f 이후).

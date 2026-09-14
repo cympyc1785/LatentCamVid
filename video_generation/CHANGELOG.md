@@ -17,6 +17,9 @@
   그대로라 안 주면 예전 코퍼스와 비트 동일하다.
 
 ### Added
+- **D194 molmo2 layer-21 arm (`dynpose_d194_molmo2_l21.yaml`) (2026-09-14).** `dynpose_d194_molmo2_nogeo`
+  를 hydra `defaults` 로 상속하고 `peav_layer: 21` 한 줄만 덮는다 — 캐시가 두 층을 같은 파일에
+  들고 있어서 **다시 굽지 않는다**. 두 arm 의 차이가 이 한 줄뿐이라 층 효과가 다른 축과 안 섞인다.
 - **molmo2 캐시에 중간층(`--extra_layer`) + 샤딩(`--num_shards/--shard_id/--merge_shards`)
   (2026-09-14, D194 사용자 지시).** 마지막 층은 `lm_head` 직전이라 다음 토큰 예측에 필요한 것만
   남기는 쪽으로 이미 기울어 있다 — 카메라 궤적에 쓸모 있는 게 그 압축 전인지 후인지는 **둘 다

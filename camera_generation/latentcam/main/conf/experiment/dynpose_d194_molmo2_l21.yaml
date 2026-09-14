@@ -1,0 +1,19 @@
+# @package _global_
+# D194 — `dynpose_d194_molmo2_nogeo.yaml` 과 **한 줄만 다른** 사본: molmo2 hidden state 를
+# 마지막 층이 아니라 `blocks[21]` 의 raw 출력에서 가져온다 (사용자 지시 2026-09-14).
+#
+# 캐시는 다시 굽지 않는다 — `cache_molmo2_embeddings.py --extra_layer 21` 이 두 층을 같은
+# 파일에 넣어 뒀고, `peav_layer` 가 읽는 키(`emb` vs `emb_l21`)만 바꾼다.
+#
+# ═══ 왜 중간 층인가 ══════════════════════════════════════════════════════════════════════
+# 마지막 층은 `ln_f` 를 지난 뒤라 next-token 예측용으로 쏠려 있고, 중간 층이 시각-텍스트
+# 정렬 정보를 더 들고 있다는 게 일반적 관찰이다. 여기서는 그걸 **같은 데이터·같은 설정**으로
+# 직접 대조한다 — nogeo arm 과 이 arm 의 차이는 이 한 줄뿐이다.
+#
+# ⚠ 두 층은 스케일이 크게 다르다 (D194 실측: |x| p50 마지막 1.076 vs layer21 0.519).
+#   `peav_in_ln: true` 가 켜져 있어야 proj 이 그 차이를 흡수한다. 아래에 그대로 켜 뒀다.
+defaults:
+  - dynpose_d194_molmo2_nogeo
+
+exp_name: dynpose_d194_molmo2_l21
+peav_layer: 21             # ← nogeo arm 과의 유일한 차이. null 이면 마지막 층(ln_f 이후).

@@ -439,7 +439,15 @@ def main():
     assert not unknown, f"모르는 stage: {unknown} (가능: {STAGE_ORDER})"
     stages.sort(key=STAGE_ORDER.index)
     if args.gpu is not None:
-        assert str(args.gpu) in list("01234"), f"GPU 는 0~4 만 (CLAUDE.md): {args.gpu}"
+        # CLAUDE.md 기본은 0~4 다. 사용자가 **특정 작업에 한해** 그 위를 열어 줄 때만
+        # `BANK_GPU_ALLOW` 로 넓힌다 (D192, 사용자 지시 2026-09-14 "5~7 재사용").
+        # 왜 환경변수인가: 이 가드는 여태 `--gpu` 를 **안 주고** `CUDA_VISIBLE_DEVICES` 를
+        # 밖에서 export 하면 그냥 뚫렸다 (:205 `env = dict(environ)`). 그 우회는 로그에
+        # `gpu=None` 으로 찍혀 어느 GPU 를 썼는지 사후에 알 수 없다. 통로를 하나로 모아
+        # 로그에 남긴다. 안 주면 문자열이 "01234" 그대로라 옛 동작과 같다.
+        allow = environ.get("BANK_GPU_ALLOW", "01234")
+        assert str(args.gpu) in list(allow), \
+            f"GPU 는 {allow} 만 (CLAUDE.md / BANK_GPU_ALLOW): {args.gpu}"
 
     videos = load_videos(args.videos)
     mine = [v for i, v in enumerate(videos) if i % args.num_shards == args.shard_id]

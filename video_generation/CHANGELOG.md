@@ -7,6 +7,36 @@
 ## [Unreleased]
 
 ### Added
+- **`route_presets.py --slot_whitelist_track` — subject 가 움직이면 다른 어휘를 쓴다
+  (2026-09-14, D192).** 여태 `--slot_whitelist` 는 씬 전체에 한 벌이라 "일정 이상 움직이는
+  subject 는 track, 안 움직이면 dolly_in" 을 표현할 방법이 없었다. 새 플래그는 anchor 가
+  `reasons["anchor_track_eligible"]`(= `moving` ∧ `center_drift_u > --track_min_drift_u`)일 때만
+  적용되는 **두 번째 화이트리스트**이고, 어느 쪽을 썼는지 `reasons["slot_whitelist_source"]` 에
+  남긴다. 기본값 `""` = 꺼짐 = 예전과 비트 동일. 구현 주의: 선택 결과를 루프 바깥 이름에 쓰면
+  anchor 2개짜리 씬에서 뒤 anchor 가 앞 anchor 의 목록을 물려받는다 — 루프-로컬 `keep` 으로 둔다.
+- **`fit_hole_ladder.py --gate_static` — 정지 preset 도 물리 게이트를 통과시킨다
+  (2026-09-14, D192).** `track_*` 는 `STATIC_PRESETS` 라 `rungs=[ladder[0]]` 로 끝나고
+  `solve_knob` 을 건너뛰는데, **게이트 판정도 같이 건너뛴다**. 열은 `probe()` 가 채우지만 아무도
+  안 읽어서 위반이 조용히 통과한다 — 기존 3,205행 실측 `obb_slack<0` 11.3% / `behind_frac>0`
+  21.7% / `subject_visible_frac<0.6` 16.7% / **합집합 44.6%**. 플래그를 켜면 `physical_verdict`
+  + occlusion 을 돌려 위반 행에 `<binding>_blocked` 를 단다. 접미사가 `_limited` 가 아닌 이유:
+  `_limited` 는 "수렴했고 게이트가 천장을 정한" 행이라 뜻이 반대고, 기존 config 의
+  `--retry_status *_limited` 가 둘을 같이 쓸어간다. 기본 꺼짐.
+- **`emit_bank.py --require "<col><op><thr>"` — 이미 구운 뱅크에서 게이트 위반 행을 거른다
+  (2026-09-14, D192).** `--gate_static` 은 **새로 굽는** 뱅크만 고친다. d179/d183/d185 처럼
+  플래그가 없던 시절 구운 뱅크를 재수확하려면 emit 쪽에 같은 판정이 있어야 한다.
+  `>=` `<=` `>` `<` 4종, 열이 없거나 `nan` 이면 통과(= 옛 뱅크에서 열이 빠져도 안 죽는다),
+  요약에 임계별 탈락 수를 찍는다. 빈 `--require` 실측: `canonical.json` 이 HEAD 판과 `diff` 동일.
+- **`run_bank.py` GPU 가드에 `BANK_GPU_ALLOW` (2026-09-14, D192).** CLAUDE.md 기본은 0~4 이고
+  기본값 `"01234"` 도 그대로다. 사용자가 특정 작업에 한해 위를 열어줄 때만 환경변수로 넓힌다.
+  환경변수로 뺀 이유: 이 assert 는 여태 `--gpu` 를 **안 주고** `CUDA_VISIBLE_DEVICES` 를 밖에서
+  export 하면 그냥 뚫렸다 (`:205` `env = dict(environ)` 이 부모 환경을 그대로 물려준다).
+  가드가 있는 척하는 것보다 어디로 넓혔는지 로그에 남는 편이 낫다.
+- **`configs/bank/d192_dynpose100k_track_or_dolly.json` (2026-09-14, D192).** 어휘를 두 갈래로만
+  가른다 — 움직이는 subject 는 `track_look_at`, 안 움직이면 `dolly_in_look_at`.
+  d188 대비 실질 변경은 `--retry_status` 다: `fit_hole_ladder.py:1316` 에서 `retry_status` 가
+  **pick 제외 목록을 겸하기 때문에**, d188 처럼 `static` 과 `*_limited` 를 넣어두면 수렴한
+  카메라가 통째로 못 뽑힌다. τ 사다리 `0.10 0.35 1.00` 은 그대로.
 - **`lbm/pick.py` + `scripts/repick_bank.py` — 재굽기 없이 `picked` 열만 다시 단다
   (2026-09-14, D189).** `pick` 은 사다리가 끝난 뒤의 **순수 후처리**다: 행을 지우지 않고
   (`bank.json` 은 재고 목록), `poses.npz` 에는 안 고른 행의 pose 까지 전부 들어 있다

@@ -1105,7 +1105,32 @@ def main(args):
                 target = hole_static + delta if excess else delta
                 if kind is None:
                     knob, status, binding, calls = float(seen[0]["target_tau"]), "static", "", 0
-                    probe(knob)          # 캐시에 poses/info 를 채운다 (렌더 1회)
+                    probed = probe(knob)         # 캐시에 poses/info 를 채운다 (렌더 1회)
+                    # D192. 정지 preset 은 손잡이가 없어 `solve_knob` 을 건너뛰는데, 그러면
+                    # **게이트 판정도 같이 건너뛴다**. 열은 위 `probe` 가 정상적으로 채우는데
+                    # 아무도 안 읽는다. d185/d183/d179 의 `track_look_at` 3,205행 실측:
+                    #     obb_slack < 0               11.3%   (카메라가 노드 OBB 안)
+                    #     behind_frac > 0             21.7%   (G1 — 표면 뒤)
+                    #     subject_visible_frac < 0.6  16.7%   (subject 가 가려짐)
+                    #     합집합                       44.6%
+                    # status 가 `static` 하나뿐이라 `--pick_budget` 의 `ok` 필터도 이걸 못 가른다
+                    # (status 로만 거른다) — 그 행이 씬의 유일한 카메라로 뽑힌다.
+                    # 켜면 `over()` 와 **같은 식·같은 순서**로 한 번 판정해 `f"{사유}_blocked"`
+                    # 로 적는다. 그러면 `--retry_status ..._blocked` 가 사다리를 다음 층(다른
+                    # anchor)으로 내리고 pick 의 `ok` 에서도 빠진다.
+                    # `_limited` 가 아니라 `_blocked` 인 이유: `_limited` 는 "게이트가 크기의
+                    # 천장을 정했지만 수렴한 카메라"라 쓸 수 있는 행이고 (`fit_hole_ladder`
+                    # :1122), 이쪽은 게이트를 **위반한** 행이라 뜻이 반대다. 같은 접미사를 쓰면
+                    # 기존 `--retry_status *_limited` 설정이 둘을 한꺼번에 집어간다.
+                    # 기본 off — 안 주면 위 세 줄만 남아 옛 동작과 비트 동일하다.
+                    if args.gate_static:
+                        _geo, _seen_frac = probed[1], probed[8]
+                        why = physical_verdict(_geo, max_behind, min_obb, max_elev,
+                                               min_ground, min_approach, max_behind_dyn)
+                        if why is None and _seen_frac == _seen_frac and _seen_frac < min_seen:
+                            why = "occlusion"
+                        if why is not None:
+                            status, binding = f"{why}_blocked", why
                 else:
                     knob, status, binding, calls = solve_knob(probe, target, points, kind,
                                                               args.iterations, max_behind, min_obb,
@@ -2038,6 +2063,14 @@ def build_parser():
     # 줄인다. 손잡이 하한에서도 못 넘기면 `status=clamped_low` + `binding=occlusion` 이 되고,
     # 그건 이미 `--retry_status clamped_low` 가 잡아 다음 층 preset 으로 넘긴다.
     parser.add_argument("--min_subject_visible", default=0.6, type=float)
+    # D192. 정지 preset(`STATIC_PRESETS` — `static_look_at` / `track_look_at` 등)에도 위 게이트
+    # 전부를 **한 번** 적용한다. 손잡이가 없어 이분법을 건너뛰는 preset 이라 여태 게이트 판정도
+    # 같이 건너뛰었다 (측정 열은 채워지는데 아무도 안 읽는다 — 근거는 본문 `args.gate_static`
+    # 주석의 3,205행 실측). 위반하면 `status = f"{사유}_blocked"` 가 되므로
+    # `--retry_status collision_blocked obb_blocked ...` 로 사다리와 pick 에서 뺄 수 있다.
+    # 기본 off = 옛 동작 비트 동일.
+    parser.add_argument("--gate_static", dest="gate_static", action="store_true", default=False)
+    parser.add_argument("--no_gate_static", dest="gate_static", action="store_false")
     # ── D168 (사용자 지시 2026-09-08). **게이트는 한 개도 안 늘린다** — 이분법(`solve_knob`)과
     #    사다리 목표는 D166 과 글자 그대로 같다. 새로 짜는 건 routing 과 retry 둘뿐이다.
     #    끄면(기본) 출력이 D167 뱅크와 **비트 단위로 같다**.

@@ -482,6 +482,9 @@ def main(args):
     assert anchors, why
     # D181. 슬롯 화이트리스트. 빈 문자열이면 끔 = 옛 동작.
     whitelist = tuple(s.strip() for s in args.slot_whitelist.split(",") if s.strip())
+    # D192. anchor 가 추종 가능(`center_drift_u > --track_min_drift_u`)일 때만 쓰는 **두 번째**
+    # 화이트리스트. 빈 문자열이면 위 하나를 양쪽에 똑같이 써서 옛 동작과 비트 동일하다.
+    whitelist_track = tuple(s.strip() for s in args.slot_whitelist_track.split(",") if s.strip())
     # 쉼표 목록 -> tuple. 빈 문자열이면 세로 슬롯을 아예 안 넣는다(`--vertical_fallback` 만 남는다).
     vertical_gravity = tuple(m.strip() for m in args.vertical_gravity.split(",") if m.strip())
     grid = args.slot_plan == "grid2x2"
@@ -504,15 +507,30 @@ def main(args):
                                   orbit_fallback=args.orbit_fallback,
                                   orbit_min_span=args.orbit_min_span)
         full_first = full_first if full_first is not None else dict(slots)
-        if whitelist:
+        # D192 (사용자 지시 2026-09-14 "일정 이상 움직이는 subject일 경우 track hold, 많이
+        # 안움직이는 subject일 경우 dolly in look at으로만"). 어휘를 두 개로 고정하려면 슬롯을
+        # anchor 의 운동량으로 갈라야 한다 — 하나의 화이트리스트로는 못 한다. `advance` 만
+        # 남기면 움직이는 anchor 가 `track_dolly_in_look_at` 을 받고, `static` 만 남기면 정지
+        # anchor 가 `static_look_at` 을 받아 둘 다 요청과 다른 preset 이 된다.
+        # 판정량은 `route()` 가 이미 계산해 `reasons` 에 실어 둔 `anchor_track_eligible` 이다
+        # (= `moving` ∧ `center_drift_u > --track_min_drift_u`). 여기서 다시 계산하면 문턱이
+        # 두 곳으로 갈려 D166 이 고친 버그가 되돌아온다.
+        # `whitelist` 를 덮으면 다음 anchor 가 앞 anchor 의 목록을 물려받는다 — 루프 안에서만
+        # 사는 이름으로 받는다.
+        keep = whitelist
+        if whitelist_track:
+            track_ok = bool(reasons.get("anchor_track_eligible"))
+            keep = whitelist_track if track_ok else whitelist
+            reasons["slot_whitelist_source"] = "track" if track_ok else "static"
+        if keep:
             # D181. `route()` 의 슬롯 구성·방향(away/toward)·track 판정·reasons 를 그대로 쓰고
             # **마지막에 골라내기만** 한다. 여기서 거르는 이유는 route() 안에서 거르면 bonus
             # track 슬롯 해싱과 `num_track` 집계가 화이트리스트에 따라 달라져, 같은 씬의
             # 전량 라우팅과 파일럿 라우팅이 서로 다른 preset 을 내기 때문 — 그러면 파일럿이
             # 코퍼스의 부분집합이 아니게 된다.
-            reasons["slot_whitelist"] = list(whitelist)
-            reasons["slot_whitelist_dropped"] = [s for s, _ in slots if s not in whitelist]
-            slots = [(s, p) for s, p in slots if s in whitelist]
+            reasons["slot_whitelist"] = list(keep)
+            reasons["slot_whitelist_dropped"] = [s for s, _ in slots if s not in keep]
+            slots = [(s, p) for s, p in slots if s in keep]
         # D188. 슬롯 **순서**를 video 해시로 회전한다. 예산이 1일 때 `plan_variants` 가 뽑는 건
         # `pool[0]` 하나뿐인데, `route()` 의 슬롯 순서는 (recede, advance, lateral, rotate, arc,
         # orbit, vertical, static) 로 고정이라 화이트리스트를 씌우면 **살아남은 것 중 가장 앞**이
@@ -619,8 +637,10 @@ def main(args):
     # 결말(변이 0)이므로 같은 rc=3 으로 내보낸다. 켜지 않으면 옛 동작대로 빈 `--presets` 를
     # 그대로 출력한다.
     if args.skip_if_empty and not presets:
-        print(f"슬롯이 0개 — --slot_whitelist '{args.slot_whitelist}' 뒤에 남은 슬롯이 없다",
-              file=sys.stderr)
+        print(f"슬롯이 0개 — --slot_whitelist '{args.slot_whitelist}'"
+              + (f" / --slot_whitelist_track '{args.slot_whitelist_track}'"
+                 if args.slot_whitelist_track else "")
+              + " 뒤에 남은 슬롯이 없다", file=sys.stderr)
         raise SystemExit(3)
 
     # D166. scene 당 변이 예산. `target_count` 가 상한(요구가 아니다 — 사용자 지시
@@ -789,6 +809,15 @@ def build_parser():
     # 방향은 소스 카메라의 횡이동에서 나오는 씬별 값이라 고정하면 소스와 같은 쪽으로 도는
     # 변이가 섞인다 (§route 의 away/toward).
     parser.add_argument("--slot_whitelist", default="", type=str)
+    # D192 (사용자 지시 2026-09-14): anchor 가 **추종 가능**할 때만 쓰는 두 번째 목록. 비어
+    # 있으면 위 목록을 양쪽에 써서 옛 동작과 비트 동일하다. 판정은 `route()` 의
+    # `anchor_track_eligible` (= `moving` ∧ `center_drift_u > --track_min_drift_u`) 하나.
+    #   예) `--slot_whitelist advance --slot_whitelist_track static --track_mode replace`
+    #       움직이는 anchor -> static 슬롯 -> `track_look_at` (따라가며 재조준)
+    #       정지   anchor -> advance 슬롯 -> `dolly_in_look_at` (다가가며 재조준)
+    # 한 목록으로는 못 하는 이유: `advance` 만 남기면 움직이는 anchor 가
+    # `track_dolly_in_look_at`, `static` 만 남기면 정지 anchor 가 `static_look_at` 이 된다.
+    parser.add_argument("--slot_whitelist_track", default="", type=str)
     parser.add_argument("--external_shapes", default=None, type=str)
     # D83: 2 → 4. 모양 뱅크가 12개(6라벨)에서 188개(47라벨)로 늘었는데 영상당 2개만 뽑으면
     # 코퍼스가 그 다양성을 못 본다. 4면 변이의 약 1/3 이 free-moving(실제 촬영 궤적)이 된다.

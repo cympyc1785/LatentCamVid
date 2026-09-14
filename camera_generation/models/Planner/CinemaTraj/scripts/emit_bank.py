@@ -193,6 +193,54 @@ def rung_of(variant: dict):
     return float(variant.get("hole_delta", variant["target_hole"]))
 
 
+REQUIRE_OPS = (">=", "<=", ">", "<")
+
+
+def parse_require(exprs):
+    """`--require "obb_slack>=0"` 목록 -> [(열, 연산자, 문턱)].
+
+    왜 emit 에 이게 필요한가 (D192): `track_look_at` 은 `STATIC_PRESETS` 라 fit 의 이분법을
+    통째로 건너뛴다 — 손잡이가 없으니 풀 것도 없다. 그런데 **게이트 판정도 같이 건너뛴다.**
+    열은 정상적으로 채워지는데 아무도 안 본다. d185/d183/d179 3,205행 실측:
+        obb_slack < 0                11.3%     (카메라가 노드 OBB 안)
+        behind_frac > 0              21.7%     (G1 — 표면 뒤)
+        subject_visible_frac < 0.6   16.7%     (subject 가 가려짐)
+        합집합                        44.6%
+    `suspect` 열이 51.5% 를 달지만 그 중 실제 위반은 1,110 뿐이라 덮지도 못하고 과잉이다.
+    그래서 뱅크는 그대로 두고 **소비자가 측정 열로 자른다** — `--status`/`--presets` 와 같은
+    성격이고, 목록이 비면 조건이 없어 옛 동작과 비트 동일하다.
+
+    열 이름을 고정 인자(`--min_obb_slack` 등)로 안 만드는 이유: 뱅크 CSV 열이 70개가 넘고
+    세대마다 느는데, 자를 축은 세대마다 다르다. 하나씩 인자를 파면 그 목록이 emit 의
+    argparse 에 영원히 쌓인다.
+    """
+    out = []
+    for raw in (exprs or []):
+        expr = raw.strip()
+        op = next((o for o in REQUIRE_OPS if o in expr), None)
+        assert op, f"--require 는 {'/'.join(REQUIRE_OPS)} 중 하나를 써야 한다: {raw!r}"
+        col, _, thr = expr.partition(op)
+        col = col.strip()
+        assert col, f"--require 열 이름이 비었다: {raw!r}"
+        out.append((col, op, float(thr)))
+    return out
+
+
+def passes(variant: dict, col: str, op: str, thr: float):
+    """변이의 `col` 이 문턱을 넘는가. 열이 없거나 nan 이면 **통과**시킨다 — 안 잰 것과
+    위반한 것은 다르고, 옛 세대 뱅크(열 자체가 없는)를 이 필터로 통째로 비우면 안 된다."""
+    if col not in variant:
+        return True
+    try:
+        value = float(variant[col])
+    except (TypeError, ValueError):
+        return True
+    if value != value:                       # nan
+        return True
+    return (value >= thr if op == ">=" else value <= thr if op == "<="
+            else value > thr if op == ">" else value < thr)
+
+
 def fold_groups(variants: list):
     """(anchor, preset) 별로 손잡이 값이 같은 단들을 묶는다 → 접힌 단 태그 집합.
 
@@ -265,6 +313,7 @@ def main(args):
     keep_anchor = set(args.anchors.split(",")) if args.anchors else None
     keep_preset = set(args.presets.split(",")) if args.presets else None
     keep_hole = {float(h) for h in args.holes.split(",")} if args.holes else None
+    require = parse_require(args.require)
 
     def pose_error(built, reference):
         """재현 오차. 리타이밍 중이면 **위치만** 본다 — 회전은 달라지는 게 목적이다."""
@@ -272,7 +321,8 @@ def main(args):
             return float(np.abs(built[:, :3, 3] - reference[:, :3, 3]).max())
         return float(np.abs(built - reference).max())
 
-    cameras, records, dropped = {}, [], {"filter": 0, "folded": 0, "path_len": 0}
+    cameras, records, dropped = {}, [], {"filter": 0, "folded": 0, "path_len": 0, "require": 0}
+    require_hits = {f"{c}{o}{t:g}": 0 for c, o, t in require}
     rel_stack, rel_full_stack, tags = [], [], []
     world_poses = []                     # --dump_poses 용. bank.json 변이 순서를 그대로 지킨다.
     worst_pose, worst_pose_tag, worst_round = 0.0, "", 0.0
@@ -294,6 +344,12 @@ def main(args):
             continue
         if float(variant["path_len_u"]) < args.min_path_len:
             dropped["path_len"] += 1
+            continue
+        # D192. 측정 열 문턱. `--require` 가 비면 건너뛰므로 옛 동작과 비트 동일하다.
+        failed = next((f"{c}{o}{t:g}" for c, o, t in require if not passes(variant, c, o, t)), None)
+        if failed is not None:
+            dropped["require"] += 1
+            require_hits[failed] += 1
             continue
 
         node = nodes[variant["anchor_id"]]
@@ -430,7 +486,9 @@ def main(args):
         raise SystemExit(f"{NO_EMITTABLE_TOKEN} "
                          f"내보낼 변이가 하나도 없다 — 필터를 확인할 것 "
                          f"(뱅크 변이 {len(bank['variants'])}개, 필터 {dropped['filter']} / "
-                         f"접힌 단 {dropped['folded']} / path {dropped['path_len']}).")
+                         f"접힌 단 {dropped['folded']} / path {dropped['path_len']}"
+                         + (f" / require {dropped['require']} {require_hits}" if require else "")
+                         + ").")
 
     output_folder = args.out_dir or path.join(bank_folder, "canonical")
     makedirs(output_folder, exist_ok=True)
@@ -484,7 +542,8 @@ def main(args):
     print(f"{'video':<26}{args.video}   bank {args.bank_dir}")
     print(f"{'variants':<26}{len(bank['variants'])} 중 {len(cameras)} 내보냄"
           f"   (필터 {dropped['filter']} / 접힌 단 {dropped['folded']} / "
-          f"path {dropped['path_len']})")
+          f"path {dropped['path_len']}"
+          + (f" / require {dropped['require']} {require_hits}" if require else "") + ")")
     print(f"{'접힌 단 (내보낸 것 중)':<24}{folded_kept}   `folded_onto` 로 대표 태그를 가리킨다")
     print(f"{'translation_degenerate':<26}{degenerate}   이동 0 — --scales 도 |t| 정규화도 무의미")
     print(f"{'g = rmax/S 범위':<25}[{gauges.min():.5f}, {gauges.max():.5f}]"
@@ -551,6 +610,11 @@ def build_parser():
     parser.add_argument("--presets", default=None)                      # 쉼표 구분 preset
     parser.add_argument("--holes", default=None)                        # 쉼표 구분 target_hole
     parser.add_argument("--min_path_len", default=0.0, type=float)      # 이 아래는 뺀다 (u)
+    # D192. 측정 열 문턱 (`열>=값` / `열<=값` / `열>값` / `열<값`, 여러 개면 AND). 근거는
+    # `parse_require` docstring — `track_look_at` 이 fit 게이트를 안 거치는 구멍을 여기서 막는다.
+    #   예) --require "obb_slack>=0" "behind_frac<=0" "subject_visible_frac>=0.6"
+    # 빈 목록(기본) = 조건 없음 = 옛 동작 비트 동일.
+    parser.add_argument("--require", nargs="*", default=[], type=str)
     # D188 ③. `picked` 열이 찬 행만 내보낸다 (= 씬당 `--pick_budget` 대). 열이 없는 옛 뱅크에
     # 주면 0 행이 되므로, 뱅크를 `--pick_budget` 으로 구웠을 때만 켠다.
     parser.add_argument("--picked_only", dest="picked_only", action="store_true", default=False)

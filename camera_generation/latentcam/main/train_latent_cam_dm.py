@@ -278,6 +278,31 @@ def build_track_cond(data, t_lat, device, dropout_p=0.0):
     return cond
 
 
+def readout_aux_loss(raw_model, data, device):
+    """[new 2026-09-15] readout query → subject OBB center 보조 손실 (valid 채널로 마스킹).
+
+    타깃은 concat 조건과 **같은** `data['target_track']` (B,T,4)[xyz, valid] 이라 게이지가
+    cam_param 과 일치한다 (frame-s 카메라 좌표 / norm_scale). readout query 수 Q 가 T 와 다르면
+    시간축을 linear interp 한다 — 기본 Q=49=T 라 보통은 그대로다.
+
+    보조 head 는 DiT 출력과 연결돼 있지 않으므로 이 손실을 안 더하면(추론) 그래프에서 통째로
+    빠진다. `peav_readout_aux_dim=0` 이거나 코퍼스에 target_track 이 없으면 None → 기존 arm 과
+    손실이 비트 동일하다.
+    """
+    pred = getattr(raw_model, 'readout_aux_pred', None)
+    tt = data.get('target_track')
+    if pred is None or tt is None:
+        return None
+    tt = tt.to(device).float()                                      # (B,T,4)
+    if tt.shape[1] != pred.shape[1]:
+        tt = F.interpolate(tt.transpose(1, 2), size=pred.shape[1], mode='linear',
+                           align_corners=True).transpose(1, 2)
+    tgt, valid = tt[..., :pred.shape[-1]], tt[..., 3:4]
+    # valid=0 = anchor 를 scene_graph 에서 못 찾은 변이. 손실에서 통째로 뺀다. 전부 invalid 면
+    # 분자가 0 이라 손실 0 (clamp 는 0 나눗셈 방지용이고 .item() 동기화를 피하려는 것이기도 하다).
+    return ((pred - tgt).pow(2) * valid).sum() / (valid.sum().clamp(min=1.0) * pred.shape[-1])
+
+
 def build_video_cond(data, device):
     """[new 2026-09-03] PE-AV 스트림(D117 video CA) 을 모델 kwargs dict 로 만든다.
 
@@ -533,6 +558,23 @@ def train():
         print(f"(model) video CA: video_latent_dim={_vld} video_text_dim={_vtd} "
               f"in_ln={_vid_kw['peav_in_ln']} gate={_vid_kw['video_gate']} "
               f"(순서 text CA -> video CA -> geo CA)")
+        # [new 2026-09-15] cfg.peav_readout_layers>0: 캐시 토큰을 바로 video CA 에 먹이지 않고
+        # learnable shallow transformer 로 요약한 뒤 그 출력을 key/value 로 쓴다. 0 (기본) 이면
+        # 모듈이 생성되지 않아 기존 arm 과 state_dict·동작이 비트 동일하다.
+        _rol = int(getattr(cfg, 'peav_readout_layers', 0) or 0)
+        if _rol > 0:
+            _vid_kw.update(
+                peav_readout_layers=_rol,
+                peav_readout_queries=int(getattr(cfg, 'peav_readout_queries', 49)),
+                peav_readout_aux_dim=int(getattr(cfg, 'peav_readout_aux_dim', 0) or 0))
+            _auxw = float(getattr(cfg, 'peav_readout_aux_w', 0.0))
+            print(f"(model) peav readout: layers={_rol} "
+                  f"queries={_vid_kw['peav_readout_queries']} "
+                  f"aux_dim={_vid_kw['peav_readout_aux_dim']} aux_w={_auxw} "
+                  f"(aux head 는 손실 전용 — 추론 경로가 호출하지 않는다)")
+            if _vid_kw['peav_readout_aux_dim'] > 0:
+                assert _auxw > 0, \
+                    "peav_readout_aux_dim>0 인데 peav_readout_aux_w=0 이면 head 가 학습되지 않는다"
     # arm B (text_encoder='PEAV') 는 text CA 입력이 umt5 4096 이 아니라 PE-AV 1024 다.
     if cfg.text_encoder == 'PEAV':
         _geo_kw['text_dim'] = 1024
@@ -1108,6 +1150,7 @@ def train():
                 (traj_latents.shape[0],),
                 device=device,
             ).long()
+            _aux = None                                  # readout 보조 손실 (없으면 None)
             if getattr(cfg, 'is_ar', False):
                 # chunk-wise AR: teacher-forced causal self-attn over past clean latents
                 _raw = accelerator.unwrap_model(model)
@@ -1125,14 +1168,22 @@ def train():
                 noise_pred = model(noisy_x, timesteps.float(), text_embeds, text_masks,
                                    pc_embeds, pc_masks, cond=_cond, **_vkw)
                 loss = F.mse_loss(noise_pred, noise)
-                
+                # [new 2026-09-15] readout 보조 손실. readout/aux 가 꺼져 있거나 코퍼스에
+                # target_track 이 없으면 None 이라 loss 가 예전과 비트 동일하다.
+                _aux = readout_aux_loss(accelerator.unwrap_model(model), data, device)
+                if _aux is not None:
+                    loss = loss + float(getattr(cfg, 'peav_readout_aux_w', 0.0)) * _aux
+
             t5 = time.time()
             accelerator.backward(loss)
             opt.step()
             opt.zero_grad(set_to_none=True)
             global_step += 1
             t6 = time.time()
-            accelerator.log({"train/loss": loss.item()}, step=global_step)
+            _log = {"train/loss": loss.item()}
+            if _aux is not None:
+                _log["train/readout_aux_obb"] = _aux.item()   # 가중치 곱하기 전 원 손실
+            accelerator.log(_log, step=global_step)
             pbar.set_description(f"Epoch {epoch} | Loss {loss.item():.4f}")
 
             total_loss += loss.detach() * B

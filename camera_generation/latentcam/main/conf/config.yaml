@@ -534,6 +534,21 @@ peav_in_ln: true
 # epoch 동안 loss ~1.0 에 갇혔다. gate=0 이면 시작 시점 출력이 D108 과 비트 동일하고 필요한
 # 만큼만 열린다. false = 예전(덮어쓰기) 동작. video_latent_dim=0 이면 이 키와 무관.
 video_gate: true
+# [new 2026-09-15, D195-A] readout transformer. 캐시 hidden state 를 LayerNorm+Linear 하나로
+# video CA 에 바로 먹이는 대신, learnable query 가 [self-attn → cross-attn → MLP] 를 이만큼
+# 반복해 요약하고 **그 출력이 CA 의 key/value 가 된다**. 0 (기본) = 모듈 미생성 → 기존 arm 과
+# state_dict·동작 비트 동일. video_latent_dim=0 이면 이 키들과 무관.
+peav_readout_layers: 0
+# query 개수 = 요약 토큰 수. 49 = 소스 프레임 수라 query i 가 프레임 i 에 대응하고, 그래서
+# aux head 가 프레임별 좌표를 그대로 뱉을 수 있다. 부수 효과로 video CA key/value 가
+# 3264 → 49 로 줄어든다.
+peav_readout_queries: 49
+# >0 이면 readout 출력에 MLP head 를 달아 **프레임별 subject OBB center** 를 맞히게 한다
+# (3 = xyz). 타깃은 target_track_dim 이 쓰는 것과 같은 `target_track.npz` 라 게이지가
+# cam_param 과 일치한다 — 코퍼스에 그 파일이 없으면 손실이 조용히 None 이 되니 주의.
+# head 출력은 DiT 로 되돌아가지 않으므로 추론에서 안 부르면 그게 곧 "MLP 를 뗀" 상태다.
+peav_readout_aux_dim: 0
+peav_readout_aux_w: 0.0       # 보조 손실 가중치. aux_dim>0 인데 0 이면 학습 진입점에서 assert.
 geo_inseg_span: null          # in-seg sampling span override (null = full segment)
 geo_covis_radius: 2.0         # covisibility retrieval: ball radius
 geo_covis_theta0: 10.0        # covisibility retrieval: min view-angle separation (deg)

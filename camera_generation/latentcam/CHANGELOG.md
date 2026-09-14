@@ -5,6 +5,25 @@ All notable changes to the latentcam sub-project. Follows [Keep a Changelog](htt
 ## [Unreleased]
 
 ### Added
+- **PE-AV/molmo2 readout transformer + subject OBB 보조 손실 (2026-09-15, D195-A 사용자 지시).**
+  `peav_readout_layers: 0` (기본) 이면 모듈이 생성조차 안 되고 state_dict·forward 가 기존 arm 과
+  **비트 동일**하다 (실측: 키 집합 일치, 같은 seed 로 `torch.equal(y_off, y_new) == True`).
+  켜면 캐시 hidden state 가 `LayerNorm+Linear` 하나로 video CA 에 바로 가는 대신, `num_queries`
+  개 learnable query 가 `[self-attn → cross-attn → MLP]` 를 `peav_readout_layers` 번 돌아 만든
+  요약이 CA 의 key/value 를 **대신**한다 (`PeavReadout`, `camera_diffusion_model_latent.py`).
+  query 수 기본 49 = 소스 프레임 수라 query i 가 프레임 i 에 대응하고, 부수 효과로 video CA
+  key/value 가 3264 → 49 로 줄어든다. 입력은 `[video_text | video]` 합본이다 — caption 토큰을
+  같이 먹여야 query 가 "어느 물체가 subject 인지"를 알 수 있고 그게 아래 보조 손실의 전제다.
+  `peav_readout_aux_dim: 3` 이면 요약 위에 MLP head 가 붙어 **프레임별 subject OBB center** 를
+  맞춘다 (`train_latent_cam_dm.readout_aux_loss`, 가중치 `peav_readout_aux_w`, wandb
+  `train/readout_aux_obb`). 타깃은 `target_track_dim` 이 쓰는 것과 같은 `target_track.npz`
+  (frame-s 카메라 좌표 / norm_scale) 라 게이지가 cam_param 과 일치하고, `valid=0` 변이는
+  손실에서 빠진다. head 출력은 DiT 로 **되돌아가지 않는다** — 실측으로 aux 만 backward 하면
+  `out.weight.grad is None`, DiT 손실만 backward 하면 `aux_head.weight.grad is None` 이고
+  `readout.query` 에만 양쪽 grad 가 모인다. 즉 추론에서 head 를 안 부르는 것이 곧 "MLP 를 뗀"
+  상태다. readout 2층 + aux head 기준 +8.70 M param (41 키). 코퍼스에 `target_track.npz` 가
+  없으면 손실이 조용히 `None` 이 되므로, aux 를 쓸 코퍼스엔 `export_target_track.py` 가
+  선행돼야 한다 (2026-09-15 기준 d121 52/52, dynpose d194 **0/7801**).
 - **`cache_molmo2_embeddings.py --text_override_json` / `--probe` (2026-09-14, D191).**
   둘 다 안 주면 D124 이후 기존 동작과 비트 동일하다. `--text_override_json` 은
   `{data_name: text}` JSON 으로 **molmo2 가 읽는 문장만** 갈아끼운다 — 디스크 위 코퍼스

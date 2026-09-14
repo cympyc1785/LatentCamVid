@@ -79,6 +79,58 @@ class SelfAttention(nn.Module):
         return self.norm(x + a)
 
 
+class PeavReadout(nn.Module):
+    """[new 2026-09-15] PE-AV/molmo2 캐시 토큰을 **학습되는 shallow transformer** 로 한 번 요약한다.
+
+    D194 까지는 캐시 hidden state(molmo2 l21 기준 video 3136 + text 128 토큰)가 LayerNorm +
+    Linear 하나만 거쳐 곧장 video CA 의 key/value 로 들어갔다. 즉 frozen encoder 의 좌표계를
+    DiT 가 층마다 직접 읽는 구조라, "이 씬에서 어느 물체가 subject 이고 그게 어디로 가는가"를
+    중간에서 정리해 주는 자리가 없었다.
+
+    여기서는 `num_queries` 개의 learnable query 가 [self-attn(질의끼리) → cross-attn(캐시 토큰)
+    → MLP] 를 `num_layers` 번 돌아 그 요약을 만들고, **그 출력이 video CA 의 key/value 를
+    대신한다**. query 수를 프레임 수(기본 49)로 두는 이유가 둘이다:
+      ① 토큰이 3264 → 49 로 줄어 video CA 비용이 그만큼 내려간다.
+      ② query i 가 프레임 i 에 대응하므로 `aux_head` 가 **프레임별 subject OBB center** 를
+         그대로 뱉을 수 있다.
+
+    입력은 `_build_video_tok` 이 만든 **[video_text | video] 합본**이다 — caption 토큰을 같이
+    먹여야 query 가 "어느 물체" 인지를 알 수 있고, 그게 OBB 보조 손실이 성립하는 전제다.
+
+    `aux_head` 는 **DiT 출력에 전혀 기여하지 않는다**. `forward` 가 (요약, aux예측) 을 따로
+    돌려주고 요약만 CA 로 흘러가므로, 추론에서 aux 를 안 읽으면 그게 곧 "MLP 를 뗀" 상태다
+    (가중치는 ckpt 에 남지만 계산 그래프에서 분리되어 있다).
+
+    `num_layers=0` 이면 이 모듈이 아예 생성되지 않는다 (기존 arm 과 state_dict·동작 비트 동일).
+    """
+
+    def __init__(self, dim, num_heads, num_queries, num_layers, dropout, aux_dim=0):
+        super().__init__()
+        self.query = nn.Parameter(torch.randn(num_queries, dim) * 0.02)
+        self.layers = nn.ModuleList([
+            nn.ModuleList([
+                SelfAttention(dim, num_heads),
+                CrossAttention(dim, num_heads),
+                FusedMLP(dim, dropout, nn.GELU, hidden_layer_multiplier=4),
+            ])
+            for _ in range(num_layers)
+        ])
+        self.out_ln = nn.LayerNorm(dim)
+        self.aux_head = (nn.Sequential(nn.LayerNorm(dim), nn.Linear(dim, dim), nn.SiLU(),
+                                       nn.Linear(dim, int(aux_dim)))
+                         if int(aux_dim) > 0 else None)
+
+    def forward(self, tok, key_padding_mask=None):
+        """(B,L,D) 캐시 토큰 → ((B,Q,D) 요약, (B,Q,aux_dim) aux 예측 | None)."""
+        q = self.query.unsqueeze(0).expand(tok.shape[0], -1, -1)
+        for self_attn, cross_attn, mlp in self.layers:
+            q = self_attn(q)
+            q = cross_attn(q, tok, key_padding_mask=key_padding_mask)
+            q = mlp(q) + q
+        q = self.out_ln(q)
+        return q, (self.aux_head(q) if self.aux_head is not None else None)
+
+
 class CameraDiffusionModel(nn.Module):
     def __init__(
         self,
@@ -99,6 +151,9 @@ class CameraDiffusionModel(nn.Module):
         peav_in_ln=True,
         text_in_ln=False,
         video_gate=True,
+        peav_readout_layers=0,
+        peav_readout_queries=49,
+        peav_readout_aux_dim=0,
     ):
         super().__init__()
 
@@ -169,6 +224,9 @@ class CameraDiffusionModel(nn.Module):
         # 0 = video 토큰만 (arm B / 기본).
         self.video_text_dim = int(video_text_dim)
         self.peav_in_ln = bool(peav_in_ln)
+        # video 스트림이 꺼진 arm 에서도 속성은 존재해야 forward 분기가 성립한다.
+        self.peav_readout_layers = 0
+        self.readout = None
         if self.video_latent_dim > 0:
             self.video_ln = (nn.LayerNorm(self.video_latent_dim) if self.peav_in_ln
                              else nn.Identity())
@@ -200,11 +258,21 @@ class CameraDiffusionModel(nn.Module):
                 ])
                 for _ in range(num_layers)
             ])
+            # [new 2026-09-15] readout: video_tok 을 DiT 에 바로 먹이지 않고 shallow transformer
+            # 로 한 번 요약한다 (§PeavReadout). 0 = 기존 경로 그대로 (state_dict·동작 비트 동일).
+            self.peav_readout_layers = int(peav_readout_layers)
+            self.readout = (PeavReadout(hidden_dim, num_heads, int(peav_readout_queries),
+                                        self.peav_readout_layers, dropout,
+                                        aux_dim=int(peav_readout_aux_dim))
+                            if self.peav_readout_layers > 0 else None)
 
         self.out = nn.Linear(hidden_dim, cam_dim)
         self.text_cross_attn_weight = None
         self.geo_cross_attn_weight = None
         self.video_cross_attn_weight = None
+        # readout 보조 head 의 예측. forward 마다 덮어쓰고 학습 루프가 읽어 간다 (attn_weight
+        # 들과 같은 stash 방식). readout/aux 가 꺼져 있으면 영원히 None 이다.
+        self.readout_aux_pred = None
 
         self.geo_encoder = geo_encoder
 
@@ -256,6 +324,8 @@ class CameraDiffusionModel(nn.Module):
         has_video = (self.video_latent_dim > 0) and (video_emb is not None)
         if has_video:
             self.video_cross_attn_weight = None
+        # 직전 step 의 예측을 학습 루프가 잘못 집어 가지 않도록 매 forward 에서 비운다.
+        self.readout_aux_pred = None
         # geo latent is provided externally (on-the-fly frozen geo_encoder in the
         # training loop); condition on it whenever geo_emb is given.
         has_geo_latent = geo_emb is not None
@@ -293,6 +363,13 @@ class CameraDiffusionModel(nn.Module):
         if has_video:
             video_tok, video_kpm = self._build_video_tok(
                 video_emb, video_mask, video_text_emb, video_text_mask)
+            # [new 2026-09-15] readout 을 거친 요약이 아래 층들의 key/value 가 된다. 요약
+            # 토큰은 전부 유효하므로 padding mask 는 여기서 사라진다. AR 경로(`forward_ar`)엔
+            # 안 걸어 두었다 — video_latent_dim>0 은 표준 diffusion 경로 전용이라 학습
+            # 진입점에서 이미 assert 로 막혀 있다 (train_latent_cam_dm.py).
+            if self.readout is not None:
+                video_tok, self.readout_aux_pred = self.readout(video_tok, video_kpm)
+                video_kpm = None
 
         for _li, (norm1, self_attn, text_cross_attn, mlp1, norm2, geo_cross_attn, mlp2) in enumerate(self.layers):
 

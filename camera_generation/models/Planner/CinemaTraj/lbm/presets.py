@@ -335,6 +335,14 @@ PRESET_TAU_REF = {name: "follow" for name in PRESETS if name.startswith("track_"
 
 TAU_REF_CHOICES = ("source", "follow", "auto")
 
+# D140 의 `suspect` 태그 전체 목록. 다는 쪽(`fit_hole_ladder.tag_suspects`)과 자르는 쪽
+# (`vista4d_bank_to_dl3dv.py --drop_suspect`) 이 서로 다른 파일이라, 목록을 각자 들고 있으면
+# 조용히 어긋난다 — 실제로 ④⑤ 가 추가된 뒤 emit 쪽 `choices` 는 ①②③ 에 머물러 있었고,
+# d192 뱅크에서 실제로 붙은 태그(④ 518행 / ⑤ 500행)를 **지정할 방법이 없었다**.
+# 그래서 두 파일이 이미 같이 import 하는 이 모듈에 한 벌만 둔다.
+SUSPECT_TAGS = ("aim_free_subject_lost", "static_start_collision", "motion_preset_no_motion",
+                "aim_target_subject_lost", "hole_over_budget")
+
 
 def resolve_tau_ref(preset: str, tau_ref: str) -> str:
     """`"auto"` 일 때만 preset 기본값으로. 그 외에는 요청값 그대로 (D97 이전 동작 보존)."""

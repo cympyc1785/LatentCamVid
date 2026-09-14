@@ -1,0 +1,55 @@
+# @package _global_
+# D194 — 같은 d194 코퍼스 위의 **molmo2 단독** arm (geo 없음).
+#
+# `dynpose_d194_da3.yaml` 와 데이터축은 **완전히 동일**하다 (같은 코퍼스 / 같은 holdout /
+# 같은 umt5 캡션). 바뀌는 것은 모델축 하나 — geo(da3) 를 끄고 molmo2 video+text CA 를 켠다.
+# 코퍼스·필터·어휘 설명은 `dynpose_d194_da3.yaml` 머리말 참조.
+#
+# ═══ molmo2 가 읽는 문장은 umt5 와 다르다 (D191 에서 정한 그대로) ═════════════════════════
+# 디스크 위 `prompts.json` 의 concise 캡션은 **한 바이트도 안 건드린다** — umt5 는 그걸 읽는다.
+# molmo2 에는 `--text_override_json` 으로 `Track {target_text}.` 만 넣는다. molmo2 스트림의
+# 역할은 "카메라를 어떻게 움직이나"가 아니라 **"화면의 어느 물체 얘기인가"** 이고, 그 지칭구가
+# D193 의 `instance_desc.json` 에서 온다. d194 는 그 지칭구가 7,801/7,801 anchor 전량에 있어
+# d189 때의 fallback(맨 라벨)이 0 건이다.
+# 어휘가 track/dolly 2종이라 "Track X" 가 dolly 변이에도 붙지만, 이 문장은 카메라 동사가 아니라
+# **subject 지목**으로 쓰인다 (D191 에서 같은 근거로 probe 도 안 바꿨다).
+#
+# ═══ 캐시 ════════════════════════════════════════════════════════════════════════════════
+# `molmo2_cache/{video/*.pt, text.pt}`. video 쪽은 소스 영상만 보므로 target 뱅크와 무관하지만
+# 씬이 d189 와 거의 안 겹쳐서 d194 전용으로 굽는다. text 쪽은 오버라이드 문장에 딸린 것이라
+# 반드시 이 코퍼스 전용이다.
+exp_name: dynpose_d194_molmo2_nogeo
+dl3dv_root: /data1/cympyc1785/data/DynPose-LBM/latentcam_dynpose_d194
+meta_csv: meta_dynpose.csv
+train_seg_list: /data1/cympyc1785/data/DynPose-LBM/latentcam_dynpose_d194/seg_list_dynpose_train.txt
+test_seg_list: /data1/cympyc1785/data/DynPose-LBM/latentcam_dynpose_d194/seg_list_dynpose_test.txt
+coverage_blacklist_path: null
+
+text_len: 128   # D194 da3 arm 과 동일. 부사 뺀 판본이라 더 짧아졌고 잘림은 없다.
+
+pose_source: da3
+target_pose_source: da3_target_poses
+scale_mode: avg_scale
+avg_scale_ref: context_first_cam
+intr_norm: rel
+cam_dim: 64
+
+geo_encoder: null          # ← da3 arm 은 'da3'. 이 한 줄이 dataset/train/model 세 군데를 끈다.
+geo_posed: false           # geo 가 없으므로 무의미하지만, true 로 두면 오독된다.
+geo_cam_embed: null
+geo_latent_cache_dir: null
+geo_raw_cache_dir: null    # 경로가 남아 있으면 캐시를 쓴다고 오독된다.
+
+anchor_pred_frame0: true
+
+peav_video_cache_dir: /data1/cympyc1785/data/DynPose-LBM/latentcam_dynpose_d194/molmo2_cache/video
+peav_text_cache: /data1/cympyc1785/data/DynPose-LBM/latentcam_dynpose_d194/molmo2_cache/text.pt
+video_latent_dim: 2560     # Molmo2 LM hidden — video part (3136 tok)
+video_text_in_stream: true
+video_text_dim: 2560       # 같은 LM hidden — text part (128 tok). 기본 1024 는 PE-AV 값이다.
+peav_in_ln: true           # proj 앞 LayerNorm. FIX-D117 참조 (없으면 CA logit 포화)
+video_gate: true           # 0 초기화 residual gate. FIX-D117 참조 (없으면 loss ~1.0 정체)
+
+batch_size: 8
+epochs: 100          # 실제 집행자는 conf/config.yaml 의 `epoch_cap: 100`.
+ckpt_at_epochs: [50, 100]

@@ -1,0 +1,88 @@
+# @package _global_
+# D194 — **어휘 2종** d192 뱅크(+ D193 target 지칭구) 위의 da3 단독 arm.
+#
+# ═══ d189 arm 과 무엇이 다른가 — 데이터축 두 개 ══════════════════════════════════════════
+# ① **preset 어휘가 2종뿐이다** (사용자 지시 2026-09-14). 많이 움직이는 subject 는
+#    `track_look_at`, 별로 안 움직이는 subject 는 `dolly_in_look_at`. d188/d189 는 17 preset
+#    전체를 썼다. 즉 이 arm 이 배우는 카메라 어휘는 **둘 중 하나를 고르는 것 + 그 크기**이고,
+#    orbit/crane/pedestal 계열은 학습 신호에서 통째로 빠진다.
+#    d192 canonical 7,801대 실측 구성: track_look_at 6,450 (82.7%) / dolly_in_look_at 1,351.
+# ② **target 이 전량 지칭구다.** `captions_d193.json` 은 D193 이 구운 `instance_desc.json`
+#    7,801/7,801 anchor 위에서 만들어졌다 — d189 때 target 의 76%가 맨 라벨("man"/"hand")로
+#    떨어지던 문제가 0 편이다 (캡션 빌드 로그의 "instance_desc.json 없어 라벨로 떨어진 N편"
+#    경고 0건).
+#
+# ═══ 무엇을 잘랐나 (사용자 지시 "clamped_low 같은거 빠지도록") ═════════════════════════════
+# `--drop_status clamped_low` 는 **아무것도 안 자른다** — d192 canonical 7,801행에 `clamped_low`
+# 가 0 건이다 (emit 단계가 canonical 로 올리기 전에 이미 뺀다). 같은 종류의 해악("게이트를
+# 못 넘겼는데 정상 변이로 나간다")은 `status` 가 아니라 **별도 `suspect` 열**로 샌다:
+#     aim_target_subject_lost  518행 (6.6%)  subject_in_frame median 0.692
+#     hole_over_budget         500행 (6.4%)  hole_fraction    median 0.395
+# 그래서 `--drop_suspect` 로 그 둘을 잘랐다. 7,801 → **6,894 (88.4%)**,
+# track 5,638 / dolly 1,256. 플래그는 그대로 남겨 둔다 — 다음 세대에서 `clamped_low` 가 다시
+# 생기면 잡아야 하고, 없을 때는 no-op 이라 비용이 0 이다.
+# (`--drop_suspect` 의 argparse `choices` 가 태거보다 두 태그 낡아 있어서 먼저 고쳤다 —
+#  FIX.log 2026-09-14 / `lbm/presets.py:SUSPECT_TAGS`.)
+#
+# ═══ holdout ════════════════════════════════════════════════════════════════════════════
+# `--test_hash_mod 20` (`md5(scene) % 20 == 0`), d189 와 같은 규칙이다. 코퍼스가 9배 커졌지만
+# 해시 분할이라 d189 의 test 씬은 여전히 test 쪽에 있다.
+#
+# ═══ 모델축은 d189_da3 와 글자 그대로 같다 ═══════════════════════════════════════════════
+# geo/pose/scale/intr 계열 값을 `dynpose_d189_da3.yaml` 에서 그대로 가져왔다. 이번 세대에서
+# 움직인 축은 **데이터 둘(어휘·지칭구)** 이므로 모델 하이퍼를 같이 건드리면 원인을 못 가른다.
+# d189 와 나란히 볼 때는 **씬 수가 8배 다르다**는 것을 같이 읽어야 한다 (865 → 6,894).
+#
+# ═══ geo raw 캐시 ════════════════════════════════════════════════════════════════════════
+# d189 캐시(865편)와 씬 집합이 거의 안 겹치므로 d194 전용 디렉토리를 판다 — 남의 root 밑에
+# 6천 편을 새로 쓰면 d189 가 읽는 물건이 조용히 달라진다. preloaded 0 으로 시작(on-the-fly DA3).
+#
+# ═══ 재현 ════════════════════════════════════════════════════════════════════════════════
+#   python scripts/build_bank_captions.py --bank_dir hole_bank_d192 --output_root out_dynpose \
+#       --out_name captions_d193.json --prompt_style nl --no_magnitude \
+#       --videos_file tmp/d194/videos_d192.txt
+#   python scripts/vista4d_bank_to_dl3dv.py --cine_out out_dynpose --bank_dir hole_bank_d192 \
+#       --captions_name captions_d193.json --picked_only --chunk_prefix dynpose \
+#       --meta_csv meta_dynpose.csv --seg_list_prefix seg_list_dynpose --test_hash_mod 20 \
+#       --recon_root <DynPose-100K>/eval_data/recon_and_seg --out_root <root> \
+#       --drop_status clamped_low \
+#       --drop_suspect aim_target_subject_lost hole_over_budget
+exp_name: dynpose_d194_da3
+dl3dv_root: /data1/cympyc1785/data/DynPose-LBM/latentcam_dynpose_d194
+meta_csv: meta_dynpose.csv
+train_seg_list: /data1/cympyc1785/data/DynPose-LBM/latentcam_dynpose_d194/seg_list_dynpose_train.txt
+test_seg_list: /data1/cympyc1785/data/DynPose-LBM/latentcam_dynpose_d194/seg_list_dynpose_test.txt
+coverage_blacklist_path: null
+
+text_len: 128   # D123 이후 전 arm 동일. 부사를 뺀 판본이라 더 짧아졌고 잘림은 없다.
+
+pose_source: da3
+target_pose_source: da3_target_poses   # target 만 <scene>/da3/target_poses.npz 로 교체
+scale_mode: avg_scale
+avg_scale_ref: context_first_cam       # 디렉토리 avg_scale_context_first_cam <- scene_graph S
+intr_norm: rel                         # vae_20260302_300 = frame-0-relative-intrinsics ckpt
+cam_dim: 64                            # = 그 ckpt 의 latent_dim
+
+geo_encoder: da3
+geo_cam_embed: null
+geo_latent_cache_dir: null
+geo_posed: true
+geo_shuffle_order: false
+da3_geo_model: da3nested-giant-large
+da3_geo_input_hw: [252, 448]
+da3_geo_layers: last
+
+geo_view_sampling: context_uniform  # context range = 영상 전체 [0,49) = 소스 영상 전체
+geo_num_views: 6                    # _even_indices(49,6) = [0,10,19,29,38,48]
+geo_first_view_target_s: true       # view0 = 프레임 s(=0). 이미 첫 픽이라 집합이 안 바뀐다.
+
+geo_raw_cache_dir: /data1/cympyc1785/data/DynPose-LBM/latentcam_dynpose_d194/geo_raw_cache_da3
+da3_cam_token_per_sample: true   # 캐시는 B=1 로 구워진다 — 켜야 on-the-fly 폴백과 일치
+
+anchor_pred_frame0: true
+
+video_latent_dim: 0   # video CA 블록 자체를 만들지 않는다 (D117 이전과 비트 동일)
+
+batch_size: 8
+epochs: 100          # 실제 집행자는 conf/config.yaml 의 `epoch_cap: 100`.
+ckpt_at_epochs: [50, 100]

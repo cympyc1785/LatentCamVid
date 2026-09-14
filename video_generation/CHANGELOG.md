@@ -6,6 +6,16 @@
 
 ## [Unreleased]
 
+### Fixed
+- **`suspect` 태그 목록을 `lbm/presets.py:SUSPECT_TAGS` 한 벌로 (2026-09-14).** 목록이 다는 쪽
+  (`fit_hole_ladder.tag_suspects`, 5종)과 자르는 쪽(`vista4d_bank_to_dl3dv.py --drop_suspect`
+  의 `choices`, 3종)에 따로 하드코딩돼 있었고 후자가 ④ `aim_target_subject_lost` / ⑤
+  `hole_over_budget` 을 모르는 채 남아 있었다. d192 canonical 7,801행에서 실제로 붙은 태그가
+  정확히 그 둘(907행, 11.6%)이라 **자를 수 있는 게 하나도 없었다** — 지정하면 argparse 가 rc=2
+  로 거부한다. 두 파일이 이미 같이 import 하는 `lbm/presets.py` 에 상수를 두고 양쪽이 읽게 했다
+  (`fit_hole_ladder` 를 emit 쪽에서 import 하면 torch 렌더러까지 끌려온다). 기본값은 빈 리스트
+  그대로라 안 주면 예전 코퍼스와 비트 동일하다.
+
 ### Added
 - **probe frustum/gizmo 따로 끄기 + 색 지정 (2026-09-14).** 자리를 정하고 나면 gizmo 화살표가
   프러스텀을 가려서 "이 카메라가 뭘 보나"를 확인할 수가 없는데, 프러스텀이 gizmo 의 **자식**이라

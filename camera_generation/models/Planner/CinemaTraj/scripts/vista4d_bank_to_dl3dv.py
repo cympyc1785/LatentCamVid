@@ -73,7 +73,7 @@ if _LATENTCAM_MAIN not in sys.path:
 if CINEMATRAJ_ROOT not in sys.path:
     sys.path.insert(0, CINEMATRAJ_ROOT)
 from dataset_cfg import AVG_SCALE_DIRS, AVG_SCALE_REFS      # noqa: E402
-from lbm.presets import row_preset                          # noqa: E402
+from lbm.presets import SUSPECT_TAGS, row_preset            # noqa: E402
 
 RECON_DEFAULT = "/data1/cympyc1785/data/Vista4D-Eval-Data/eval_data/recon_and_seg"
 
@@ -331,9 +331,9 @@ def main():
     # 자른다 (`fit_hole_ladder.tag_suspects`). 태그 목록이라 접두사가 아니라 **토큰** 매칭.
     # 기본값이 빈 리스트라 안 주면 예전 코퍼스와 비트 동일하고, `suspect` 열이 없는 예전
     # 뱅크에서도 no-op 이다.
-    parser.add_argument("--drop_suspect", nargs="*", default=[],
-                        choices=["aim_free_subject_lost", "static_start_collision",
-                                 "motion_preset_no_motion"],
+    # `choices` 를 여기 적어두지 않는 이유는 §SUSPECT_TAGS — 태거에 ④⑤ 가 추가된 뒤 이 목록이
+    # ①②③ 에 머물러, d192 뱅크에서 실제로 붙은 태그를 지정하면 argparse 가 거부했다.
+    parser.add_argument("--drop_suspect", nargs="*", default=[], choices=list(SUSPECT_TAGS),
                         help="예: --drop_suspect aim_free_subject_lost  (토큰 매칭, 기본 없음)")
     # D189. `picked` 열이 고른 행만 내보낸다 (`lbm/pick.py` / `emit_bank.py --picked_only` 와
     # 같은 열). 기본 꺼짐 = 열이 없던 예전 뱅크와 비트 동일.

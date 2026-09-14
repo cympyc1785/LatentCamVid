@@ -201,7 +201,8 @@ from decode.build_poses import build_poses                                      
 from lbm.cloud import EVAL_DATA_DEFAULT, VISTA4D_ROOT_DEFAULT                   # noqa: E402
 from lbm.cloud import CINEMATRAJ_ROOT as CLOUD_ROOT                             # noqa: E402
 from lbm.cloud import subject_point_mask                                        # noqa: E402
-from lbm.presets import DEFAULT_SHAPE, STATIC_PRESETS, TAU_REF_CHOICES          # noqa: E402
+from lbm.presets import (DEFAULT_SHAPE, STATIC_PRESETS, SUSPECT_TAGS,           # noqa: E402
+                         TAU_REF_CHOICES)
 from lbm.render import CloudRenderer, add_cloud_source_args, open_renderer      # noqa: E402,F401
 from scene_graph.io import load_scene                                           # noqa: E402
 from scene_graph.scale import (TAU_DENOM_MODES, assert_scale_mode,             # noqa: E402
@@ -498,9 +499,9 @@ def tag_suspects(rows: list, args) -> dict:
     """
     hold_like = ("hold", "look_at")          # 정지가 의도인 preset 접미사
     turn_like = ("pan", "tilt")              # 제자리 회전 — path_len_u 0 이 정상
-    counts = {"aim_free_subject_lost": 0, "static_start_collision": 0,
-              "motion_preset_no_motion": 0, "aim_target_subject_lost": 0,
-              "hole_over_budget": 0}
+    # 목록은 `lbm.presets.SUSPECT_TAGS` 한 벌만 둔다 — 자르는 쪽(`--drop_suspect`)이 같은 걸
+    # 읽어야 태그를 늘렸을 때 조용히 어긋나지 않는다.
+    counts = {tag: 0 for tag in SUSPECT_TAGS}
     for row in rows:
         tags = []
         preset, status = str(row["preset"]), str(row["status"])

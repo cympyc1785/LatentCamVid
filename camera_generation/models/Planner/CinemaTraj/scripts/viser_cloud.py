@@ -249,7 +249,8 @@ def main():
     # 0 이면 z_med 기준 자동 (0.002·z_med).
     parser.add_argument("--point_size", default=0.0, type=float)
     parser.add_argument("--cam_stride", default=2, type=int)
-    parser.add_argument("--cam_scale", default=0.0, type=float)  # 0 = 0.03·z_med
+    # 0 = 0.03·z_med. 슬라이더 초기값일 뿐이고, 띄운 뒤 GUI `view > camera size` 로 바꾼다.
+    parser.add_argument("--cam_scale", default=0.0, type=float)
     parser.add_argument("--up", default="-y", choices=sorted(UP_VECTORS))
     # plan 카메라 오버레이 (선택). <out>/<video>/<bank>/poses.npz 의 variant_id 부분일치.
     parser.add_argument("--bank", default="", type=str)
@@ -314,12 +315,14 @@ def main():
                 point_size=point_size, visible=(f == 0)))
 
     src_gl = cam_c2w @ gl2cv  # CV c2w -> add_frustums 가 먹는 GL c2w
-    add_frustums(server, "/cam_source", src_gl, float(intrinsics[0, 0, 0]),
-                 float(intrinsics[0, 1, 1]), width, height, (140, 140, 140), cam_scale,
-                 downsample=args.cam_stride)
+    src_cams = [(h, 1.0) for h in add_frustums(
+        server, "/cam_source", src_gl, float(intrinsics[0, 0, 0]),
+        float(intrinsics[0, 1, 1]), width, height, (140, 140, 140), cam_scale,
+        downsample=args.cam_stride)]
     src_now = add_frustums(server, "/cam_source_now", src_gl[:1], float(intrinsics[0, 0, 0]),
                            float(intrinsics[0, 1, 1]), width, height, (60, 200, 90),
                            cam_scale * 1.6)
+    src_cams += [(h, 1.6) for h in src_now]
 
     focal = float(intrinsics[0, 0, 0])
     # 소스 카메라 경로도 선으로 — plan 이 떠는지 판단하려면 "원래 소스는 얼마나 떠는가"가
@@ -381,16 +384,26 @@ def main():
 
     # 현재 선택된 motion 의 handle 들. 갈아끼울 때 통째로 remove 한다 — 같은 이름으로 덮어쓰면
     # 프러스텀 수가 줄어들 때(다른 F) 이전 것이 남는다.
-    state = {"handles": [], "now": [], "c2w": None, "label": ""}
+    state = {"handles": [], "now": [], "c2w": None, "label": "", "cams": []}
+
+    # 프러스텀 크기는 씬마다 맞는 값이 다르다 — camel 소스는 49프레임 경로가 0.167 u 뿐이라
+    # 기본 0.03·z_med 로는 점군에 묻히고, 카메라가 크게 도는 씬에선 같은 값이 화면을 덮는다.
+    # handle 을 지웠다 다시 만들면 깜빡이므로 `scale` prop 만 갈아끼운다. 배율(now=1.6)을 같이
+    # 들고 있어야 "현재 프레임" 프러스텀이 큰 구분이 슬라이더를 움직여도 유지된다.
+    def apply_cam_scale():
+        value = float(gui_cam.value)
+        for handle, ratio in src_cams + state["cams"]:
+            handle.scale = value * ratio
 
     def select(index: int):
         label, plan_c2w, row = motions[int(index)]
         for handle in state["handles"]:
             handle.remove()
         plan_gl = plan_c2w @ gl2cv
-        handles = list(add_frustums(server, "/cam_plan", plan_gl, focal,
-                                    float(intrinsics[0, 1, 1]), width, height, (255, 140, 40),
-                                    cam_scale, downsample=args.cam_stride))
+        plan_cams = list(add_frustums(server, "/cam_plan", plan_gl, focal,
+                                      float(intrinsics[0, 1, 1]), width, height, (255, 140, 40),
+                                      cam_scale, downsample=args.cam_stride))
+        handles = list(plan_cams)
         handles.append(server.scene.add_line_segments(
             "/plan_path", path_segments(plan_c2w[:, :3, 3]), colors=(255, 140, 40),
             thickness=cam_scale * 0.10))
@@ -402,8 +415,10 @@ def main():
             handles.append(server.scene.add_line_segments(
                 "/subject_track", path_segments(track), colors=(60, 220, 90),
                 thickness=cam_scale * 0.08))
-        state.update(handles=handles + now, now=now, c2w=plan_c2w, label=label)
+        state.update(handles=handles + now, now=now, c2w=plan_c2w, label=label,
+                     cams=[(h, 1.0) for h in plan_cams] + [(h, 1.6) for h in now])
         gui_info.value = motion_report(label, row, plan_c2w, track, z_med, focal, src_jerk)
+        apply_cam_scale()
         refresh()
 
     with server.gui.add_folder("motion"):
@@ -427,6 +442,8 @@ def main():
                                              disabled=ground_handle is None)
         gui_size = server.gui.add_slider("point size", min=point_size * 0.25, max=point_size * 4.0,
                                          step=point_size * 0.05, initial_value=point_size)
+        gui_cam = server.gui.add_slider("camera size", min=cam_scale * 0.1, max=cam_scale * 10.0,
+                                        step=cam_scale * 0.05, initial_value=cam_scale)
 
     def refresh():
         f = int(gui_frame.value)
@@ -480,6 +497,8 @@ def main():
         for handle in dyn_handles:
             handle.point_size = float(gui_size.value)
 
+    gui_cam.on_update(lambda _: apply_cam_scale())
+
     if motions:
         select(0)
     else:
@@ -489,6 +508,7 @@ def main():
             ("static shown", f"{len(static_pick):,} / {len(static_idx):,}"),
             ("dynamic/frame", f"{int(np.median(dyn_counts) if dyn_counts else 0):,} (median)"),
             ("z_med frame0", f"{z_med:.4f}"), ("point size", f"{point_size:.5f}"),
+            ("camera size", f"{cam_scale:.4f}  (GUI view > camera size 로 조절)"),
             ("up", args.up), ("banks", " ".join(banks) or "-"),
             ("obb nodes", " ".join(f"{i}({'dyn' if m else 'stat'})" for i, _, m in graph_rows)
              or "-"),

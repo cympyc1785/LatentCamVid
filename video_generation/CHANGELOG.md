@@ -7,6 +7,15 @@
 ## [Unreleased]
 
 ### Added
+- **`viser_cloud.py` 에 `view > camera size` 슬라이더 (2026-09-14).** 프러스텀 크기 기본값
+  `0.03·z_med` 는 씬마다 안 맞는다 — camel 은 49프레임 카메라 경로가 0.167 u 뿐이라 프러스텀이
+  한 점에 겹치고, 크기가 median depth 3.55 u 의 3% 라 점군에 묻혀서 **안 보인다**. 여태 고치려면
+  `--cam_scale` 을 바꿔 프로세스를 다시 띄워야 했고 camel `cloud.npz` 는 1.4 GB 라 재기동이
+  1분이다. 슬라이더는 handle 을 지웠다 만들지 않고 `scale` prop 만 갈아끼운다(지웠다 만들면
+  깜빡인다 — `_pose` 주석과 같은 이유). `/cam_source_now`·`/cam_plan_now` 의 1.6배는 배율로
+  들고 있어서 슬라이더를 움직여도 "현재 프레임" 구분이 유지되고, plan 프러스텀은 `select()` 가
+  갈아끼운 뒤 `apply_cam_scale()` 로 현재 슬라이더 값을 다시 먹인다. `--cam_scale` 은 이제
+  슬라이더 초기값이다 (기본값·기존 동작 불변).
 - **릴 표본 선택기에 `--picked_only` / `--bucket_by preset` (2026-09-14, D192).**
   `pick_warp_sample_scenes.py` 와 `run_preset_warp_{sample,max_shard}.sh` 가 후보 행을
   `status.startswith("solved")` 로만 골랐는데, **`solved` 는 "뱅크에 남았다"와 다른 뜻**이다 —

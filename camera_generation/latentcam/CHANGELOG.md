@@ -5,6 +5,21 @@ All notable changes to the latentcam sub-project. Follows [Keep a Changelog](htt
 ## [Unreleased]
 
 ### Added
+- **`cache_molmo2_embeddings.py --text_override_json` / `--probe` (2026-09-14, D191).**
+  둘 다 안 주면 D124 이후 기존 동작과 비트 동일하다. `--text_override_json` 은
+  `{data_name: text}` JSON 으로 **molmo2 가 읽는 문장만** 갈아끼운다 — 디스크 위 코퍼스
+  `prompts.json` 은 안 건드리므로 같은 코퍼스를 쓰는 umt5/T5 arm 은 글자 단위로 그대로다.
+  누락 세그먼트가 있으면 assert 로 죽는다 (조용한 부분 적용 방지). 구운 `text.pt` 에
+  `template: molmo2_override+probe` 와 `text_override_json` 경로를 같이 싣는다.
+  사용자 지시 2026-09-14 "molmo2에는 Track {target with detail} 형식으로 넣은거로 돌려줘".
+- **`conf/experiment/dynpose_d189_molmo2_nogeo.yaml` / `dynpose_d189_da3_molmo2.yaml`
+  (2026-09-14, D191).** d189 코퍼스(865씬 / 1,034대)를 **파일 단위로 그대로** 읽는 molmo2 두
+  arm. 이미 끝난 `dynpose_d189_da3`(geo only)와 합쳐 3-arm 이 되고, 셋 다 같은 코퍼스 ·
+  holdout · `text_len` · VAE · `scale_mode` · `intr_norm` 이라 움직인 축은 스트림 구성뿐이다.
+  molmo2 텍스트는 `Track {상세 target}.` — 상세 target 은 D190 `instance_desc.json` 을 먹여
+  다시 구운 `captions_d191.json` 의 `target_text` 이고, 1,034/1,034 에 붙었다 (라벨 폴백 0).
+  probe 는 안 바꿨다 (`Track X` 가 명령문이라 기존 질의문과 그대로 맞물린다).
+  두 arm 이 `molmo2_cache/{video,text.pt}` 를 공유하므로 molmo2 입력이 완전히 동일하다.
 - **`conf/experiment/dynpose_d189_da3.yaml` — anchor 당 1대로 다시 고른 d188 뱅크 위의 da3 arm
   (2026-09-14, D189).** 모델축 값은 `dynpose_d137_da3` 에서 **글자 그대로** 가져왔다 — 이번
   세대에서 움직인 축은 데이터 하나이므로 모델 하이퍼를 같이 건드리면 원인을 못 가른다.

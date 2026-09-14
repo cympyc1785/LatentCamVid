@@ -1,0 +1,84 @@
+# @package _global_
+# D191-a — d189 코퍼스 위에서 **da3 geo 를 빼고 Molmo2-4B 스트림만** 쓰는 arm.
+# 레이어 순서 text CA(umt5) -> molmo2 CA. geo CA 없음.
+#
+# ═══ 코퍼스는 d189 와 글자 단위로 같다 ═════════════════════════════════════════════════════
+# `dl3dv_root` / `meta_csv` / seg_list / `prompts.json` 전부 `dynpose_d189_da3.yaml` 과 동일한
+# 파일을 가리킨다 (865씬 / 1,034대, 해시 holdout `md5(scene)%20==0`). 즉 **umt5 가 읽는 캡션이
+# 바뀌지 않았다** — 이미 돌린 `dynpose_d189_da3` 와 이 arm 의 차이는 스트림 구성뿐이다.
+#
+# ═══ 무엇이 바뀌었나: molmo2 가 읽는 문장 (사용자 지시 2026-09-14) ══════════════════════════
+# "molmo2에는 Track {target with detail} 형식으로 넣은거로 돌려줘".
+# molmo2 텍스트 슬롯에 코퍼스 concise 캡션 대신 `Track {상세 target}.` 를 넣는다. 예:
+#   umt5   "The camera arcs to the left while pulling back from camper."     <- 코퍼스 그대로
+#   molmo2 "Track the white camper with a maroon stripe parked under a green roof."
+# 상세 target 은 D190 에서 구운 `instance_desc.json` 을 먹여 다시 구운 `captions_d191.json` 의
+# `target_text` 다. 조인 키는 `variant_id` (`target_hole` 류 실현치 열이 아니다).
+# 1,034/1,034 세그먼트 전부 상세 target 이 붙었고 라벨 폴백 0건 — 즉 "man" 같은 맨 라벨이
+# 남은 세그먼트가 없다.
+#
+# 왜 코퍼스가 아니라 캐시만 바꾸나: 코퍼스 `prompts.json` 을 갈면 umt5 캡션도 같이 바뀌어
+# `dynpose_d189_da3` 와의 대조가 두 축(텍스트 인코더 입력 + molmo2 스트림)으로 갈라진다.
+# 텍스트 오버라이드는 `cache_molmo2_embeddings.py --text_override_json` 으로 **캐시를 구울 때만**
+# 적용되므로 디스크 위 코퍼스는 그대로다.
+#
+# ═══ probe 는 안 바꿨다 ════════════════════════════════════════════════════════════════════
+# 캡션 뒤에 붙는 고정 질의문은 D124 이후 전 molmo2 arm 과 같은 문장
+# ("Describe the camera trajectory implied by this instruction for the video above.") 이다.
+# `Track X` 는 명령문이라 이 질의문과 그대로 맞물린다. 바꿀 거면 `--probe` 로 바꾸고
+# 캐시를 다시 구우면 된다 — 이번엔 축을 하나만 움직인다.
+#
+# ═══ 무엇이 꺼지는가 ═══════════════════════════════════════════════════════════════════════
+# `geo_encoder: null` 하나가 세 군데를 동시에 끈다 (D138 헤더와 같은 근거):
+#   · dataset  `dataset_cfg.py:263  geo_enabled = bool(getattr(cfg, 'geo_encoder', None))`
+#   · train    `train_latent_cam_dm.py:482  ... if getattr(cfg, 'geo_encoder', None) else None`
+#   · model    `camera_diffusion_model_latent.py:261  has_geo_latent = geo_emb is not None`
+# `pose_source: da3` / `target_pose_source` 는 **카메라 궤적 자체**의 출처라 그대로 둔다.
+#
+# ═══ 재현 ════════════════════════════════════════════════════════════════════════════════
+#   python scripts/build_bank_captions.py --bank_dir hole_bank_d188 --output_root out_dynpose \
+#       --out_name captions_d191.json --prompt_style nl --no_magnitude --videos_file <865편 목록>
+#   python tmp/d191/build_override.py                       # -> molmo2_text_track.json
+#   python main/cache_molmo2_embeddings.py --gpu 3 --root <d189> --seg_prefix dynpose \
+#       --video_out <d189>/molmo2_cache/video --text_out <d189>/molmo2_cache/text.pt \
+#       --text_override_json <tmp>/d191/molmo2_text_track.json
+exp_name: dynpose_d189_molmo2_nogeo
+dl3dv_root: /data1/cympyc1785/data/DynPose-LBM/latentcam_dynpose_d189
+meta_csv: meta_dynpose.csv
+train_seg_list: /data1/cympyc1785/data/DynPose-LBM/latentcam_dynpose_d189/seg_list_dynpose_train.txt
+test_seg_list: /data1/cympyc1785/data/DynPose-LBM/latentcam_dynpose_d189/seg_list_dynpose_test.txt
+coverage_blacklist_path: null
+
+text_len: 128   # D189 와 동일. 부사 뺀 판본이라 더 짧아졌고 잘림은 없다.
+
+pose_source: da3
+target_pose_source: da3_target_poses
+scale_mode: avg_scale
+avg_scale_ref: context_first_cam
+intr_norm: rel
+cam_dim: 64
+
+# ─── geo (da3) 스트림 제거 ────────────────────────────────────────────────────────────────
+geo_encoder: null          # ← D189 는 'da3'. 이 한 줄이 dataset/train/model 세 군데를 끈다.
+geo_posed: false           # geo 가 없으므로 무의미하지만, true 로 두면 오독된다.
+geo_cam_embed: null
+geo_latent_cache_dir: null
+geo_raw_cache_dir: null    # 경로가 남아 있으면 캐시를 쓴다고 오독된다.
+
+anchor_pred_frame0: true
+
+# ─── Molmo2 CA (기존 PE-AV 슬롯을 그대로 재사용한다) ───────────────────────────────────────
+peav_video_cache_dir: /data1/cympyc1785/data/DynPose-LBM/latentcam_dynpose_d189/molmo2_cache/video
+peav_text_cache: /data1/cympyc1785/data/DynPose-LBM/latentcam_dynpose_d189/molmo2_cache/text.pt
+# `peav_seg_list_only` 를 **안 켠다**: d189 코퍼스는 `--picked_only` 로 내보내 prompts.json
+# 항목 수(1,034)가 seg_list 합(985+49)과 정확히 같다. 커버리지 검사를 좁힐 이유가 없고,
+# 안 좁혀야 캐시 누락이 실제로 잡힌다.
+video_latent_dim: 2560     # Molmo2 LM hidden — video part (3136 tok)
+video_text_in_stream: true
+video_text_dim: 2560       # 같은 LM hidden — text part (128 tok). 기본 1024 는 PE-AV 값이다.
+peav_in_ln: true           # proj 앞 LayerNorm. FIX-D117 참조 (없으면 CA logit 포화)
+video_gate: true           # 0 초기화 residual gate. FIX-D117 참조 (없으면 loss ~1.0 정체)
+
+batch_size: 8
+epochs: 100          # 실제 집행자는 conf/config.yaml 의 `epoch_cap: 100`.
+ckpt_at_epochs: [50, 100]

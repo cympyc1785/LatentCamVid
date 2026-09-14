@@ -33,10 +33,13 @@ stage 전에 video·text attention 이 끝난" 지점.
 사용 예시:
   python main/cache_molmo2_embeddings.py --gpu 2 --verify --limit_scenes 1   # 스모크
   python main/cache_molmo2_embeddings.py --gpu 2                             # 전량
+  python main/cache_molmo2_embeddings.py --gpu 3 --root <d189> --seg_prefix dynpose \
+      --text_override_json <tmp>/molmo2_text_track.json                      # D191 Track {target}
 """
 
 from argparse import ArgumentParser
 from os import path as osp, makedirs, environ
+import json
 import sys
 import time
 
@@ -163,6 +166,8 @@ def pool_video(hid, patch_mask, n_frames, side, pool):
 
 def main(args):
     from transformers import AutoProcessor, AutoModelForImageTextToText
+    global PROBE
+    PROBE = args.probe   # 기본값은 모듈 상수 그대로 — 안 주면 D124 와 비트 동일
     device = torch.device('cuda' if torch.cuda.is_available() else 'cpu')
     dtype = torch.bfloat16
     t0 = time.time()
@@ -174,6 +179,16 @@ def main(args):
           f'layers={model.config.text_config.num_hidden_layers}', flush=True)
 
     items = collect(args.root, args.splits.split(','), args.seg_prefix)
+    if args.text_override_json:
+        # D191: molmo2 가 읽는 문장만 갈아끼운다. 코퍼스 prompts.json 은 안 건드리므로
+        # 같은 코퍼스를 쓰는 T5/umt5 arm 은 글자 단위로 그대로다 — 차이가 이 스트림에만 남는다.
+        ov = json.load(open(args.text_override_json))
+        miss = [it['data_name'] for it in items if it['data_name'] not in ov]
+        assert not miss, f'text_override_json 에 {len(miss)}개 누락: {miss[:5]}'
+        for it in items:
+            it['concise'] = ov[it['data_name']].strip()
+        print(f'[text] override {args.text_override_json}  '
+              f'{len(items)} seg / 고유 문장 {len({it["concise"] for it in items})}', flush=True)
     for it in items:
         assert it['concise'], f"{it['data_name']}: concise 캡션이 비었다"
     scenes = {}
@@ -250,7 +265,9 @@ def main(args):
                                 for it in items},
                     'emb': embs, 'mask': masks,
                     'text': [f'{sk}\t{c}' for sk, c in pairs],
-                    'template': f'molmo2_concise+probe', 'text_len': L,
+                    'template': ('molmo2_override+probe' if args.text_override_json
+                                 else 'molmo2_concise+probe'), 'text_len': L,
+                    'text_override_json': args.text_override_json,
                     'probe': PROBE}, args.text_out)
 
     print()
@@ -305,6 +322,10 @@ if __name__ == '__main__':
     p.add_argument('--video_out', default=osp.join(CACHE, 'video'))   # 씬당 1파일
     p.add_argument('--text_out', default=osp.join(CACHE, 'text.pt'))  # 전체 1파일
     p.add_argument('--text_len', type=int, default=128)               # 0 = 실측 최대
+    # D191: molmo2 가 읽는 문장을 {data_name: text} JSON 으로 갈아끼운다. 안 주면 코퍼스
+    # prompts.json 의 concise 를 그대로 쓴다 (= D124 이후 전 arm 의 기존 동작).
+    p.add_argument('--text_override_json', default=None)
+    p.add_argument('--probe', default=PROBE)                          # 캡션 뒤 고정 질의문
     p.add_argument('--video_pool', type=int, default=8)               # 9x9 -> pool x pool
     p.add_argument('--bs', type=int, default=8)                       # 캡션 배치
     p.add_argument('--fps', type=float, default=25.0)                 # timestamp 문구용

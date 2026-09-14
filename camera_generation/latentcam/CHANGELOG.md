@@ -31,8 +31,10 @@ All notable changes to the latentcam sub-project. Follows [Keep a Changelog](htt
   `geo_raw_cache_dir` 만 d189 전용으로 새로 판다: 캐시 키가 scene 이름이라 target 뱅크와
   무관해 공유해도 맞지만, d129 캐시는 273편뿐이고 여기 865편 중 대부분이 새 씬이라 남의 root
   밑에 590편을 새로 쓰면 d129/d137/d157 이 읽는 디렉토리가 조용히 다른 물건이 된다.
-  **부분 코퍼스임을 config 주석에 박아 뒀다** — 865편 / 1,030대는 d188 이 12% 구워진 스냅샷이고,
-  완주판(~9,700대)과 지표를 나란히 두면 안 된다.
+  **부분 코퍼스임을 config 주석에 박아 뒀다** — 865편 / 1,034대는 d188 이 12% 구워진 스냅샷이고,
+  완주판(~9,700대 = 10,346 x 0.935 대/씬 **환산 추정치**)과 지표를 나란히 두면 안 된다.
+  (2026-09-14 정정: 원래 1,030 대로 적어 뒀었다. 그건 re-pick 실행 시점 로그이고, export
+  전에 d188 이 3편을 더 구워 넣어 실제 코퍼스는 1,034 대다 — prompts.json 항목 합으로 확인.)
 - **`scripts/viz/molmo2_attn_map.py` — Molmo2 최종층 attention map 시각화 (D164, 2026-09-08,
   사용자 지시 "Molmo2에 비디오, 텍스트 먹였을 때 final hidden state 기준 attention map 시각화해서
   보고싶어" → "map + swap 먼저").** `--stage map,swap,sweep` 단일 python 드라이버.

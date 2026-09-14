@@ -69,6 +69,12 @@ UP_VECTORS = {"+x": (1, 0, 0), "-x": (-1, 0, 0), "+y": (0, 1, 0), "-y": (0, -1, 
 # 때문이다 — camel 은 vfov 16.4° 라 프러스텀이 바늘처럼 길어져 자리를 가늠할 수가 없다.
 PROBE_FOV_DEG = 60.0
 
+# probe 를 여러 대 띄우면 전부 같은 색이라 어느 게 어느 건지 못 고른다. 새로 만들 때마다 이
+# 팔레트를 돌려 쓰고, `color` 피커로 활성 probe 만 따로 바꾼다. 소스(회색)·플랜(주황)·현재
+# 프레임(초록) 과 겹치지 않는 색만 골랐다.
+PROBE_COLORS = [(255, 60, 220), (60, 200, 255), (255, 210, 60), (150, 255, 120),
+                (255, 120, 60), (180, 140, 255)]
+
 
 def import_frustum_helpers(viewer_root: str):
     """규약(GL↔CV)의 단일 출처는 latentcam 뷰어다 — 여기서 재구현하지 않고 그대로 가져온다."""
@@ -342,10 +348,12 @@ def main():
 
     # ---- probe 카메라: 끌어서 옮기는 프러스텀 ----
     # 소스 카메라 자리는 씬이 정해준 것이라 "여기서 보면 어떻게 보이나"를 물어볼 수가 없다.
-    # gizmo 를 하나 띄우고 프러스텀을 **자식으로 항등 자세**로 붙인다 — 그러면 gizmo 의
-    # (wxyz, position) 이 곧 그 카메라의 OpenCV c2w 라서, 마음에 드는 자리를 찾았을 때 읽은
-    # 숫자를 그대로 카메라 pose 로 쓸 수 있다. (add_frustums 가 `c2w_gl @ _GL2CV` 로 만드는
-    # 것과 같은 규약. 자식이 항등이므로 변환이 한 번 더 들어가지 않는다.)
+    # gizmo 를 띄우고 프러스텀을 그 자세에 맞춘다 — gizmo 의 (wxyz, position) 이 곧 그 카메라의
+    # OpenCV c2w 라서, 마음에 드는 자리를 찾았을 때 읽은 숫자를 그대로 카메라 pose 로 쓸 수 있다
+    # (add_frustums 가 `c2w_gl @ _GL2CV` 로 만드는 것과 같은 규약).
+    #
+    # 프러스텀은 gizmo 의 **자식이 아니라 형제**다. 자식으로 붙이면 부모를 숨길 때 자식도 같이
+    # 사라져서 "화살표만 끄고 프러스텀만 보기"가 안 된다. 대신 드래그마다 pose 를 복사한다.
     #
     # fov 는 소스 intrinsics 를 안 쓴다. camel 소스는 vfov 16.4°(fy 2499 @ 720p) 짜리 망원이라
     # 그 화각으로 그리면 프러스텀이 바늘처럼 길어져 자리를 가늠할 수가 없다. 기본은 보통 렌즈
@@ -356,17 +364,23 @@ def main():
     # 새로 만들 때 살아있는 노드와 이름이 겹쳐 그 노드를 덮어쓴다.
     probe_seq = {"n": 0}
 
-    def make_probe(wxyz, position, fov_deg: float, size: float, show: bool):
+    def make_probe(wxyz, position, fov_deg: float, size: float, show_cam: bool, show_giz: bool):
         index = probe_seq["n"]
         probe_seq["n"] += 1
         gizmo = server.scene.add_transform_controls(
             f"/probe{index}", scale=cam_scale * 2.5, line_width=2.0,
-            wxyz=wxyz, position=position, visible=show)
+            wxyz=wxyz, position=position, visible=show_giz)
         cam = server.scene.add_camera_frustum(
-            f"/probe{index}/cam", fov=float(np.radians(fov_deg)), aspect=width / height,
-            scale=size, color=(255, 60, 220), visible=show)
+            f"/probe{index}_cam", fov=float(np.radians(fov_deg)), aspect=width / height,
+            scale=size, color=PROBE_COLORS[index % len(PROBE_COLORS)],
+            wxyz=wxyz, position=position, visible=show_cam)
         probes.append({"name": f"probe {index}", "gizmo": gizmo, "cam": cam})
         return probes[-1]
+
+    def sync_probe(probe):
+        """gizmo -> 프러스텀. 형제라서 자동으로 안 따라온다."""
+        probe["cam"].wxyz = probe["gizmo"].wxyz
+        probe["cam"].position = probe["gizmo"].position
 
     aim_track = tracks[sorted(tracks)[0]] if tracks else None
     cloud_center = {"value": None}     # 1.5M 점 median 은 버튼 누를 때 한 번만
@@ -504,7 +518,10 @@ def main():
                                         step=cam_scale * 0.05, initial_value=cam_scale)
 
     with server.gui.add_folder("probe camera"):
-        gui_probe = server.gui.add_checkbox("show", initial_value=True)
+        # frustum 과 gizmo 를 따로 끈다. 자리를 정하고 나면 화살표가 프러스텀을 가려서
+        # "이 카메라가 뭘 보나"를 확인할 수가 없다.
+        gui_probe = server.gui.add_checkbox("show frustum", initial_value=True)
+        gui_probe_giz = server.gui.add_checkbox("show gizmo", initial_value=True)
         gui_probe_size = server.gui.add_slider(
             "probe size", min=cam_scale * 0.1, max=cam_scale * 10.0, step=cam_scale * 0.05,
             initial_value=cam_scale * 1.6)
@@ -513,6 +530,9 @@ def main():
                                               initial_value=PROBE_FOV_DEG)
         gui_probe_pick = server.gui.add_dropdown("active", options=["probe 0"],
                                                  initial_value="probe 0")
+        # 크기·화각은 전 probe 공통이지만 **색만 활성 probe 한 대**에 걸린다 — 여러 대를
+        # 구분하려고 두는 손잡이라 다 같은 색으로 칠하면 의미가 없다.
+        gui_probe_color = server.gui.add_rgb("color (active)", initial_value=PROBE_COLORS[0])
         gui_probe_add = server.gui.add_button("add camera")
         gui_probe_del = server.gui.add_button("remove active")
         gui_probe_snap = server.gui.add_button("snap to source frame")
@@ -591,6 +611,9 @@ def main():
         R = _R_of(probe["gizmo"].wxyz)
         frame = int(gui_frame.value)
         target = aim_target(frame)
+        # 피커를 활성 probe 색으로 되돌린다. 이 대입이 on_update 를 다시 부르지만 같은 색을
+        # 같은 probe 에 칠하는 것이라 무해하다.
+        gui_probe_color.value = tuple(int(c) for c in probe["cam"].color)
         gui_probe_info.value = "\n".join([
             f"{probe['name']}   vfov {np.degrees(float(probe['cam'].fov)):.1f} deg",
             f"pos     {p[0]:+.4f} {p[1]:+.4f} {p[2]:+.4f}",
@@ -609,11 +632,17 @@ def main():
         gui_probe_pick.value = select if select in names else names[-1]
         probe_report()
 
+    def bind_probe(probe):
+        """드래그마다 프러스텀을 gizmo 자세로 따라오게 한다. 형제 노드라 이 복사가 없으면
+        화살표만 움직이고 프러스텀은 제자리에 남는다."""
+        probe["gizmo"].on_update(lambda _: (sync_probe(probe), probe_report()))
+
     def probe_snap(_event=None):
         probe = active_probe()
         if probe is None:
             return
         probe["gizmo"].wxyz, probe["gizmo"].position = _pose(src_gl[int(gui_frame.value)], gl2cv)
+        sync_probe(probe)
         probe_report()
 
     def probe_aim(_event=None):
@@ -622,6 +651,7 @@ def main():
             return
         p = np.asarray(probe["gizmo"].position, dtype=float)
         probe["gizmo"].wxyz = _wxyz(look_at_R(p, aim_target(int(gui_frame.value))))
+        sync_probe(probe)
         probe_report()
 
     def probe_add(_event=None):
@@ -636,8 +666,8 @@ def main():
                         + _R_of(wxyz)[:, 0] * cam_scale * 3.0)
         probe = make_probe(wxyz, np.asarray(position, dtype=np.float32),
                            float(gui_probe_fov.value), float(gui_probe_size.value),
-                           bool(gui_probe.value))
-        probe["gizmo"].on_update(lambda _: probe_report())
+                           bool(gui_probe.value), bool(gui_probe_giz.value))
+        bind_probe(probe)
         refresh_probe_list(probe["name"])
 
     def probe_remove(_event=None):
@@ -652,7 +682,18 @@ def main():
     @gui_probe.on_update
     def _(_event):
         for probe in probes:
-            probe["gizmo"].visible = probe["cam"].visible = bool(gui_probe.value)
+            probe["cam"].visible = bool(gui_probe.value)
+
+    @gui_probe_giz.on_update
+    def _(_event):
+        for probe in probes:
+            probe["gizmo"].visible = bool(gui_probe_giz.value)
+
+    @gui_probe_color.on_update
+    def _(_event):
+        probe = active_probe()
+        if probe is not None:
+            probe["cam"].color = tuple(int(c) for c in gui_probe_color.value)
 
     @gui_probe_size.on_update
     def _(_event):
@@ -671,8 +712,8 @@ def main():
     gui_probe_snap.on_click(probe_snap)
     gui_probe_aim.on_click(probe_aim)
 
-    probe_0 = make_probe(*_pose(src_gl[0], gl2cv), PROBE_FOV_DEG, cam_scale * 1.6, True)
-    probe_0["gizmo"].on_update(lambda _: probe_report())
+    probe_0 = make_probe(*_pose(src_gl[0], gl2cv), PROBE_FOV_DEG, cam_scale * 1.6, True, True)
+    bind_probe(probe_0)
     refresh_probe_list(probe_0["name"])
 
     if motions:

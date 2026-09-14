@@ -7,6 +7,18 @@
 ## [Unreleased]
 
 ### Added
+- **probe frustum/gizmo 따로 끄기 + 색 지정 (2026-09-14).** 자리를 정하고 나면 gizmo 화살표가
+  프러스텀을 가려서 "이 카메라가 뭘 보나"를 확인할 수가 없는데, 프러스텀이 gizmo 의 **자식**이라
+  부모를 숨기면 같이 사라졌다. 프러스텀을 `/probe{i}/cam` → `/probe{i}_cam` **형제 노드**로 떼고
+  gizmo `on_update` 마다 `(wxyz, position)` 을 복사한다(`sync_probe`) — 자식일 때 공짜였던 추종을
+  명시적으로 하는 대신 `show frustum` / `show gizmo` 를 독립으로 끌 수 있다. `snap`·`aim` 처럼
+  코드가 gizmo pose 를 바꾸는 자리에도 `sync_probe` 를 넣었다(빠지면 화살표만 움직인다).
+  **"gizmo pose == 그 카메라의 OpenCV c2w"** 불변조건은 그대로다 — 프러스텀에 추가 변환 없이
+  같은 자세를 복사할 뿐이라 `pose` 읽기창 숫자를 여전히 그대로 쓸 수 있다. 색은
+  `color (active)` 피커로 **활성 probe 한 대만** 바꾼다(크기·화각은 전체 공통) — 여러 대를
+  구분하려고 두는 손잡이라 다 같은 색이면 의미가 없다. 새 probe 는 `PROBE_COLORS` 6색 팔레트를
+  돌려 쓰고(소스 회색·플랜 주황·현재 프레임 초록과 안 겹치는 색), `active` 를 바꾸면 피커가 그
+  probe 의 색을 되읽는다.
 - **`viser_cloud.py` 에 끌어 옮기는 probe 카메라 (2026-09-14).** 소스 카메라 자리는 씬이 정해준
   것이라 "여기서 보면 어떻게 보이나"를 물어볼 수가 없다. gizmo(`add_transform_controls`)를 띄우고
   프러스텀을 **자식으로 항등 자세**로 붙였다 — 그러면 gizmo 의 `(wxyz, position)` 이 그대로 그

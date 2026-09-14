@@ -7,6 +7,18 @@
 ## [Unreleased]
 
 ### Added
+- **릴 표본 선택기에 `--picked_only` / `--bucket_by preset` (2026-09-14, D192).**
+  `pick_warp_sample_scenes.py` 와 `run_preset_warp_{sample,max_shard}.sh` 가 후보 행을
+  `status.startswith("solved")` 로만 골랐는데, **`solved` 는 "뱅크에 남았다"와 다른 뜻**이다 —
+  정지 preset 은 `status="static"`, 게이트에 부딪혀 수렴한 행은 `*_limited` 다
+  (`fit_hole_ladder.py:1098-1124`). 그래서 어휘가 `track_look_at`(954행 전부 `static`) +
+  `dolly_in_look_at` 인 d192 뱅크는 solved 가 **0행**이라 릴이 전편 `EMPTY` 로 조용히
+  건너뛰어졌다. `--picked_only`(러너는 `PICKED=1`)는 코퍼스로 나가는 `picked` 열을 본다.
+  `--bucket_by preset`(러너는 `BUCKET_BY=preset`)은 moving/static 버킷을 `center_drift_u`
+  대신 `track_` preset 유무로 가른다 — drift 는 정적 노드에서도 카메라 때문에 크게 찍혀서
+  (`stat_0 trees` 3.23 u) drift 만 보면 track 이 안 켜진 씬이 moving 버킷에 앉는다.
+  **둘 다 기본값은 예전 동작 그대로**이고, 선택기와 렌더러 양쪽에 같은 값이 가야 표본을 고른
+  모집단과 실제로 찍히는 변이의 모집단이 일치한다.
 - **`route_presets.py --slot_whitelist_track` — subject 가 움직이면 다른 어휘를 쓴다
   (2026-09-14, D192).** 여태 `--slot_whitelist` 는 씬 전체에 한 벌이라 "일정 이상 움직이는
   subject 는 track, 안 움직이면 dolly_in" 을 표현할 방법이 없었다. 새 플래그는 anchor 가

@@ -45,13 +45,28 @@ from sys import stderr
 DEFAULT_DRIFT_THRESH = 0.05
 
 
-def scene_rows(output_root: str, video: str, bank_dir: str):
-    """해당 씬의 solved 행 + 릴이 쓸 anchor 를 돌려준다. 뱅크가 없으면 None."""
+def row_is_picked(row: dict) -> bool:
+    """`fit_hole_ladder.py` 가 코퍼스로 내보내기로 고른 행인가."""
+    return str(row.get("picked", "")).strip().lower() in ("1", "true", "yes")
+
+
+def scene_rows(output_root: str, video: str, bank_dir: str, picked_only: bool = False):
+    """해당 씬의 후보 행 + 릴이 쓸 anchor 를 돌려준다. 뱅크가 없으면 None.
+
+    `picked_only` 가 아니면 예전 그대로 `status` 가 `solved` 로 시작하는 행이다.
+
+    왜 분기가 필요한가: **`solved` 는 "뱅크에 남았다"와 같은 뜻이 아니다.** 정지 preset 은
+    손잡이가 없어 `status="static"` 으로 끝나고, 게이트에 부딪혀 수렴한 행은 `*_limited` 다
+    (`fit_hole_ladder.py:1098-1124`). d192 처럼 어휘가 `track_look_at`(전부 `static`) +
+    `dolly_in_look_at` 인 뱅크는 **solved 행이 0개**라 이 선택기가 통째로 빈손이 된다.
+    그런 뱅크에서 실제로 코퍼스에 들어가는 건 `picked` 열이므로 그쪽을 본다.
+    """
     csv_path = path.join(output_root, video, bank_dir, "bank.csv")
     if not path.isfile(csv_path):
         return None
+    keep = row_is_picked if picked_only else (lambda r: r["status"].startswith("solved"))
     with open(csv_path, encoding="utf-8") as file:
-        rows = [r for r in csv.DictReader(file) if r["status"].startswith("solved")]
+        rows = [r for r in csv.DictReader(file) if keep(r)]
     if not rows:
         return None
     counts = Counter(r["anchor_id"] for r in rows)
@@ -74,11 +89,11 @@ def node_drift(output_root: str, video: str, anchor: str):
     return None, None
 
 
-def collect(output_root: str, bank_dir: str, videos: list):
+def collect(output_root: str, bank_dir: str, videos: list, picked_only: bool = False):
     """씬마다 (anchor, drift, preset 수, track preset 수) 를 모은다."""
     out = []
     for video in videos:
-        got = scene_rows(output_root, video, bank_dir)
+        got = scene_rows(output_root, video, bank_dir, picked_only)
         if got is None:
             continue
         anchor, rows = got
@@ -96,10 +111,22 @@ def collect(output_root: str, bank_dir: str, videos: list):
     return out
 
 
-def split_buckets(items: list, thresh: float, num_moving: int, num_static: int):
-    """움직임 여부로 가르고 각 버킷에서 결정론적으로 앞에서 자른다."""
-    moving = [d for d in items if d["center_drift_u"] >= thresh]
-    static = [d for d in items if d["center_drift_u"] < thresh]
+def split_buckets(items: list, thresh: float, num_moving: int, num_static: int,
+                  bucket_by: str = "drift"):
+    """움직임 여부로 가르고 각 버킷에서 결정론적으로 앞에서 자른다.
+
+    `bucket_by="preset"` 은 `center_drift_u` 대신 **실제로 남은 preset 에 `track_` 이 있는지**로
+    가른다. 왜 필요한가: `center_drift_u` 는 정적 노드에서도 크게 나온다 (카메라가 움직이면
+    `stat_0 trees` 가 3.23 u 로 찍힌다). `route_presets.py` 는 track 자격을 `moving ∧ drift`
+    **둘 다**로 보므로, drift 만 보고 가르면 track 이 안 켜진 씬이 moving 버킷에 앉는다 —
+    버킷이 거짓말을 하면 "두 어휘를 나란히 본다"는 목적 자체가 깨진다.
+    """
+    if bucket_by == "preset":
+        moving = [d for d in items if d["n_track_preset"] > 0]
+        static = [d for d in items if d["n_track_preset"] == 0]
+    else:
+        moving = [d for d in items if d["center_drift_u"] >= thresh]
+        static = [d for d in items if d["center_drift_u"] < thresh]
     #    1순위 preset 다양성(내림), 2순위 drift, 3순위 이름 — 전부 결정론.
     moving.sort(key=lambda d: (-d["n_preset"], -d["center_drift_u"], d["video"]))
     static.sort(key=lambda d: (-d["n_preset"], d["center_drift_u"], d["video"]))
@@ -117,11 +144,12 @@ def main(args):
                         if path.isdir(path.join(root, v)))
     else:
         videos = args.videos
-    items = collect(args.output_root, args.bank_dir, videos)
+    items = collect(args.output_root, args.bank_dir, videos, args.picked_only)
     if not items:
-        raise SystemExit(f"뱅크 {args.bank_dir} 에 solved 행이 있는 씬이 없다 ({args.output_root})")
+        what = "picked" if args.picked_only else "solved"
+        raise SystemExit(f"뱅크 {args.bank_dir} 에 {what} 행이 있는 씬이 없다 ({args.output_root})")
     pick_m, pick_s, all_m, all_s = split_buckets(
-        items, args.drift_thresh, args.num_moving, args.num_static)
+        items, args.drift_thresh, args.num_moving, args.num_static, args.bucket_by)
     picked = pick_m + pick_s
 
     if args.table:
@@ -159,6 +187,11 @@ if __name__ == "__main__":
     parser.add_argument("--num_moving", default=2, type=int)     # 움직이는 subject 표본 수
     parser.add_argument("--num_static", default=2, type=int)     # 안 움직이는 subject 표본 수
     parser.add_argument("--drift_thresh", default=DEFAULT_DRIFT_THRESH, type=float)
+    #    후보 행을 `status=solved` 대신 `picked` 열로 고른다 (기본 off = 예전 동작 그대로).
+    parser.add_argument("--picked_only", action="store_true", default=False)
+    parser.add_argument("--no_picked_only", dest="picked_only", action="store_false")
+    #    버킷 기준. `drift` = 예전 동작. `preset` = 남은 preset 에 `track_` 이 있는지.
+    parser.add_argument("--bucket_by", default="drift", choices=["drift", "preset"])
     parser.add_argument("--table", action="store_true")          # 근거 표를 stderr 로
     parser.add_argument("--out", default="")                     # 선택 근거 JSON 경로
     main(parser.parse_args())

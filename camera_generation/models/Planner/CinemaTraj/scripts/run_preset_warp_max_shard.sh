@@ -38,6 +38,12 @@ EVAL="${EVAL:-}"
 #    넘어가므로 래퍼는 exit 0 이고, 릴 폴더에 mp4 가 0개인 것으로만 드러난다.**
 #    `npz`/`memory` 를 명시로 주면 그대로 강제한다.
 CLOUD="${CLOUD:-auto}"
+#    후보 행을 고르는 기준. 기본 `0` = **예전 그대로 `status=solved`**.
+#    `PICKED=1` 이면 `picked` 열(= 코퍼스로 나가는 행)로 고른다. 왜 필요한가: `solved` 는
+#    "뱅크에 남았다"와 다른 뜻이다 — 정지 preset 은 `status="static"`, 게이트에 부딪혀 수렴한
+#    행은 `*_limited` 다. d192 처럼 어휘가 `track_look_at`(전부 static) + `dolly_in_look_at`
+#    인 뱅크는 solved 가 0행이라 이 러너가 전편 `EMPTY` 로 떨어진다.
+PICKED="${PICKED:-0}"
 PY=/data1/cympyc1785/miniconda3/envs/vista4d/bin/python
 HERE=/data1/cympyc1785/LatentCamVid/camera_generation/models/Planner/CinemaTraj
 cd "$HERE" || exit 1
@@ -54,13 +60,16 @@ for V in $LIST; do
     NAME="${V}__preset_warp_max.mp4"
     if [ -f "$OUTDIR/$NAME" ]; then echo "[s$SHARD] SKIP $V"; continue; fi
     # preset 별 최대단 variant_id 목록. anchor 고정은 위 헤더 참조.
-    IDS=$($PY - "$V" "$BANK" "$ROOT" <<'PYEOF'
+    IDS=$($PY - "$V" "$BANK" "$ROOT" "$PICKED" <<'PYEOF'
 import csv, sys
 from collections import Counter, defaultdict
 from os import path
-video, bank, root = sys.argv[1], sys.argv[2], sys.argv[3]
+video, bank, root, picked = sys.argv[1], sys.argv[2], sys.argv[3], sys.argv[4] == "1"
 rows = list(csv.DictReader(open(path.join(root, video, bank, "bank.csv"))))
-rows = [r for r in rows if r["status"].startswith("solved")]
+if picked:
+    rows = [r for r in rows if str(r.get("picked", "")).strip().lower() in ("1", "true", "yes")]
+else:
+    rows = [r for r in rows if r["status"].startswith("solved")]
 if not rows:
     sys.exit(0)
 counts = Counter(r["anchor_id"] for r in rows)
@@ -77,7 +86,7 @@ for p, c in sorted(byp.items()):
 print(" ".join(out))
 PYEOF
 )
-    if [ -z "$IDS" ]; then echo "[s$SHARD] EMPTY $V (solved 0)"; continue; fi
+    if [ -z "$IDS" ]; then echo "[s$SHARD] EMPTY $V ($([ "$PICKED" = 1 ] && echo picked || echo solved) 0)"; continue; fi
     #    **뱅크가 구워진 K 규약을 그대로 따라간다.** `render_bank_videos.py --fixed_focal` 은
     #    기본 off 인데(자기 일관성 검사가 소스와 화각을 정확히 맞춰야 해서) 뱅크는
     #    `--fixed_focal` 로 구워졌다. 안 맞추면 pose 는 고정 K 로 풀렸는데 렌더만 프레임별

@@ -30,6 +30,16 @@ GPU=$1; BANK=$2; OUTDIR=$3; ROOT="${4:-out}"
 #    표본 수 override — 기본 2+2.
 NMOV="${NMOV:-2}"
 NSTAT="${NSTAT:-2}"
+#    후보 행 기준. 기본 `0` = 예전 그대로 `status=solved`. 어휘가 정지 preset 위주라
+#    solved 가 0행인 뱅크(d192 의 `track_look_at`)는 `PICKED=1` 로 `picked` 열을 쓴다.
+#    선택기와 렌더러 **양쪽에 같은 값**이 가야 한다 — 한쪽만 바꾸면 표본을 고른 모집단과
+#    실제로 찍히는 변이의 모집단이 어긋난다.
+PICKED="${PICKED:-0}"
+PICK_FLAG=""
+[ "$PICKED" = "1" ] && PICK_FLAG="--picked_only"
+#    버킷 기준. 기본 `drift` = 예전 동작. `preset` 은 `track_` preset 유무로 가른다
+#    (정적 노드도 카메라 때문에 drift 가 크게 찍히므로, 어휘가 두 종뿐인 뱅크는 이쪽이 맞다).
+BUCKET_BY="${BUCKET_BY:-drift}"
 #    `--eval_data` override. **안 주면 표본 씬이 실제로 있는 루트를 골라** 쓴다 (아래 EVAL 탐색).
 #    추정이 필요한 이유: `--output_root out_dynpose` 만 주고 eval_data 를 빼면 렌더러가 dynpose
 #    씬을 Vista4D 데이터셋에서 찾다가 조용히 다른 소스로 warp 한다.
@@ -46,8 +56,9 @@ HERE=/data1/cympyc1785/LatentCamVid/camera_generation/models/Planner/CinemaTraj
 cd "$HERE" || exit 1
 mkdir -p "$OUTDIR"
 
+# shellcheck disable=SC2086
 VIDEOS=$($PY scripts/pick_warp_sample_scenes.py \
-    --output_root "$ROOT" --bank_dir "$BANK" \
+    --output_root "$ROOT" --bank_dir "$BANK" $PICK_FLAG --bucket_by "$BUCKET_BY" \
     --num_moving "$NMOV" --num_static "$NSTAT" --table \
     --out "$OUTDIR/sample.json" 2> "$OUTDIR/sample_table.txt")
 RC=$?
@@ -78,7 +89,7 @@ fi
 #    여기서 assign 만 하면 export 가 안 돼 dynpose 뱅크가 `out` 을 보고 EMPTY 로 떨어진다.
 #    `CLOUD` 도 그대로 흘린다 — 기본 `auto` 는 cloud.npz 유무로 npz/memory 를 고른다
 #    (D178 이후 세대는 cloud.npz 가 없다).
-VIDEOS="$VIDEOS" BANK="$BANK" ROOT="$ROOT" EVAL="$EVAL" CLOUD="${CLOUD:-auto}" \
+VIDEOS="$VIDEOS" BANK="$BANK" ROOT="$ROOT" EVAL="$EVAL" CLOUD="${CLOUD:-auto}" PICKED="$PICKED" \
     bash scripts/run_preset_warp_max_shard.sh "$GPU" 0 1 "$OUTDIR"
 RC=$?
 ls -la "$OUTDIR"

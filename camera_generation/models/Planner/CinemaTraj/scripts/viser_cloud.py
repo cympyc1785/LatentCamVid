@@ -336,6 +336,45 @@ def main():
     graph_path = path.join(args.out, args.video, "scene_graph.json")
     tracks = subject_tracks_world(graph_path)
 
+    # ---- probe 카메라: 끌어서 옮기는 프러스텀 ----
+    # 소스 카메라 자리는 씬이 정해준 것이라 "여기서 보면 어떻게 보이나"를 물어볼 수가 없다.
+    # gizmo 를 하나 띄우고 프러스텀을 **자식으로 항등 자세**로 붙인다 — 그러면 gizmo 의
+    # (wxyz, position) 이 곧 그 카메라의 OpenCV c2w 라서, 마음에 드는 자리를 찾았을 때 읽은
+    # 숫자를 그대로 카메라 pose 로 쓸 수 있다. (add_frustums 가 `c2w_gl @ _GL2CV` 로 만드는
+    # 것과 같은 규약. 자식이 항등이므로 변환이 한 번 더 들어가지 않는다.)
+    probe_gizmo = server.scene.add_transform_controls(
+        "/probe", scale=cam_scale * 2.5, line_width=2.0,
+        wxyz=_pose(src_gl[0], gl2cv)[0], position=_pose(src_gl[0], gl2cv)[1])
+    probe_cam = server.scene.add_camera_frustum(
+        "/probe/cam", fov=float(2 * np.arctan2(height / 2, float(intrinsics[0, 1, 1]))),
+        aspect=width / height, scale=cam_scale * 1.6, color=(255, 60, 220))
+
+    aim_track = tracks[sorted(tracks)[0]] if tracks else None
+    cloud_center = {"value": None}     # 1.5M 점 median 은 버튼 누를 때 한 번만
+
+    def aim_target(frame: int):
+        """probe 가 바라볼 점. 동적 subject 가 있으면 그 프레임 위치, 없으면 점군 중앙값."""
+        if aim_track is not None and frame < len(aim_track):
+            return np.asarray(aim_track[frame], dtype=float)
+        if cloud_center["value"] is None:
+            cloud_center["value"] = (np.median(points[static_pick], axis=0).astype(float)
+                                     if len(static_pick) else np.zeros(3))
+        return cloud_center["value"]
+
+    def look_at_R(position: np.ndarray, target: np.ndarray):
+        """OpenCV c2w 회전 [right | down | fwd]. roll 은 world up 기준 0 이다."""
+        fwd = np.asarray(target, dtype=float) - np.asarray(position, dtype=float)
+        norm = float(np.linalg.norm(fwd))
+        if norm < 1e-9:
+            return np.eye(3)
+        fwd /= norm
+        down_hint = -np.asarray(UP_VECTORS[args.up], dtype=float)
+        right = np.cross(down_hint, fwd)
+        if np.linalg.norm(right) < 1e-6:            # 정확히 위/아래를 볼 때 축이 무너진다
+            right = np.cross(np.array([1.0, 0.0, 0.0]), fwd)
+        right /= np.linalg.norm(right)
+        return np.stack([right, np.cross(fwd, right), fwd], axis=1)
+
     # ---- scene graph 오버레이: OBB(정적 1개 / 동적 프레임별) + 지면 격자 ----
     # 동적 OBB 를 프레임별 handle 로 쪼개는 이유는 동적 점군과 같다 — 49개를 한꺼번에 그리면
     # 움직이는 박스가 겹쳐서 아무것도 안 보인다. refresh() 가 점군과 같은 슬라이더로 껐다 켠다.
@@ -445,6 +484,16 @@ def main():
         gui_cam = server.gui.add_slider("camera size", min=cam_scale * 0.1, max=cam_scale * 10.0,
                                         step=cam_scale * 0.05, initial_value=cam_scale)
 
+    with server.gui.add_folder("probe camera"):
+        gui_probe = server.gui.add_checkbox("show", initial_value=True)
+        gui_probe_size = server.gui.add_slider(
+            "probe size", min=cam_scale * 0.1, max=cam_scale * 10.0, step=cam_scale * 0.05,
+            initial_value=cam_scale * 1.6)
+        gui_probe_snap = server.gui.add_button("snap to source frame")
+        gui_probe_aim = server.gui.add_button("aim at subject")
+        gui_probe_info = server.gui.add_text("pose", initial_value="", multiline=True,
+                                             disabled=True)
+
     def refresh():
         f = int(gui_frame.value)
         show_all = bool(gui_dyn_all.value)
@@ -499,6 +548,40 @@ def main():
 
     gui_cam.on_update(lambda _: apply_cam_scale())
 
+    def probe_report():
+        """gizmo 자세를 그대로 숫자로 — 이 값이 곧 쓸 수 있는 OpenCV c2w 다."""
+        p = np.asarray(probe_gizmo.position, dtype=float)
+        R = _R_of(probe_gizmo.wxyz)
+        target = aim_target(int(gui_frame.value))
+        gui_probe_info.value = "\n".join([
+            f"pos     {p[0]:+.4f} {p[1]:+.4f} {p[2]:+.4f}",
+            f"fwd     {R[0, 2]:+.4f} {R[1, 2]:+.4f} {R[2, 2]:+.4f}",
+            f"up      {-R[0, 1]:+.4f} {-R[1, 1]:+.4f} {-R[2, 1]:+.4f}",
+            f"dist to subject  {float(np.linalg.norm(target - p)):.4f} u",
+            f"dist to src[{int(gui_frame.value)}]   "
+            f"{float(np.linalg.norm(cam_c2w[int(gui_frame.value), :3, 3] - p)):.4f} u",
+        ])
+
+    def probe_snap(_event=None):
+        f = int(gui_frame.value)
+        probe_gizmo.wxyz, probe_gizmo.position = _pose(src_gl[f], gl2cv)
+        probe_report()
+
+    def probe_aim(_event=None):
+        p = np.asarray(probe_gizmo.position, dtype=float)
+        probe_gizmo.wxyz = _wxyz(look_at_R(p, aim_target(int(gui_frame.value))))
+        probe_report()
+
+    @gui_probe.on_update
+    def _(_event):
+        probe_gizmo.visible = probe_cam.visible = bool(gui_probe.value)
+
+    gui_probe_size.on_update(lambda _: setattr(probe_cam, "scale", float(gui_probe_size.value)))
+    gui_probe_snap.on_click(probe_snap)
+    gui_probe_aim.on_click(probe_aim)
+    probe_gizmo.on_update(lambda _: probe_report())
+    probe_report()
+
     if motions:
         select(0)
     else:
@@ -529,6 +612,18 @@ def _pose(c2w_gl: np.ndarray, gl2cv: np.ndarray):
     import viser.transforms as vtf
     c2w_cv = c2w_gl @ gl2cv
     return vtf.SO3.from_matrix(c2w_cv[:3, :3]).wxyz, c2w_cv[:3, 3].astype(np.float32)
+
+
+def _wxyz(rotation: np.ndarray):
+    """OpenCV c2w 회전 -> viser quaternion."""
+    import viser.transforms as vtf
+    return vtf.SO3.from_matrix(np.asarray(rotation, dtype=float)).wxyz
+
+
+def _R_of(wxyz) -> np.ndarray:
+    """viser quaternion -> OpenCV c2w 회전. gizmo 를 끌고 난 자세를 숫자로 읽을 때 쓴다."""
+    import viser.transforms as vtf
+    return vtf.SO3(np.asarray(wxyz, dtype=float)).as_matrix()
 
 
 if __name__ == "__main__":

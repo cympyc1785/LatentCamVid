@@ -7,6 +7,16 @@
 ## [Unreleased]
 
 ### Added
+- **`viser_cloud.py` 에 끌어 옮기는 probe 카메라 (2026-09-14).** 소스 카메라 자리는 씬이 정해준
+  것이라 "여기서 보면 어떻게 보이나"를 물어볼 수가 없다. gizmo(`add_transform_controls`)를 띄우고
+  프러스텀을 **자식으로 항등 자세**로 붙였다 — 그러면 gizmo 의 `(wxyz, position)` 이 그대로 그
+  카메라의 OpenCV c2w 라서, 마음에 드는 자리를 찾으면 읽은 숫자를 바로 카메라 pose 로 쓸 수 있다
+  (자식에 변환이 한 번 더 들어가면 이 성질이 깨진다). GUI `probe camera` 폴더: `show` /
+  `probe size`(프러스텀만, gizmo 는 생성 시 크기 고정) / `snap to source frame`(현재 프레임 소스
+  카메라로 이동) / `aim at subject`(위치는 두고 회전만 — 동적 subject track 의 현재 프레임 위치,
+  없으면 점군 median 을 본다. roll 은 `--up` 기준 0) / `pose` 읽기창(pos·fwd·up·subject 까지 거리·
+  소스까지 거리). gizmo 를 손으로 돌려 원하는 방향을 맞추는 건 사실상 불가능해서 `aim` 버튼이
+  없으면 이 기능 자체가 안 쓰인다.
 - **`viser_cloud.py` 에 `view > camera size` 슬라이더 (2026-09-14).** 프러스텀 크기 기본값
   `0.03·z_med` 는 씬마다 안 맞는다 — camel 은 49프레임 카메라 경로가 0.167 u 뿐이라 프러스텀이
   한 점에 겹치고, 크기가 median depth 3.55 u 의 3% 라 점군에 묻혀서 **안 보인다**. 여태 고치려면

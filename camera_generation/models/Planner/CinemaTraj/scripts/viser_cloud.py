@@ -65,6 +65,10 @@ VIEWER_ROOT_DEFAULT = path.normpath(path.join(
 UP_VECTORS = {"+x": (1, 0, 0), "-x": (-1, 0, 0), "+y": (0, 1, 0), "-y": (0, -1, 0),
               "+z": (0, 0, 1), "-z": (0, 0, -1)}
 
+# probe 프러스텀의 기본 세로 화각. 소스 intrinsics 를 안 쓰는 이유는 그게 씬마다 망원이기
+# 때문이다 — camel 은 vfov 16.4° 라 프러스텀이 바늘처럼 길어져 자리를 가늠할 수가 없다.
+PROBE_FOV_DEG = 60.0
+
 
 def import_frustum_helpers(viewer_root: str):
     """규약(GL↔CV)의 단일 출처는 latentcam 뷰어다 — 여기서 재구현하지 않고 그대로 가져온다."""
@@ -342,12 +346,27 @@ def main():
     # (wxyz, position) 이 곧 그 카메라의 OpenCV c2w 라서, 마음에 드는 자리를 찾았을 때 읽은
     # 숫자를 그대로 카메라 pose 로 쓸 수 있다. (add_frustums 가 `c2w_gl @ _GL2CV` 로 만드는
     # 것과 같은 규약. 자식이 항등이므로 변환이 한 번 더 들어가지 않는다.)
-    probe_gizmo = server.scene.add_transform_controls(
-        "/probe", scale=cam_scale * 2.5, line_width=2.0,
-        wxyz=_pose(src_gl[0], gl2cv)[0], position=_pose(src_gl[0], gl2cv)[1])
-    probe_cam = server.scene.add_camera_frustum(
-        "/probe/cam", fov=float(2 * np.arctan2(height / 2, float(intrinsics[0, 1, 1]))),
-        aspect=width / height, scale=cam_scale * 1.6, color=(255, 60, 220))
+    #
+    # fov 는 소스 intrinsics 를 안 쓴다. camel 소스는 vfov 16.4°(fy 2499 @ 720p) 짜리 망원이라
+    # 그 화각으로 그리면 프러스텀이 바늘처럼 길어져 자리를 가늠할 수가 없다. 기본은 보통 렌즈
+    # 화각(vfov 60°)이고 슬라이더로 소스 값까지 되돌릴 수 있다.
+    src_vfov_deg = float(np.degrees(2 * np.arctan2(height / 2, float(intrinsics[0, 1, 1]))))
+    probes = []                      # [{name, gizmo, cam}] — `add camera` 로 늘어난다
+    # 번호는 리스트 길이가 아니라 **단조 증가 카운터**로 붙인다. 길이를 쓰면 가운데 것을 지운 뒤
+    # 새로 만들 때 살아있는 노드와 이름이 겹쳐 그 노드를 덮어쓴다.
+    probe_seq = {"n": 0}
+
+    def make_probe(wxyz, position, fov_deg: float, size: float, show: bool):
+        index = probe_seq["n"]
+        probe_seq["n"] += 1
+        gizmo = server.scene.add_transform_controls(
+            f"/probe{index}", scale=cam_scale * 2.5, line_width=2.0,
+            wxyz=wxyz, position=position, visible=show)
+        cam = server.scene.add_camera_frustum(
+            f"/probe{index}/cam", fov=float(np.radians(fov_deg)), aspect=width / height,
+            scale=size, color=(255, 60, 220), visible=show)
+        probes.append({"name": f"probe {index}", "gizmo": gizmo, "cam": cam})
+        return probes[-1]
 
     aim_track = tracks[sorted(tracks)[0]] if tracks else None
     cloud_center = {"value": None}     # 1.5M 점 median 은 버튼 누를 때 한 번만
@@ -489,6 +508,13 @@ def main():
         gui_probe_size = server.gui.add_slider(
             "probe size", min=cam_scale * 0.1, max=cam_scale * 10.0, step=cam_scale * 0.05,
             initial_value=cam_scale * 1.6)
+        # 소스 화각(camel 16.4°)도 슬라이더 범위 안에 들어오게 하한을 10° 로 둔다.
+        gui_probe_fov = server.gui.add_slider("probe vfov (deg)", min=10.0, max=120.0, step=1.0,
+                                              initial_value=PROBE_FOV_DEG)
+        gui_probe_pick = server.gui.add_dropdown("active", options=["probe 0"],
+                                                 initial_value="probe 0")
+        gui_probe_add = server.gui.add_button("add camera")
+        gui_probe_del = server.gui.add_button("remove active")
         gui_probe_snap = server.gui.add_button("snap to source frame")
         gui_probe_aim = server.gui.add_button("aim at subject")
         gui_probe_info = server.gui.add_text("pose", initial_value="", multiline=True,
@@ -548,39 +574,106 @@ def main():
 
     gui_cam.on_update(lambda _: apply_cam_scale())
 
+    def active_probe():
+        """드롭다운이 가리키는 probe. 지워진 이름이 남아 있을 수 있으니 없으면 마지막 것."""
+        for probe in probes:
+            if probe["name"] == gui_probe_pick.value:
+                return probe
+        return probes[-1] if probes else None
+
     def probe_report():
         """gizmo 자세를 그대로 숫자로 — 이 값이 곧 쓸 수 있는 OpenCV c2w 다."""
-        p = np.asarray(probe_gizmo.position, dtype=float)
-        R = _R_of(probe_gizmo.wxyz)
-        target = aim_target(int(gui_frame.value))
+        probe = active_probe()
+        if probe is None:
+            gui_probe_info.value = "(probe 없음 — add camera)"
+            return
+        p = np.asarray(probe["gizmo"].position, dtype=float)
+        R = _R_of(probe["gizmo"].wxyz)
+        frame = int(gui_frame.value)
+        target = aim_target(frame)
         gui_probe_info.value = "\n".join([
+            f"{probe['name']}   vfov {np.degrees(float(probe['cam'].fov)):.1f} deg",
             f"pos     {p[0]:+.4f} {p[1]:+.4f} {p[2]:+.4f}",
             f"fwd     {R[0, 2]:+.4f} {R[1, 2]:+.4f} {R[2, 2]:+.4f}",
             f"up      {-R[0, 1]:+.4f} {-R[1, 1]:+.4f} {-R[2, 1]:+.4f}",
             f"dist to subject  {float(np.linalg.norm(target - p)):.4f} u",
-            f"dist to src[{int(gui_frame.value)}]   "
-            f"{float(np.linalg.norm(cam_c2w[int(gui_frame.value), :3, 3] - p)):.4f} u",
+            f"dist to src[{frame}]   "
+            f"{float(np.linalg.norm(cam_c2w[frame, :3, 3] - p)):.4f} u",
         ])
 
+    def refresh_probe_list(select: str = ""):
+        """드롭다운 옵션을 현재 probe 목록으로 맞춘다. 비면 placeholder 한 줄을 둔다 —
+        viser 드롭다운은 빈 options 를 못 받는다."""
+        names = [probe["name"] for probe in probes] or ["-"]
+        gui_probe_pick.options = names
+        gui_probe_pick.value = select if select in names else names[-1]
+        probe_report()
+
     def probe_snap(_event=None):
-        f = int(gui_frame.value)
-        probe_gizmo.wxyz, probe_gizmo.position = _pose(src_gl[f], gl2cv)
+        probe = active_probe()
+        if probe is None:
+            return
+        probe["gizmo"].wxyz, probe["gizmo"].position = _pose(src_gl[int(gui_frame.value)], gl2cv)
         probe_report()
 
     def probe_aim(_event=None):
-        p = np.asarray(probe_gizmo.position, dtype=float)
-        probe_gizmo.wxyz = _wxyz(look_at_R(p, aim_target(int(gui_frame.value))))
+        probe = active_probe()
+        if probe is None:
+            return
+        p = np.asarray(probe["gizmo"].position, dtype=float)
+        probe["gizmo"].wxyz = _wxyz(look_at_R(p, aim_target(int(gui_frame.value))))
         probe_report()
+
+    def probe_add(_event=None):
+        # 새 카메라는 **활성 probe 자리에서 한 발짝 옆**에 둔다. 같은 자리에 겹쳐 놓으면 방금
+        # 만든 게 어느 것인지 못 고르고, 원점에 두면 씬 밖일 수 있다.
+        base = active_probe()
+        if base is None:
+            wxyz, position = _pose(src_gl[int(gui_frame.value)], gl2cv)
+        else:
+            wxyz = np.asarray(base["gizmo"].wxyz, dtype=float)
+            position = (np.asarray(base["gizmo"].position, dtype=float)
+                        + _R_of(wxyz)[:, 0] * cam_scale * 3.0)
+        probe = make_probe(wxyz, np.asarray(position, dtype=np.float32),
+                           float(gui_probe_fov.value), float(gui_probe_size.value),
+                           bool(gui_probe.value))
+        probe["gizmo"].on_update(lambda _: probe_report())
+        refresh_probe_list(probe["name"])
+
+    def probe_remove(_event=None):
+        probe = active_probe()
+        if probe is None:
+            return
+        probe["cam"].remove()
+        probe["gizmo"].remove()
+        probes.remove(probe)
+        refresh_probe_list()
 
     @gui_probe.on_update
     def _(_event):
-        probe_gizmo.visible = probe_cam.visible = bool(gui_probe.value)
+        for probe in probes:
+            probe["gizmo"].visible = probe["cam"].visible = bool(gui_probe.value)
 
-    gui_probe_size.on_update(lambda _: setattr(probe_cam, "scale", float(gui_probe_size.value)))
+    @gui_probe_size.on_update
+    def _(_event):
+        for probe in probes:
+            probe["cam"].scale = float(gui_probe_size.value)
+
+    @gui_probe_fov.on_update
+    def _(_event):
+        for probe in probes:
+            probe["cam"].fov = float(np.radians(gui_probe_fov.value))
+        probe_report()
+
+    gui_probe_pick.on_update(lambda _: probe_report())
+    gui_probe_add.on_click(probe_add)
+    gui_probe_del.on_click(probe_remove)
     gui_probe_snap.on_click(probe_snap)
     gui_probe_aim.on_click(probe_aim)
-    probe_gizmo.on_update(lambda _: probe_report())
-    probe_report()
+
+    probe_0 = make_probe(*_pose(src_gl[0], gl2cv), PROBE_FOV_DEG, cam_scale * 1.6, True)
+    probe_0["gizmo"].on_update(lambda _: probe_report())
+    refresh_probe_list(probe_0["name"])
 
     if motions:
         select(0)
@@ -592,6 +685,7 @@ def main():
             ("dynamic/frame", f"{int(np.median(dyn_counts) if dyn_counts else 0):,} (median)"),
             ("z_med frame0", f"{z_med:.4f}"), ("point size", f"{point_size:.5f}"),
             ("camera size", f"{cam_scale:.4f}  (GUI view > camera size 로 조절)"),
+            ("probe vfov", f"{PROBE_FOV_DEG:.0f} deg  (소스는 {src_vfov_deg:.1f} deg)"),
             ("up", args.up), ("banks", " ".join(banks) or "-"),
             ("obb nodes", " ".join(f"{i}({'dyn' if m else 'stat'})" for i, _, m in graph_rows)
              or "-"),

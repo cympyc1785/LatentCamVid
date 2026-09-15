@@ -29,6 +29,19 @@
   피커로 뺐다. viser handle 은 color 를 못 갈아끼워서 색 변경은 track 을 지우고 다시 그린다.
   `target color` 는 preview 와 **첫 pin** 에만 먹고 두 번째 pin 부터는 `PIN_PALETTE` 로 간다 —
   여러 궤적 동시 비교가 pin 의 존재 이유라 전부 같은 색이 되면 안 된다.
+- **`viser_scene.py` — 동적 점 "간격"과 카메라 선 굵기 (2026-09-15, 사용자 지적 "이건 span 이고
+  내가 말한건 범위가 아니라 interval 간격이야" + "카메라 frustum 잘 안보이는데 두께 못늘림").**
+  위 항목의 `span start`/`span end` 는 **범위**였는데 요청은 **간격**이었다. 둘은 직교하는
+  손잡이라 둘 다 둔다: 범위 슬라이더는 `range start`/`range end` 로 이름을 바꾸고(기본값을
+  전 구간으로), 간격은 `frame interval (every N)` 슬라이더(기본 5)를 새로 뒀다. 간격은
+  `all frames` 에서도 먹는다 — 전 프레임을 겹치면 동적 점이 뭉개지는데, N 칸마다 한 장만
+  남기면 같은 구간이 잔상처럼 떨어져 읽힌다. 점은 `(frame - lo) % step == 0`, OBB 는
+  `obb_span(node, lo, hi, step)` 으로 같은 규칙을 탄다 (캐시 키에 `step` 추가).
+  선 굵기는 `camera thickness` 슬라이더 + `--cam_thickness` (기본 **3.0**, 예전 하드코딩은
+  frustum 1.5 / 스플라인 2.0). 점군이 빽빽한 씬에서 1.5 px frustum 이 묻힌다. 색과 달리
+  굵기는 viser 1.1 handle 의 `line_width` 로 **그 자리에서** 갱신되므로 다시 안 그린다
+  (`add_*` 인자 이름은 `thickness`, handle 속성 이름은 `line_width` 로 서로 다르다).
+  비율은 스플라인 1.0 / frustum 0.75 / 현재 프레임 2.0 배로 유지한다.
 
 ### Added
 - **`CinemaTraj/scripts/viser_scene.py` — 씬 하나를 브라우저에서 3D 로 보는 viser 뷰어

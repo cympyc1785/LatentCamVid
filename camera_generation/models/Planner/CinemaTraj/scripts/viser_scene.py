@@ -156,23 +156,30 @@ def main(args):
             position=corners.mean(axis=0) + up_world * 0.0)
 
     # ── 카메라 ───────────────────────────────────────────────────────────────
+    # 선 굵기는 GUI 로 바꾼다. dict 에 담아 두는 이유는 `draw_track` 이 GUI 보다 먼저 정의돼야
+    # 해서 — 슬라이더가 이 값을 갈면 이후에 그려지는 궤적(pin/preview)도 같은 굵기로 나온다.
+    # 비율은 유지한다: 스플라인 1.0 / frustum 0.75 / 현재 프레임 2.0 배.
+    cam_lw = {"v": float(args.cam_thickness)}
+
     def draw_track(prefix: str, poses: np.ndarray, color, stride: int, label: str):
         """궤적 = 중심 스플라인 + stride 간격 frustum. 49개를 다 그리면 화면이 frustum 벽이 된다."""
         handles = [server.scene.add_spline_catmull_rom(
             f"{prefix}/path", poses[:, :3, 3].astype(np.float32), color=color,
-            thickness=2.0, thickness_units="screen")]
+            thickness=cam_lw["v"], thickness_units="screen")]
         for f in range(0, len(poses), stride):
             fov, aspect, wxyz, position = frustum_args(poses[f], K[min(f, len(K) - 1)], height, width)
             handles.append(server.scene.add_camera_frustum(
                 f"{prefix}/f{f:02d}", fov, aspect, scale=args.cam_scale, color=color,
-                wxyz=wxyz, position=position, thickness=1.5, thickness_units="screen"))
+                wxyz=wxyz, position=position, thickness=cam_lw["v"] * 0.75,
+                thickness_units="screen"))
         handles.append(server.scene.add_label(f"{prefix}/name", label, position=poses[0, :3, 3]))
         return handles
 
     source_handles = []
     cur_source = server.scene.add_camera_frustum(
         "/cam/cur_source", *frustum_args(cam_c2w[0], K[0], height, width)[:2],
-        scale=args.cam_scale * 1.8, color=(255, 255, 255), thickness=3.0, thickness_units="screen")
+        scale=args.cam_scale * 1.8, color=(255, 255, 255),
+        thickness=cam_lw["v"] * 2.0, thickness_units="screen")
     pins, pin_handles = {}, []     # variant_id -> (bank_name, poses)
 
     def redraw_pins():
@@ -200,13 +207,19 @@ def main(args):
     with server.gui.add_folder("cloud"):
         gui_show_static = server.gui.add_checkbox("static points", True)
         gui_show_dyn = server.gui.add_checkbox("dynamic points", True)
-        gui_dyn_mode = server.gui.add_dropdown("dynamic span (points+OBB)",
-                                               ("current frame", "interval", "all frames"))
-        # `interval` 일 때만 쓰는 구간. 전량(`all frames`)은 동적 점이 겹쳐서 어느 구간에서
-        # 물체가 어디로 갔는지 안 보이는데, 구간을 좁히면 그게 보인다.
-        gui_span_lo = server.gui.add_slider("span start", 0, num_frames - 1, 1, 0)
-        gui_span_hi = server.gui.add_slider("span end", 0, num_frames - 1, 1,
-                                            min(8, num_frames - 1))
+        gui_dyn_mode = server.gui.add_dropdown("dynamic frames (points+OBB)",
+                                               ("current frame", "interval", "all frames"),
+                                               initial_value="interval")
+        # 아래 두 슬라이더는 위 드롭다운이 `interval` 일 때만 먹는다. 이름을 `interval start/end`
+        # 로 맞춰 둔 이유: `span` 이라고만 쓰면 드롭다운에 `interval` 모드가 있다는 걸 못 찾는다.
+        # 전량(`all frames`)은 동적 점이 겹쳐서 어느 구간에서 물체가 어디로 갔는지 안 보이는데,
+        # 구간을 좁히면 그게 보인다.
+        gui_span_lo = server.gui.add_slider("range start", 0, num_frames - 1, 1, 0)
+        gui_span_hi = server.gui.add_slider("range end", 0, num_frames - 1, 1,
+                                            num_frames - 1)
+        # 간격. `all frames` 에서도 먹는다 — 이게 "전 프레임 잔상"을 실제로 읽게 만드는 손잡이다.
+        gui_frame_step = server.gui.add_slider("frame interval (every N)", 1,
+                                               max(2, num_frames // 2), 1, 5)
         gui_psize = server.gui.add_slider("point size", 0.001, 0.05, 0.001, args.point_size)
 
     with server.gui.add_folder("obb"):
@@ -227,6 +240,10 @@ def main(args):
         # 점군 색이 다르라 상수 하나로는 못 맞춘다.
         gui_src_color = server.gui.add_rgb("source color", SOURCE_COLOR)
         gui_tgt_color = server.gui.add_rgb("target color", TARGET_COLOR)
+        # 굵기는 화면 픽셀 단위(`thickness_units="screen"`)라 줌 해도 안 변한다 — 점군이 빽빽하면
+        # 기본 1.5px frustum 이 묻힌다. viser 1.1 handle 은 `line_width` 가 갱신 가능해서 다시
+        # 그릴 필요가 없다 (색과 달리).
+        gui_cam_lw = server.gui.add_slider("camera thickness", 0.5, 12.0, 0.5, cam_lw["v"])
         gui_add = server.gui.add_button("pin selected")
         gui_clear = server.gui.add_button("clear pinned")
 
@@ -266,15 +283,17 @@ def main(args):
 
     frame_obb_cache, span_obb_cache = {}, {}
 
-    def obb_span(node, lo: int, hi: int):
-        """동적 노드 OBB 를 `[lo, hi]` 구간만큼 쌓아 선분 한 덩어리로.
+    def obb_span(node, lo: int, hi: int, step: int):
+        """동적 노드 OBB 를 `[lo, hi]` 구간에서 `step` 간격으로 쌓아 선분 한 덩어리로.
 
         프레임별 선분은 `frame_obb_cache` 에 한 번만 계산해 두고, 구간 합은 슬라이더를 끌면
-        매번 달라지므로 `(id, lo, hi)` 로 따로 캐시한다 — 안 그러면 드래그마다 49번 재계산한다.
+        매번 달라지므로 `(id, lo, hi, step)` 로 따로 캐시한다 — 안 그러면 드래그마다 49번
+        재계산한다.
         """
-        key = (node["id"], lo, hi)
+        key = (node["id"], lo, hi, step)
         if key not in span_obb_cache:
-            frames = [f for f in node["track"]["frames"] if lo <= f <= hi]
+            frames = [f for f in node["track"]["frames"]
+                      if lo <= f <= hi and (f - lo) % step == 0]
             if not frames:
                 frames = [max(min(hi, node["track"]["frames"][-1]), node["track"]["frames"][0])]
             for f in frames:
@@ -285,22 +304,29 @@ def main(args):
         return span_obb_cache[key]
 
     def dyn_span():
-        """현재 모드가 뜻하는 프레임 구간 `[lo, hi]`. 구간 모드에서 start > end 면 뒤집는다."""
+        """보여줄 프레임 `[lo, hi]` + 간격 `step` (= `lo` 부터 `step` 칸마다 한 장).
+
+        `step` 은 구간과 별개의 손잡이다 — 구간은 "어디부터 어디까지", 간격은 "그중 몇 장
+        건너뛰고". 전 프레임을 한꺼번에 띄우면 동적 점이 겹쳐서 궤적이 안 보이는데, 간격을
+        벌리면 같은 구간이 잔상처럼 떨어져 보인다. `current frame` 에서는 한 장뿐이라 무의미.
+        """
+        step = max(1, int(gui_frame_step.value))
         mode = gui_dyn_mode.value
         if mode == "all frames":
-            return 0, num_frames - 1
+            return 0, num_frames - 1, step
         if mode == "current frame":
             f = int(gui_frame.value)
-            return f, f
+            return f, f, 1
         lo, hi = int(gui_span_lo.value), int(gui_span_hi.value)
-        return (lo, hi) if lo <= hi else (hi, lo)
+        lo, hi = (lo, hi) if lo <= hi else (hi, lo)
+        return lo, hi, step
 
     def update_frame(_=None):
         f = int(gui_frame.value)
-        lo, hi = dyn_span()
+        lo, hi, step = dyn_span()
         cloud_dynamic.visible = gui_show_dyn.value
         if gui_show_dyn.value:
-            keep = (dynamic[2] >= lo) & (dynamic[2] <= hi)
+            keep = (dynamic[2] >= lo) & (dynamic[2] <= hi) & ((dynamic[2] - lo) % step == 0)
             cloud_dynamic.points = dynamic[0][keep] if keep.any() else dynamic[0][:1] * 0
             cloud_dynamic.colors = dynamic[1][keep] if keep.any() else dynamic[1][:1]
         for node in nodes:
@@ -310,7 +336,7 @@ def main(args):
             label_handles[node["id"]].visible = on and gui_show_labels.value
             if on and node["kind"] == "dyn":
                 segs, corners = node_obb_world(node, f, T_wg)
-                handle.points = segs if lo == hi == f else obb_span(node, lo, hi)
+                handle.points = segs if lo == hi == f else obb_span(node, lo, hi, step)
                 label_handles[node["id"]].position = corners.mean(axis=0)
         fov, aspect, wxyz, position = frustum_args(cam_c2w[f], K[f], height, width)
         cur_source.wxyz, cur_source.position = wxyz, position
@@ -321,6 +347,7 @@ def main(args):
     gui_dyn_mode.on_update(update_frame)
     gui_span_lo.on_update(update_frame)
     gui_span_hi.on_update(update_frame)
+    gui_frame_step.on_update(update_frame)
     gui_show_dyn_obb.on_update(update_frame)
     gui_show_stat_obb.on_update(update_frame)
     gui_show_labels.on_update(update_frame)
@@ -336,6 +363,22 @@ def main(args):
     gui_show_src.on_update(set_source_visible)
     gui_src_color.on_update(lambda _: redraw_source())
     gui_tgt_color.on_update(lambda _: [redraw_preview(), redraw_pins()])
+
+    def set_cam_thickness(_=None):
+        """이미 그려진 궤적 handle 의 선 굵기를 그 자리에서 갈아끼운다.
+
+        `add_*` 인자 이름은 `thickness` 지만 handle 쪽 속성은 `line_width` 다 (viser 1.1).
+        spline 은 frustum 보다 굵게 둬야 궤적의 형태가 먼저 읽힌다.
+        """
+        cam_lw["v"] = float(gui_cam_lw.value)
+        cur_source.line_width = cam_lw["v"] * 2.0
+        for group in (source_handles, pin_handles, preview_handles):
+            for handle in group:
+                if hasattr(handle, "line_width"):
+                    handle.line_width = (cam_lw["v"] if handle.name.endswith("/path")
+                                         else cam_lw["v"] * 0.75)
+
+    gui_cam_lw.on_update(set_cam_thickness)
 
     def on_bank(_=None):
         load_bank(gui_bank.value)
@@ -401,6 +444,9 @@ if __name__ == "__main__":
     parser.add_argument("--max_dynamic", default=400000, type=int)            # 동적 점 상한(49프레임 합)
     parser.add_argument("--point_size", default=0.008, type=float)
     parser.add_argument("--cam_scale", default=0.08, type=float)              # frustum 크기
+    # frustum/궤적 선 굵기(화면 px). GUI `camera thickness` 의 시작값. 예전 기본 1.5 는 점군이
+    # 빽빽한 씬에서 안 보인다.
+    parser.add_argument("--cam_thickness", default=3.0, type=float)
     parser.add_argument("--cam_stride", default=4, type=int)                  # frustum 을 그릴 간격
     parser.add_argument("--static_nodes", action="store_true", default=True)  # 정적 노드 OBB 포함
     parser.add_argument("--no_static_nodes", dest="static_nodes", action="store_false")

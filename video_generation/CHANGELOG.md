@@ -6,7 +6,29 @@
 
 ## [Unreleased]
 
+### Added
+- **`sample_camera_bank.py --route_preset_override` + `configs/bank/d198_untried_presets.json`
+  (2026-09-15, 사용자 요청 "시도해본 preset 말고 남는 preset 으로 돌려볼 수 있어").**
+  라우팅(`route_presets.route`)은 슬롯 8개에 preset 을 하나씩 박고 방향(`away`/`toward`)은
+  소스 횡이동이 정하므로 **거울짝은 구조적으로 안 뽑힌다** — d185 9,697편 실측에서 어휘 43종 중
+  21종만 시도됐고 22종은 0건, anchor 15,044개 중 3,475개(23.1%)가 통과 변이 0개다. 새 플래그는
+  **anchor 집합은 라우팅 JSON 그대로 두고 preset 목록만 갈아끼운다**. anchor 를 유지해야 하는
+  이유는 `instance_desc.json` 의 target 지칭구가 `anchor_id` 로 붙기 때문이다 (어긋나면 캡션
+  단계에서 조용히 빈 target 이 된다). 기존 `--presets` 로는 안 되는데, `plan_variants` 가
+  `route_presets.get(id, presets)` 라 anchor 가 라우팅 표에 있으면 `--presets` 를 아예 안 보기
+  때문이다. `--preset_route` 없이 `--presets` 만 주는 옛 경로는 분기를 안 타므로 그대로다.
+  override 는 free-moving 슬롯과 scene 예산(`target_count`)도 같이 푼다 — 이 세대의 목적이
+  '잔량을 다 돌린다' 라서다.
+
 ### Fixed
+- **`--route_preset_override` 가 `--presets` 축까지 갈아끼우게 (2026-09-15).** 첫 파일럿 24편이
+  **전량 빈 뱅크**(`skipped.json` 만)로 나왔다. `route_presets` 만 바꾸고 `presets` 를 안 바꾼
+  탓인데, 라우팅이 `--emit args` 로 **자기 슬롯 합집합**을 적어 보내므로(`route_presets.py:691`)
+  그 옛 8종이 `bank.json` 의 `axes.presets` 로 실리고, `fit_hole_ladder` 는 그 축을 필터로
+  쓴다(`:805`). τ 뱅크엔 새 preset 이 30개 들어 있는데 fit 이 0개로 읽고 나간 것이다.
+  증상이 특히 나쁜 이유는 `skipped.json` 이 `reason: "tau_start_exceeds_ladder"` 에
+  `tau_start: 0.0` / `num_surviving_variants: 30` 을 같이 적어 **자기모순인 채로 성공처럼**
+  보인다는 점이다 (`fit_hole_ladder.py:1247` 의 `assert not filtered` 가 빈 집합에 vacuous 통과).
 - **`suspect` 태그 목록을 `lbm/presets.py:SUSPECT_TAGS` 한 벌로 (2026-09-14).** 목록이 다는 쪽
   (`fit_hole_ladder.tag_suspects`, 5종)과 자르는 쪽(`vista4d_bank_to_dl3dv.py --drop_suspect`
   의 `choices`, 3종)에 따로 하드코딩돼 있었고 후자가 ④ `aim_target_subject_lost` / ⑤

@@ -908,6 +908,26 @@ def main(args):
         nodes = [n for n in nodes if n["id"] in route_presets]
         if cut:
             print(f"{'route_cut':<16}" + " ".join(cut) + "  (preset_route 에 없는 anchor)")
+        # D198. anchor **집합은 라우팅 JSON 그대로** 두고 preset 목록만 갈아끼운다
+        # (사용자 지시 2026-09-15 "시도해본 preset 말고 남는 preset 으로 돌려볼 수 있어").
+        # 라우팅은 슬롯마다 preset 을 하나씩 박으므로 어휘 43종 중 anchor 가 실제로 시도하는 건
+        # 8종 이하다 — d185 코퍼스 전체에서 22종이 **한 번도** 안 나왔다. 그 잔량을 구우려면
+        # anchor 는 같아야 한다 (캡션·instance_desc 가 anchor_id 로 붙어 있다).
+        # 왜 `--presets` 로 안 되나: `plan_variants` 는 `route_presets.get(id, presets)` 라
+        # anchor 가 라우팅 표에 있으면 `--presets` 를 아예 안 본다.
+        # `--preset_route` 없이 `--presets` 만 주는 옛 경로는 그대로다 (분기 안 탄다).
+        if args.route_preset_override:
+            route_presets = {a: list(args.route_preset_override) for a in route_presets}
+            route_backfill = {a: [] for a in route_presets}
+            free_preset, target_count, object_budget = None, 0, 0   # 예산 없이 전량 굽는다
+            # `presets` 도 같이 갈아끼워야 한다. 이건 `--presets` 인데, 라우팅이 `--emit args`
+            # 로 **자기 슬롯 합집합**을 적어 보내므로(`route_presets.py:691`) 안 바꾸면 옛 8종이
+            # 그대로 남는다. 그 값이 `bank.json` 의 `axes.presets` 로 실리고, `fit_hole_ladder`
+            # 는 그 축을 필터로 쓴다(`:805`) — τ 뱅크엔 새 preset 이 30개 들어 있는데 fit 이
+            # 0개로 읽고 `skipped.json` 만 쓰고 나간다 (D198 파일럿 24편 전량이 이렇게 비었다).
+            presets = list(args.route_preset_override)
+            print(f"{'route_override':<16}{' '.join(args.route_preset_override)}"
+                  f"   (anchor {len(route_presets)}개, 예산/free-moving 해제)")
     print(f"{'presets':<16}{len(presets)}   tau ladder {ladder}")
     print(f"{'speeds':<16}{args.speeds}   trackings {args.trackings}   "
           f"look_at_bias {args.look_at_biases}\n")
@@ -1408,6 +1428,11 @@ def build_parser():
     # 합집합으로 넘기면 그게 4개가 되어 격자가 2x4=8 로 부푼다. free-moving 슬롯도 같은 이유로
     # 합집합에 두면 anchor 전부에 걸려 scene 당 5개가 안 된다.
     parser.add_argument("--preset_route", default=None, type=str)
+    # D198. `--preset_route` 의 **anchor 집합만** 쓰고 preset 목록은 이 값으로 갈아끼운다.
+    # 라우팅이 이미 다녀간 씬에서 "안 써 본 preset" 만 추가로 구울 때 쓴다 (§route_override).
+    # 주면 free-moving 슬롯과 scene 예산(`target_count`)이 같이 풀린다 — 예산을 남겨 두면
+    # anchor 당 앞 몇 개만 굽고 나머지를 예비로 미뤄서 "잔량을 다 돌린다"는 목적을 못 지킨다.
+    parser.add_argument("--route_preset_override", nargs="*", default=None)
     # D166. scene 당 변이 **상한**. 0 이면 `--preset_route` JSON 의 `target_count` 를 쓰고,
     # 그것도 없으면(옛 JSON) 배분 자체를 안 한다 = 옛 동작(anchor 전량 x preset 전량).
     # 여기서 덮어쓰는 건 라우팅을 다시 안 돌리고 상한만 바꿔 보고 싶을 때뿐이다.

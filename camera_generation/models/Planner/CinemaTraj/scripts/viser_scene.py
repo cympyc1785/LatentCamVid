@@ -40,6 +40,7 @@ from scene_graph.obb import OBB_EDGES, obb_corners, yaw_to_R      # noqa: E402
 # 궤적 색. 소스는 회색(기준), 합성은 팔레트 순서대로 — `make_camviz.py` 의 소스 회색 / 플랜 주황
 # 관례를 따르되 여러 개를 동시에 비교할 수 있게 확장했다.
 SOURCE_COLOR = (170, 170, 170)
+TARGET_COLOR = (255, 60, 60)          # preview + 첫 pin. GUI `target color` 가 덮는다
 PIN_PALETTE = [(255, 140, 0), (0, 200, 255), (120, 255, 120), (255, 80, 200),
                (255, 235, 60), (160, 140, 255), (255, 110, 110), (90, 255, 210)]
 DYN_COLOR, STAT_COLOR = (0, 255, 255), (255, 128, 0)
@@ -168,7 +169,7 @@ def main(args):
         handles.append(server.scene.add_label(f"{prefix}/name", label, position=poses[0, :3, 3]))
         return handles
 
-    source_handles = draw_track("/cam/source", cam_c2w, SOURCE_COLOR, args.cam_stride, "source")
+    source_handles = []
     cur_source = server.scene.add_camera_frustum(
         "/cam/cur_source", *frustum_args(cam_c2w[0], K[0], height, width)[:2],
         scale=args.cam_scale * 1.8, color=(255, 255, 255), thickness=3.0, thickness_units="screen")
@@ -177,9 +178,11 @@ def main(args):
     def redraw_pins():
         while pin_handles:
             pin_handles.pop().remove()
+        # 첫 pin 은 GUI 의 `target color` 를 쓴다 — 하나만 고정했을 때 "지정한 색"이 그대로
+        # 나오게 하려는 것. 둘 이상이면 서로 구별돼야 하므로 나머지는 팔레트로 넘긴다.
         for i, (vid, (bname, poses)) in enumerate(pins.items()):
-            pin_handles.extend(draw_track(f"/cam/pin/{i:02d}", poses,
-                                          PIN_PALETTE[i % len(PIN_PALETTE)],
+            color = tuple(gui_tgt_color.value) if i == 0 else PIN_PALETTE[(i - 1) % len(PIN_PALETTE)]
+            pin_handles.extend(draw_track(f"/cam/pin/{i:02d}", poses, color,
                                           args.cam_stride, f"{bname}:{vid}"))
 
     # ── GUI ──────────────────────────────────────────────────────────────────
@@ -198,7 +201,12 @@ def main(args):
         gui_show_static = server.gui.add_checkbox("static points", True)
         gui_show_dyn = server.gui.add_checkbox("dynamic points", True)
         gui_dyn_mode = server.gui.add_dropdown("dynamic span (points+OBB)",
-                                               ("current frame", "all frames"))
+                                               ("current frame", "interval", "all frames"))
+        # `interval` 일 때만 쓰는 구간. 전량(`all frames`)은 동적 점이 겹쳐서 어느 구간에서
+        # 물체가 어디로 갔는지 안 보이는데, 구간을 좁히면 그게 보인다.
+        gui_span_lo = server.gui.add_slider("span start", 0, num_frames - 1, 1, 0)
+        gui_span_hi = server.gui.add_slider("span end", 0, num_frames - 1, 1,
+                                            min(8, num_frames - 1))
         gui_psize = server.gui.add_slider("point size", 0.001, 0.05, 0.001, args.point_size)
 
     with server.gui.add_folder("obb"):
@@ -215,6 +223,10 @@ def main(args):
         gui_variant = server.gui.add_dropdown(
             "variant", tuple(bank["variant"]) if bank["cam"] is not None else ("(none)",))
         gui_preview = server.gui.add_checkbox("preview selected", True)
+        # 색은 상수가 아니라 GUI 로 뺀다 — 배경·점군 색과 겹치면 궤적이 안 보이는데, 씬마다
+        # 점군 색이 다르라 상수 하나로는 못 맞춘다.
+        gui_src_color = server.gui.add_rgb("source color", SOURCE_COLOR)
+        gui_tgt_color = server.gui.add_rgb("target color", TARGET_COLOR)
         gui_add = server.gui.add_button("pin selected")
         gui_clear = server.gui.add_button("clear pinned")
 
@@ -240,24 +252,55 @@ def main(args):
         if poses is None or not gui_preview.value:
             return
         preview_handles.extend(
-            draw_track("/cam/preview", poses, (255, 60, 60), args.cam_stride, gui_variant.value))
+            draw_track("/cam/preview", poses, tuple(gui_tgt_color.value),
+                       args.cam_stride, gui_variant.value))
 
-    all_span_cache = {}
+    def redraw_source():
+        """색을 바꾸려면 다시 그리는 수밖에 없다 — viser handle 은 color 를 못 갈아끼운다."""
+        while source_handles:
+            source_handles.pop().remove()
+        source_handles.extend(draw_track("/cam/source", cam_c2w, tuple(gui_src_color.value),
+                                         args.cam_stride, "source"))
+        for handle in source_handles:
+            handle.visible = gui_show_src.value
 
-    def obb_all_frames(node):
-        """동적 노드의 **전 프레임** OBB 를 선분 한 덩어리로. 재생을 안 보고 한눈에 궤적을
-        보려는 용도라 매 프레임 다시 쌓지 않고 노드별로 한 번만 계산해 둔다."""
-        if node["id"] not in all_span_cache:
-            all_span_cache[node["id"]] = np.concatenate(
-                [node_obb_world(node, f, T_wg)[0] for f in node["track"]["frames"]], axis=0)
-        return all_span_cache[node["id"]]
+    frame_obb_cache, span_obb_cache = {}, {}
+
+    def obb_span(node, lo: int, hi: int):
+        """동적 노드 OBB 를 `[lo, hi]` 구간만큼 쌓아 선분 한 덩어리로.
+
+        프레임별 선분은 `frame_obb_cache` 에 한 번만 계산해 두고, 구간 합은 슬라이더를 끌면
+        매번 달라지므로 `(id, lo, hi)` 로 따로 캐시한다 — 안 그러면 드래그마다 49번 재계산한다.
+        """
+        key = (node["id"], lo, hi)
+        if key not in span_obb_cache:
+            frames = [f for f in node["track"]["frames"] if lo <= f <= hi]
+            if not frames:
+                frames = [max(min(hi, node["track"]["frames"][-1]), node["track"]["frames"][0])]
+            for f in frames:
+                if (node["id"], f) not in frame_obb_cache:
+                    frame_obb_cache[(node["id"], f)] = node_obb_world(node, f, T_wg)[0]
+            span_obb_cache[key] = np.concatenate(
+                [frame_obb_cache[(node["id"], f)] for f in frames], axis=0)
+        return span_obb_cache[key]
+
+    def dyn_span():
+        """현재 모드가 뜻하는 프레임 구간 `[lo, hi]`. 구간 모드에서 start > end 면 뒤집는다."""
+        mode = gui_dyn_mode.value
+        if mode == "all frames":
+            return 0, num_frames - 1
+        if mode == "current frame":
+            f = int(gui_frame.value)
+            return f, f
+        lo, hi = int(gui_span_lo.value), int(gui_span_hi.value)
+        return (lo, hi) if lo <= hi else (hi, lo)
 
     def update_frame(_=None):
         f = int(gui_frame.value)
-        span_all = gui_dyn_mode.value == "all frames"
+        lo, hi = dyn_span()
         cloud_dynamic.visible = gui_show_dyn.value
         if gui_show_dyn.value:
-            keep = np.ones(len(dynamic[0]), bool) if span_all else dynamic[2] == f
+            keep = (dynamic[2] >= lo) & (dynamic[2] <= hi)
             cloud_dynamic.points = dynamic[0][keep] if keep.any() else dynamic[0][:1] * 0
             cloud_dynamic.colors = dynamic[1][keep] if keep.any() else dynamic[1][:1]
         for node in nodes:
@@ -267,7 +310,7 @@ def main(args):
             label_handles[node["id"]].visible = on and gui_show_labels.value
             if on and node["kind"] == "dyn":
                 segs, corners = node_obb_world(node, f, T_wg)
-                handle.points = obb_all_frames(node) if span_all else segs
+                handle.points = segs if lo == hi == f else obb_span(node, lo, hi)
                 label_handles[node["id"]].position = corners.mean(axis=0)
         fov, aspect, wxyz, position = frustum_args(cam_c2w[f], K[f], height, width)
         cur_source.wxyz, cur_source.position = wxyz, position
@@ -276,6 +319,8 @@ def main(args):
     gui_frame.on_update(update_frame)
     gui_show_dyn.on_update(update_frame)
     gui_dyn_mode.on_update(update_frame)
+    gui_span_lo.on_update(update_frame)
+    gui_span_hi.on_update(update_frame)
     gui_show_dyn_obb.on_update(update_frame)
     gui_show_stat_obb.on_update(update_frame)
     gui_show_labels.on_update(update_frame)
@@ -289,6 +334,8 @@ def main(args):
         update_frame()
 
     gui_show_src.on_update(set_source_visible)
+    gui_src_color.on_update(lambda _: redraw_source())
+    gui_tgt_color.on_update(lambda _: [redraw_preview(), redraw_pins()])
 
     def on_bank(_=None):
         load_bank(gui_bank.value)
@@ -321,6 +368,7 @@ def main(args):
         if bank["cam"] is not None and vid in set(bank["variant"]):
             pins[vid] = (bank["name"], np.asarray(bank["cam"][np.flatnonzero(bank["variant"] == vid)[0]],
                                                   dtype=float))
+    redraw_source()
     redraw_pins()
     redraw_preview()
     update_frame()

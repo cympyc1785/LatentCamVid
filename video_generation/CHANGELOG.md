@@ -16,6 +16,20 @@
   (`fit_hole_ladder` 를 emit 쪽에서 import 하면 torch 렌더러까지 끌려온다). 기본값은 빈 리스트
   그대로라 안 주면 예전 코퍼스와 비트 동일하다.
 
+### Changed
+- **`viser_scene.py` — 동적 점 구간 표시 + 카메라 색 지정 (2026-09-15, 사용자 요청 "dynamic
+  point frame 을 frame interval 정해서 띄울 수 있게" + "source, target 카메라 색깔 지정할 수
+  있게").** `dynamic span (points+OBB)` 드롭다운에 `interval` 을 넣고 `span start`/`span end`
+  슬라이더를 붙였다. 기존 두 모드는 그대로다 — `current frame` / `all frames` 는 각각 구간
+  `[f,f]` / `[0,N-1]` 로 같은 코드를 탄다. 전 프레임을 겹치면 snowboard 처럼 subject 가 멀리
+  이동하는 씬에서 점이 번져 **어느 구간에 어디 있었는지**가 안 보이는데, 구간을 좁히면 그게
+  보인다. OBB 는 프레임별 선분(`frame_obb_cache`)과 구간 합(`span_obb_cache`)을 따로 캐시한다 —
+  슬라이더를 끌면 구간이 매번 달라져서 합만 캐시하면 드래그마다 프레임 수만큼 재계산한다.
+  색은 상수 `SOURCE_COLOR` / 하드코딩 `(255,60,60)` 대신 `source color` / `target color` RGB
+  피커로 뺐다. viser handle 은 color 를 못 갈아끼워서 색 변경은 track 을 지우고 다시 그린다.
+  `target color` 는 preview 와 **첫 pin** 에만 먹고 두 번째 pin 부터는 `PIN_PALETTE` 로 간다 —
+  여러 궤적 동시 비교가 pin 의 존재 이유라 전부 같은 색이 되면 안 된다.
+
 ### Added
 - **`CinemaTraj/scripts/viser_scene.py` — 씬 하나를 브라우저에서 3D 로 보는 viser 뷰어
   (2026-09-15, 사용자 요청 "viser 로 obb, camera, point cloud 를 snowboard scene 을 보고싶어"

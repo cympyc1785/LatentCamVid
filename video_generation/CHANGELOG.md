@@ -17,6 +17,23 @@
   그대로라 안 주면 예전 코퍼스와 비트 동일하다.
 
 ### Added
+- **`CinemaTraj/scripts/viser_scene.py` — 씬 하나를 브라우저에서 3D 로 보는 viser 뷰어
+  (2026-09-15, 사용자 요청 "viser 로 obb, camera, point cloud 를 snowboard scene 을 보고싶어"
+  + "source camera trajectory 랑 synthesized camera trajectory(리스트 중 선택)들도 같이"
+  + "dynamic subject 도 static point cloud 처럼 모든 프레임 다 합쳐서").** 지금까지 판정 수단이
+  전부 2D 렌더(`obb_overlay.mp4`, depth-warp 릴, contact sheet)라 "카메라가 물체 뒤로 들어갔나 /
+  궤적이 왜 저기서 꺾이나"를 못 갈랐다 — 한 시점에서 겹쳐 보이는 것과 실제로 가까운 것이 구분이
+  안 된다. 한 좌표계(world) 위에 `cloud.npz` 점군 · `scene_graph.json` OBB · 소스 카메라 ·
+  뱅크(합성) 카메라를 전부 올린다. 좌표계는 셋이 섞여 있어 그대로 못 옮긴다: 점군/소스 c2w/뱅크
+  c2w 는 world 로 동일하지만(snowboard 에서 뱅크 `cam_c2w[0,0]` 위치가 소스 `cam_c2w[0]` 과 비트
+  동일) **OBB·track 은 graph frame G** 라 `frames.T_wg` 로 올려야 한다. 동적 점은
+  `visible.sum(1)==1` (`lbm/cloud.py` 와 같은 식)로 가르되 `visible` 을 통째로 unpack 하면
+  snowboard 에서 2.1 GB 라 **바이트 popcount** 로만 센다. 뱅크는 `bank` / `anchor` / `variant`
+  3단 드롭다운 + `pin selected` 로 여러 궤적을 동시에 색을 달리해 비교한다. 동적 점은
+  `dynamic span` 드롭다운으로 "현재 프레임"(기본) / "전 프레임 합침"을 고른다 — 기본이 현재
+  프레임인 이유는 49프레임을 겹치면 사람 형체가 번져서 안 보이기 때문. static/dynamic 을 따로
+  샘플링하는 이유는 동적 점이 전체의 14.8% (snowboard 6.48M/43.8M) 라 한 덩어리로 뽑으면 subject
+  가 먼저 사라지기 때문이다. GPU 를 안 쓴다(numpy 만).
 - **`CinemaTraj/scripts/eval_subject_in_frame.py` 에 씬 단위 샤딩(`--num_shards/--shard_id`)과
   샤드 병합(`--merge`) (2026-09-15, D194 사용자 지시 "gpu 1~3 써서 병렬로").** 기본값 `1/0` 이라
   안 주면 기존 동작과 비트 단위로 같다. 자르는 단위가 **씬**인 이유는 씬 하나를 여는 비용

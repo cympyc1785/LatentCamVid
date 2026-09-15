@@ -187,8 +187,17 @@ def main(args):
         scene = name[len(args.name_prefix) + 1:-(len(entry) + 1)]
         by_scene[scene].append((name, entry))
 
+    # 샤딩은 **씬 단위**다. entry 로 자르면 같은 씬의 점군을 샤드마다 다시 올리게 되는데,
+    # 씬 하나 여는 비용(unproject)이 entry 하나 렌더보다 훨씬 크다. 기본값 1/0 은 전량 =
+    # 기존 동작과 비트 단위로 같다.
+    scenes = sorted(by_scene)
+    if args.num_shards > 1:
+        scenes = [s for i, s in enumerate(scenes) if i % args.num_shards == args.shard_id]
+        print(f"[shard {args.shard_id}/{args.num_shards}] 씬 {len(scenes)}/{len(by_scene)}",
+              flush=True)
+
     rows, skipped = [], []
-    for scene in sorted(by_scene):
+    for scene in scenes:
         graph_path = path.join(args.cloud_root, scene, "scene_graph.json")
         # npz 모드는 cloud.npz 가 있어야 하고, memory 모드는 recon 만 있으면 된다.
         needed = [graph_path] + ([path.join(args.cloud_root, scene, "cloud.npz")]
@@ -249,12 +258,32 @@ def main(args):
               "render_mode": "cloud" if args.temporal_persistence else "warp_1to1",
               "ref_eval_dir": args.ref_eval_dir, "arms": arms,
               "entries": len(refs), "subject_occlusion": bool(args.subject_occlusion),
+              "num_shards": args.num_shards, "shard_id": args.shard_id,
               "skipped": skipped, "rows": rows}
     if args.out:
         makedirs(path.dirname(path.abspath(args.out)), exist_ok=True)
         with open(args.out, "w", encoding="utf-8") as file:
             json.dump(report, file, ensure_ascii=False, indent=1)
 
+    summarize(rows, labels, args, report)
+    if args.out:
+        with open(args.out, "w", encoding="utf-8") as file:
+            json.dump(report, file, ensure_ascii=False, indent=1)
+
+    if skipped:
+        print(f"\nskipped {len(skipped)}")
+        for s in skipped[:10]:
+            print(f"  {s}")
+    if args.out:
+        print(f"\n-> {args.out}")
+
+
+def summarize(rows, labels, args, report):
+    """arm 요약표 + center_box sweep 을 찍고 `report["sweep"]` 을 채운다.
+
+    샤드 병합(`--merge`)이 같은 표를 다시 그릴 수 있어야 해서 main 에서 떼어냈다 — 샤드마다
+    찍힌 표를 사람이 눈으로 더할 수는 없다 (arm 평균은 샤드 크기 가중이라 단순 평균이 틀린다).
+    """
     occl_on = any("subject_visible_frac" in r for r in rows)
     print(f"\n{'arm':<12}{'n':>4}{'subj_in_frame':>15}{'median':>9}"
           f"{'hole':>8}{'subj_cov':>10}{'zero_f':>8}"
@@ -290,16 +319,48 @@ def main(args):
                        "mean": {l: [float(np.mean([in_frame_at(r["centers"], b)
                                                    for r in rows if r["arm"] == l]))
                                     for b in boxes] for l in labels}}
+
+
+def merge(args):
+    """샤드 JSON 들을 한 표로. 렌더는 안 한다 — 저장된 `rows` 만 합친다.
+
+    `(name, arm)` 로 중복을 제거한다: 샤드 경계가 씬이라 원칙적으로 겹치지 않지만, 재실행한
+    샤드를 지우지 않고 같은 glob 에 남겨 두면 그 씬만 두 번 세어져 평균이 조용히 기운다.
+    """
+    shards = sorted(glob(args.merge))
+    assert shards, f"{args.merge} 에 샤드 JSON 이 없다"
+    rows, skipped, seen, labels = [], [], set(), ["gt"]
+    for shard_path in shards:
+        with open(shard_path, encoding="utf-8") as file:
+            rep = json.load(file)
+        labels += [l for l in rep["arms"] if l not in labels]
+        n0 = len(rows)
+        for row in rep["rows"]:
+            key = (row["name"], row["arm"])
+            if key in seen:
+                continue
+            seen.add(key)
+            rows.append(row)
+        skipped += rep.get("skipped", [])
+        print(f"  {path.basename(shard_path):<40} rows {len(rep['rows']):>5} "
+              f"(+{len(rows) - n0} new)", flush=True)
+    labels = [l for l in labels if any(r["arm"] == l for r in rows)]
+    names = {r["name"] for r in rows}
+    print(f"\nentries {len(names)} / rows {len(rows)} / arms {labels}")
+
+    report = {"format": "subject_in_frame_v1", "center_box": args.center_box,
+              "merged_from": shards, "arms": {l: "" for l in labels if l != "gt"},
+              "entries": len(names), "skipped": skipped, "rows": rows}
+    summarize(rows, labels, args, report)
     if args.out:
+        makedirs(path.dirname(path.abspath(args.out)), exist_ok=True)
         with open(args.out, "w", encoding="utf-8") as file:
             json.dump(report, file, ensure_ascii=False, indent=1)
-
+        print(f"\n-> {args.out}")
     if skipped:
         print(f"\nskipped {len(skipped)}")
         for s in skipped[:10]:
             print(f"  {s}")
-    if args.out:
-        print(f"\n-> {args.out}")
 
 
 if __name__ == "__main__":
@@ -358,6 +419,15 @@ if __name__ == "__main__":
     parser.add_argument("--no_subject_occlusion", dest="subject_occlusion",
                         action="store_false")
     parser.add_argument("--limit", type=int, default=0)              # 0 = 씬 전량 (프로브용)
+    # 씬 단위 샤딩 (`sam3_seg_instances.py` 와 같은 패턴). 기본 1/0 = 전량, 기존 동작 그대로.
+    parser.add_argument("--num_shards", type=int, default=1)
+    parser.add_argument("--shard_id", type=int, default=0)
+    # 샤드 JSON glob 을 주면 **렌더 없이** 그것들만 합쳐 표를 그린다 (GPU 불필요).
+    parser.add_argument("--merge", default=None)
     parser.add_argument("--device", default="cuda")
     parser.add_argument("--out", default=None)
-    main(parser.parse_args())
+    parsed = parser.parse_args()
+    if parsed.merge:
+        merge(parsed)
+    else:
+        main(parsed)

@@ -17,6 +17,15 @@
   그대로라 안 주면 예전 코퍼스와 비트 동일하다.
 
 ### Added
+- **`CinemaTraj/scripts/eval_subject_in_frame.py` 에 씬 단위 샤딩(`--num_shards/--shard_id`)과
+  샤드 병합(`--merge`) (2026-09-15, D194 사용자 지시 "gpu 1~3 써서 병렬로").** 기본값 `1/0` 이라
+  안 주면 기존 동작과 비트 단위로 같다. 자르는 단위가 **씬**인 이유는 씬 하나를 여는 비용
+  (recon 로드 + `unproject`)이 entry 하나 렌더보다 크기 때문이다 — entry 로 자르면 같은 점군을
+  샤드마다 다시 올린다. `--merge <glob>` 은 GPU 없이 샤드 JSON 의 `rows` 만 합쳐 같은 표
+  (arm 요약 + `center_box` sweep)를 다시 그린다. 샤드마다 찍힌 표를 사람이 더할 수는 없어서
+  (arm 평균이 샤드 크기 가중이라 단순 평균이 틀린다) 요약 코드를 `summarize()` 로 떼어내 두 경로가
+  같은 함수를 쓴다. 병합은 `(name, arm)` 으로 중복을 제거한다 — 재실행한 샤드를 안 지우고 같은
+  glob 에 남기면 그 씬만 두 번 세어져 평균이 조용히 기운다.
 - **D194 molmo2 layer-21 arm (`dynpose_d194_molmo2_l21.yaml`) (2026-09-14).** `dynpose_d194_molmo2_nogeo`
   를 hydra `defaults` 로 상속하고 `peav_layer: 21` 한 줄만 덮는다 — 캐시가 두 층을 같은 파일에
   들고 있어서 **다시 굽지 않는다**. 두 arm 의 차이가 이 한 줄뿐이라 층 효과가 다른 축과 안 섞인다.

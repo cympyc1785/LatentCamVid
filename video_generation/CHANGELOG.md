@@ -30,8 +30,10 @@
   `visible.sum(1)==1` (`lbm/cloud.py` 와 같은 식)로 가르되 `visible` 을 통째로 unpack 하면
   snowboard 에서 2.1 GB 라 **바이트 popcount** 로만 센다. 뱅크는 `bank` / `anchor` / `variant`
   3단 드롭다운 + `pin selected` 로 여러 궤적을 동시에 색을 달리해 비교한다. 동적 점은
-  `dynamic span` 드롭다운으로 "현재 프레임"(기본) / "전 프레임 합침"을 고른다 — 기본이 현재
-  프레임인 이유는 49프레임을 겹치면 사람 형체가 번져서 안 보이기 때문. static/dynamic 을 따로
+  `dynamic span (points+OBB)` 드롭다운으로 "현재 프레임"(기본) / "전 프레임 합침"을 고른다 —
+  기본이 현재 프레임인 이유는 49프레임을 겹치면 사람 형체가 번져서 안 보이기 때문이고,
+  "전 프레임"은 **점과 OBB 를 같이** 겹쳐서 재생을 안 보고도 subject 궤적을 한눈에 본다
+  (사용자 요청). static/dynamic 을 따로
   샘플링하는 이유는 동적 점이 전체의 14.8% (snowboard 6.48M/43.8M) 라 한 덩어리로 뽑으면 subject
   가 먼저 사라지기 때문이다. GPU 를 안 쓴다(numpy 만).
 - **`CinemaTraj/scripts/eval_subject_in_frame.py` 에 씬 단위 샤딩(`--num_shards/--shard_id`)과

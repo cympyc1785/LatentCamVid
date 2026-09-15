@@ -197,7 +197,8 @@ def main(args):
     with server.gui.add_folder("cloud"):
         gui_show_static = server.gui.add_checkbox("static points", True)
         gui_show_dyn = server.gui.add_checkbox("dynamic points", True)
-        gui_dyn_mode = server.gui.add_dropdown("dynamic span", ("current frame", "all frames"))
+        gui_dyn_mode = server.gui.add_dropdown("dynamic span (points+OBB)",
+                                               ("current frame", "all frames"))
         gui_psize = server.gui.add_slider("point size", 0.001, 0.05, 0.001, args.point_size)
 
     with server.gui.add_folder("obb"):
@@ -241,12 +242,22 @@ def main(args):
         preview_handles.extend(
             draw_track("/cam/preview", poses, (255, 60, 60), args.cam_stride, gui_variant.value))
 
+    all_span_cache = {}
+
+    def obb_all_frames(node):
+        """동적 노드의 **전 프레임** OBB 를 선분 한 덩어리로. 재생을 안 보고 한눈에 궤적을
+        보려는 용도라 매 프레임 다시 쌓지 않고 노드별로 한 번만 계산해 둔다."""
+        if node["id"] not in all_span_cache:
+            all_span_cache[node["id"]] = np.concatenate(
+                [node_obb_world(node, f, T_wg)[0] for f in node["track"]["frames"]], axis=0)
+        return all_span_cache[node["id"]]
+
     def update_frame(_=None):
         f = int(gui_frame.value)
+        span_all = gui_dyn_mode.value == "all frames"
         cloud_dynamic.visible = gui_show_dyn.value
         if gui_show_dyn.value:
-            keep = np.ones(len(dynamic[0]), bool) if gui_dyn_mode.value == "all frames" \
-                else dynamic[2] == f
+            keep = np.ones(len(dynamic[0]), bool) if span_all else dynamic[2] == f
             cloud_dynamic.points = dynamic[0][keep] if keep.any() else dynamic[0][:1] * 0
             cloud_dynamic.colors = dynamic[1][keep] if keep.any() else dynamic[1][:1]
         for node in nodes:
@@ -256,7 +267,7 @@ def main(args):
             label_handles[node["id"]].visible = on and gui_show_labels.value
             if on and node["kind"] == "dyn":
                 segs, corners = node_obb_world(node, f, T_wg)
-                handle.points = segs
+                handle.points = obb_all_frames(node) if span_all else segs
                 label_handles[node["id"]].position = corners.mean(axis=0)
         fov, aspect, wxyz, position = frustum_args(cam_c2w[f], K[f], height, width)
         cur_source.wxyz, cur_source.position = wxyz, position

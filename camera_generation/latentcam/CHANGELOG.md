@@ -5,6 +5,25 @@ All notable changes to the latentcam sub-project. Follows [Keep a Changelog](htt
 ## [Unreleased]
 
 ### Added
+- **`cache_molmo2_embeddings.py --decode_keep points --decode_points 49` — decode hidden 슬롯을
+  "생성 토큰 순번"이 아니라 **영상 프레임**으로 바꾼다 (2026-09-16, D197-d2 사용자 지시
+  "49프레임 다 나오도록").** `--decode_tokens` 만 주면 슬롯 t 는 t번째 생성 토큰이라 영상과
+  아무 관계가 없다. `Track {target}` 프롬프트에 Molmo2 는 점마다 **시각**을 단
+  `<tracks coords="0.0 1 444 461;0.5 1 444 453;…">` 로 답하므로, 점 하나가 끝나는
+  토큰(`;`, 마지막 점은 coords 를 닫는 `"`)의 hidden 만 골라 `round(t*fps)` 프레임 슬롯에
+  담는다. 슬롯이 곧 프레임이라 video 토큰의 49x8x8 격자와 축이 맞고, 저장량은 49슬롯이라
+  전 토큰(~800)의 1/16 (13,993쌍 x 2층 = ~7 GB; 전 토큰이면 ~117 GB 였다).
+  **점 개수를 정하는 건 `--fps` 다.** `processing_molmo2.get_video_string` 이 프레임마다
+  `f"{t:.1f} "` 를 박는데 모델은 0.5 s 라벨마다 한 점을 찍는다 — 기본 25.0 에서는 49프레임이
+  0.0~1.9 로 뭉쳐 **라벨 20종 / 점 4개**뿐이고(프레임 커버리지 4/49), 4.0 이면 점 25개,
+  **2.0** 이면 라벨이 정확히 0.0,0.5,…,24.0 이라 프레임과 1:1 이다. 실측 3씬에서 점
+  48/49/49, 생성 721~733 토큰에서 EOS 자연 종료 — 그래서 `--decode_tokens 900` 이 한 벌로
+  붙는다(640 이면 `<tracks>` 중간에 잘려 파싱 점 0개). 5캡션 스모크: 채운 슬롯 48.6/49,
+  파싱 실패 0%, 길이 초과 0%. 처리량 ~42 s/scene (decode 900 스텝이 지배적).
+  fps 를 바꾸면 prefix 토큰열 길이가 4323 -> 4341 로 달라지지만 **video 캐시는 재사용**한다
+  (`--skip_done` 기본 True) — 바꾸는 게 text 스트림 하나여야 arm 사이에서 video 가 비트
+  동일하게 남는다. `--decode_keep all`(기본)이면 저장물은 기존과 **비트 동일**하다.
+  `tmp/d197/probe_track_fps.py` 가 fps↔점개수 실측 + 소스 영상 위 track 점 오버레이 mp4 를 낸다.
 - **`cache_molmo2_embeddings.py --decode_tokens N` — prefill 대신 decode 스텝 hidden 을 굽는다
   (2026-09-16, D197-d 사용자 지시).** 기존 경로가 담는 것은 캡션+probe 가 놓인 **prompt 위치**의
   hidden 이다 — 모델이 답을 아직 한 토큰도 커밋하지 않은 상태다. `--decode_tokens N` 을 주면
@@ -28,8 +47,9 @@ All notable changes to the latentcam sub-project. Follows [Keep a Changelog](htt
 - **D197-d 실험 config 2종 (2026-09-16).**
   `dynpose_d197_molmo2_dec_da3.yaml` (마지막 층) / `dynpose_d197_molmo2_dec_l21_da3.yaml`
   (`blocks[21]`). 둘 다 `dynpose_d197_molmo2_da3` 를 상속하고 `peav_text_cache` 를
-  `molmo2_cache/text_decode.pt` 로만 바꾼다 — **video 캐시는 소스 영상만 보므로 arm ②/③ 과
-  같은 파일을 그대로 읽는다** (재굽기 없음).
+  `molmo2_cache/text_decode_pts49.pt` 로만 바꾼다 — **video 캐시는 소스 영상만 보므로 arm ②/③ 과
+  같은 파일을 그대로 읽는다** (재굽기 없음). 캐시 이름이 `text_decode.pt` -> `text_decode_pts49.pt`
+  로 바뀐 것은 위 `--decode_keep points` 채택 때문이다 (슬롯 128 토큰 -> 49 프레임).
 - **PE-AV/molmo2 readout transformer + subject OBB 보조 손실 (2026-09-15, D195-A 사용자 지시).**
   `peav_readout_layers: 0` (기본) 이면 모듈이 생성조차 안 되고 state_dict·forward 가 기존 arm 과
   **비트 동일**하다 (실측: 키 집합 일치, 같은 seed 로 `torch.equal(y_off, y_new) == True`).

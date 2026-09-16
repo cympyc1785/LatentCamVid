@@ -48,6 +48,19 @@ decode 스텝 hidden 도 구울 수 있다 (`--decode_tokens`, D197-d 사용자 
   `emb_l{N}` 도 같은 슬롯 기준이라 층 비교가 그대로 성립한다. 생성문은 `decode_text` 로 같이
   저장한다. 안 주면 저장물은 기존과 **비트 동일**하다.
 
+`--decode_keep points` (D197-d2): 위 경로는 슬롯이 "생성 토큰 순번"이라 영상 프레임과 아무
+  관계가 없다. `Track {target}` 프롬프트에 molmo2 는 `<tracks coords="0.0 1 444 461;0.5 1 ...">`
+  로 답하므로, **점 하나가 끝나는 토큰**(`;`, 마지막 점은 coords 를 닫는 `"`)의 hidden 만 골라
+  그 점의 시각 t 가 가리키는 프레임 `round(t*fps)` 슬롯에 담으면 슬롯이 곧 프레임이 된다 —
+  비디오 토큰의 49x8x8 격자와 축이 맞고, 저장량도 49슬롯이라 전 토큰(~800)의 1/16 이다.
+  점 개수는 **fps 가 정한다**: 모델이 0.5 s 라벨 간격마다 한 점을 찍는데 `--fps` 는
+  `processing_molmo2.get_video_string` 의 프레임별 `f"{t:.1f} "` 문구만 바꾼다. 기본 25.0 이면
+  49프레임이 0.0~1.9 로 뭉쳐 **라벨 20종 / 점 4개**뿐이고, `--fps 2.0` 이면 라벨이 정확히
+  0.0,0.5,...,24.0 이라 프레임과 1:1 (실측 3씬: 점 48/49/49, gen 721~733 tok 자연 종료).
+  따라서 `--fps 2.0 --decode_tokens 900 --decode_keep points --decode_points 49` 가 한 벌이다.
+  fps 를 바꾸면 prefix 토큰열도 바뀌므로 **video 캐시는 기존(fps 25) 것을 재사용**한다
+  (`--skip_done` 기본 True). 이 arm 이 바꾸는 것은 text 스트림 하나다.
+
 샤딩 (`--num_shards/--shard_id`): 씬을 `i % num_shards` 로 갈라 GPU 여러 장에 흩는다.
   video 는 씬당 1파일이라 충돌이 없고, text 는 전체 1파일이라 샤드마다
   `<text_out>.shard{i}of{n}` 으로 떨어뜨린 뒤 `--merge_shards` 로 합친다 (GPU 불필요).
@@ -62,11 +75,14 @@ decode 스텝 hidden 도 구울 수 있다 (`--decode_tokens`, D197-d 사용자 
   python main/cache_molmo2_embeddings.py --merge_shards --num_shards 3 ...   # 합치기
   python main/cache_molmo2_embeddings.py --gpu 0 --decode_tokens 128 --extra_layer 21 \
       --verify --limit_scenes 1 ...                                          # D197-d 스모크
+  python main/cache_molmo2_embeddings.py --gpu 0 --fps 2.0 --decode_tokens 900 \
+      --decode_keep points --decode_points 49 --extra_layer 21 ...           # D197-d2 점정렬
 """
 
 from argparse import ArgumentParser, Namespace
 from os import path as osp, makedirs, environ
 import json
+import re
 import sys
 import time
 
@@ -284,12 +300,88 @@ def decode_hidden(model, prefix_emb, tails, text_len, n_new, device, eos_ids, ta
     om = torch.arange(text_len)[None] <= done.cpu()[:, None]
     om &= torch.arange(text_len)[None] < used
 
+    # `--decode_keep points` 는 text_len 보다 **많이** 생성한다 (49점을 다 받으려면 ~800 토큰).
+    # 그 경우 아래 pad 결과는 안 쓰이지만, 슬라이스가 터지지 않게 잘라 둔다.
+    keep = min(len(hs), text_len)
+
     def pad(xs):
         o = torch.zeros(B, text_len, xs[0].shape[-1], dtype=torch.float16)
-        o[:, :len(xs)] = torch.stack(xs, 1)
+        o[:, :keep] = torch.stack(xs[:keep], 1)
         return o
 
-    return pad(hs), om, (pad(hx) if tap is not None else None), gen[:, :used], done.cpu()
+    raw = (torch.stack(hs, 1), torch.stack(hx, 1) if tap is not None else None)
+    return pad(hs), om, (pad(hx) if tap is not None else None), gen[:, :used], done.cpu(), raw
+
+
+# ------------------------------------------------------------------ 점 정렬 슬롯 (D197-d2)
+
+# 체크포인트 README(Molmo2-4B) 의 tracking 파서와 같은 정규식.
+COORD_RE = re.compile(r'<(?:points|tracks).*? coords="([0-9\t:;, .]+)"/?>')
+FRAME_RE = re.compile(r'(?:^|\t|:|,|;)([0-9\.]+) ([0-9\. ]+)')
+
+
+def track_times(text):
+    """생성문에서 track 점의 **시각(초)** 만 등장 순서대로."""
+    out = []
+    for c in COORD_RE.finditer(text):
+        out += [float(g.group(1)) for g in FRAME_RE.finditer(c.group(1))]
+    return out
+
+
+def point_end_slots(row, n_tok, semi_ids, quote_ids):
+    """coords 안에서 점 하나가 끝나는 토큰 위치들.
+
+    점은 `"<t> <id> <x> <y>;"` 꼴로 이어 붙고 마지막 점만 `;` 대신 coords 를 닫는 `"` 가 온다.
+    그 경계 토큰 위치의 hidden 은 **그 점의 좌표를 막 다 뱉은 직후**의 상태라, 프레임 t 의
+    화면 위치를 읽어낸 결과가 담긴다. (여는 `coords="` 의 따옴표는 `;` 가 하나도 안 나온
+    시점이라 `if idx` 가 걸러낸다.)
+    """
+    idx = []
+    for t in range(n_tok):
+        v = int(row[t])
+        if v in semi_ids:
+            idx.append(t)
+        elif v in quote_ids and idx:
+            idx.append(t)
+            break
+    return idx
+
+
+def pack_points(raw, gen, done, texts, n_pts, fps, semi_ids, quote_ids, stat):
+    """decode hidden (B,used,D) -> **프레임 정렬** (B,n_pts,D) + mask.
+
+    슬롯 f = 소스 영상의 f번째 프레임. 점의 시각 t 를 `round(t*fps)` 로 프레임에 되돌린다
+    (`--fps 2.0` 이면 라벨 0.0,0.5,...,24.0 이 프레임 0..48 과 1:1). 점 개수와 시각 개수가
+    어긋나면(파싱 실패) 순서대로 채우고 `fallback` 으로 센다 — 조용히 틀리는 것보다 세는 게 낫다.
+    """
+    h_raw, hx_raw = raw
+    B, D = h_raw.shape[0], h_raw.shape[-1]
+    h = torch.zeros(B, n_pts, D, dtype=torch.float16)
+    hx = torch.zeros(B, n_pts, D, dtype=torch.float16) if hx_raw is not None else None
+    m = torch.zeros(B, n_pts, dtype=torch.bool)
+    for i in range(B):
+        n = min(int(done[i]) + 1, gen.shape[1])
+        sl = point_end_slots(gen[i], n, semi_ids, quote_ids)
+        ts = track_times(texts[i])
+        if len(sl) == len(ts) and ts:
+            fr = [int(round(t * fps)) for t in ts]
+        else:
+            fr = list(range(len(sl)))
+            stat['fallback'] += 1
+        # EOS 를 못 본 행만 잘린 것이다. `done` 은 EOS 를 못 보면 n_new 로 남고, `gen` 은
+        # 이미 `used`(=최대 n_new) 로 잘려 들어오므로 경계가 정확히 gen.shape[1] 이다.
+        if int(done[i]) >= gen.shape[1]:
+            stat['truncated'] += 1
+        for s, f in zip(sl, fr):
+            if 0 <= f < n_pts:
+                h[i, f] = h_raw[i, s]
+                if hx is not None:
+                    hx[i, f] = hx_raw[i, s]
+                m[i, f] = True
+        stat['points'] += len(sl)
+        stat['filled'] += int(m[i].sum())
+        stat['n'] += 1
+    return h, m, hx
 
 
 def pool_video(hid, patch_mask, n_frames, side, pool):
@@ -430,14 +522,20 @@ def main(args):
     tails_all = {c: proc.tokenizer(user_tail(c), add_special_tokens=False,
                                    return_tensors='pt')['input_ids'][0] for _, c in pairs}
     lens = sorted(len(v) for v in tails_all.values())
-    L = args.text_len or lens[-1]
-    assert lens[-1] <= L, f'꼬리 최장 {lens[-1]} 토큰 > text_len {L} — --text_len 을 올릴 것'
+    pts_mode = bool(args.decode_tokens) and args.decode_keep == 'points'
+    # `points` 모드의 저장 길이는 꼬리 길이와 무관하다 — 슬롯이 **프레임**이다.
+    L = args.decode_points if pts_mode else (args.text_len or lens[-1])
+    if not pts_mode:
+        assert lens[-1] <= L, f'꼬리 최장 {lens[-1]} 토큰 > text_len {L} — --text_len 을 올릴 것'
     print(f'[text] tail tokens  min {lens[0]} / p50 {lens[len(lens) // 2]} / '
-          f'max {lens[-1]}  -> text_len {L}', flush=True)
+          f'max {lens[-1]}  -> text_len {L}'
+          f'{" (points: 슬롯=프레임)" if pts_mode else ""}', flush=True)
 
     eos_ids, gen_text = None, None
+    semi_ids, quote_ids, pstat = None, None, None
     if args.decode_tokens:
-        assert args.decode_tokens <= L, f'--decode_tokens {args.decode_tokens} > text_len {L}'
+        if not pts_mode:
+            assert args.decode_tokens <= L, f'--decode_tokens {args.decode_tokens} > text_len {L}'
         # `<|im_end|>`(= tokenizer.eos_token) + config 의 eos 를 모두 종료 토큰으로 본다.
         ee = {proc.tokenizer.eos_token_id, proc.tokenizer.convert_tokens_to_ids('<|im_end|>')}
         ce = getattr(model.config, 'eos_token_id', None)
@@ -446,6 +544,14 @@ def main(args):
         gen_text = [''] * len(pairs)
         print(f'[decode] greedy {args.decode_tokens} 토큰, prefill hidden 폐기. '
               f'eos {eos_ids.tolist()}', flush=True)
+    if pts_mode:
+        # BPE 라 `;` / `"` 를 품은 토큰이 여러 개다 (` ;`, `;"` 등). 전부 경계로 본다.
+        vocab = proc.tokenizer.get_vocab()
+        semi_ids = {i for tok, i in vocab.items() if ';' in tok}
+        quote_ids = {i for tok, i in vocab.items() if '"' in tok}
+        pstat = {'n': 0, 'points': 0, 'filled': 0, 'fallback': 0, 'truncated': 0}
+        print(f'[points] 슬롯 {L} = 프레임, 시각->프레임 은 round(t*{args.fps}). '
+              f'경계 토큰 `;` {len(semi_ids)}종 / `"` {len(quote_ids)}종', flush=True)
 
     makedirs(args.video_out, exist_ok=True)
     D = model.config.text_config.hidden_size
@@ -495,11 +601,17 @@ def main(args):
             cb = caps[i:i + args.bs]
             tl = [tails_all[c] for c in cb]
             if args.decode_tokens:
-                h, m, hx, gen, done = decode_hidden(model, prefix_emb, tl, L,
-                                                    args.decode_tokens, device, eos_ids, tap)
+                h, m, hx, gen, done, raw = decode_hidden(model, prefix_emb, tl, L,
+                                                         args.decode_tokens, device, eos_ids, tap)
+                txts = []
                 for j, c in enumerate(cb):
-                    gen_text[pidx[(sk, c)]] = proc.tokenizer.decode(
-                        gen[j, :min(int(done[j]) + 1, gen.shape[1])])
+                    txts.append(proc.tokenizer.decode(
+                        gen[j, :min(int(done[j]) + 1, gen.shape[1])]))
+                    gen_text[pidx[(sk, c)]] = txts[-1]
+                if pts_mode:
+                    h, m, hx = pack_points(raw, gen, done, txts, L, args.fps,
+                                           semi_ids, quote_ids, pstat)
+                del raw
             else:
                 h, m, hx = tail_hidden(model, prefix_emb, tl, L, device, tap)
             for j, c in enumerate(cb):
@@ -523,13 +635,21 @@ def main(args):
     if tap is not None:
         tap.close()
 
+    if pstat and pstat['n']:
+        print(f'[points] 캡션 {pstat["n"]}개  점/캡션 {pstat["points"] / pstat["n"]:.1f}  '
+              f'채운 슬롯 {pstat["filled"] / pstat["n"]:.1f}/{L}  '
+              f'파싱실패 {pstat["fallback"]} ({pstat["fallback"] / pstat["n"]:.1%})  '
+              f'길이초과 {pstat["truncated"]} ({pstat["truncated"] / pstat["n"]:.1%})', flush=True)
+
     text_path = shard_text_path(args)
     if not args.limit_scenes:
         makedirs(osp.dirname(text_path), exist_ok=True)
         tpl = 'molmo2_override+probe' if args.text_override_json else 'molmo2_concise+probe'
         payload = {'emb': embs, 'mask': masks,
                    'text': [f'{sk}\t{c}' for sk, c in pairs],
-                   'template': tpl + ('+decode' if args.decode_tokens else ''), 'text_len': L,
+                   'template': tpl + ('' if not args.decode_tokens else
+                                      f'+decode_points{L}_fps{args.fps:g}' if pts_mode
+                                      else '+decode'), 'text_len': L,
                    'text_override_json': args.text_override_json,
                    'extra_layer': args.extra_layer, 'probe': PROBE}
         if args.decode_tokens:
@@ -537,6 +657,10 @@ def main(args):
             # 나중에 캐시만 보고도 되짚을 수 있어야 한다 (13,993개 x ~400자 = 6 MB 수준).
             payload['decode_tokens'] = args.decode_tokens
             payload['decode_text'] = gen_text
+            payload['decode_keep'] = args.decode_keep
+            if pts_mode:
+                payload['decode_fps'] = args.fps
+                payload['decode_points_stat'] = pstat
         if embs_x is not None:
             payload[f'emb_l{args.extra_layer}'] = embs_x
         if args.num_shards > 1:
@@ -610,10 +734,13 @@ def verify_decode(model, proc, prefix_emb, caps, tails_all, args, embs, masks, p
     # 꼬리를 일부러 끼워 넣어 padding 을 강제한다.
     long = max(tails_all.values(), key=len)
     pad_n = len(long) - len(tails_all[c])
-    h1, m1, _, g1, _ = decode_hidden(model, prefix_emb, [tails_all[c]], L,
-                                     args.decode_tokens, device, eos_ids)
-    h2, m2, _, g2, _ = decode_hidden(model, prefix_emb, [long, tails_all[c]], L,
-                                     args.decode_tokens, device, eos_ids)
+    # `points` 모드는 L(=49) 이 생성 길이보다 훨씬 짧다. 대조는 **생성 전량**에서 해야 의미가
+    # 있으므로 pad 길이를 decode_tokens 까지 늘려 부른다 (저장물과 무관한 검사 전용 호출).
+    Lv = max(L, args.decode_tokens)
+    h1, m1, _, g1, _, _ = decode_hidden(model, prefix_emb, [tails_all[c]], Lv,
+                                        args.decode_tokens, device, eos_ids)
+    h2, m2, _, g2, _, _ = decode_hidden(model, prefix_emb, [long, tails_all[c]], Lv,
+                                        args.decode_tokens, device, eos_ids)
 
     def cmp(a, b, na, nb):
         n = min(na, nb)
@@ -639,11 +766,13 @@ def verify_decode(model, proc, prefix_emb, caps, tails_all, args, embs, masks, p
         print(f'             pad  {proc.tokenizer.decode(g2[1, :n2])!r}')
 
     got, gm = embs[pidx[(sk, c)]].float(), masks[pidx[(sk, c)]]
-    pre, pm, _ = tail_hidden(model, prefix_emb, [tails_all[c]], L, device)
-    prel, pcos = cmp(pre[0], got, int(pm[0].sum()), int(gm.sum()))
-    print(f'   [prefill 대조] relL2 {prel:.2e}  cos {pcos:.6f}   (0/1 이면 슬롯을 잘못 집었다)')
-    print(f'   [슬롯] mask {int(gm.sum())}/{L}  |h| p50 {float(got.abs().median()):.3f}  '
-          f'eos_id {eos_ids.tolist()}')
+    if args.decode_keep == 'all':
+        # points 모드에서는 슬롯이 프레임이라 prefill 꼬리와 자리 대 자리로 겹치지 않는다.
+        pre, pm, _ = tail_hidden(model, prefix_emb, [tails_all[c]], L, device)
+        prel, pcos = cmp(pre[0], got, int(pm[0].sum()), int(gm.sum()))
+        print(f'   [prefill 대조] relL2 {prel:.2e}  cos {pcos:.6f}   (0/1 이면 슬롯을 잘못 집었다)')
+    print(f'   [슬롯] mask {int(gm.sum())}/{L}  keep={args.decode_keep}  '
+          f'|h| p50 {float(got.abs().median()):.3f}  eos_id {eos_ids.tolist()}')
     for x in sorted(caps, key=lambda y: len(tails_all[y]))[:3]:
         print(f'   [생성문] {x[:52]!r}\n            -> {gen_text[pidx[(sk, x)]]!r}')
     print('', flush=True)
@@ -675,6 +804,14 @@ if __name__ == '__main__':
     # D197-d: prompt 위치(prefill) hidden 대신 **greedy decode 스텝**의 hidden 을 굽는다.
     # 0/None 이면 기존 prefill 경로 그대로 (저장물 비트 동일). text_len 이하여야 한다.
     p.add_argument('--decode_tokens', type=int, default=None)
+    # D197-d2: `all` 이면 생성 스텝 0..N-1 을 그대로 슬롯에 담는다 (기존 동작).
+    # `points` 면 `<tracks coords="...">` 의 **점 하나가 끝나는 토큰**(`;` / 닫는 `"`)의 hidden 만
+    # 골라 그 점의 시각 t 로 정해지는 **프레임 슬롯** round(t*fps) 에 넣는다. 슬롯 수는
+    # --decode_points (49) 이고, 비디오 토큰의 49x8x8 격자와 프레임 축이 1:1 로 맞는다.
+    # 49점을 다 받으려면 --fps 2.0 (라벨 0.0..24.0) + --decode_tokens 900 이 필요하다 (실측
+    # 721~733 tok 에서 자연 종료). --fps 25 기본값에서는 라벨이 20종뿐이라 4점만 나온다.
+    p.add_argument('--decode_keep', choices=['all', 'points'], default='all')
+    p.add_argument('--decode_points', type=int, default=49)           # = 프레임 수
     p.add_argument('--num_shards', type=int, default=1)               # 씬을 i%n 으로 분할
     p.add_argument('--shard_id', type=int, default=0)
     p.add_argument('--merge_shards', action='store_true')             # 샤드 text 합치기 (GPU 불필요)

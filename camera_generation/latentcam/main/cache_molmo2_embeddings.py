@@ -40,6 +40,14 @@ stage 전에 video·text attention 이 끝난" 지점.
   층 번호는 `blocks[N]` 의 출력 = 사용자가 말한 0~35 인덱스와 같다.
   `--extra_layer` 를 안 주면 저장물은 D124/D191 과 **비트 동일**하다.
 
+decode 스텝 hidden 도 구울 수 있다 (`--decode_tokens`, D197-d 사용자 지시 "prefill 단계에서
+나오는 hidden token 들은 버리고 decode 단계에서 나오는 hidden 만"):
+  기본 경로가 담는 것은 **prompt 위치**의 hidden 이다 — 모델이 답을 아직 한 글자도 커밋하지
+  않은 상태다. `--decode_tokens N` 을 주면 greedy 로 N 토큰을 실제로 생성하면서, `y_t` 를 입력으로
+  넣고 나온 hidden 을 슬롯 t 에 담는다. `y_0` 를 고른 prefill 마지막 위치 hidden 은 버린다.
+  `emb_l{N}` 도 같은 슬롯 기준이라 층 비교가 그대로 성립한다. 생성문은 `decode_text` 로 같이
+  저장한다. 안 주면 저장물은 기존과 **비트 동일**하다.
+
 샤딩 (`--num_shards/--shard_id`): 씬을 `i % num_shards` 로 갈라 GPU 여러 장에 흩는다.
   video 는 씬당 1파일이라 충돌이 없고, text 는 전체 1파일이라 샤드마다
   `<text_out>.shard{i}of{n}` 으로 떨어뜨린 뒤 `--merge_shards` 로 합친다 (GPU 불필요).
@@ -52,6 +60,8 @@ stage 전에 video·text attention 이 끝난" 지점.
   python main/cache_molmo2_embeddings.py --gpu 6 --root <d194> --seg_prefix dynpose \
       --extra_layer 21 --num_shards 3 --shard_id 0 ...                       # D194 샤드
   python main/cache_molmo2_embeddings.py --merge_shards --num_shards 3 ...   # 합치기
+  python main/cache_molmo2_embeddings.py --gpu 0 --decode_tokens 128 --extra_layer 21 \
+      --verify --limit_scenes 1 ...                                          # D197-d 스모크
 """
 
 from argparse import ArgumentParser, Namespace
@@ -206,6 +216,82 @@ def tail_hidden(model, prefix_emb, tails, text_len, device, tap=None):
     return pad(h), om, (pad(tap.h[:, P:]) if tap is not None else None)
 
 
+@torch.inference_mode()
+def decode_hidden(model, prefix_emb, tails, text_len, n_new, device, eos_ids, tap=None):
+    """**decode 스텝의** hidden 만 모은다 (D197-d, 사용자 지시).
+
+    `tail_hidden` 이 주는 것은 prompt 위치의 hidden 이다 — 아직 답을 만들기 전, "다음 토큰을
+    뭘 낼까"를 아직 한 번도 커밋하지 않은 상태의 표현이다. 여기서는 그 prefill hidden 을 **전부
+    버리고**, 모델이 실제로 궤적 서술을 생성하는 동안(= greedy decode) 나오는 hidden 만 남긴다.
+    슬롯 t 에는 t번째 생성 토큰 `y_t` **위치의** hidden 이 들어간다 (`y_t` 를 입력으로 넣고 나온
+    값이므로 decode forward 의 산물이다). `y_0` 를 고르는 데 쓰인 prefill 의 마지막 위치 hidden 은
+    버린다 — 그게 "prefill 단계에서 나오는 hidden token 은 버린다"의 경계선이다.
+
+    배치 레이아웃이 `tail_hidden` 과 다르다. right padding 이면 아이템마다 꼬리 끝 열이 달라서
+    decode 를 한 번에 못 돈다 (`cache_position` 은 배치 공용 1D). 그래서 **mid padding**:
+        [prefix (P)] [pad (L-len_i)] [tail (len_i)]
+    로 꼬리 끝을 한 열에 정렬하고, 밀린 position 은 `position_ids` 로 아이템마다 따로 준다
+    (prefix 0..P-1, pad 는 0(마스크됨), tail 은 P..P+len_i-1). 이러면 각 꼬리 토큰이 보는
+    position 은 right padding 일 때와 **같다** — 아래 `verify_decode` 가 B=1(패딩 없음) 대조로
+    실측한다.
+
+    EOS(`<|im_end|>`) 를 낸 아이템은 그 슬롯까지 유효로 치고 mask 를 닫는다. 전부 닫히면 조기 종료.
+    """
+    core, B = model.model, len(tails)
+    P, L = prefix_emb.shape[1], max(len(t) for t in tails)
+    ids = torch.zeros(B, L, dtype=torch.long)
+    msk = torch.zeros(B, L, dtype=torch.long)
+    pos = torch.zeros(B, P + L, dtype=torch.long)
+    pos[:, :P] = torch.arange(P)
+    for i, t in enumerate(tails):
+        ids[i, L - len(t):], msk[i, L - len(t):] = t, 1
+        pos[i, P + L - len(t):] = torch.arange(P, P + len(t))
+    tail_emb, _ = core.build_input_embeddings(ids.to(device))
+    emb = torch.cat([prefix_emb.expand(B, -1, -1), tail_emb], 1)
+    am = torch.cat([torch.ones(B, P, dtype=torch.long), msk], 1).to(device)
+    pos = pos.to(device)
+    out = core(inputs_embeds=emb, attention_mask=am, position_ids=pos, use_cache=True)
+    cache = out.past_key_values
+    nxt = model.lm_head(out.last_hidden_state[:, -1]).argmax(-1)      # y_0 (prefill hidden 은 버린다)
+    del out
+
+    eos_ids = eos_ids.to(device)
+    last_pos = pos[:, -1:]                                            # = P + len_i - 1
+    gen = torch.zeros(B, n_new, dtype=torch.long)
+    done = torch.full((B,), n_new, dtype=torch.long, device=device)   # EOS 슬롯 (없으면 n_new)
+    alive = torch.ones(B, dtype=torch.bool, device=device)
+    hs, hx, used = [], [], n_new
+    for t in range(n_new):
+        gen[:, t] = nxt.cpu()
+        e, _ = core.build_input_embeddings(nxt[:, None])
+        am = torch.cat([am, alive[:, None].long()], 1)
+        o = core(inputs_embeds=e, attention_mask=am,
+                 position_ids=last_pos + (t + 1),
+                 past_key_values=cache, use_cache=True,
+                 cache_position=torch.tensor([P + L + t], device=device))
+        hs.append(o.last_hidden_state[:, 0].float().half().cpu())
+        if tap is not None:
+            hx.append(tap.h[:, 0].float().half().cpu())
+        eos = torch.isin(nxt, eos_ids)
+        done = torch.where(alive & eos, torch.full_like(done, t), done)
+        alive = alive & ~eos
+        if not bool(alive.any()):
+            used = t + 1
+            break
+        nxt = model.lm_head(o.last_hidden_state[:, 0]).argmax(-1)
+        del o
+
+    om = torch.arange(text_len)[None] <= done.cpu()[:, None]
+    om &= torch.arange(text_len)[None] < used
+
+    def pad(xs):
+        o = torch.zeros(B, text_len, xs[0].shape[-1], dtype=torch.float16)
+        o[:, :len(xs)] = torch.stack(xs, 1)
+        return o
+
+    return pad(hs), om, (pad(hx) if tap is not None else None), gen[:, :used], done.cpu()
+
+
 def pool_video(hid, patch_mask, n_frames, side, pool):
     """patch 위치 hidden -> (n_frames*pool*pool, 2560). 풀링은 **프레임 안에서만**."""
     v = hid[patch_mask]                                   # (n_frames*side*side, D)
@@ -234,7 +320,7 @@ def merge_shards(args):
     매기고** `by_name` 은 여기서 `collect` 로 다시 만든다 (샤드는 자기 씬만 알기 때문).
     """
     parts, offset, pair_idx = [], 0, {}
-    embs, masks, extras, texts = [], [], [], []
+    embs, masks, extras, texts, dec_texts = [], [], [], [], []
     extra_key = None
     for sid in range(args.num_shards):
         p = shard_text_path(Namespace(**{**vars(args), 'shard_id': sid}))
@@ -246,6 +332,7 @@ def merge_shards(args):
             pair_idx[t] = offset + i
         offset += len(d['text'])
         texts += d['text']
+        dec_texts += d.get('decode_text', [])
         embs.append(d['emb'])
         masks.append(d['mask'])
         xk = [k for k in d if k.startswith('emb_l')]
@@ -274,6 +361,10 @@ def merge_shards(args):
     if extras:
         assert len(extras) == args.num_shards, '중간층이 일부 샤드에만 있다 — 재굽기 필요'
         out[extra_key] = torch.cat(extras)
+    if ref.get('decode_tokens'):
+        assert len(dec_texts) == len(texts), 'decode_text 가 일부 샤드에만 있다 — 재굽기 필요'
+        out['decode_tokens'] = ref['decode_tokens']
+        out['decode_text'] = dec_texts
     makedirs(osp.dirname(args.text_out), exist_ok=True)
     torch.save(out, args.text_out)
 
@@ -344,6 +435,18 @@ def main(args):
     print(f'[text] tail tokens  min {lens[0]} / p50 {lens[len(lens) // 2]} / '
           f'max {lens[-1]}  -> text_len {L}', flush=True)
 
+    eos_ids, gen_text = None, None
+    if args.decode_tokens:
+        assert args.decode_tokens <= L, f'--decode_tokens {args.decode_tokens} > text_len {L}'
+        # `<|im_end|>`(= tokenizer.eos_token) + config 의 eos 를 모두 종료 토큰으로 본다.
+        ee = {proc.tokenizer.eos_token_id, proc.tokenizer.convert_tokens_to_ids('<|im_end|>')}
+        ce = getattr(model.config, 'eos_token_id', None)
+        ee |= set(ce if isinstance(ce, (list, tuple)) else ([ce] if ce is not None else []))
+        eos_ids = torch.tensor(sorted(i for i in ee if i is not None), dtype=torch.long)
+        gen_text = [''] * len(pairs)
+        print(f'[decode] greedy {args.decode_tokens} 토큰, prefill hidden 폐기. '
+              f'eos {eos_ids.tolist()}', flush=True)
+
     makedirs(args.video_out, exist_ok=True)
     D = model.config.text_config.hidden_size
     embs = torch.zeros(len(pairs), L, D, dtype=torch.float16)
@@ -390,19 +493,32 @@ def main(args):
 
         for i in range(0, len(caps), args.bs):
             cb = caps[i:i + args.bs]
-            h, m, hx = tail_hidden(model, prefix_emb, [tails_all[c] for c in cb], L, device, tap)
+            tl = [tails_all[c] for c in cb]
+            if args.decode_tokens:
+                h, m, hx, gen, done = decode_hidden(model, prefix_emb, tl, L,
+                                                    args.decode_tokens, device, eos_ids, tap)
+                for j, c in enumerate(cb):
+                    gen_text[pidx[(sk, c)]] = proc.tokenizer.decode(
+                        gen[j, :min(int(done[j]) + 1, gen.shape[1])])
+            else:
+                h, m, hx = tail_hidden(model, prefix_emb, tl, L, device, tap)
             for j, c in enumerate(cb):
                 embs[pidx[(sk, c)]], masks[pidx[(sk, c)]] = h[j], m[j]
                 if hx is not None:
                     embs_x[pidx[(sk, c)]] = hx[j]
             ndone += len(cb)
+        if args.verify and n == 0 and args.decode_tokens:
+            # B=1(패딩 없음) 대조라 prefix_emb 를 들고 있어야 한다 — del 보다 앞에서 돈다.
+            verify_decode(model, proc, prefix_emb, caps, tails_all, args, embs, masks,
+                          pidx, sk, device, eos_ids, gen_text)
         del prefix_emb, hid, hid_x
         torch.cuda.empty_cache()
         print(f'  [{n + 1}/{len(keys)}] {sk}  captions {len(caps)}  '
               f'({ndone}/{len(pairs)})  {time.time() - t0:.0f}s', flush=True)
 
-        if args.verify and n == 0:
-            verify(model, proc, video, caps, args, prefix_ids, embs, masks, pidx, sk, device, dtype)
+        if args.verify and n == 0 and not args.decode_tokens:
+            verify(model, proc, video, caps, args, prefix_ids, embs, masks, pidx, sk,
+                   device, dtype)
 
     if tap is not None:
         tap.close()
@@ -410,12 +526,17 @@ def main(args):
     text_path = shard_text_path(args)
     if not args.limit_scenes:
         makedirs(osp.dirname(text_path), exist_ok=True)
+        tpl = 'molmo2_override+probe' if args.text_override_json else 'molmo2_concise+probe'
         payload = {'emb': embs, 'mask': masks,
                    'text': [f'{sk}\t{c}' for sk, c in pairs],
-                   'template': ('molmo2_override+probe' if args.text_override_json
-                                else 'molmo2_concise+probe'), 'text_len': L,
+                   'template': tpl + ('+decode' if args.decode_tokens else ''), 'text_len': L,
                    'text_override_json': args.text_override_json,
                    'extra_layer': args.extra_layer, 'probe': PROBE}
+        if args.decode_tokens:
+            # 생성문을 같이 싣는다 — 이 arm 은 "모델이 뭘 말하면서 낸 hidden 인가"가 곧 진단이라
+            # 나중에 캐시만 보고도 되짚을 수 있어야 한다 (13,993개 x ~400자 = 6 MB 수준).
+            payload['decode_tokens'] = args.decode_tokens
+            payload['decode_text'] = gen_text
         if embs_x is not None:
             payload[f'emb_l{args.extra_layer}'] = embs_x
         if args.num_shards > 1:
@@ -470,6 +591,64 @@ def verify(model, proc, video, caps, args, prefix_ids, embs, masks, pidx, sk, de
               f'|h| p50 {float(h.abs().median()):.3f}   {c[:48]!r}', flush=True)
 
 
+@torch.inference_mode()
+def verify_decode(model, proc, prefix_emb, caps, tails_all, args, embs, masks, pidx, sk,
+                  device, eos_ids, gen_text):
+    """decode 경로의 두 가지 위험을 실측한다.
+
+    (1) **mid padding + position_ids 배선이 맞나.** 같은 캡션을 B=1(패딩이 아예 없다)로 다시
+        돌려 배치 결과와 대조한다. position 이 밀렸거나 pad 를 보고 있으면 여기서 갈라진다.
+        배치 안에서 **가장 짧은** 캡션이 패딩을 제일 많이 받으므로 그걸 고른다.
+    (2) **정말 prefill 이 아닌가.** 같은 꼬리의 prompt hidden(`tail_hidden`) 과 비교해서
+        값이 달라야 한다. 같으면 슬롯을 잘못 집은 것이다.
+    """
+    print('[verify] decode 배선 대조', flush=True)
+    L = embs.shape[1]
+    c = min(caps, key=lambda x: len(tails_all[x]))
+    # 이 씬 캡션끼리는 길이가 같을 수 있다 (`Track {target}` 은 대개 동형). 그러면 mid padding 이
+    # 아예 안 걸려 검사가 공회전한다 — prefix 는 전 씬 공통(위의 assert)이라 코퍼스에서 제일 긴
+    # 꼬리를 일부러 끼워 넣어 padding 을 강제한다.
+    long = max(tails_all.values(), key=len)
+    pad_n = len(long) - len(tails_all[c])
+    h1, m1, _, g1, _ = decode_hidden(model, prefix_emb, [tails_all[c]], L,
+                                     args.decode_tokens, device, eos_ids)
+    h2, m2, _, g2, _ = decode_hidden(model, prefix_emb, [long, tails_all[c]], L,
+                                     args.decode_tokens, device, eos_ids)
+
+    def cmp(a, b, na, nb):
+        n = min(na, nb)
+        if n == 0:
+            return float('nan'), float('nan')
+        x, y = a[:n].float(), b[:n].float()
+        rel = float((x - y).norm() / y.norm().clamp_min(1e-6))
+        cos = float(torch.nn.functional.cosine_similarity(x, y, -1).mean())
+        return rel, cos
+
+    n1, n2 = int(m1[0].sum()), int(m2[1].sum())
+    tok_eq = int(min(g1.shape[1], g2.shape[1])) and bool(
+        torch.equal(g1[0, :min(n1, n2)], g2[1, :min(n1, n2)]))
+    rel, cos = cmp(h1[0], h2[1], n1, n2)
+    print(f'   [padding] pad {pad_n} tok 강제 -> gen {n1} vs {n2} tok, 토큰열 일치 {tok_eq}')
+    print(f'             hidden relL2 {rel:.2e}  cos {cos:.6f}   (토큰열이 같으면 bf16 잡음만)')
+    if not tok_eq:
+        # greedy argmax 는 좌표 숫자에서 자주 박빙이라 한 토큰이 갈릴 수 있다. 자리 밀림
+        # (position 배선 오류)인지 숫자 한 글자인지는 **어디서** 갈렸는지로 가린다.
+        d = (g1[0, :min(n1, n2)] != g2[1, :min(n1, n2)]).nonzero().flatten().tolist()
+        print(f'             갈린 슬롯 {d[:8]}{"..." if len(d) > 8 else ""} / {min(n1, n2)}')
+        print(f'             B=1  {proc.tokenizer.decode(g1[0, :n1])!r}')
+        print(f'             pad  {proc.tokenizer.decode(g2[1, :n2])!r}')
+
+    got, gm = embs[pidx[(sk, c)]].float(), masks[pidx[(sk, c)]]
+    pre, pm, _ = tail_hidden(model, prefix_emb, [tails_all[c]], L, device)
+    prel, pcos = cmp(pre[0], got, int(pm[0].sum()), int(gm.sum()))
+    print(f'   [prefill 대조] relL2 {prel:.2e}  cos {pcos:.6f}   (0/1 이면 슬롯을 잘못 집었다)')
+    print(f'   [슬롯] mask {int(gm.sum())}/{L}  |h| p50 {float(got.abs().median()):.3f}  '
+          f'eos_id {eos_ids.tolist()}')
+    for x in sorted(caps, key=lambda y: len(tails_all[y]))[:3]:
+        print(f'   [생성문] {x[:52]!r}\n            -> {gen_text[pidx[(sk, x)]]!r}')
+    print('', flush=True)
+
+
 if __name__ == '__main__':
     p = ArgumentParser()
     p.add_argument('--ckpt', default=MOLMO)
@@ -493,6 +672,9 @@ if __name__ == '__main__':
     p.add_argument('--gpu', default='2')
     # D194: 마지막 층 옆에 블록 N(0~35) 의 raw 출력도 같이 저장한다. None 이면 D124 와 비트 동일.
     p.add_argument('--extra_layer', type=int, default=None)
+    # D197-d: prompt 위치(prefill) hidden 대신 **greedy decode 스텝**의 hidden 을 굽는다.
+    # 0/None 이면 기존 prefill 경로 그대로 (저장물 비트 동일). text_len 이하여야 한다.
+    p.add_argument('--decode_tokens', type=int, default=None)
     p.add_argument('--num_shards', type=int, default=1)               # 씬을 i%n 으로 분할
     p.add_argument('--shard_id', type=int, default=0)
     p.add_argument('--merge_shards', action='store_true')             # 샤드 text 합치기 (GPU 불필요)

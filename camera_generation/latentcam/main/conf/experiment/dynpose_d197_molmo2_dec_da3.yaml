@@ -1,0 +1,28 @@
+# @package _global_
+# D197-d — `dynpose_d197_molmo2_da3.yaml` 과 **텍스트 캐시 한 줄만** 다른 사본:
+# molmo2 hidden 을 prompt 위치(prefill)가 아니라 **greedy decode 스텝**에서 가져온다.
+#
+# ═══ 왜 (사용자 지시 2026-09-16) ══════════════════════════════════════════════════════════
+# 기존 arm ②/③ 이 먹는 것은 캡션+probe 가 놓인 **prompt 위치**의 hidden 이다 — 모델이 답을
+# 아직 한 토큰도 커밋하지 않은 상태의 표현이다. 이 arm 은 그 prefill hidden 을 전부 버리고,
+# 모델이 실제로 생성하는 동안 나오는 hidden 만 쓴다 (`--decode_tokens 128`).
+#
+# ⚠ 실측: 우리 문장이 `Track {target}.` 이라 Molmo2 는 이걸 **자기 native tracking 과제**로
+#   받아 카메라 서술이 아니라 2D 물체 트랙 XML 을 낸다 —
+#     `<tracks coords="0.0 1 456 453;0.5 1 552 453;1.0 1 398 461;1.5 1 445 589">the man in a
+#      light grey shirt and cap standing by the grill</tracks>`
+#   즉 이 arm 의 decode hidden 은 "카메라 궤적 서술"이 아니라 **타깃의 시간축 화면 좌표 읽기**를
+#   하는 동안의 표현이다. 텍스트를 arm ②/③ 과 글자 단위로 같게 유지해야 prefill↔decode 만
+#   갈리므로 문장은 안 바꾼다.
+#
+# ═══ 캐시 ════════════════════════════════════════════════════════════════════════════════
+# video 캐시는 **소스 영상만** 보므로 arm ②/③ 과 같은 파일을 그대로 읽는다 (재굽기 없음).
+# text 캐시만 `text_decode.pt` 로 따로 굽는다 — `--decode_tokens 128 --extra_layer 21` 이라
+# 마지막 층과 21층을 같은 파일에 들고 있고, 21층 arm 은 이 파일을 상속해 한 줄만 바꾼다.
+# 슬롯 t = t번째 **생성** 토큰 위치의 hidden. mask 는 EOS(`<|im_end|>`) 까지 (실측 p50 ~77/128).
+defaults:
+  - dynpose_d197_molmo2_da3
+
+exp_name: dynpose_d197_molmo2_dec_da3
+peav_text_cache: /data1/cympyc1785/data/DynPose-LBM/latentcam_dynpose_d197/molmo2_cache/text_decode.pt
+peav_layer: null           # null = 마지막 층(ln_f 이후). 21 로 바꾸면 blocks[21] raw 출력.

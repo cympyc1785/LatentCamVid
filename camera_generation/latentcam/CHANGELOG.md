@@ -5,6 +5,31 @@ All notable changes to the latentcam sub-project. Follows [Keep a Changelog](htt
 ## [Unreleased]
 
 ### Added
+- **`cache_molmo2_embeddings.py --decode_tokens N` — prefill 대신 decode 스텝 hidden 을 굽는다
+  (2026-09-16, D197-d 사용자 지시).** 기존 경로가 담는 것은 캡션+probe 가 놓인 **prompt 위치**의
+  hidden 이다 — 모델이 답을 아직 한 토큰도 커밋하지 않은 상태다. `--decode_tokens N` 을 주면
+  greedy 로 N 토큰을 실제로 생성하면서, `y_t` 를 입력으로 넣고 나온 hidden 을 슬롯 t 에 담는다.
+  `y_0` 를 고른 prefill 마지막 위치 hidden 은 **버린다** — 그게 "prefill hidden 은 버린다"의
+  경계선이다. `emb_l{N}`(`--extra_layer`) 도 같은 슬롯 기준이라 층 대조가 그대로 성립하고,
+  생성문은 `decode_text` 로 같이 저장한다. 안 주면 저장물은 기존과 **비트 동일**하다.
+  배치 레이아웃이 기존 `tail_hidden` 과 다르다: right padding 이면 아이템마다 꼬리 끝 열이 달라
+  decode 를 한 번에 못 돈다(`cache_position` 은 배치 공용 1D). 그래서 **mid padding**
+  `[prefix(P)][pad(L-len_i)][tail(len_i)]` 로 꼬리 끝을 한 열에 정렬하고 `position_ids` 를
+  아이템마다 따로 준다. `--verify` 가 코퍼스 최장 꼬리를 일부러 끼워 padding 을 강제한 뒤
+  B=1(패딩 0) 결과와 대조한다 — 실측 relL2 8.6e-3 / cos 0.999963, 갈린 슬롯은 좌표 숫자 한 개
+  (`464` vs `461`) 뿐이라 bf16 배치 리덕션 잡음이다. prefill 대조는 relL2 0.444 / cos 0.899 로
+  슬롯이 실제로 다르다. 처리량 실측 5.3 s/scene (prefill 2.55 s/scene 의 2.1배).
+  ⚠ 우리 문장이 `Track {target}.` 이라 Molmo2 는 이걸 **자기 native tracking 과제**로 받아
+  카메라 서술이 아니라 2D 물체 트랙 XML 을 낸다 (`<tracks coords="0.0 1 456 453;0.5 1 552 453;
+  1.0 1 398 461;1.5 1 445 589">the man in a light grey shirt…</tracks>`, 77/128 토큰). 즉 이
+  arm 의 decode hidden 은 "카메라 궤적 서술"이 아니라 **타깃의 시간축 화면 좌표 읽기** 중의
+  표현이다. 텍스트를 arm ②/③ 과 글자 단위로 같게 둬야 prefill↔decode 만 갈리므로 문장은
+  안 바꿨다.
+- **D197-d 실험 config 2종 (2026-09-16).**
+  `dynpose_d197_molmo2_dec_da3.yaml` (마지막 층) / `dynpose_d197_molmo2_dec_l21_da3.yaml`
+  (`blocks[21]`). 둘 다 `dynpose_d197_molmo2_da3` 를 상속하고 `peav_text_cache` 를
+  `molmo2_cache/text_decode.pt` 로만 바꾼다 — **video 캐시는 소스 영상만 보므로 arm ②/③ 과
+  같은 파일을 그대로 읽는다** (재굽기 없음).
 - **PE-AV/molmo2 readout transformer + subject OBB 보조 손실 (2026-09-15, D195-A 사용자 지시).**
   `peav_readout_layers: 0` (기본) 이면 모듈이 생성조차 안 되고 state_dict·forward 가 기존 arm 과
   **비트 동일**하다 (실측: 키 집합 일치, 같은 seed 로 `torch.equal(y_off, y_new) == True`).

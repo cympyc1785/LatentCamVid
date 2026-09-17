@@ -44,6 +44,12 @@ train_seg_list: /data1/cympyc1785/data/DynPose-LBM/latentcam_dynpose_d200/seg_li
 test_seg_list: /data1/cympyc1785/data/DynPose-LBM/latentcam_dynpose_d200/seg_list_dynpose_test.txt
 coverage_blacklist_path: null
 
+# CLaTr 게이지는 D200 da3 arm 과 같다 (`dynpose_d200_da3.yaml` 머리말의 "CLaTr 게이지" 참조).
+# defaults 로 안 물려받는 파일이라 두 줄을 여기에도 적는다 — 5 arm 이 **같은 자**를 써야
+# arm 간 대조가 성립한다.
+clatr_ckpt_path: /data1/cympyc1785/LatentCamVid/camera_generation/latentcam/checkpoints/clatr_dynpose_d200_epoch149.ckpt
+clatr_standardization: dynpose49_d200
+
 text_len: 128   # D200 da3 arm 과 동일.
 
 pose_source: da3

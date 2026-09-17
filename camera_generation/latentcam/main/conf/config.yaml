@@ -655,3 +655,9 @@ clip_max_length: 77
 # a DIFFERENT corpus — so FD / PRDC / clatr_score from runs using this ckpt are NOT comparable with
 # any number in EXPERIMENTS.log before 2026-07-30. Only compare epoch139-vs-epoch139.
 clatr_ckpt_path: /data1/cympyc1785/LatentCamVid/camera_generation/latentcam/checkpoints/clatr_epoch139_large.ckpt
+# `src.extraction` 이 쓸 standardization config 이름. null 이면 기존 동작 그대로
+# (config_eval.yaml 의 `dataset: traj+caption_eval` -> 0120, num_cams 120).
+# **clatr_ckpt_path 를 49프레임 코퍼스 ckpt 로 바꾸면 이것도 같이 바꿔야 한다** —
+# num_cams 는 padding 길이라 (trajectory_dataset.py:180) 49프레임으로 학습한 CLaTr 에
+# 120 을 주면 71프레임이 zero-pad 로 따라 들어간다. d200 ckpt 는 `dynpose49_d200`.
+clatr_standardization: null

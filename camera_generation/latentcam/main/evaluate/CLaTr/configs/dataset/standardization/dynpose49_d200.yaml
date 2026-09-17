@@ -1,0 +1,32 @@
+# dynpose d200 코퍼스(49프레임) 용 standardization. dynpose49.yaml(d137) 의 d200 판이다.
+#
+# 게이지를 새로 재는 이유: d200 은 d137 과 코퍼스가 다르다 (씬 10,169 / 카메라 51,422 vs
+# d137 10,857). preset 어휘도 d192/d198 을 거치며 늘었고 씬당 카메라 상한이 6 이라
+# 궤적 분포가 같지 않다. 실제로 norm_std 가 [0.0704, 0.0152, 0.0873] -> [0.0657, 0.0325,
+# 0.0708] 로 바뀌었다 — 특히 y(수직) 성분이 2.1배다 (pedestal/crane 계열 비중 증가).
+#
+# num_cams 는 padding 길이다 (trajectory_dataset.py:180). d200 궤적도 전부 정확히
+# 49프레임이라 padding 이 0 이 된다.
+#
+# norm_*/shift_* 는 `prepare_clatr_vista.py --print_stats` 로 **d200 train split
+# 50,915개**에서 실측했다 (velocity 표기: 첫 프레임 = 절대 위치, 이후 = 프레임 차분).
+# shift_* 가 0 인 것은 dynpose49.yaml 과 같은 이유다 — target 궤적이 frame0 world 원점에
+# 앵커되어 첫 프레임 위치가 항상 0 이다. 실측 shift_std 는 [3e-8, 1e-8, 4e-8] 인데 그대로
+# 적으면 standardize 를 켜는 순간 0 나눗셈이 되므로 **1.0 으로 둔다**.
+#
+# 주의 — `trajectory_dataset.py:43` 이 `self.standardize = False` 로 못 박아 두어 이
+# 통계는 학습에 쓰이지 않는다. 그래도 남의 코퍼스 숫자를 물려두면 나중에 standardize 를
+# 켜는 순간 조용히 틀리므로 우리 값을 적어 둔다.
+
+name: 'dynpose49_d200'
+num_interframes: 0
+num_cams: 49
+num_total_frames: ${eval:'${dataset.standardization.num_interframes} * (${dataset.standardization.num_cams} - 1) + ${dataset.standardization.num_cams} '}
+
+norm_mean: [0.00014377, -0.00480233, -0.00937266]
+norm_std: [0.06565477, 0.03246500, 0.07076665]
+
+shift_mean: [0.0, 0.0, 0.0]
+shift_std: [1.0, 1.0, 1.0]
+
+velocity: true

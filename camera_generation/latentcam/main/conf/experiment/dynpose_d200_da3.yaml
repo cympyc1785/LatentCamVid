@@ -11,7 +11,17 @@
 # "free-moving도 포함해서 세주고 clamped_low만 빼줘"). D197 이 쓰던 suspect 5종 필터는 안 쓴다.
 # 그래서 `aim=free` 변이가 26.79% (13,777/51,422) 그대로 들어온다 — molmo2 arm 들이 그 변이를
 # zero-embedding 으로 받는 이유가 이것이다 (`dynpose_d200_molmo2_da3.yaml` 머리말).
-# 씬 단위 holdout 은 export 의 `md5(scene) % 20 == 0` 이 그대로 해 준다.
+# 씬 단위 holdout 은 고정 목록 `CinemaTraj/configs/dynpose_holdout_scenes_100.txt` **100씬 /
+# 506대 (0.98%)** 다 (md5 해시 분할 아님). legacy 27씬의 상위집합이라 D137/D194/D197 과
+# `test27` 부분집합으로 대조할 수 있다. test 목록은 **씬 라운드로빈 순서**로 쓰여 있어
+# `val_max_batches: 20` × `batch_size: 8` = 앞 160줄이 100씬 전부를 덮는다 (전 세대는 ~30씬).
+#
+# ═══ CLaTr 게이지 ══════════════════════════════════════════════════════════════════════════
+# 이 세대는 **d200 코퍼스로 직접 학습한 CLaTr** 로 캡션 지표를 잰다 (아래 clatr_* 두 줄).
+# 기본값 `clatr_epoch139_large.ckpt` 는 E.T./ArtTraj 게이지(num_cams 120)라 49프레임 궤적에
+# 71프레임 zero-pad 를 붙여 재던 것이다.
+# **FD / PRDC / clatr_score 는 D194/D197 및 그 이전 어느 숫자와도 비교 불가**다 — 자가 바뀌었다.
+# 같은 ckpt 를 쓴 run 끼리만 비교할 것 (`conf/config.yaml:651-657` 의 같은 경고).
 #
 # ═══ geo raw 캐시 ══════════════════════════════════════════════════════════════════════════
 # 이 세대는 **굽고 쓴다** (사용자 지시 "da3 ... 캐싱"). context view 가 `context_uniform` 이라
@@ -24,6 +34,12 @@ meta_csv: meta_dynpose.csv
 train_seg_list: /data1/cympyc1785/data/DynPose-LBM/latentcam_dynpose_d200/seg_list_dynpose_train.txt
 test_seg_list: /data1/cympyc1785/data/DynPose-LBM/latentcam_dynpose_d200/seg_list_dynpose_test.txt
 coverage_blacklist_path: null
+
+# d200 train split 50,915개로 학습한 CLaTr (wandb trajectory-clip/bf7xk542, 150 epoch).
+# standardization 이름을 같이 넘겨야 padding 길이가 49 로 맞는다 — 빼면 config_eval.yaml 의
+# 기본값 0120(num_cams 120)이 그대로 걸린다.
+clatr_ckpt_path: /data1/cympyc1785/LatentCamVid/camera_generation/latentcam/checkpoints/clatr_dynpose_d200_epoch149.ckpt
+clatr_standardization: dynpose49_d200
 
 text_len: 128   # D197 과 동일.
 

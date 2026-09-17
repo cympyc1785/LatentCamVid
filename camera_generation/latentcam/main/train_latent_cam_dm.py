@@ -938,8 +938,12 @@ def train():
                 # subpackages; skipped when clip_extraction is unavailable or per-token
                 # (per-token val saves no transforms; uses flow val loss + tau/pattern bins).
                 if _HAS_CLIP and not _pt:
-                    out, err, ret = run_command_in_dir([sys.executable, '-m', 'src.extraction', f'checkpoint_path={cfg.clatr_ckpt_path}', f'data_dir={result_dir}'], \
-                                                    'evaluate/CLaTr')
+                    _clatr_argv = [sys.executable, '-m', 'src.extraction', f'checkpoint_path={cfg.clatr_ckpt_path}', f'data_dir={result_dir}']
+                    # ckpt 가 49프레임 코퍼스로 학습됐으면 padding 길이(num_cams)도 같이 바꿔야
+                    # 한다. 기본 null 이면 argv 가 그대로라 기존 동작(0120, num_cams 120) 유지.
+                    if getattr(cfg, 'clatr_standardization', None):
+                        _clatr_argv.append(f'dataset/standardization={cfg.clatr_standardization}')
+                    out, err, ret = run_command_in_dir(_clatr_argv, 'evaluate/CLaTr')
                     print(out)
                     print(err)
                     out, err, ret = run_command_in_dir([sys.executable, '-m', 'src.eval_only', '--pred_path', f"{os.path.join(result_dir, 'preds.npy')}"], \

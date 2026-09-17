@@ -5,6 +5,26 @@ All notable changes to the latentcam sub-project. Follows [Keep a Changelog](htt
 ## [Unreleased]
 
 ### Added
+- **D200 코퍼스로 학습한 CLaTr 게이지 + `clatr_standardization` 설정 (2026-09-17, 사용자 지시
+  "CLaTr도 이 데이터셋에 대해서 학습 돌려놔줘. 이걸로 학습 때 validation 평가해주고").**
+  지금까지 학습 중 caption 지표(FD / PRDC / clatr_score)는 `clatr_epoch139_large.ckpt` 로 쟀는데
+  그건 E.T./ArtTraj 게이지다 — `configs/config_eval.yaml` 의 `dataset: traj+caption_eval` 이
+  `standardization: '0120'`(**num_cams 120**)을 물고 있어서, 49프레임짜리 우리 궤적 뒤에
+  71프레임 zero-pad 를 붙여 재고 있었다. 세 조각을 더한다:
+  - `scripts/prepare_clatr_vista.py --stage all` 로 d200 코퍼스를 CLaTr 레이아웃으로 변환.
+    train **50,915** / test **506** (diverged_pose 1대 탈락, `error.txt` 에 기록), 전부 49프레임.
+  - `main/evaluate/CLaTr/configs/dataset/standardization/dynpose49_d200.yaml` — `--print_stats`
+    실측값. d137 대비 `norm_std` 가 `[0.0704, 0.0152, 0.0873]` → `[0.0657, 0.0325, 0.0708]` 로,
+    특히 **y(수직) 성분이 2.1배**다. `shift_std` 실측은 `[3e-8, 1e-8, 4e-8]`(frame0 world 앵커)
+    이라 dynpose49.yaml 과 같은 이유로 `[1.0, 1.0, 1.0]` 으로 둔다.
+  - `conf/config.yaml` 에 **`clatr_standardization`** (기본 `null`) 추가 +
+    `train_latent_cam_dm.py` 의 `src.extraction` argv 에 `dataset/standardization=<이름>` 을
+    조건부로 붙인다. **null 이면 argv 가 그대로라 기존 동작(0120, num_cams 120) 유지.**
+  학습: wandb `trajectory-clip/bf7xk542` (`xp_name=clatr_dynpose_d200`, 150 epoch,
+  1,592 step/epoch, GPU 4). d200 5-arm experiment yaml 2개(root)에 `clatr_ckpt_path` +
+  `clatr_standardization` 배선 — 나머지 3개는 `defaults` 로 물려받는다.
+  ⚠ **자가 바뀌었다. D200 run 의 FD / PRDC / clatr_score 는 D194/D197 및 그 이전 어느 숫자와도
+  비교 불가**다. 같은 ckpt 를 쓴 run 끼리만 비교할 것.
 - **`cache_molmo2_embeddings.py --joint` — prefill/decode arm 4개를 forward **한 번**에서 뽑는다
   (2026-09-17, D200 사용자 지시 "prefill 단계의 l21/last 와 decode 단계의 l21/last 를 한번에").**
   `--decode_tokens` 경로의 **첫 forward 가 곧 prefill** 이다(KV 캐시를 채우는 그 forward).

@@ -50,11 +50,28 @@ TRUMANS arm 의 "recording median" 과 같은 자리다.
   <scene>/images_4/*.png        정렬 순서 = pose 순서, 개수 == N
   <root>/meta_vista4d.csv       `chunk` 열만 읽힌다
 
+═══ 뱅크 여러 세대를 한 코퍼스로 (D200) ═══════════════════════════════════════════════
+`--bank_dirs A B C` 를 주면 씬마다 **세 뱅크의 변이를 한 통에 붓고** `--per_scene_cap` 으로
+씬당 상한을 씌운다. 세대를 뱅크 폴더째 합치지 **않는** 이유는 `bank.json:fixed` 가 세대마다
+다르기 때문이다 — d198 은 config 가 `fit.args` 를 통째로 다시 써서 `--tau_denom S` 를 흘렸고
+argparse 기본값 `z_med_frame0` 으로 떨어졌다. `decode/build_poses.py:720` 이 그 값으로 z_med 를
+다시 구해 궤적을 푸므로, 하나의 `fixed` 로 합치면 `emit_bank.py:433` 의 재풀이 assert 가 터진다.
+여기서는 **포즈 배열을 그대로 복사**할 뿐 다시 풀지 않으므로 세대가 섞여도 기하가 안 흔들린다.
+
+상한 규칙은 `lbm/pick.py:pick_key` 하나만 쓴다 (track 먼저 → plan_tier → grade → hole_fraction).
+`grade` 의 `retry_suspect` 는 **뱅크마다 자기 `fallback.retry_suspect`** 를 읽는다 — d198 은 그
+목록이 비어 있어 전 행이 grade 0 이고, 그게 그 세대의 실제 설정이다.
+
+순서는 status/suspect/picked 필터 → dedup → 상한이다. 상한을 먼저 씌우면 붕괴 중복이 예산을
+갉아먹어 씬당 실제 카메라가 6대 아래로 떨어진다.
+
 사용 예시:
   python scripts/vista4d_bank_to_dl3dv.py --dry_run
   python scripts/vista4d_bank_to_dl3dv.py --workers 8
   python scripts/vista4d_bank_to_dl3dv.py --bank_dir hole_bank_k6 --test_videos camel bmx-bumps
   python scripts/vista4d_bank_to_dl3dv.py --drop_status clamped_low   # D137. 아래 참조
+  python scripts/vista4d_bank_to_dl3dv.py \
+      --bank_dirs hole_bank_d185 hole_bank_d198 hole_bank_d199 --per_scene_cap 6   # D200
 """
 import csv
 import json
@@ -73,6 +90,7 @@ if _LATENTCAM_MAIN not in sys.path:
 if CINEMATRAJ_ROOT not in sys.path:
     sys.path.insert(0, CINEMATRAJ_ROOT)
 from dataset_cfg import AVG_SCALE_DIRS, AVG_SCALE_REFS      # noqa: E402
+from lbm.pick import pick_key                               # noqa: E402
 from lbm.presets import SUSPECT_TAGS, row_preset            # noqa: E402
 
 RECON_DEFAULT = "/data1/cympyc1785/data/Vista4D-Eval-Data/eval_data/recon_and_seg"
@@ -92,83 +110,100 @@ def scaled_K(K0, scale):
     return K
 
 
+def filter_variants(bank, bank_ids, drop_status, drop_suspect, picked_only, drop_hist):
+    """뱅크 하나에서 내보낼 변이 인덱스를 고른다. `drop_hist` 는 씬 전체에서 공유한다.
+
+    세 축이 **서로 독립**이고 순서대로 적용된다:
+
+    ① `drop_status` (D137) — "게이트가 막았다". `clamped_low` 는 `fit_hole_ladder.py:513-531`
+       에서 "knob 을 하한까지 밀었는데 **하한에서도 `over()` 가 여전히 참**" 일 때 찍힌다.
+       즉 제일 작게 만들어도 게이트를 위반하는 카메라이고, 그 궤적이 그대로 pseudo-GT 로
+       나간다. d129 dd10 train 612행 실측에서 binding 이 collision 340 / obb 114 /
+       approach 87 / ground 43 / elev 26 / hole 2 였다 — hole 예산(=τ) 때문에 걸린 건 2건뿐이고
+       나머지는 물리 게이트다. `path_len_u` 중앙값이 0.0330 (solved 는 0.6900) 이라 사실상
+       정지 카메라인데 캡션은 `dolly_in`/`s_curve` 라고 써 있다 — 이름과 실제 이동량이 어긋난
+       학습 신호. **접두사** 매칭이라 `clamped_low` 하나로 `clamped_low+tau_floor` 까지 잡는다
+       (`+tau_floor` 접미사는 `:910` 에서 붙는 **직교하는** 표시라 `solved+tau_floor` 처럼
+       정상 행에도 붙는다 — 접미사만으로 거르면 안 된다).
+
+    ② `drop_suspect` (D140) — "게이트는 통과했는데 설정 탓에 캡션과 기하가 어긋난다"
+       (`fit_hole_ladder.tag_suspects`). 그래서 태그가 붙은 행의 대부분은 `status == "solved"`
+       이고 ① 에 안 걸린다. `suspect` 열은 `|` 로 이은 목록이라 **부분 문자열이 아니라 토큰**
+       으로 맞춘다 — 접두사 매칭을 쓰면 `aim_free_subject_lost` 가 두 번째 토큰일 때 못 잡는다.
+
+    ③ `picked_only` (D189) — 씬/anchor 단위 **예산**의 결과(`lbm/pick.py`). 뱅크는 재고
+       목록이라 사다리가 만든 행을 다 들고 있고, 그중 무엇을 쓸지는 `picked` 열이 정한다.
+       `emit_bank.py --picked_only` 와 같은 열·같은 판정. 켰는데 열이 비어 있으면 그 씬이
+       0행이 되므로 (조용한 전멸) `unpicked` 를 히스토그램에 싣는다.
+
+    셋 다 기본값이 빈 리스트 / False 라 안 주면 예전 코퍼스와 **비트 동일**하다.
+    """
+    rows = {v["variant_id"]: v for v in bank["variants"]}
+    keep = []
+    for i, vid in enumerate(bank_ids):
+        row = rows.get(vid)
+        if row is None:
+            # poses.npz 에는 있는데 bank.json 에 없는 id. 예전 판본은 여기서 KeyError 로
+            # 죽었다 — 조용히 넘기되 히스토그램에 남겨 "0행이 됐다"를 추적할 수 있게 한다.
+            drop_hist["id_not_in_bank"] = drop_hist.get("id_not_in_bank", 0) + 1
+            continue
+        status = str(row.get("status", ""))
+        if drop_status and any(status.startswith(p) for p in drop_status):
+            drop_hist[status] = drop_hist.get(status, 0) + 1
+            continue
+        if drop_suspect:
+            tags = [t for t in str(row.get("suspect", "") or "").split("|") if t]
+            hit = sorted(set(tags) & set(drop_suspect))
+            if hit:
+                key = "suspect:" + "|".join(hit)
+                drop_hist[key] = drop_hist.get(key, 0) + 1
+                continue
+        if picked_only and not row.get("picked"):
+            drop_hist["unpicked"] = drop_hist.get("unpicked", 0) + 1
+            continue
+        keep.append(i)
+    return rows, keep
+
+
 def convert_scene(job):
     """영상 하나 → <out>/<chunk>/{da3/*, images_4/*}. 실패는 예외 대신 dict 로 돌려준다."""
     import imageio.v3 as iio                    # worker 안에서 import
 
-    (video, chunk, out_root, image_dir, image_scale, recon_root, cine_out, bank_dir,
-     refs, skip_done, dedup, captions_name, drop_status, drop_suspect, picked_only) = job
+    (video, chunk, out_root, image_dir, image_scale, recon_root, cine_out, bank_dirs,
+     refs, skip_done, dedup, captions_name, drop_status, drop_suspect, picked_only,
+     per_scene_cap) = job
     dst = path.join(out_root, *chunk.split("/"))
     da3, img = path.join(dst, "da3"), path.join(dst, image_dir)
     try:
         graph = json.load(open(path.join(cine_out, video, "scene_graph.json"), encoding="utf-8"))
-        bank = json.load(open(path.join(cine_out, video, bank_dir, "bank.json"), encoding="utf-8"))
-        caps = json.load(open(path.join(cine_out, video, bank_dir, captions_name),
-                              encoding="utf-8"))["captions"]
-        poses = np.load(path.join(cine_out, video, bank_dir, "poses.npz"))
-        bank_c2w = np.asarray(poses["cam_c2w"], dtype=np.float64)          # (V,T,4,4)
-        bank_ids = [str(v) for v in poses["variant_id"].tolist()]
+        src_c2w = np.asarray(graph["cameras"]["cam_c2w_world"], dtype=np.float64)   # (N,4,4)
+        n = src_c2w.shape[0]
 
-        # ---- status 필터 (D137). `--drop_status` 가 빈 리스트면 아래 블록이 통째로 no-op 이라
-        #    예전 코퍼스와 비트 동일하게 돈다.
-        #    `clamped_low` 는 `fit_hole_ladder.py:513-531` 에서 "knob 을 하한까지 밀었는데
-        #    **하한에서도 `over()` 가 여전히 참**" 일 때 찍힌다. 즉 제일 작게 만들어도 게이트를
-        #    위반하는 카메라이고, 그 궤적이 그대로 pseudo-GT 로 나간다. d129 dd10 train 612행
-        #    실측에서 binding 이 collision 340 / obb 114 / approach 87 / ground 43 / elev 26 /
-        #    hole 2 였다 — hole 예산(=τ) 때문에 걸린 건 2건뿐이고 나머지는 물리 게이트다.
-        #    `path_len_u` 중앙값이 0.0330 (solved 는 0.6900) 이라 사실상 정지 카메라인데
-        #    캡션은 `dolly_in`/`s_curve` 라고 써 있다 — 이름과 실제 이동량이 어긋난 학습 신호.
-        #    접두사 매칭이다: `clamped_low` 하나로 `clamped_low+tau_floor` 까지 잡는다
-        #    (`+tau_floor` 접미사는 `:910` 에서 붙는 **직교하는** 표시라 `solved+tau_floor`
-        #    처럼 정상 행에도 붙는다 — 접미사만으로 거르면 안 된다).
-        status_by_id = {v["variant_id"]: str(v.get("status", "")) for v in bank["variants"]}
-        keep = list(range(len(bank_ids)))
-        n_drop, drop_hist = 0, {}
-        if drop_status:
-            kept = []
-            for i in keep:
-                status = status_by_id.get(bank_ids[i], "")
-                if any(status.startswith(p) for p in drop_status):
-                    drop_hist[status] = drop_hist.get(status, 0) + 1
-                    continue
-                kept.append(i)
-            n_drop, keep = len(keep) - len(kept), kept
-
-        # ---- suspect 필터 (D140). `status` 필터와 **별개 축**이다.
-        #    `drop_status` 는 "게이트가 막았다"를 자르고, 이건 "게이트는 통과했는데 설정 탓에
-        #    캡션과 기하가 어긋난다"를 자른다 (`fit_hole_ladder.tag_suspects` 참조). 그래서
-        #    태그 하나가 붙은 행의 대부분은 `status == "solved"` 이고 위 블록에 안 걸린다.
-        #    `suspect` 열은 `|` 로 이은 태그 목록이라 **부분 문자열**이 아니라 토큰으로 맞춘다 —
-        #    접두사 매칭을 쓰면 `aim_free_subject_lost` 가 두 번째 토큰일 때 못 잡는다.
-        #    빈 리스트면 no-op 이고, `suspect` 열이 아예 없는 예전 뱅크에서도 no-op 이다.
-        if drop_suspect:
-            susp_by_id = {v["variant_id"]: str(v.get("suspect", "") or "")
-                          for v in bank["variants"]}
-            kept = []
-            for i in keep:
-                tags = [t for t in susp_by_id.get(bank_ids[i], "").split("|") if t]
-                hit = sorted(set(tags) & set(drop_suspect))
-                if hit:
-                    key = "suspect:" + "|".join(hit)
-                    drop_hist[key] = drop_hist.get(key, 0) + 1
-                    continue
-                kept.append(i)
-            n_drop, keep = n_drop + len(keep) - len(kept), kept
-
-        # ---- picked 필터 (D189). 위 둘과 **또 다른 축**이다 — 저 둘은 행마다 독립으로 "이건
-        #    쓰면 안 된다"를 보지만, 이건 씬/anchor 단위 **예산**의 결과다 (`lbm/pick.py`).
-        #    뱅크는 재고 목록이라 사다리가 만든 행을 다 들고 있고, 그중 무엇을 코퍼스로 쓸지는
-        #    `picked` 열이 정한다. `emit_bank.py --picked_only` 와 같은 열·같은 판정이다.
-        #    기본 꺼짐 = 열이 없던 예전 뱅크와 비트 동일. 켰는데 열이 비어 있으면 그 씬은 0행이
-        #    되므로 (조용한 전멸) 아래 `n_unpicked` 를 요약에 싣는다.
-        n_unpicked = 0
-        if picked_only:
-            pick_by_id = {v["variant_id"]: bool(v.get("picked")) for v in bank["variants"]}
-            kept = [i for i in keep if pick_by_id.get(bank_ids[i])]
-            n_unpicked, keep = len(keep) - len(kept), kept
-            if n_unpicked:
-                drop_hist["unpicked"] = drop_hist.get("unpicked", 0) + n_unpicked
-            n_drop += n_unpicked
+        # ---- 뱅크 세대를 한 통에 붓는다 (D200). 뱅크가 하나면 아래 루프가 한 바퀴만 돌고
+        #    이후 전 블록이 예전과 같은 순서·같은 값이라 코퍼스가 비트 동일하다.
+        pool, n_drop, drop_hist = [], 0, {}
+        for bank_dir in bank_dirs:
+            bdir = path.join(cine_out, video, bank_dir)
+            if not path.isfile(path.join(bdir, "bank.json")):
+                continue                       # 이 씬에 이 세대가 없는 건 정상 (d199 는 571편뿐)
+            bank = json.load(open(path.join(bdir, "bank.json"), encoding="utf-8"))
+            caps = json.load(open(path.join(bdir, captions_name),
+                                  encoding="utf-8"))["captions"]
+            poses = np.load(path.join(bdir, "poses.npz"))
+            bank_c2w = np.asarray(poses["cam_c2w"], dtype=np.float64)          # (V,T,4,4)
+            bank_ids = [str(v) for v in poses["variant_id"].tolist()]
+            if bank_c2w.shape[1] != n:
+                return {"video": video, "status": "fail",
+                        "why": f"{bank_dir} 프레임 {bank_c2w.shape[1]} != 소스 프레임 {n}"}
+            # `grade` 는 뱅크마다 **자기** retry_suspect 로 매긴다 — 세대 설정이 다르다.
+            retry_suspect = tuple((bank.get("fallback") or {}).get("retry_suspect") or ())
+            rows, kept = filter_variants(bank, bank_ids, drop_status, drop_suspect,
+                                         picked_only, drop_hist)
+            n_drop += len(bank_ids) - len(kept)
+            for i in kept:
+                row = rows[bank_ids[i]]
+                pool.append((pick_key(row, retry_suspect), bank_dir, row,
+                             caps.get(bank_ids[i], {}), bank_c2w[i]))
 
         # ---- 사다리 붕괴 중복 제거.
         #    hole 사다리 4단은 게이트(obb/ground/approach/elev/shape/collision)가 물리면
@@ -180,25 +215,36 @@ def convert_scene(job):
         #    남기는 건 뱅크 순서상 첫 번째 = 사다리 아랫단(작은 target_hole)이다.
         #    **status 필터 뒤에 돈다** — 순서가 뒤바뀌면 pose 가 비트 동일한 붕괴 그룹에서
         #    `clamped_low` 인 아랫단이 대표로 남아 그룹 전체가 통째로 날아간다.
-        n_pre_dedup = len(keep)
+        #    **상한보다도 앞에 둔다** — 뒤로 미루면 붕괴 중복이 예산을 갉아먹어 씬당 실제
+        #    카메라가 상한 아래로 조용히 떨어진다.
+        n_pre_dedup = len(pool)
         if dedup:
             seen, dedup_keep = set(), []
-            for i in keep:
-                digest = bank_c2w[i].round(9).tobytes()
+            for entry in pool:
+                digest = entry[4].round(9).tobytes()
                 if digest in seen:
                     continue
                 seen.add(digest)
-                dedup_keep.append(i)
-            keep = dedup_keep
-        n_dup = n_pre_dedup - len(keep)
-        bank_c2w = bank_c2w[keep]
-        bank_ids = [bank_ids[i] for i in keep]
+                dedup_keep.append(entry)
+            pool = dedup_keep
+        n_dup = n_pre_dedup - len(pool)
 
-        src_c2w = np.asarray(graph["cameras"]["cam_c2w_world"], dtype=np.float64)   # (N,4,4)
-        n, T = src_c2w.shape[0], bank_c2w.shape[1]
-        if T != n:
-            return {"video": video, "status": "fail",
-                    "why": f"뱅크 프레임 {T} != 소스 프레임 {n}"}
+        # ---- 씬당 상한 (D200). 0 이면 통째로 no-op = 예전과 비트 동일 (정렬도 안 한다).
+        #    규칙은 `lbm/pick.py:pick_key` 하나뿐이고, `sort` 가 안정 정렬이라 동점은
+        #    뱅크 나열 순서 → 뱅크 내 순서로 갈린다 (재실행해도 같은 카메라가 뽑힌다).
+        n_over = 0
+        if per_scene_cap:
+            pool.sort(key=lambda entry: entry[0])
+            n_over = max(0, len(pool) - per_scene_cap)
+            if n_over:
+                drop_hist["over_cap"] = drop_hist.get("over_cap", 0) + n_over
+                n_drop += n_over
+                pool = pool[:per_scene_cap]
+
+        bank_c2w = (np.stack([entry[4] for entry in pool]) if pool
+                    else np.zeros((0, n, 4, 4), dtype=np.float64))
+        bank_ids = [entry[2]["variant_id"] for entry in pool]
+
         # --fixed_focal 과 같은 규약: frame0 K 를 전 프레임에 복사한 뒤 이미지 배율만큼 줄인다.
         K = scaled_K(np.asarray(graph["cameras"]["K"], dtype=np.float64)[0], image_scale)
         h = int(round(float(K[1, 2]) * 2))
@@ -209,7 +255,8 @@ def convert_scene(job):
         if skip_done and done:
             return {"video": video, "status": "skip_done", "n": n, "h": h, "w": w,
                     "n_var": len(bank_ids), "n_dup": n_dup, "n_drop": n_drop,
-                    "drop_hist": drop_hist}
+                    "n_over": n_over, "drop_hist": drop_hist,
+                    "banks": sorted({e[1] for e in pool})}
         makedirs(da3, exist_ok=True)
         makedirs(img, exist_ok=True)
 
@@ -235,14 +282,13 @@ def convert_scene(job):
         np.savez(path.join(da3, "target_poses.npz"),
                  extrinsics=np.linalg.inv(bank_c2w).astype(np.float32),      # (V,T,4,4) w2c
                  intrinsics=np.repeat(K[None, None], len(keys), axis=0
-                                      ).repeat(T, axis=1).astype(np.float32),
+                                      ).repeat(n, axis=1).astype(np.float32),
                  keys=np.array(keys),
                  variant_id=np.array(bank_ids))
 
-        by_id = {v["variant_id"]: v for v in bank["variants"]}
         prompts = {}
-        for seg, vid in zip(keys, bank_ids):
-            row, cap = by_id[vid], caps.get(vid, {})
+        for seg, (_, bank_dir, row, cap, _c2w) in zip(keys, pool):
+            vid = row["variant_id"]
             prompts[seg] = {
                 "frame_idx": [0, n],                       # segment = 변이. 구간은 항상 전체다.
                 "prompt_camera_with_scene_video": {"concise": cap.get("prompt", "")},
@@ -279,8 +325,9 @@ def convert_scene(job):
                 json.dump(avg_scale, open(path.join(ref_dir, f"{seg}.json"), "w"))
 
         return {"video": video, "status": "ok", "n": n, "h": h, "w": w,
-                "n_var": len(keys), "n_dup": n_dup, "n_drop": n_drop,
-                "drop_hist": drop_hist, "S": avg_scale}
+                "n_var": len(keys), "n_dup": n_dup, "n_drop": n_drop, "n_over": n_over,
+                "drop_hist": drop_hist, "S": avg_scale,
+                "banks": sorted({e[1] for e in pool})}
     except Exception as error:                             # noqa: BLE001
         return {"video": video, "status": "fail", "why": f"{type(error).__name__}: {error}"}
 
@@ -289,6 +336,13 @@ def main():
     parser = ArgumentParser(description=__doc__)
     parser.add_argument("--cine_out", default=path.join(CINEMATRAJ_ROOT, "out"))
     parser.add_argument("--bank_dir", default="hole_bank_k6")
+    # D200. 세대를 씬 단위로 **합친다**. 비우면 `--bank_dir` 하나만 쓰고 예전과 비트 동일.
+    # 뱅크 폴더째 합치지 않는 이유는 모듈 docstring §D200 참조 (`fixed.tau_denom` 이 세대마다
+    # 다르고 `build_poses` 가 그걸 기하 입력으로 쓴다).
+    parser.add_argument("--bank_dirs", nargs="*", default=[],
+                        help="예: --bank_dirs hole_bank_d185 hole_bank_d198 hole_bank_d199")
+    # D200. 씬당 카메라 상한. 0 이면 꺼짐 = 재고 전량. 규칙은 `lbm/pick.py:pick_key`.
+    parser.add_argument("--per_scene_cap", default=0, type=int)
     # 뱅크 안의 캡션 파일. 궤적은 그대로 두고 **텍스트만** 바꿔 대조군을 만들 때 쓴다
     # (`build_bank_captions.py --out_name`). 기본값이 예전 하드코딩 이름이라 동작은 그대로다.
     parser.add_argument("--captions_name", default="captions.json", type=str)
@@ -345,52 +399,76 @@ def main():
     parser.add_argument("--dry_run", action="store_true")
     args = parser.parse_args()
 
+    bank_dirs = list(args.bank_dirs) or [args.bank_dir]
+
+    def banks_of(video):
+        """이 씬에서 **완비된** 뱅크만 (bank.json + poses.npz + 캡션 셋 다 있는 것)."""
+        return [b for b in bank_dirs
+                if all(path.isfile(path.join(args.cine_out, video, b, f))
+                       for f in ("bank.json", "poses.npz", args.captions_name))]
+
     if args.videos == ["all"]:
         videos = sorted(v for v in listdir(args.cine_out)
-                        if path.isfile(path.join(args.cine_out, v, args.bank_dir, "bank.json")))
+                        if any(path.isfile(path.join(args.cine_out, v, b, "bank.json"))
+                               for b in bank_dirs))
     else:
         videos = list(args.videos)
 
-    jobs, missing = [], []
+    jobs, missing, bank_hist = [], [], {}
     for video in videos:
-        need = [path.join(args.cine_out, video, "scene_graph.json"),
-                path.join(args.cine_out, video, args.bank_dir, "bank.json"),
-                path.join(args.cine_out, video, args.bank_dir, "poses.npz"),
-                path.join(args.cine_out, video, args.bank_dir, args.captions_name),
-                path.join(args.recon_root, video, "video.mp4")]
-        gone = [path.basename(p) for p in need if not path.isfile(p)]
+        avail = banks_of(video)
+        gone = []
+        if not avail:
+            gone.append(f"완비된 뱅크 없음({'/'.join(bank_dirs)})")
+        for p in (path.join(args.cine_out, video, "scene_graph.json"),
+                  path.join(args.recon_root, video, "video.mp4")):
+            if not path.isfile(p):
+                gone.append(path.basename(p))
         if gone:
             missing.append((video, f"없음: {', '.join(gone)}"))
             continue
+        bank_hist["+".join(avail)] = bank_hist.get("+".join(avail), 0) + 1
         chunk = f"{args.chunk_prefix}/{video}" if args.chunk_prefix else video
         jobs.append((video, chunk, args.out_root, args.image_dir, args.image_scale,
-                     args.recon_root, args.cine_out, args.bank_dir, args.avg_scale_refs,
+                     args.recon_root, args.cine_out, avail, args.avg_scale_refs,
                      args.skip_done, args.dedup, args.captions_name, list(args.drop_status),
-                     list(args.drop_suspect), args.picked_only))
+                     list(args.drop_suspect), args.picked_only, args.per_scene_cap))
 
-    print(f"{'bank_dir':22s} {args.bank_dir}")
+    print(f"{'bank_dir':22s} {' '.join(bank_dirs)}")
+    print(f"{'per_scene_cap':22s} {args.per_scene_cap or '(없음 — 재고 전량)'}")
     print(f"{'picked_only':22s} {args.picked_only}")
     print(f"{'drop_status':22s} {args.drop_status or '(없음 — 예전과 비트 동일)'}")
     print(f"{'drop_suspect':22s} {args.drop_suspect or '(없음 — 예전과 비트 동일)'}")
     print(f"{'scenes (video)':22s} {len(jobs)}")
     print(f"{'skipped':22s} {len(missing)}")
-    for video, why in missing:
+    for video, why in missing[:20]:
         print(f"  - {video}: {why}")
+    if len(missing) > 20:
+        print(f"  ... 그리고 {len(missing) - 20}편 더")
+    if len(bank_dirs) > 1:
+        print(f"{'뱅크 조합별 씬 수':22s}")
+        for combo, cnt in sorted(bank_hist.items(), key=lambda kv: -kv[1]):
+            print(f"  {combo:<56}{cnt:7d}")
     if args.dry_run:
-        for video, *_ in jobs[:5]:
-            n = len(json.load(open(path.join(args.cine_out, video, args.bank_dir, "bank.json"),
-                                   encoding="utf-8"))["variants"])
-            print(f"  {video:<24} {n:5d} variants")
+        for video, _chunk, *_rest in jobs[:5]:
+            per = []
+            for b in banks_of(video):
+                nv = len(json.load(open(path.join(args.cine_out, video, b, "bank.json"),
+                                        encoding="utf-8"))["variants"])
+                per.append(f"{b}:{nv}")
+            print(f"  {video:<40} {' '.join(per)}")
         return
 
     makedirs(args.out_root, exist_ok=True)
     results = []
     with ProcessPoolExecutor(max_workers=max(1, args.workers)) as pool:
         futures = [pool.submit(convert_scene, job) for job in jobs]
+        every = 1 if len(futures) <= 200 else 250     # 10k 씬이면 진행 표시만 남긴다
         for future in as_completed(futures):
             results.append(future.result())
-            print(f"  done {len(results)}/{len(futures)}  {results[-1]['video']:<24} "
-                  f"{results[-1]['status']}", flush=True)
+            if len(results) % every == 0 or results[-1]["status"] == "fail":
+                print(f"  done {len(results)}/{len(futures)}  {results[-1]['video']:<40} "
+                      f"{results[-1]['status']}", flush=True)
 
     ok = [r for r in results if r["status"] in ("ok", "skip_done")]
     fail = [r for r in results if r["status"] == "fail"]
@@ -416,18 +494,33 @@ def main():
                 file.write("\n".join(ids) + "\n")
             seg_paths[side] = (p, len(ids))
 
-    print(f"\n{'video':<24}{'var':>6}{'drop':>6}{'dup':>6}{'frames':>8}{'h x w':>12}{'S':>10}")
-    for r in sorted(ok, key=lambda x: x["video"]):
+    # 씬별 표는 **앞 20편만**. 10k 씬을 전부 찍으면 로그가 요약을 덮는다 (CLAUDE.md §산출물).
+    shown = sorted(ok, key=lambda x: x["video"])
+    print(f"\n{'video':<40}{'var':>6}{'drop':>6}{'dup':>6}{'frames':>8}{'h x w':>12}{'S':>10}")
+    for r in shown[:20]:
         hw = f"{r['h']}x{r['w']}"
-        print(f"{r['video']:<24}{r['n_var']:6d}{r.get('n_drop', 0):6d}{r.get('n_dup', 0):6d}"
+        print(f"{r['video']:<40}{r['n_var']:6d}{r.get('n_drop', 0):6d}{r.get('n_dup', 0):6d}"
               f"{r['n']:8d}{hw:>12}{r.get('S', float('nan')):10.3f}")
+    if len(shown) > 20:
+        print(f"  ... 그리고 {len(shown) - 20}편 더 (전량은 아래 총계로)")
     # 중복 제거는 조용히 개수가 줄면 안 되는 값이라 총계를 따로 찍는다.
     kept = sum(r["n_var"] for r in ok)
     dup = sum(r.get("n_dup", 0) for r in ok)
     drop = sum(r.get("n_drop", 0) for r in ok)
+    empty = [r["video"] for r in ok if r["n_var"] == 0]
     print(f"\n{'변이 (dedup 후)':22s} {kept}"
           + (f"   제거한 사다리 붕괴 중복 {dup} ({dup / max(kept + dup, 1):.0%})"
              if args.dedup else "   (--no_dedup: 중복 제거 안 함)"))
+    if args.per_scene_cap:
+        # 상한이 실제로 물린 양. 씬당 평균이 상한보다 한참 낮으면 상한이 아니라 **재고**가
+        # 병목이라는 뜻이고, 그건 씬을 더 굽는 문제지 상한을 올릴 문제가 아니다.
+        over = sum(r.get("n_over", 0) for r in ok)
+        scenes = max(1, len(ok) - len(empty))
+        print(f"{'씬당 상한':22s} {args.per_scene_cap}   상한 초과로 버린 변이 {over}"
+              f"   씬당 실제 {kept / scenes:.2f}대 (카메라 있는 씬 {scenes})")
+    if empty:
+        # 조용한 전멸을 못 보고 지나치면 안 된다 — meta_csv 에는 행이 남지만 seg 는 0개다.
+        print(f"{'⚠ 카메라 0대 씬':22s} {len(empty)}   {empty[:5]}")
     # status / suspect 필터도 같은 이유로 총계를 찍는다 — 조용히 코퍼스가 줄면 안 된다.
     # `drop_hist` 는 두 필터가 공유하는 히스토그램이고, suspect 쪽 키에는 `suspect:` 접두사가
     # 붙어 있어 (convert_scene) 어느 축에서 잘렸는지 한 표에서 구분된다.

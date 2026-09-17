@@ -7,6 +7,23 @@
 ## [Unreleased]
 
 ### Added
+- **`scripts/vista4d_bank_to_dl3dv.py --bank_dirs / --per_scene_cap` + 새 드라이버
+  `scripts/run_corpus_export.py` (2026-09-17, D200).** 뱅크 **세 세대를 한 코퍼스로** 붓는다.
+  씬마다 d185/d198/d199 의 변이를 한 통에 모으고 `pick_key`(track 먼저 → `plan_tier` → grade →
+  `hole_fraction`) 로 정렬해 `--per_scene_cap` 개만 남긴다. dedup 을 **상한보다 앞에** 둔다 —
+  뒤로 미루면 붕괴 중복이 예산을 갉아먹어 씬당 실제 카메라가 상한 아래로 조용히 떨어진다.
+  `prompts.json.source` 에 변이별 출신 뱅크가 적힌다.
+  **뱅크 폴더째 합치지 않는 이유**: `bank.json:fixed` 가 세대마다 다르다. d198 은 config 가
+  `fit.args` 를 통째로 다시 써서 `--tau_denom S` 를 흘렸고 argparse 기본값 `z_med_frame0` 으로
+  떨어졌다. `decode/build_poses.py:720` 이 그 값으로 z_med 를 다시 구해 궤적을 풀므로 하나의
+  `fixed` 로 합치면 `emit_bank.py:433` 의 재풀이 assert 가 터진다. export 는 **포즈 배열을 그대로
+  복사**할 뿐 다시 풀지 않으므로 세대가 섞여도 기하가 안 흔들린다.
+  회귀 검증: D197 과 똑같은 인자(단일 `--bank_dir`, 상한 0)로 5편을 다시 뽑아 출고된 d197
+  코퍼스와 **비트 동일** — `prompts.json` 완전 일치, `target_poses.npz` 의 `extrinsics` /
+  `variant_id` `np.array_equal` (카메라 0대 씬 포함).
+  `run_corpus_export.py` 는 `run_dynpose_d163_export.sh` 계열 bash 래퍼를 대체한다 (CLAUDE.md
+  "bash 지양, python 우선 — 하나의 python 드라이버 + `--stage`"). 단계
+  `desc|merge_desc|captions|export|verify`, 세대 차이는 전부 argparse 기본값.
 - **`tmp/d199/pick5_yield.py` (2026-09-17, 사용자 지적 "fallback 포함해서 씬당 5개여야 하는 거
   아니야? 버전 섞지 말고 제대로 통계내").** 아래 항목의 **카메라 115,812 은 코퍼스가 아니라 뱅크
   재고 전량**이었다. 뱅크는 D39/D45 이후 한 줄도 안 지우는 재고 목록이고 d185 는

@@ -6,16 +6,53 @@
 
 ## [Unreleased]
 
+### Changed
+- **dynpose holdout 27씬 -> 100씬 + test seg-list 씬 라운드로빈 (2026-09-17, D200, 사용자
+  "test 비율을 좀 늘려야하는거 아냐?").** 두 가지를 같이 고친다.
+  ① `run_corpus_export.py --test_videos` 기본값을 `configs/dynpose_holdout_scenes.txt`(27씬)
+  에서 새 `configs/dynpose_holdout_scenes_100.txt`(100씬) 으로. 코퍼스가 10,169씬이 된 지금
+  27씬은 **0.26%** 라 씬 수준 지표의 n 이 27 뿐이었다. 새 목록은 **legacy 27 의 상위집합**이라
+  D137/D194/D197 과의 대조가 끊기지 않고(`test27` / `test_full` 두 줄로 보고), 추가 73씬은
+  **씬당 카메라 수 분포로 층화 추출**했다 (코퍼스 6대 52.73%/5대 32.32%/1대 7.14% vs
+  새 test 53%/32%/7%). 27씬 파일은 남겨 뒀다 — `--test_videos <...>/dynpose_holdout_scenes.txt`.
+  ② `vista4d_bank_to_dl3dv.py --test_roundrobin`(기본 on, 끄려면 `--no_test_roundrobin`).
+  학습 중 val 은 `main/train_latent_cam_dm.py` 의 `step >= cfg.val_max_batches` 로 test
+  리스트의 **앞 val_max_batches×batch_size 줄**(기본 20×8=160)만 보고 `main/base.py` 가
+  `shuffle=False` 라 **파일 순서 그대로 앞에서** 자른다. 예전처럼 씬별로 뭉쳐 쓰면 씬당 5~6대라
+  앞 160줄이 ~30씬밖에 안 돼서 **holdout 을 넓혀도 학습 중 val 은 안 넓어진다** (마지막 testset
+  eval 만 커진다). 라운드로빈(round r = 각 씬의 r번째 카메라)이면 앞 N줄이 서로 다른 N씬이다.
+  train 은 DataLoader 가 shuffle 하므로 순서를 안 건드린다. 원소 집합은 그대로라
+  `assert sorted(rr) == sorted(lists["test"])` 로 못 박았다.
+  이미 출고된 D200 코퍼스에는 `tmp/d200/resplit_holdout.py` 로 사후 적용했다 — 재export·재굽기
+  없이 seg-list 두 개만 다시 썼다(`.bak` 백업). **합집합이 안 바뀌어 캐시가 유효**하기 때문이다:
+  씬별 `da3/` 산출물과 geo 캐시는 씬 키이고, molmo2 캐시는
+  `main/cache_peav_embeddings.collect()` 가 train+test 를 합쳐 dedup 한 뒤 `by_name` 으로
+  저장한다. 실측 D200: train 10,069씬/50,916대 (99.02%), test 100씬/506대 (0.98%),
+  학습 중 val 씬 수 27 -> 100.
+
 ### Added
 - **`scripts/vista4d_bank_to_dl3dv.py --bank_dirs / --per_scene_cap` + 새 드라이버
-  `scripts/run_corpus_export.py` (2026-09-17, D200).** 뱅크 **세 세대를 한 코퍼스로** 붓는다.
-  씬마다 d185/d198/d199 의 변이를 한 통에 모으고 `pick_key`(track 먼저 → `plan_tier` → grade →
+  `scripts/run_corpus_export.py` (2026-09-17, D200).** 뱅크 **여러 세대를 한 코퍼스로** 붓는다.
+  씬마다 각 세대의 변이를 한 통에 모으고 `pick_key`(track 먼저 → `plan_tier` → grade →
   `hole_fraction`) 로 정렬해 `--per_scene_cap` 개만 남긴다. dedup 을 **상한보다 앞에** 둔다 —
   뒤로 미루면 붕괴 중복이 예산을 갉아먹어 씬당 실제 카메라가 상한 아래로 조용히 떨어진다.
   `prompts.json.source` 에 변이별 출신 뱅크가 적힌다.
-  **뱅크 폴더째 합치지 않는 이유**: `bank.json:fixed` 가 세대마다 다르다. d198 은 config 가
-  `fit.args` 를 통째로 다시 써서 `--tau_denom S` 를 흘렸고 argparse 기본값 `z_med_frame0` 으로
-  떨어졌다. `decode/build_poses.py:720` 이 그 값으로 z_med 를 다시 구해 궤적을 풀므로 하나의
+  **채택 세대 = d185 + d199** (사용자 지시 2026-09-17 "버전마다 설정이 다르지 않아? d185
+  기준이어야해"). config 로더는 stage 키를 **통째로 교체**하므로 `extends` 가 있어도 같은 stage
+  키를 다시 쓰면 그 stage 의 상속이 통째로 끊긴다. 실측 diff:
+  d199 는 `tau`/`fit`/`emit` 키가 **아예 없어** d185 를 글자 단위로 상속하고 `route` 에
+  `--anchor_require_frame0` 하나만 붙는다 (anchor 후보를 **좁히는** 쪽이라 d185 가 떨궜을
+  카메라를 새로 통과시키지 않는다). 반면 **d198 은 `fit.args` 를 통째로 다시 써서 인자 25개가
+  빠졌다** — `--collision_time_match --collision_source depth`(충돌 판정),
+  `--behind_src_frames 49 --behind_min_zcam 0.02 --behind_clear_src_ratio 0`(behind-surface),
+  `--tracking lock --preset_tracking`, `--orbit_fixed_sweep --min_sweep_deg 20`,
+  `--composition*`, `--tau_denom S --tau_knob_min 0.005`, `--fallback_ladder` 계열.
+  같은 게이트를 통과한 카메라가 아니므로 **제외**한다 (상세 FIX.log 2026-09-17).
+  잃는 어휘는 `crane_down` / `push_in_arc_{left,right}` / 각 `track_` 짝 6종이고, 빼도
+  상한 6 에서 **카메라 51,422 / 씬 10,169** 로 목표(카메라 50k / 씬 10k)를 넘는다. 채택 후
+  aim 비율 look_at 73.21% / free 26.79% 는 d185 단독과 소수점 둘째 자리까지 같다.
+  **뱅크 폴더째 합치지 않는 이유**: `bank.json:fixed` 가 세대마다 다를 수 있다.
+  `decode/build_poses.py:720` 이 `fixed.tau_denom` 으로 z_med 를 다시 구해 궤적을 풀므로 하나의
   `fixed` 로 합치면 `emit_bank.py:433` 의 재풀이 assert 가 터진다. export 는 **포즈 배열을 그대로
   복사**할 뿐 다시 풀지 않으므로 세대가 섞여도 기하가 안 흔들린다.
   회귀 검증: D197 과 똑같은 인자(단일 `--bank_dir`, 상한 0)로 5편을 다시 뽑아 출고된 d197

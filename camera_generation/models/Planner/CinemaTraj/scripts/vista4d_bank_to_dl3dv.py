@@ -364,6 +364,16 @@ def main():
     # 865편 중 513편(59.3%)을 잡았다. 해시는 코퍼스가 몇 편이든 같은 씬을 같은 쪽에 두므로
     # d188 이 다 구워진 뒤 다시 내보내도 test 가 train 으로 새지 않는다.
     parser.add_argument("--test_hash_mod", default=0, type=int)
+    # D200. test seg-list 를 **씬 라운드로빈**으로 쓴다 (round r = 각 씬의 r번째 카메라).
+    # 학습 중 val 은 `train_latent_cam_dm.py` 의 `step >= cfg.val_max_batches` 로 test 리스트의
+    # 앞 val_max_batches×batch_size 줄만 보고, `base.py` 가 shuffle=False 라 **파일 순서 그대로
+    # 앞에서** 자른다. 씬별로 뭉쳐 쓰면(예전 동작) 씬당 5~6대라 앞 160줄이 ~30씬밖에 안 돼
+    # holdout 을 아무리 넓혀도 학습 중 val 의 씬 다양성이 안 오른다. 라운드로빈이면 앞 N줄이
+    # 서로 다른 N씬이 된다. train 은 DataLoader 가 shuffle 하므로 순서를 안 건드린다.
+    # 예전처럼 씬별로 뭉쳐 쓰려면 `--no_test_roundrobin`.
+    parser.add_argument("--test_roundrobin", dest="test_roundrobin",
+                        action="store_true", default=True)
+    parser.add_argument("--no_test_roundrobin", dest="test_roundrobin", action="store_false")
     parser.add_argument("--seg_list_prefix", default="seg_list_vista4d")
     parser.add_argument("--image_dir", default="images_4")     # dl3dv IMAGE_DIR_NAMES 첫 후보
     # 소스는 1280x720. 0.5 면 640x360 -> geo_image_hw (256,448) 로 갈 때 여전히 축소라
@@ -488,6 +498,20 @@ def main():
             if args.test_hash_mod:
                 held = held or is_test_hash(r["video"], args.test_hash_mod)
             lists["test" if held else "train"] += [f"{chunk}/{seg}" for seg in range(r["n_var"])]
+        if args.test_roundrobin:
+            # 씬별로 뭉친 test 목록을 씬 라운드로빈으로 다시 편다 (같은 원소, 순서만 바뀜).
+            by_scene = {}
+            for s in lists["test"]:
+                by_scene.setdefault(s.rsplit("/", 1)[0], []).append(s)
+            rr, r = [], 0
+            while True:
+                row = [by_scene[k][r] for k in sorted(by_scene) if r < len(by_scene[k])]
+                if not row:
+                    break
+                rr += row
+                r += 1
+            assert sorted(rr) == sorted(lists["test"])
+            lists["test"] = rr
         for side, ids in lists.items():
             p = path.join(args.out_root, f"{args.seg_list_prefix}_{side}.txt")
             with open(p, "w") as file:

@@ -246,8 +246,13 @@ if __name__ == "__main__":
     p.add_argument("--stage", default="verify",
                    choices=[*STAGES, "all"], type=str)
     # ── 뱅크 / 코퍼스 (세대 차이는 전부 여기서) ────────────────────────────────
+    # d198 은 뺀다 — config 가 `fit.args` 를 통째로 덮어써서 인자 25개(충돌 판정 /
+    # behind-surface / tracking / orbit sweep / composition / tau_denom)가 빠졌다. 같은
+    # 게이트를 통과한 카메라가 아니라 섞으면 pseudo-GT 의 뜻이 달라진다 (FIX.log 2026-09-17,
+    # 사용자 지시 "d185 기준이어야해"). d199 는 route 에 `--anchor_require_frame0` 하나만
+    # 붙고 tau/fit/emit 은 d185 를 글자 그대로 상속하므로 같은 세대로 취급한다.
     p.add_argument("--banks", nargs="+",
-                   default=["hole_bank_d185", "hole_bank_d198", "hole_bank_d199"])
+                   default=["hole_bank_d185", "hole_bank_d199"])
     p.add_argument("--per_scene_cap", default=6, type=int)     # 씬당 카메라 상한. 0 이면 무제한
     p.add_argument("--captions_name", default="captions_d200.json", type=str)
     p.add_argument("--desc_name", default="instance_desc_d200.json", type=str)
@@ -267,8 +272,13 @@ if __name__ == "__main__":
                                              "DynPose-100K/metadata.csv", type=str)
     p.add_argument("--shapes", default=path.join(CINE, "configs", "datadop_shapes.json"),
                    type=str)
+    # D200 에서 27씬 -> 100씬 (legacy 27 의 상위집합). 27씬은 코퍼스가 10,169씬이 된 지금
+    # 0.26% 라 씬 수준 지표의 n 이 27 밖에 안 됐다. 새 목록은 씬당 카메라 수 분포로 층화
+    # 추출했고 legacy 27 을 전부 포함하므로, 지표를 `test27`(D137/D194/D197 과 대조 가능) 과
+    # `test_full` 두 줄로 낼 수 있다. 예전 27씬으로 돌리려면
+    # `--test_videos <CINE>/configs/dynpose_holdout_scenes.txt` (파일은 그대로 남겨 뒀다).
     p.add_argument("--test_videos", default=path.join(CINE, "configs",
-                                                      "dynpose_holdout_scenes.txt"), type=str)
+                                                      "dynpose_holdout_scenes_100.txt"), type=str)
     p.add_argument("--meta_csv", default="meta_dynpose.csv", type=str)
     p.add_argument("--chunk_prefix", default="dynpose", type=str)
     p.add_argument("--seg_list_prefix", default="seg_list_dynpose", type=str)

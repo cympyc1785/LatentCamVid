@@ -61,6 +61,24 @@ decode 스텝 hidden 도 구울 수 있다 (`--decode_tokens`, D197-d 사용자 
   fps 를 바꾸면 prefix 토큰열도 바뀌므로 **video 캐시는 기존(fps 25) 것을 재사용**한다
   (`--skip_done` 기본 True). 이 arm 이 바꾸는 것은 text 스트림 하나다.
 
+`--joint` (D200, 사용자 지시 "prefill 단계의 l21/last 와 decode 단계의 l21/last 를 한번에"):
+  `--decode_tokens` 경로의 **첫 forward 가 곧 prefill** 이다 (KV 캐시를 채우는 그 forward).
+  지금까지는 그 자리의 hidden 을 버렸는데, 버리지 말고 같이 저장하면 arm 4개
+  (prefill last / prefill l21 / decode last / decode l21) 가 **forward 한 번**에서 나온다.
+  prefill 캐시를 따로 굽는 것은 같은 계산을 두 번 하는 것이다.
+  저장은 **파일 둘**로 가른다 — `--text_out`(decode) / `--prefill_out`(prefill). 한 파일에 4개를
+  다 담으면 arm 하나가 자기가 안 쓰는 25 GB 를 같이 로드한다 (`torch.load` 는 부분 로드 불가).
+  하류가 바꾸는 것은 `peav_text_cache` 경로 하나뿐이고 `peav_layer` 배선은 그대로다.
+  ⚠ 두 arm 이 **같은 fps** 를 쓰게 된다. `--decode_keep points` 는 `--fps 2.0` 이 한 벌이므로
+    prefill 도 fps 2.0 으로 구워진다 (기존 prefill arm 은 25.0). 프롬프트가 같아지므로 두 arm 의
+    차이가 "읽는 자리"(prompt 위치 vs 생성 위치) 하나로 좁혀진다 — 대조로는 오히려 깨끗하다.
+
+`--free_mode zero` (D200, 사용자 지시): `aim=free` 변이는 겨냥하는 물체가 없어서 `Track {target}`
+  문장이 성립하지 않는다. 그 변이의 text hidden 을 **굽지 않고** 전량 0 행 하나로 묶고 mask 를
+  False 로 둔다. 학습에서 zero-embedding 이 들어가는 것과 같고, forward 는 0회다 — 영상 hidden 은
+  씬당 1파일이라 캡션과 무관하게 이미 구워져 있기 때문이다 (모듈 상단 `video` 설명).
+  `off`(기본) 이면 `aim` 을 아예 안 보므로 기존 세대와 비트 동일하다.
+
 샤딩 (`--num_shards/--shard_id`): 씬을 `i % num_shards` 로 갈라 GPU 여러 장에 흩는다.
   video 는 씬당 1파일이라 충돌이 없고, text 는 전체 1파일이라 샤드마다
   `<text_out>.shard{i}of{n}` 으로 떨어뜨린 뒤 `--merge_shards` 로 합친다 (GPU 불필요).
@@ -232,8 +250,25 @@ def tail_hidden(model, prefix_emb, tails, text_len, device, tap=None):
     return pad(h), om, (pad(tap.h[:, P:]) if tap is not None else None)
 
 
+def mid_to_right(x, tails, text_len):
+    """mid padding `[pad][tail]` 의 hidden 을 `tail_hidden` 과 같은 **right padding** 으로 옮긴다.
+
+    `decode_hidden` 의 첫 forward 가 곧 prefill 이라 그 자리의 hidden 이 `tail_hidden` 과 같은
+    값이다 — 다만 배치 레이아웃만 다르다. 꼬리 토큰이 보는 position 은 양쪽에서 `P..P+len-1`
+    로 같고 pad 는 attention mask 가 지운다 (`decode_hidden` docstring). 그래서 자리만 굴리면
+    `tail_hidden` 과 대체 가능한 값이 된다 — `--verify` 의 [joint prefill 대조] 가 실측한다.
+    """
+    B, L = x.shape[0], x.shape[1]
+    o = torch.zeros(B, text_len, x.shape[-1], dtype=torch.float16)
+    for i, t in enumerate(tails):
+        n = min(len(t), text_len)
+        o[i, :n] = x[i, L - len(t):L - len(t) + n].float().half().cpu()
+    return o
+
+
 @torch.inference_mode()
-def decode_hidden(model, prefix_emb, tails, text_len, n_new, device, eos_ids, tap=None):
+def decode_hidden(model, prefix_emb, tails, text_len, n_new, device, eos_ids, tap=None,
+                  pre_len=0):
     """**decode 스텝의** hidden 만 모은다 (D197-d, 사용자 지시).
 
     `tail_hidden` 이 주는 것은 prompt 위치의 hidden 이다 — 아직 답을 만들기 전, "다음 토큰을
@@ -252,6 +287,12 @@ def decode_hidden(model, prefix_emb, tails, text_len, n_new, device, eos_ids, ta
     실측한다.
 
     EOS(`<|im_end|>`) 를 낸 아이템은 그 슬롯까지 유효로 치고 mask 를 닫는다. 전부 닫히면 조기 종료.
+
+    `pre_len > 0` (D200 `--joint`, 사용자 지시 "prefill 단계의 l21/last 와 decode 단계의 l21/last
+    를 한번에") 이면 **첫 forward 의 꼬리 hidden 을 버리지 않고** 같이 돌려준다. 그 forward 가
+    바로 prefill 이므로 prefill 캐시를 따로 굽는 것은 같은 계산을 두 번 하는 것이다 — 4개 arm
+    (prefill last / prefill l21 / decode last / decode l21) 이 forward **한 번**에서 나온다.
+    반환 길이는 `pre_len` 슬롯이고 레이아웃은 `tail_hidden` 과 같은 right padding 이다.
     """
     core, B = model.model, len(tails)
     P, L = prefix_emb.shape[1], max(len(t) for t in tails)
@@ -269,6 +310,15 @@ def decode_hidden(model, prefix_emb, tails, text_len, n_new, device, eos_ids, ta
     out = core(inputs_embeds=emb, attention_mask=am, position_ids=pos, use_cache=True)
     cache = out.past_key_values
     nxt = model.lm_head(out.last_hidden_state[:, -1]).argmax(-1)      # y_0 (prefill hidden 은 버린다)
+    pre = None
+    if pre_len:
+        # `--joint`: 버리는 대신 챙긴다. mid padding 을 right padding 으로 되돌려 `tail_hidden`
+        # 과 같은 레이아웃으로 만든다 (pad 는 attention mask 가 이미 지웠다).
+        pre_m = torch.zeros(B, pre_len, dtype=torch.bool)
+        for i, t in enumerate(tails):
+            pre_m[i, :min(len(t), pre_len)] = True
+        pre = (mid_to_right(out.last_hidden_state[:, P:], tails, pre_len), pre_m,
+               mid_to_right(tap.h[:, P:], tails, pre_len) if tap is not None else None)
     del out
 
     eos_ids = eos_ids.to(device)
@@ -310,7 +360,8 @@ def decode_hidden(model, prefix_emb, tails, text_len, n_new, device, eos_ids, ta
         return o
 
     raw = (torch.stack(hs, 1), torch.stack(hx, 1) if tap is not None else None)
-    return pad(hs), om, (pad(hx) if tap is not None else None), gen[:, :used], done.cpu(), raw
+    return (pad(hs), om, (pad(hx) if tap is not None else None), gen[:, :used], done.cpu(),
+            raw, pre)
 
 
 # ------------------------------------------------------------------ 점 정렬 슬롯 (D197-d2)
@@ -395,61 +446,108 @@ def pool_video(hid, patch_mask, n_frames, side, pool):
     return v.permute(0, 2, 3, 1).reshape(n_frames * pool * pool, -1)
 
 
+# ------------------------------------------------------------------ 아이템 / free-moving
+
+# free-moving(`aim=free`) 변이가 공유하는 **전역 sentinel pair**. 저장 행은 전부 0, mask 는 전부
+# False 라 씬마다 따로 둘 이유가 없다 (자세한 근거는 `prepare_items` docstring).
+FREE_PAIR = ('', '')
+
+
+def prepare_items(args):
+    """`collect` + `--text_override_json` + free-moving 처리. main 과 merge 가 같은 걸 봐야 한다.
+
+    free-moving (`aim == --free_aim`, D200 기준 26.79%) 은 카메라가 겨냥하는 물체가 아예 없다.
+    molmo2 가 읽는 문장이 `Track {target}.` 인 arm 에서는 넣을 target 이 없고, 사용자 지시는
+    "빈 문자열을 넣고 학습 때 text hidden 자리에 zero-embedding" 이다.
+
+    `--free_mode zero` 는 그 zero 를 **캐시 단계에서** 확정한다. 빈 문자열로 forward 를 돌려도
+    나오는 것은 probe 문장 위치의 hidden 뿐이고 그건 학습에서 어차피 0 으로 덮인다 — 그리고
+    영상 쪽 hidden 은 씬당 1파일(`<video_out>/<scene_key>.pt`) 로 캡션과 무관하게 이미 구워지므로
+    free 변이를 위해 돌릴 GPU 일이 **하나도 없다**. 그래서 전 free 변이를 0 행 하나로 묶고
+    mask 를 전부 False 로 둔다 (하류 `_build_video_tok` 이 `tt * mask` 로 0 을 만들고 key padding
+    으로도 지운다). decode 도 당연히 안 돈다 = 사용자 지시 "decode 단계는 free-moving 은 안 돌리고".
+    """
+    items = collect(args.root, args.splits.split(','), args.seg_prefix)
+    if args.text_override_json:
+        ov = json.load(open(args.text_override_json))
+        miss = [it['data_name'] for it in items if it['data_name'] not in ov]
+        assert not miss, f'text_override_json 에 {len(miss)}개 누락: {miss[:5]}'
+        for it in items:
+            it['concise'] = ov[it['data_name']].strip()
+    free = set()
+    if args.free_mode != 'off':
+        free = {it['data_name'] for it in items if (it.get('aim') or '') == args.free_aim}
+        assert free, (f"--free_mode {args.free_mode} 인데 aim=={args.free_aim!r} 인 변이가 0개다 "
+                      '— prompts.json 에 aim 필드가 없는 세대일 수 있다')
+    return items, free
+
+
+def pair_key(it, free):
+    """이 아이템이 쓰는 (scene_key, caption) 키. free 변이는 전역 sentinel 하나로 모인다."""
+    return FREE_PAIR if it['data_name'] in free else (it['scene_key'], it['concise'])
+
+
 # ------------------------------------------------------------------ 샤드
 
-def shard_text_path(args):
-    """샤드면 `<text_out>.shard{i}of{n}`, 아니면 `<text_out>` 그대로."""
+def shard_text_path(args, out=None):
+    """샤드면 `<out>.shard{i}of{n}`, 아니면 `<out>` 그대로. 기본 대상은 `--text_out`."""
+    out = out or args.text_out
     if args.num_shards <= 1:
-        return args.text_out
-    base, ext = osp.splitext(args.text_out)
+        return out
+    base, ext = osp.splitext(out)
     return f'{base}.shard{args.shard_id}of{args.num_shards}{ext}'
 
 
-def merge_shards(args):
-    """샤드 text 파일들 -> 전역 `text.pt` 한 개. GPU 를 안 쓴다.
+def merge_one(args, out_path, items, free):
+    """샤드 파일들 -> 전역 파일 한 개. GPU 를 안 쓴다.
 
     각 샤드의 `pidx` 는 그 샤드 안에서만 유효하므로, pairs 를 합치면서 **전역 인덱스를 새로
-    매기고** `by_name` 은 여기서 `collect` 로 다시 만든다 (샤드는 자기 씬만 알기 때문).
+    매기고** `by_name` 은 여기서 `prepare_items` 로 다시 만든다 (샤드는 자기 씬만 안다).
+    free sentinel 만은 **모든 샤드에 중복으로 있다** — 첫 샤드 것만 남기고 나머지는 버린다.
     """
+    free_key = '\t'.join(FREE_PAIR)
     parts, offset, pair_idx = [], 0, {}
     embs, masks, extras, texts, dec_texts = [], [], [], [], []
     extra_key = None
     for sid in range(args.num_shards):
-        p = shard_text_path(Namespace(**{**vars(args), 'shard_id': sid}))
+        p = shard_text_path(Namespace(**{**vars(args), 'shard_id': sid}), out_path)
         assert osp.isfile(p), f'샤드 파일이 없다: {p}'
         d = torch.load(p, map_location='cpu')
         assert d.get('shard', [None, None])[1] == args.num_shards, f'{p}: num_shards 불일치'
+        keep = []
         for i, t in enumerate(d['text']):
+            if t == free_key and t in pair_idx:
+                continue                      # sentinel 은 샤드마다 있다 — 첫 것만
             assert t not in pair_idx, f'샤드 {sid} 에 중복 pair: {t!r} — 씬 분할이 겹쳤다'
-            pair_idx[t] = offset + i
-        offset += len(d['text'])
-        texts += d['text']
-        dec_texts += d.get('decode_text', [])
-        embs.append(d['emb'])
-        masks.append(d['mask'])
+            pair_idx[t] = offset + len(keep)
+            keep.append(i)
+        offset += len(keep)
+        sel = torch.tensor(keep, dtype=torch.long)
+        texts += [d['text'][i] for i in keep]
+        if d.get('decode_text'):
+            dec_texts += [d['decode_text'][i] for i in keep]
+        embs.append(d['emb'][sel])
+        masks.append(d['mask'][sel])
         xk = [k for k in d if k.startswith('emb_l')]
         if xk:
             assert extra_key in (None, xk[0]), f'{p}: 중간층 키가 샤드마다 다르다 {xk[0]}'
             extra_key = xk[0]
-            extras.append(d[xk[0]])
-        parts.append((p, len(d['text']), d))
+            extras.append(d[xk[0]][sel])
+        parts.append((p, len(keep), d))
 
     ref = parts[0][2]
-    items = collect(args.root, args.splits.split(','), args.seg_prefix)
-    if args.text_override_json:
-        ov = json.load(open(args.text_override_json))
-        for it in items:
-            it['concise'] = ov[it['data_name']].strip()
     by_name = {}
     for it in items:
-        key = f"{it['scene_key']}\t{it['concise']}"
+        key = '\t'.join(pair_key(it, free))
         assert key in pair_idx, f"{it['data_name']}: 어느 샤드에도 없다 ({key!r})"
         by_name[it['data_name']] = pair_idx[key]
 
     out = {'by_name': by_name, 'emb': torch.cat(embs), 'mask': torch.cat(masks),
            'text': texts, 'template': ref['template'], 'text_len': ref['text_len'],
            'text_override_json': ref['text_override_json'],
-           'extra_layer': ref.get('extra_layer'), 'probe': ref['probe']}
+           'extra_layer': ref.get('extra_layer'), 'probe': ref['probe'],
+           'free_mode': ref.get('free_mode'), 'free_aim': ref.get('free_aim'),
+           'free_row': pair_idx.get(free_key)}
     if extras:
         assert len(extras) == args.num_shards, '중간층이 일부 샤드에만 있다 — 재굽기 필요'
         out[extra_key] = torch.cat(extras)
@@ -457,8 +555,9 @@ def merge_shards(args):
         assert len(dec_texts) == len(texts), 'decode_text 가 일부 샤드에만 있다 — 재굽기 필요'
         out['decode_tokens'] = ref['decode_tokens']
         out['decode_text'] = dec_texts
-    makedirs(osp.dirname(args.text_out), exist_ok=True)
-    torch.save(out, args.text_out)
+        out['decode_keep'] = ref.get('decode_keep')
+    makedirs(osp.dirname(out_path), exist_ok=True)
+    torch.save(out, out_path)
 
     print(f'{"what":14s} {"count":>8s}')
     print('-' * 30)
@@ -466,8 +565,18 @@ def merge_shards(args):
         print(f'{osp.basename(p)[-18:]:14s} {n:8d}')
     print(f'{"pairs":14s} {len(texts):8d}')
     print(f'{"by_name":14s} {len(by_name):8d}')
+    print(f'{"free row":14s} {str(out["free_row"]):>8s}  (전 free 변이가 이 0 행을 공유)')
     print(f'{"extra":14s} {extra_key or "(없음)":>8s}')
-    print(f'\n-> {args.text_out}')
+    print(f'\n-> {out_path}')
+
+
+def merge_shards(args):
+    """`--text_out` 과 (joint 면) `--prefill_out` 을 각각 합친다."""
+    items, free = prepare_items(args)
+    merge_one(args, args.text_out, items, free)
+    if args.prefill_out:
+        print()
+        merge_one(args, args.prefill_out, items, free)
 
 
 # ------------------------------------------------------------------ main
@@ -486,19 +595,19 @@ def main(args):
           f'text_hidden={model.config.text_config.hidden_size} '
           f'layers={model.config.text_config.num_hidden_layers}', flush=True)
 
-    items = collect(args.root, args.splits.split(','), args.seg_prefix)
+    # D191: molmo2 가 읽는 문장만 갈아끼운다. 코퍼스 prompts.json 은 안 건드리므로 같은 코퍼스를
+    # 쓰는 T5/umt5 arm 은 글자 단위로 그대로다 — 차이가 이 스트림에만 남는다.
+    items, free = prepare_items(args)
     if args.text_override_json:
-        # D191: molmo2 가 읽는 문장만 갈아끼운다. 코퍼스 prompts.json 은 안 건드리므로
-        # 같은 코퍼스를 쓰는 T5/umt5 arm 은 글자 단위로 그대로다 — 차이가 이 스트림에만 남는다.
-        ov = json.load(open(args.text_override_json))
-        miss = [it['data_name'] for it in items if it['data_name'] not in ov]
-        assert not miss, f'text_override_json 에 {len(miss)}개 누락: {miss[:5]}'
-        for it in items:
-            it['concise'] = ov[it['data_name']].strip()
         print(f'[text] override {args.text_override_json}  '
               f'{len(items)} seg / 고유 문장 {len({it["concise"] for it in items})}', flush=True)
+    if free:
+        print(f'[free] aim=={args.free_aim!r} {len(free)}/{len(items)} '
+              f'({len(free) / len(items):.2%}) -> 0 행 1개 공유, forward 없음 '
+              f'(mode {args.free_mode})', flush=True)
     for it in items:
-        assert it['concise'], f"{it['data_name']}: concise 캡션이 비었다"
+        assert it['concise'] or it['data_name'] in free, \
+            f"{it['data_name']}: concise 캡션이 비었다"
     scenes = {}
     for it in items:
         prev = scenes.setdefault(it['scene_key'], (it['chunk'], it['frame_idx']))
@@ -509,27 +618,38 @@ def main(args):
         # 인터리브(i % n). 연속 블록으로 자르면 chunk 마다 씬 수가 달라 샤드 부하가 기운다.
         keys = [k for i, k in enumerate(keys) if i % args.num_shards == args.shard_id]
         print(f'[shard] {args.shard_id}/{args.num_shards}  씬 {len(keys)}', flush=True)
-    # dedup 키가 **(scene_key, caption)** 인 이유는 모듈 docstring 참조.
-    pairs = sorted({(it['scene_key'], it['concise']) for it in items if it['scene_key'] in set(keys)})
+    # dedup 키가 **(scene_key, caption)** 인 이유는 모듈 docstring 참조. free 변이는 씬을 가리지
+    # 않고 sentinel 한 행으로 모인다 (`prepare_items`).
+    kset = set(keys)
+    pairs = sorted({pair_key(it, free) for it in items if it['scene_key'] in kset})
     pidx = {p: i for i, p in enumerate(pairs)}
     by_scene = {}
     for sk, cap in pairs:
+        if (sk, cap) == FREE_PAIR:
+            continue
         by_scene.setdefault(sk, []).append(cap)
     print(f'[data] {len(items)} segments / {len(scenes)} scenes / '
           f'{len(pairs)} (scene,caption) pairs  [처리 대상 씬 {len(keys)}]', flush=True)
 
     # 캡션 꼬리 토큰 길이 실측 -> text_len 검증
     tails_all = {c: proc.tokenizer(user_tail(c), add_special_tokens=False,
-                                   return_tensors='pt')['input_ids'][0] for _, c in pairs}
+                                   return_tensors='pt')['input_ids'][0]
+                 for sk, c in pairs if (sk, c) != FREE_PAIR}
     lens = sorted(len(v) for v in tails_all.values())
     pts_mode = bool(args.decode_tokens) and args.decode_keep == 'points'
     # `points` 모드의 저장 길이는 꼬리 길이와 무관하다 — 슬롯이 **프레임**이다.
     L = args.decode_points if pts_mode else (args.text_len or lens[-1])
+    # `--joint` 는 decode(L 슬롯) 와 prefill(L_pre = 꼬리 토큰) 을 **동시에** 담으므로 길이가
+    # 둘이다. joint 가 아니면 L_pre 는 안 쓰인다.
+    L_pre = args.text_len or lens[-1]
     if not pts_mode:
         assert lens[-1] <= L, f'꼬리 최장 {lens[-1]} 토큰 > text_len {L} — --text_len 을 올릴 것'
+    if args.joint:
+        assert lens[-1] <= L_pre, f'꼬리 최장 {lens[-1]} > text_len {L_pre} — --text_len 을 올릴 것'
     print(f'[text] tail tokens  min {lens[0]} / p50 {lens[len(lens) // 2]} / '
           f'max {lens[-1]}  -> text_len {L}'
-          f'{" (points: 슬롯=프레임)" if pts_mode else ""}', flush=True)
+          f'{" (points: 슬롯=프레임)" if pts_mode else ""}'
+          f'{f" + prefill {L_pre}" if args.joint else ""}', flush=True)
 
     eos_ids, gen_text = None, None
     semi_ids, quote_ids, pstat = None, None, None
@@ -564,6 +684,16 @@ def main(args):
         embs_x = torch.zeros(len(pairs), L, D, dtype=torch.float16)
         print(f'[layer] 마지막(ln_f 이후) + blocks[{args.extra_layer}] raw 출력, 둘 다 저장',
               flush=True)
+    # `--joint`: decode forward 의 첫 스텝이 곧 prefill 이라 같은 계산에서 prefill hidden 도
+    # 받는다 (사용자 지시 "한번에"). arm 4개(= 2파일 x 2층) 가 forward 한 번에서 나온다.
+    embs_p = masks_p = embs_px = None
+    if args.joint:
+        embs_p = torch.zeros(len(pairs), L_pre, D, dtype=torch.float16)
+        masks_p = torch.zeros(len(pairs), L_pre, dtype=torch.bool)
+        if tap is not None:
+            embs_px = torch.zeros(len(pairs), L_pre, D, dtype=torch.float16)
+        print(f'[joint] prefill({L_pre}) + decode({L}) 를 한 forward 에서. '
+              f'prefill -> {args.prefill_out}', flush=True)
     prefix_ref, side, ndone = None, None, 0
 
     for n, sk in enumerate(keys):
@@ -600,9 +730,11 @@ def main(args):
         for i in range(0, len(caps), args.bs):
             cb = caps[i:i + args.bs]
             tl = [tails_all[c] for c in cb]
+            pre = None
             if args.decode_tokens:
-                h, m, hx, gen, done, raw = decode_hidden(model, prefix_emb, tl, L,
-                                                         args.decode_tokens, device, eos_ids, tap)
+                h, m, hx, gen, done, raw, pre = decode_hidden(
+                    model, prefix_emb, tl, L, args.decode_tokens, device, eos_ids, tap,
+                    pre_len=L_pre if args.joint else 0)
                 txts = []
                 for j, c in enumerate(cb):
                     txts.append(proc.tokenizer.decode(
@@ -618,6 +750,10 @@ def main(args):
                 embs[pidx[(sk, c)]], masks[pidx[(sk, c)]] = h[j], m[j]
                 if hx is not None:
                     embs_x[pidx[(sk, c)]] = hx[j]
+                if pre is not None:
+                    embs_p[pidx[(sk, c)]], masks_p[pidx[(sk, c)]] = pre[0][j], pre[1][j]
+                    if embs_px is not None:
+                        embs_px[pidx[(sk, c)]] = pre[2][j]
             ndone += len(cb)
         if args.verify and n == 0 and args.decode_tokens:
             # B=1(패딩 없음) 대조라 prefix_emb 를 들고 있어야 한다 — del 보다 앞에서 돈다.
@@ -642,16 +778,25 @@ def main(args):
               f'길이초과 {pstat["truncated"]} ({pstat["truncated"] / pstat["n"]:.1%})', flush=True)
 
     text_path = shard_text_path(args)
+    pre_path = shard_text_path(args, args.prefill_out) if args.joint else None
     if not args.limit_scenes:
-        makedirs(osp.dirname(text_path), exist_ok=True)
         tpl = 'molmo2_override+probe' if args.text_override_json else 'molmo2_concise+probe'
-        payload = {'emb': embs, 'mask': masks,
-                   'text': [f'{sk}\t{c}' for sk, c in pairs],
-                   'template': tpl + ('' if not args.decode_tokens else
-                                      f'+decode_points{L}_fps{args.fps:g}' if pts_mode
-                                      else '+decode'), 'text_len': L,
-                   'text_override_json': args.text_override_json,
-                   'extra_layer': args.extra_layer, 'probe': PROBE}
+        common = {'text': [f'{sk}\t{c}' for sk, c in pairs],
+                  'text_override_json': args.text_override_json,
+                  'extra_layer': args.extra_layer, 'probe': PROBE,
+                  'free_mode': args.free_mode, 'free_aim': args.free_aim,
+                  'free_row': pidx.get(FREE_PAIR)}
+        if args.num_shards > 1:
+            # 샤드는 `by_name` 을 못 만든다 — pidx 가 샤드 안에서만 유효하다. 전역 인덱스는
+            # `--merge_shards` 가 pairs 를 합치면서 새로 매긴다.
+            common['shard'] = [args.shard_id, args.num_shards]
+        else:
+            common['by_name'] = {it['data_name']: pidx[pair_key(it, free)] for it in items}
+
+        payload = dict(common, emb=embs, mask=masks, text_len=L,
+                       template=tpl + ('' if not args.decode_tokens else
+                                       f'+decode_points{L}_fps{args.fps:g}' if pts_mode
+                                       else '+decode'))
         if args.decode_tokens:
             # 생성문을 같이 싣는다 — 이 arm 은 "모델이 뭘 말하면서 낸 hidden 인가"가 곧 진단이라
             # 나중에 캐시만 보고도 되짚을 수 있어야 한다 (13,993개 x ~400자 = 6 MB 수준).
@@ -663,20 +808,30 @@ def main(args):
                 payload['decode_points_stat'] = pstat
         if embs_x is not None:
             payload[f'emb_l{args.extra_layer}'] = embs_x
-        if args.num_shards > 1:
-            # 샤드는 `by_name` 을 못 만든다 — pidx 가 샤드 안에서만 유효하다. 전역 인덱스는
-            # `--merge_shards` 가 pairs 를 합치면서 새로 매긴다.
-            payload['shard'] = [args.shard_id, args.num_shards]
-        else:
-            payload['by_name'] = {it['data_name']: pidx[(it['scene_key'], it['concise'])]
-                                  for it in items}
+        makedirs(osp.dirname(text_path), exist_ok=True)
         torch.save(payload, text_path)
+
+        if args.joint:
+            # prefill 은 **별 파일**이다. 한 파일에 4 텐서를 다 담으면 arm 하나가 자기가 안 쓰는
+            # 25 GB 를 같이 로드한다 (`torch.load` 는 부분 로드를 못 한다). 파일을 가르면
+            # 하류 배선은 `peav_text_cache` 경로 하나만 바뀌고 `peav_layer` 는 그대로다.
+            pp = dict(common, emb=embs_p, mask=masks_p, text_len=L_pre,
+                      template=tpl + '+prefill_joint')
+            if embs_px is not None:
+                pp[f'emb_l{args.extra_layer}'] = embs_px
+            makedirs(osp.dirname(pre_path), exist_ok=True)
+            torch.save(pp, pre_path)
 
     print()
     print(f'{"what":14s} {"count":>8s}  note')
     print('-' * 62)
     print(f'{"scenes":14s} {len(keys):8d}  video {args.video_out}')
     print(f'{"pairs":14s} {len(pairs):8d}  text  {text_path if not args.limit_scenes else "(skipped)"}')
+    if args.joint:
+        print(f'{"prefill":14s} {L_pre:8d}  slots {pre_path if not args.limit_scenes else "(skipped)"}')
+    if free:
+        nfree = sum(1 for it in items if it['data_name'] in free and it['scene_key'] in kset)
+        print(f'{"free segs":14s} {nfree:8d}  -> 행 {pidx.get(FREE_PAIR)} 공유 (0, mask False)')
     print(f'{"video tok":14s} {49 * args.video_pool ** 2:8d}  + text {L} = '
           f'{49 * args.video_pool ** 2 + L}  (da3 geo = 3456)')
     print(f'{"text emb":14s} {embs.numel() * 2 / 1e9:8.2f}  GB fp16')
@@ -737,10 +892,13 @@ def verify_decode(model, proc, prefix_emb, caps, tails_all, args, embs, masks, p
     # `points` 모드는 L(=49) 이 생성 길이보다 훨씬 짧다. 대조는 **생성 전량**에서 해야 의미가
     # 있으므로 pad 길이를 decode_tokens 까지 늘려 부른다 (저장물과 무관한 검사 전용 호출).
     Lv = max(L, args.decode_tokens)
-    h1, m1, _, g1, _, _ = decode_hidden(model, prefix_emb, [tails_all[c]], Lv,
-                                        args.decode_tokens, device, eos_ids)
-    h2, m2, _, g2, _, _ = decode_hidden(model, prefix_emb, [long, tails_all[c]], Lv,
-                                        args.decode_tokens, device, eos_ids)
+    Lp = args.text_len or max(len(v) for v in tails_all.values())
+    h1, m1, _, g1, _, _, p1 = decode_hidden(model, prefix_emb, [tails_all[c]], Lv,
+                                            args.decode_tokens, device, eos_ids,
+                                            pre_len=Lp if args.joint else 0)
+    h2, m2, _, g2, _, _, p2 = decode_hidden(model, prefix_emb, [long, tails_all[c]], Lv,
+                                            args.decode_tokens, device, eos_ids,
+                                            pre_len=Lp if args.joint else 0)
 
     def cmp(a, b, na, nb):
         n = min(na, nb)
@@ -764,6 +922,17 @@ def verify_decode(model, proc, prefix_emb, caps, tails_all, args, embs, masks, p
         print(f'             갈린 슬롯 {d[:8]}{"..." if len(d) > 8 else ""} / {min(n1, n2)}')
         print(f'             B=1  {proc.tokenizer.decode(g1[0, :n1])!r}')
         print(f'             pad  {proc.tokenizer.decode(g2[1, :n2])!r}')
+
+    if args.joint:
+        # `--joint` 의 유일한 위험: decode forward 의 첫 스텝에서 뽑은 prefill hidden 이
+        # `tail_hidden`(right padding, use_cache=False) 과 **같은 값인가**. mid->right 되돌림이
+        # 한 칸이라도 밀렸으면 여기서 cos 가 무너진다. 두 배치(패딩 0 / 패딩 pad_n)를 다 본다.
+        ref, rm, _ = tail_hidden(model, prefix_emb, [tails_all[c]], Lp, device)
+        n = int(rm[0].sum())
+        for tag, pp, row in (('B=1', p1, 0), ('pad', p2, 1)):
+            r, cs = cmp(pp[0][row], ref[0], int(pp[1][row].sum()), n)
+            print(f'   [joint prefill 대조 {tag}] relL2 {r:.2e}  cos {cs:.6f}  '
+                  f'슬롯 {int(pp[1][row].sum())}/{n}   (cos~1 이어야 tail_hidden 대체 가능)')
 
     got, gm = embs[pidx[(sk, c)]].float(), masks[pidx[(sk, c)]]
     if args.decode_keep == 'all':
@@ -812,11 +981,25 @@ if __name__ == '__main__':
     # 721~733 tok 에서 자연 종료). --fps 25 기본값에서는 라벨이 20종뿐이라 4점만 나온다.
     p.add_argument('--decode_keep', choices=['all', 'points'], default='all')
     p.add_argument('--decode_points', type=int, default=49)           # = 프레임 수
+    # D200: decode forward 의 **첫 스텝이 곧 prefill** 이라 그 자리 hidden 을 버리지 않고 같이
+    # 저장한다. arm 4개(prefill last / prefill l21 / decode last / decode l21) 가 forward 한 번에서
+    # 나온다 (사용자 지시 "한번에 해야 빠를 것 같아"). prefill 은 `--prefill_out` 별 파일로 간다.
+    p.add_argument('--joint', action='store_true')
+    p.add_argument('--prefill_out', default=None)                     # --joint 일 때 prefill 파일
+    # D200: `aim=free` 변이 처리. `off`(기본) = 기존 동작 그대로 (aim 을 아예 안 본다).
+    # `zero` = 전 free 변이를 **0 행 하나**로 묶고 mask 를 전부 False 로 둔다. forward 를 안 돈다 —
+    # 영상 hidden 은 씬당 1파일로 캡션과 무관하게 이미 구워지고, text 자리는 학습에서 어차피
+    # zero-embedding 이 들어가기 때문이다 (`prepare_items` docstring).
+    p.add_argument('--free_mode', choices=['off', 'zero'], default='off')
+    p.add_argument('--free_aim', default='free')                      # prompts.json 의 aim 값
     p.add_argument('--num_shards', type=int, default=1)               # 씬을 i%n 으로 분할
     p.add_argument('--shard_id', type=int, default=0)
     p.add_argument('--merge_shards', action='store_true')             # 샤드 text 합치기 (GPU 불필요)
     _a = p.parse_args()
     assert 0 <= _a.shard_id < _a.num_shards, f'shard_id {_a.shard_id} / num_shards {_a.num_shards}'
+    if _a.joint:
+        assert _a.decode_tokens, '--joint 은 decode forward 에 얹는 것이다 — --decode_tokens 필요'
+        assert _a.prefill_out, '--joint 은 prefill 을 별 파일로 낸다 — --prefill_out 필요'
     if _a.merge_shards:
         assert _a.num_shards > 1, '--merge_shards 는 --num_shards > 1 일 때만 뜻이 있다'
         merge_shards(_a)

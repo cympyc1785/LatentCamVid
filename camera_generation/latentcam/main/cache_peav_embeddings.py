@@ -125,6 +125,13 @@ def collect(root, splits, seg_prefix='dynpose'):
             out.append(dict(scene_key=data_name.rsplit('_', 1)[0], chunk=chunk, seg=key,
                             data_name=data_name, label=(e.get('anchor_label') or '').strip(),
                             motion=cf.get('motion', ''), concise=concise_caption(e),
+                            # [new 2026-09-17] `aim` 은 이 변이가 물체를 겨냥하는지(`look_at`)
+                            # 아니면 자유 이동인지(`free`) 를 가른다. free 변이엔 지칭할 대상이
+                            # 아예 없어서 molmo2 의 `Track {target}` 텍스트가 성립하지 않는다 —
+                            # `cache_molmo2_embeddings.py --free_mode zero` 가 이 값을 읽어
+                            # 그 변이의 text hidden 을 굽지 않고 0 으로 채운다. 기존 소비자는
+                            # 이 키를 안 읽으므로 동작이 그대로다.
+                            aim=(e.get('aim') or '').strip(),
                             frame_idx=tuple(e['frame_idx'])))
     return out
 

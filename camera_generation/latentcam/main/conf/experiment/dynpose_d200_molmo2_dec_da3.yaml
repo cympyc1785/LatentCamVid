@@ -1,0 +1,31 @@
+# @package _global_
+# D200 — `dynpose_d200_molmo2_da3.yaml` 과 **텍스트 캐시 한 줄만** 다른 사본: molmo2 hidden 을
+# prompt 위치(prefill)가 아니라 **greedy decode 스텝**에서 가져온다.
+#
+# ═══ 왜 ═══════════════════════════════════════════════════════════════════════════════════
+# prefill arm 이 먹는 것은 캡션+probe 가 놓인 prompt 위치의 hidden 이다 — 모델이 답을 아직 한
+# 토큰도 커밋하지 않은 상태의 표현이다. 이 arm 은 모델이 실제로 생성하는 동안의 hidden 만 쓴다.
+# D200 에서는 **둘이 같은 forward 에서 나온다** (`--joint`) — 두 파일의 차이는 읽는 자리뿐이고
+# 프롬프트·fps·video 캐시가 전부 비트 동일하다.
+#
+# ⚠ 실측(D197-d): 우리 문장이 `Track {target}.` 이라 Molmo2 는 이걸 자기 native tracking 과제로
+#   받아 카메라 서술이 아니라 2D 물체 트랙 XML 을 낸다 —
+#     `<tracks coords="0.0 1 444 461;0.5 1 444 453; ... ">the man ...</tracks>`
+#   즉 이 arm 의 decode hidden 은 "카메라 궤적 서술"이 아니라 **타깃의 시간축 화면 좌표 읽기**를
+#   하는 동안의 표현이다.
+#
+# ═══ 슬롯 = 프레임 ════════════════════════════════════════════════════════════════════════
+# 점 하나가 끝나는 토큰(`;`, 마지막 점은 coords 를 닫는 `"`)의 hidden 만 골라 `round(t*fps)`
+# 프레임 슬롯에 담는다 — 슬롯이 곧 프레임이라 video 토큰의 49x8x8 격자와 축이 맞는다.
+# `--fps 2.0` 이라 라벨이 0.0,0.5,...,24.0 으로 프레임과 1:1 (실측 채운 슬롯 48.6/49, 파싱 0%).
+# mask 는 점이 실제로 찍힌 프레임만 True.
+#
+# ═══ free-moving ══════════════════════════════════════════════════════════════════════════
+# decode 는 `aim=free` 변이를 아예 안 돈다 (사용자 지시). prefill 과 같은 0 행을 공유하므로
+# 학습에서 49슬롯 전부 zero-embedding + mask False 가 들어간다.
+defaults:
+  - dynpose_d200_molmo2_da3
+
+exp_name: dynpose_d200_molmo2_dec_da3
+peav_text_cache: /data1/cympyc1785/data/DynPose-LBM/latentcam_dynpose_d200/molmo2_cache/text.pt
+peav_layer: null           # null = 마지막 층(ln_f 이후). 21 로 바꾸면 blocks[21] raw 출력.

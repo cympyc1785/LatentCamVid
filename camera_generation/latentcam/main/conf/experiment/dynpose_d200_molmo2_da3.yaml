@@ -1,0 +1,85 @@
+# @package _global_
+# D200 — d200 코퍼스 위에서 **da3 geo + Molmo2 prefill hidden(마지막 층)** 을 같이 쓰는 arm.
+# 레이어 순서 text CA(umt5) -> geo CA(da3) -> molmo2 CA.
+#
+# ═══ 이 세대의 5-arm 구성 (사용자 지시 2026-09-17) ═════════════════════════════════════════
+#   dynpose_d200_da3                 geo only
+#   dynpose_d200_molmo2_da3          geo + molmo2 prefill 마지막 층   (이 파일)
+#   dynpose_d200_molmo2_l21_da3      geo + molmo2 prefill 21층
+#   dynpose_d200_molmo2_dec_da3      geo + molmo2 decode  마지막 층
+#   dynpose_d200_molmo2_dec_l21_da3  geo + molmo2 decode  21층
+# 넷 다 **같은 forward** 에서 나온 캐시를 읽는다 (`--joint`, 아래 참조). 움직인 축은
+# "어느 자리의 hidden 인가"(prompt 위치 vs 생성 위치) × "어느 층인가" 둘뿐이다.
+#
+# ═══ molmo2 가 읽는 문장은 umt5 와 다르다 (D191 에서 정한 그대로) ══════════════════════════
+# 디스크 위 `prompts.json` 의 concise 캡션은 한 바이트도 안 건드린다 — umt5 는 그걸 읽는다.
+# molmo2 에는 `--text_override_json` 으로 `Track {target_text}.` 만 넣는다. molmo2 스트림의
+# 역할은 "카메라를 어떻게 움직이나"가 아니라 **"화면의 어느 물체 얘기인가"** 이고, 그 지칭구가
+# `instance_desc_d200.json` 에서 온다.
+#
+# ═══ free-moving 은 zero-embedding 이다 (사용자 지시 2026-09-17) ═══════════════════════════
+# `aim=free` 변이(26.79%)에는 겨냥하는 물체가 없어 `Track {target}` 문장이 성립하지 않는다.
+# override 에 빈 문자열을 넣고 캐시가 `--free_mode zero` 로 그 변이들을 **0 행 하나**에 묶는다
+# (mask 전량 False). 학습 쪽은 고치지 않았다 — `camera_diffusion_model_latent._build_video_tok`
+# 이 이미 `tt * video_text_mask` 로 0 을 만들고 key_padding_mask 로도 빼기 때문이다. 같은 행에
+# video 토큰 3136개가 남아 있어 all-masked row 로 인한 NaN 도 안 난다.
+# `Track {anchor_label}.` 로 메우지 않는 이유: 라우팅이 고른 anchor 는 그 변이에서 카메라가
+# **안 따라가는** 물체라, 넣으면 "Track X" 와 X 를 무시하는 궤적을 짝지어 학습시킨다.
+#
+# ═══ 캐시 (D200 은 arm 4개를 forward 한 번에서 뽑는다) ═════════════════════════════════════
+# `cache_molmo2_embeddings.py --joint` — decode 경로의 **첫 forward 가 곧 prefill** 이라,
+# 지금까지 버리던 그 자리의 hidden 을 같이 저장한다. 산출물은 파일 둘:
+#   `molmo2_cache/prefill.pt`  prompt 위치 hidden, 슬롯 128 (이 파일 + l21 arm 이 읽는다)
+#   `molmo2_cache/text.pt`     decode 생성 위치 hidden, 슬롯 49 = 프레임 (dec arm 둘이 읽는다)
+# 한 파일에 넷을 다 담지 않은 이유는 `torch.load` 가 부분 로드를 못 해서다 — arm 하나가 자기가
+# 안 쓰는 수십 GB 를 같이 로드하게 된다.
+# ⚠ `--joint` 는 두 arm 이 **같은 fps** 를 쓰게 만든다. `--decode_keep points` 가 `--fps 2.0`
+#   한 벌이라 prefill 도 fps 2.0 으로 구워진다 (D197 prefill arm 은 25.0). prefix 토큰열이
+#   4323 -> 4341 로 달라지므로 **video 캐시도 이 코퍼스 전용으로 새로 굽는다** (d194/d197 링크
+#   재사용 없음). 대신 프롬프트가 같아져 prefill↔decode 차이가 "읽는 자리" 하나로 좁혀진다.
+exp_name: dynpose_d200_molmo2_da3
+dl3dv_root: /data1/cympyc1785/data/DynPose-LBM/latentcam_dynpose_d200
+meta_csv: meta_dynpose.csv
+train_seg_list: /data1/cympyc1785/data/DynPose-LBM/latentcam_dynpose_d200/seg_list_dynpose_train.txt
+test_seg_list: /data1/cympyc1785/data/DynPose-LBM/latentcam_dynpose_d200/seg_list_dynpose_test.txt
+coverage_blacklist_path: null
+
+text_len: 128   # D200 da3 arm 과 동일.
+
+pose_source: da3
+target_pose_source: da3_target_poses
+scale_mode: avg_scale
+avg_scale_ref: context_first_cam
+intr_norm: rel
+cam_dim: 64
+
+# ─── geo (da3) 스트림 — `dynpose_d200_da3.yaml` 에서 글자 그대로 복사 ──────────────────────
+geo_encoder: da3
+geo_cam_embed: null
+geo_latent_cache_dir: null
+geo_posed: true
+geo_shuffle_order: false
+da3_geo_model: da3nested-giant-large
+da3_geo_input_hw: [252, 448]
+da3_geo_layers: last
+geo_view_sampling: context_uniform
+geo_num_views: 6
+geo_first_view_target_s: true
+geo_raw_cache_dir: /data1/cympyc1785/data/DynPose-LBM/latentcam_dynpose_d200/geo_raw_cache_da3
+da3_cam_token_per_sample: true
+
+anchor_pred_frame0: true
+
+# ─── Molmo2 CA (기존 PE-AV 슬롯을 그대로 재사용한다) ───────────────────────────────────────
+peav_video_cache_dir: /data1/cympyc1785/data/DynPose-LBM/latentcam_dynpose_d200/molmo2_cache/video
+peav_text_cache: /data1/cympyc1785/data/DynPose-LBM/latentcam_dynpose_d200/molmo2_cache/prefill.pt
+peav_layer: null           # null = 마지막 층(ln_f 이후). 21 로 바꾸면 blocks[21] raw 출력.
+video_latent_dim: 2560     # Molmo2 LM hidden — video part (3136 tok)
+video_text_in_stream: true
+video_text_dim: 2560       # 같은 LM hidden — text part (128 tok). 기본 1024 는 PE-AV 값이다.
+peav_in_ln: true           # proj 앞 LayerNorm. FIX-D117 참조 (없으면 CA logit 포화)
+video_gate: true           # 0 초기화 residual gate. FIX-D117 참조 (없으면 loss ~1.0 정체)
+
+batch_size: 8
+epochs: 100          # 실제 집행자는 conf/config.yaml 의 `epoch_cap: 100`.
+ckpt_at_epochs: [50, 100]

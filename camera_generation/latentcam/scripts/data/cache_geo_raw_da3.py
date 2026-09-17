@@ -49,9 +49,17 @@ env:
   SPLITS     train,test (기본) — 두 split 의 scene 을 합집합으로 굽는다
   DEVICE     기본 cuda:0
   LIMIT      앞에서 N scene 만 (기본 0 = 전부)
+  SHARDS     [new 2026-09-17] 샤드 총수 (기본 1). scene 을 `i % SHARDS == SHARD` 로 가른다.
+  SHARD      샤드 번호 (기본 0)
+
+샤딩 (SHARDS/SHARD): 씬당 파일 하나라 샤드끼리 같은 파일을 안 건드린다 — 10k 규모 코퍼스에서
+  한 GPU 로 굽는 데 몇 시간이 걸려서 넣었다. `is_done` 이 skip-done 을 보므로 샤드 경계를
+  바꿔 다시 돌려도 안전하다. 기본값 1/0 이면 기존 동작과 **동일**하다.
 
 사용 예:
   CUDA_VISIBLE_DEVICES=2 EXP=vista4d_pgt_k6 \
+    /data1/cympyc1785/miniconda3/envs/latentcam/bin/python scripts/data/cache_geo_raw_da3.py
+  CUDA_VISIBLE_DEVICES=0 EXP=dynpose_d200_da3 SHARDS=4 SHARD=0 \
     /data1/cympyc1785/miniconda3/envs/latentcam/bin/python scripts/data/cache_geo_raw_da3.py
 """
 import os
@@ -70,6 +78,9 @@ EXP = os.environ.get("EXP", "vista4d_pgt_k6")
 SPLITS = [s.strip() for s in os.environ.get("SPLITS", "train,test").split(',') if s.strip()]
 DEVICE = os.environ.get("DEVICE", "cuda:0")
 LIMIT = int(os.environ.get("LIMIT", "0"))
+SHARDS = max(1, int(os.environ.get("SHARDS", "1")))
+SHARD = int(os.environ.get("SHARD", "0"))
+assert 0 <= SHARD < SHARDS, f"SHARD {SHARD} 가 0~{SHARDS - 1} 밖이다"
 
 cfg, _ = load_cfg("config", overrides=[f"experiment={EXP}"])
 # 굽는 동안에는 캐시를 **꺼야** 한다 — 켜져 있으면 dataset 이 캐시를 읽고 early-return 해서
@@ -155,8 +166,14 @@ def main():
         keys = sorted(plan)
         if LIMIT:
             keys = keys[:LIMIT]
+        # 샤드 분할은 **정렬된 전체 목록** 위에서 한다 — skip-done 을 먼저 적용하면 샤드마다
+        # 다른 목록을 보게 되어 재실행 시 경계가 흔들린다.
+        nall = len(keys)
+        if SHARDS > 1:
+            keys = [k for i, k in enumerate(keys) if i % SHARDS == SHARD]
         todo = [k for k in keys if not is_done(osp.join(OUT, f'{k}.pt'), meta)]
-        print(f"[{split}] scenes {len(keys)} (skip-done {len(keys) - len(todo)}, "
+        print(f"[{split}] scenes {len(keys)}/{nall} (shard {SHARD}/{SHARDS}, "
+              f"skip-done {len(keys) - len(todo)}, "
               f"non-constant {len(bad)}) -> {OUT}", flush=True)
         for k in sorted(bad):
             print(f"  !! {k}: geo_idxs 가 변이마다 다르다 ({len(bad[k])}종) -> 굽지 않음")

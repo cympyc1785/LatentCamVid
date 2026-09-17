@@ -5,6 +5,46 @@ All notable changes to the latentcam sub-project. Follows [Keep a Changelog](htt
 ## [Unreleased]
 
 ### Added
+- **`cache_molmo2_embeddings.py --joint` — prefill/decode arm 4개를 forward **한 번**에서 뽑는다
+  (2026-09-17, D200 사용자 지시 "prefill 단계의 l21/last 와 decode 단계의 l21/last 를 한번에").**
+  `--decode_tokens` 경로의 **첫 forward 가 곧 prefill** 이다(KV 캐시를 채우는 그 forward).
+  지금까지는 `out.last_hidden_state[:, P:]` 와 `tap.h[:, P:]` 를 버렸는데, 버리지 않고 같이
+  저장하면 prefill last / prefill l21 / decode last / decode l21 넷이 한 forward 에서 나온다 —
+  prefill 캐시를 따로 굽는 것은 같은 계산을 두 번 하는 것이었다. decode 경로는 **mid padding**
+  이라 `mid_to_right()` 로 `tail_hidden` 과 같은 right padding 으로 옮겨 담는다(위치가
+  `P..P+len-1` 로 같고 attention mask 가 pad 를 지우므로 값이 같아야 한다). `--verify` 가
+  `tail_hidden` 과 직접 대조한다 — 실측 relL2 7.9e-3 / **cos 0.999968** (B=1 과 padding 강제
+  양쪽 동일), 즉 bf16 배치 리덕션 잡음 수준이다.
+  저장은 **파일 둘**로 가른다: `--text_out`(decode, 슬롯 49) / `--prefill_out`(prefill, 슬롯 128).
+  한 파일에 넷을 담으면 `torch.load` 가 부분 로드를 못 해서 arm 하나가 자기가 안 쓰는 수십 GB 를
+  같이 로드한다. 하류가 바꾸는 것은 `peav_text_cache` 경로 하나뿐이고 `peav_layer` 배선은 그대로다.
+  ⚠ 두 arm 이 **같은 fps** 를 쓰게 된다 — `--decode_keep points` 는 `--fps 2.0` 이 한 벌이라
+  prefill 도 fps 2.0 으로 구워진다(기존 prefill arm 은 25.0). prefix 토큰열이 4323 -> 4341 로
+  달라지므로 D200 은 **video 캐시도 새로 굽는다**(d194/d197 심볼릭 링크 재사용 없음). 대신
+  프롬프트가 같아져 두 arm 의 차이가 "읽는 자리"(prompt 위치 vs 생성 위치) 하나로 좁혀진다.
+  `--joint` 를 안 주면 저장물은 기존과 **비트 동일**하다.
+- **`cache_molmo2_embeddings.py --free_mode zero` — `aim=free` 변이를 zero-embedding 으로
+  (2026-09-17, D200 사용자 지시).** free-moving 변이에는 겨냥하는 물체가 없어
+  `Track {target}` 문장이 성립하지 않는다(D200 실측 13,777/51,422 = 26.79%). 그 변이들의 text
+  hidden 을 **굽지 않고** 전량 0 행 하나(`FREE_PAIR = ('','')`)에 묶고 mask 를 False 로 둔다.
+  forward 는 **0회**다 — 영상 hidden 은 씬당 1파일이라 캡션과 무관하게 이미 구워져 있어서,
+  빈 문자열로 prefill 을 한 번 더 돌려도 새로 얻는 것이 probe 토큰 자리 hidden 뿐이고 학습은
+  그걸 mask 로 지운다. decode 도 sentinel 이 `by_scene` 에 안 들어가므로 자동으로 건너뛴다.
+  **학습 쪽 모델 코드는 고치지 않았다** — `camera_diffusion_model_latent._build_video_tok` 이
+  이미 `tt * video_text_mask` 로 0 을 만들고 `~cat([tm, vm])` 로 key-pad 까지 한다. 같은 행에
+  video 토큰 3136개가 남아 all-masked row NaN 도 안 난다. `off`(기본)이면 `aim` 을 아예 안 보므로
+  기존 세대와 **비트 동일**하다. 5씬 스모크: free 4 seg -> 행 0 공유, `|emb| 0.000` / mask 0.
+  `cache_peav_embeddings.collect()` 가 `aim` 을 같이 실어 나르도록 한 줄 늘었다(기존 소비자는
+  이 키를 안 읽으므로 동작 동일).
+- **`scripts/data/cache_geo_raw_da3.py` 에 `SHARDS`/`SHARD` 샤딩 (2026-09-17).** 씬당 파일
+  하나라 샤드끼리 같은 파일을 안 건드린다. 10k 규모 코퍼스(D200 10,169씬 = ~432 GB)를 GPU
+  한 장으로 굽는 데 몇 시간이 걸려서 넣었다. 분할은 **정렬된 전체 목록** 위에서 하고
+  (skip-done 을 먼저 적용하면 재실행 때 경계가 흔들린다), 기본값 1/0 이면 기존 동작과 동일하다.
+- **D200 실험 yaml 5종 (`conf/experiment/dynpose_d200_*.yaml`).** `da3` /
+  `molmo2_da3`(prefill last) / `molmo2_l21_da3` / `molmo2_dec_da3`(decode last) /
+  `molmo2_dec_l21_da3`. 코퍼스는 d185+d199 pooled(씬당 상한 6, `--drop_status clamped_low` 만),
+  모델축은 D197 세대에서 글자 그대로 복사했다. molmo2 arm 넷은 `--joint` 로 구운 **같은
+  forward** 의 캐시를 읽으므로 움직인 축이 "읽는 자리 × 층" 둘뿐이다.
 - **`cache_molmo2_embeddings.py --decode_keep points --decode_points 49` — decode hidden 슬롯을
   "생성 토큰 순번"이 아니라 **영상 프레임**으로 바꾼다 (2026-09-16, D197-d2 사용자 지시
   "49프레임 다 나오도록").** `--decode_tokens` 만 주면 슬롯 t 는 t번째 생성 토큰이라 영상과

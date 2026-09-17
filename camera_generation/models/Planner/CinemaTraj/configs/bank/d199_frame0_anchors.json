@@ -1,0 +1,35 @@
+{
+  "_why": "D199 (사용자 지시 2026-09-17 \"목표는 scene 10k, 카메라 50k 부족하면 scene dynpose 더 채워줘\") — d185+d198 합산 실측이 **카메라 115,812 (목표 231%) / 씬 9,697 (목표 97%)** 였다. 모자란 건 카메라가 아니라 **씬**이고, 부족분 654씬은 전부 `out_dynpose` 에 graph 까지 있으면서 뱅크가 0개인 씬이다. 그래서 새 dynpose 를 ingest 하지 않고 **이미 있는 씬을 살린다**.",
+
+  "_d185가_빠뜨린_이유": "route 는 정상이었다 (실측: 01050159 에서 rc=0, 변이 5). 탈락은 그 다음 τ 뱅크 단계이고, `hole_bank_d185/skipped.json` 이 사유를 그대로 적어 뒀다 — `no_surviving_anchors`, `subject_area 0.0`. 즉 **route 가 고른 anchor 가 소스 frame 0 에서 안 보인다**. 01050159 의 dyn_0 은 49프레임 중 6프레임, dyn_1 은 19프레임만 보이는데 `pick_anchors` 는 `max_area_frac`(전 프레임 최대) 순으로 고르므로 '잠깐 크게 나왔다 사라지는' 노드가 1·2순위를 차지한다. 뱅크는 frame 0 기준으로 anchor 를 잡으므로 거기서 전량 탈락한다.",
+
+  "_고치는_한_줄": "`--anchor_require_frame0` (D181 에서 이미 구현, 기본 off). `track.frames` 에 프레임 0 이 없는 노드를 anchor 후보에서 뺀다. CPU 만으로 646씬 전량에 미리 돌려 본 실측: **571/646 씬이 frame0 가시 anchor 를 갖는다** (0개 75씬은 어떤 노드도 frame 0 에 없어서 이 세대로도 못 살린다). 9,697 + 571 = 최대 10,268씬 → 목표 10k 돌파.",
+
+  "_나머지는_d185와_비트_동일": "route 에 플래그 하나만 더 붙고 tau/fit/emit 은 d185 를 글자 그대로 물려받는다. 대상 씬이 d185 와 겹치지 않으므로(뱅크 0개인 씬만) 기존 코퍼스와 합칠 때 중복이 생기지 않는다.",
+
+  "_격리": "`route.out` = `preset_route_d199.json`, 세대 디렉토리 `bank_d199`/`hole_bank_d199`. d185 의 라우팅 파일·뱅크를 건드리지 않는다.",
+
+  "_실행": "screen d199s0~s5, GPU 2,3 (학습을 멈춰서 빈 카드다). `run_bank.py --config configs/bank/d199_frame0_anchors.json --videos tmp/d199/scenes_f0.txt --num_shards 6 --shard_id N --gpu {2|3} --skip_done`. D198 은 GPU 0,1 에서 계속 돈다.",
+
+  "extends": "d185_dynpose100k_grid5.json",
+  "generation": "d199",
+  "exec": "inproc",
+  "tau_bank_dir": "bank_d199",
+  "bank_dir": "hole_bank_d199",
+  "require_markers": [".graph_d182"],
+  "route": {
+    "out": "preset_route_d199.json",
+    "args": [
+      "--num_external", "0",
+      "--max_dynamic_anchors", "2", "--max_static_anchors", "2", "--max_anchors", "2",
+      "--min_anchor_sep", "2.0",
+      "--slot_plan", "grid2x2",
+      "--slot_pair_fill", "substitute",
+      "--free_moving", "rotate",
+      "--track_min_drift_u", "0.05",
+      "--target_variants", "5",
+      "--anchor_require_frame0",
+      "--skip_if_empty"
+    ]
+  }
+}

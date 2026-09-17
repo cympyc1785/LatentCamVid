@@ -7,6 +7,24 @@
 ## [Unreleased]
 
 ### Added
+- **`configs/bank/d199_frame0_anchors.json` + `tmp/d199/project_yield.py` (2026-09-17, 사용자
+  지시 "학습 멈추고 그냥 데이터 만들기 먼저해줘 목표는 scene 10k, 카메라 50k").** 목표 대비
+  실측(clamped_low 만 제외, free-aim 포함)은 **카메라 115,812 (231%) / 씬 9,697 (97%)** 로,
+  모자란 건 카메라가 아니라 **씬 303개**였다. 부족분 654씬은 새 dynpose 가 아니라 **이미
+  `out_dynpose` 에 graph 까지 있는데 뱅크가 0개인 씬**이다 (646씬이 `.graph_d182` 보유).
+  d185 가 이들을 빠뜨린 지점은 route 가 아니다 — 01050159 에 route 를 직접 돌리면 rc=0 / 변이 5
+  로 정상이고, 탈락은 그 다음 τ 뱅크이며 `hole_bank_d185/skipped.json` 이 사유를 그대로 적어
+  뒀다: `no_surviving_anchors`, `subject_area 0.0`. `pick_anchors` 가 `max_area_frac`(전 프레임
+  최대) 순으로 고르기 때문에 **'잠깐 크게 나왔다 사라지는' 노드**가 1·2순위를 먹고, 뱅크는
+  frame 0 기준으로 anchor 를 잡으므로 거기서 전량 탈락한다 (01050159 의 dyn_0 은 49프레임 중
+  6프레임, dyn_1 은 19프레임만 가시). 고침은 **`--anchor_require_frame0` 플래그 하나**
+  (D181 에서 이미 구현돼 있고 기본 off) — `track.frames` 에 프레임 0 이 없는 노드를 anchor
+  후보에서 뺀다. GPU 쓰기 전에 CPU 만으로 646씬 전량 사전실측: **571씬이 frame0 가시 anchor 를
+  갖는다** (0개인 75씬은 어떤 노드도 frame 0 에 없어 이 세대로도 못 살린다) → 9,697+571 =
+  최대 10,268씬으로 목표 돌파. smoke 3편 3/3 OK, 카메라 15/14/5대. tau/fit/emit 은 d185 를
+  글자 그대로 물려받고 세대 디렉토리만 `bank_d199`/`hole_bank_d199` 로 격리한다.
+  `project_yield.py` 는 뱅크 여러 개를 합쳤을 때의 씬·카메라 수를 **export 를 돌리지 않고**
+  `bank.json` 만으로 세는 도구다 — 목표까지 무엇을 더 구워야 하는지를 캡션 단계 전에 정한다.
 - **`sample_camera_bank.py --route_preset_override` + `configs/bank/d198_untried_presets.json`
   (2026-09-15, 사용자 요청 "시도해본 preset 말고 남는 preset 으로 돌려볼 수 있어").**
   라우팅(`route_presets.route`)은 슬롯 8개에 preset 을 하나씩 박고 방향(`away`/`toward`)은

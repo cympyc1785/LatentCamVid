@@ -33,6 +33,16 @@
 경로는 catmull-rom 스플라인이 아니라 **`add_line_segments` 생꺾은선**으로 그린다. 스플라인은
 지금 보려는 그 jitter 를 부드럽게 만들어 버린다.
 
+## target 카메라 여러 대 동시에 (`--pin` / GUI `pin current`)
+
+슬라이더는 **한 번에 한 대**라 "A 가 B 보다 더 도나 / 둘이 같은 자리에서 시작하나"를 못 본다 —
+갈아끼우는 순간 비교 대상이 사라지기 때문이다. pin 은 그 motion 을 고정 색으로 남겨서 활성
+motion(주황) 을 계속 바꿔도 화면에 살아 있게 한다. 각 pin 은 경로 선 + 전 프레임 프러스텀 +
+**현재 프레임 프러스텀(1.6배)** 셋을 같은 색으로 그리므로, frame 슬라이더를 밀면 pin 들이
+동시에 움직여 시점 차이가 눈에 보인다. 색은 `PIN_COLORS` 순환이고 `pinned` 패널이 색↔라벨
+대응을 적어 준다. 상한은 `--max_pins` (기본 8) — 프러스텀이 변이당 49/cam_stride 개라
+무제한으로 켜면 브라우저가 느려진다.
+
 같이 그리는 것: 소스 카메라 경로(회색) · plan 경로(주황) · subject track(초록, follow 의
 입력이라 여기가 떨면 카메라도 떤다). GUI 에 preset/gain/smooth/k 와 `jerk p95`(px/frame³,
 `|Δ³p|/z_med·fx` — 화면에서 실제로 몇 px 흔들리는지)를 같이 띄운다.
@@ -47,6 +57,8 @@
         --banks follow_smooth_bank notrack_bank worldaim_bank
     python scripts/viser_cloud.py --video snowboard --port 8084 \
         --bank follow_kf_bank --variant dyn_0__orbit_left_arc__tau0.35   # 예전 동작(1개 고정)
+    python scripts/viser_cloud.py --video snowboard --port 8084 --no_cloud \
+        --bank hole_bank_k6_d151 --pin orbit_left dolly_in truck_left    # 여러 대 동시에
 """
 import json
 import sys
@@ -74,6 +86,12 @@ PROBE_FOV_DEG = 60.0
 # 프레임(초록) 과 겹치지 않는 색만 골랐다.
 PROBE_COLORS = [(255, 60, 220), (60, 200, 255), (255, 210, 60), (150, 255, 120),
                 (255, 120, 60), (180, 140, 255)]
+
+# pin 된 target 카메라 색. 활성 motion(주황 255,140,40)·소스(회색)·subject track(초록)과
+# 겹치지 않는 색만 고른다 — pin 의 목적이 "여러 대를 한 화면에서 **구분**하는 것"이라
+# 팔레트가 겹치면 기능 자체가 무의미해진다. 개수를 넘기면 순환한다.
+PIN_COLORS = [(60, 200, 255), (255, 60, 220), (255, 230, 60), (150, 255, 120),
+              (180, 140, 255), (0, 160, 255), (255, 100, 100), (120, 255, 220)]
 
 
 def import_frustum_helpers(viewer_root: str):
@@ -270,6 +288,12 @@ def main():
     # motion 브라우저. 뱅크 여러 개를 통째로 올리고 슬라이더로 갈아끼운다. 비우면 --bank 한 개만
     # 고정으로 그리는 기존 동작 그대로 (--variant 필터는 두 경로 모두에 걸린다).
     parser.add_argument("--banks", nargs="*", default=[], type=str)
+    # 기동 직후부터 **동시에** 그려둘 target 카메라. 라벨 부분일치(OR)라 `--pin orbit_left
+    # dolly_in` 처럼 주면 맞는 변이를 전부 pin 한다. 띄운 뒤에는 GUI `motion > pin current`
+    # 로 늘리고 줄인다. 활성 motion(주황) 은 pin 과 별개로 계속 그려진다.
+    parser.add_argument("--pin", nargs="*", default=[], type=str)
+    # pin 상한. 프러스텀이 변이당 (49/cam_stride) 개라 무제한으로 켜면 브라우저가 느려진다.
+    parser.add_argument("--max_pins", default=8, type=int)
     # 점군을 빼고 카메라 선만 본다 — 떨림만 볼 때는 점군이 시야를 가리고 로딩도 느리다.
     parser.add_argument("--no_cloud", action="store_true")
     # scene_graph.json 의 OBB / 지면 격자 오버레이. `--no_obb` 를 주면 예전 동작 그대로다.
@@ -457,6 +481,11 @@ def main():
     # 현재 선택된 motion 의 handle 들. 갈아끼울 때 통째로 remove 한다 — 같은 이름으로 덮어쓰면
     # 프러스텀 수가 줄어들 때(다른 F) 이전 것이 남는다.
     state = {"handles": [], "now": [], "c2w": None, "label": "", "cams": []}
+    # pin 된 target 카메라들. {label: {"handles", "now", "c2w", "cams", "color"}}.
+    # 활성 motion(state) 과 **따로** 들고 있는 이유: 활성은 슬라이더로 계속 갈아끼우는 자리라
+    # 거기에 얹으면 pin 이 매번 지워진다. pin 은 갈아끼워도 남는 것이 존재 이유다.
+    pins = {}
+    pin_seq = {"n": 0}                       # 색 순환 카운터. 지웠다 다시 켜도 색이 안 겹치게.
 
     # 프러스텀 크기는 씬마다 맞는 값이 다르다 — camel 소스는 49프레임 경로가 0.167 u 뿐이라
     # 기본 0.03·z_med 로는 점군에 묻히고, 카메라가 크게 도는 씬에선 같은 값이 화면을 덮는다.
@@ -464,7 +493,8 @@ def main():
     # 들고 있어야 "현재 프레임" 프러스텀이 큰 구분이 슬라이더를 움직여도 유지된다.
     def apply_cam_scale():
         value = float(gui_cam.value)
-        for handle, ratio in src_cams + state["cams"]:
+        pin_cams = [pair for pin in pins.values() for pair in pin["cams"]]
+        for handle, ratio in src_cams + state["cams"] + pin_cams:
             handle.scale = value * ratio
 
     def select(index: int):
@@ -493,6 +523,47 @@ def main():
         apply_cam_scale()
         refresh()
 
+    def pin_node(label: str):
+        """라벨 -> viser 노드 경로. `/` 가 계층 구분자라 라벨의 `bank/variant` 를 그대로 못 쓴다."""
+        return "/pin/" + "".join(c if c.isalnum() or c in "_-" else "_" for c in label)
+
+    def add_pin(label: str):
+        """motion 하나를 고정 색으로 그려 두고 활성 motion 이 바뀌어도 남긴다."""
+        if label in pins or len(pins) >= int(args.max_pins):
+            return
+        index = [m[0] for m in motions].index(label)
+        _, plan_c2w, row = motions[index]
+        color = PIN_COLORS[pin_seq["n"] % len(PIN_COLORS)]
+        pin_seq["n"] += 1
+        node, plan_gl = pin_node(label), plan_c2w @ gl2cv
+        cams = list(add_frustums(server, node + "/cam", plan_gl, focal,
+                                 float(intrinsics[0, 1, 1]), width, height, color,
+                                 cam_scale, downsample=args.cam_stride))
+        # 현재 프레임 프러스텀만 1.6배로 크게 — pin 을 여러 대 켜면 선이 엉켜서 "이 변이가 지금
+        # 어디를 보고 있나"를 경로만으로는 못 읽는다. 같은 색이라 소속은 유지된다.
+        now = list(add_frustums(server, node + "/now", plan_gl[:1], focal,
+                                float(intrinsics[0, 1, 1]), width, height, color, cam_scale * 1.6))
+        line = server.scene.add_line_segments(
+            node + "/path", path_segments(plan_c2w[:, :3, 3]), colors=color,
+            thickness=cam_scale * 0.10)
+        pins[label] = {"handles": cams + now + [line], "now": now, "c2w": plan_c2w,
+                       "cams": [(h, 1.0) for h in cams] + [(h, 1.6) for h in now],
+                       "color": color, "row": row}
+        apply_cam_scale()
+
+    def remove_pin(label: str):
+        pin = pins.pop(label, None)
+        if pin is None:
+            return
+        for handle in pin["handles"]:
+            handle.remove()
+
+    def pin_report():
+        if not pins:
+            return "(pin 없음 — pin current)"
+        return "\n".join(f"#{c[0]:3d},{c[1]:3d},{c[2]:3d}  {lab}"
+                         for lab, c in ((k, v["color"]) for k, v in pins.items()))
+
     with server.gui.add_folder("motion"):
         # 슬라이더와 드롭다운은 같은 select() 를 부른다. 서로를 갱신하므로 재진입 가드를 둔다 —
         # 안 두면 슬라이더->드롭다운->슬라이더로 콜백이 한 번 더 돈다.
@@ -502,6 +573,13 @@ def main():
                                            initial_value=(motions[0][0] if motions else "-"),
                                            disabled=not motions)
         gui_info = server.gui.add_text("info", initial_value="", multiline=True, disabled=True)
+        # pin: 활성 motion 을 갈아끼워도 남는 target 카메라. 슬라이더 하나로는 "A 와 B 중 어느
+        # 쪽이 더 도나"를 못 본다 — 갈아끼우는 순간 비교 대상이 사라지기 때문이다.
+        gui_pin_add = server.gui.add_button("pin current")
+        gui_pin_del = server.gui.add_button("unpin current")
+        gui_pin_clear = server.gui.add_button("clear pins")
+        gui_pin_info = server.gui.add_text("pinned", initial_value="", multiline=True,
+                                           disabled=True)
 
     with server.gui.add_folder("view"):
         gui_frame = server.gui.add_slider("frame", min=0, max=num_frames - 1, step=1, initial_value=0)
@@ -563,6 +641,8 @@ def main():
         if state["now"]:
             state["now"][0].wxyz, state["now"][0].position = _pose(
                 state["c2w"][f] @ gl2cv, gl2cv)
+        for pin in pins.values():
+            pin["now"][0].wxyz, pin["now"][0].position = _pose(pin["c2w"][f] @ gl2cv, gl2cv)
 
     guard = {"busy": False}
 
@@ -576,6 +656,26 @@ def main():
             select(index)
         finally:
             guard["busy"] = False
+
+    def pin_current(_event=None):
+        if motions:
+            add_pin(motions[int(gui_motion.value) % len(motions)][0])
+            gui_pin_info.value = pin_report()
+            refresh()
+
+    def unpin_current(_event=None):
+        if motions:
+            remove_pin(motions[int(gui_motion.value) % len(motions)][0])
+            gui_pin_info.value = pin_report()
+
+    def clear_pins(_event=None):
+        for label in list(pins):
+            remove_pin(label)
+        gui_pin_info.value = pin_report()
+
+    gui_pin_add.on_click(pin_current)
+    gui_pin_del.on_click(unpin_current)
+    gui_pin_clear.on_click(clear_pins)
 
     gui_motion.on_update(lambda _: switch(gui_motion.value))
     gui_pick.on_update(lambda _: switch([m[0] for m in motions].index(gui_pick.value)))
@@ -721,6 +821,18 @@ def main():
     else:
         refresh()
 
+    # `--pin` 은 라벨 부분일치 **OR** 다 (--variant 의 AND 와 다르다). 여기서 OR 인 이유는
+    # pin 의 쓰임이 "서로 다른 것 여러 개를 한 화면에" 라서다 — AND 로 걸면 한 종류만 남는다.
+    if args.pin:
+        picked = [m[0] for m in motions
+                  if any(token in m[0] for token in args.pin)][:int(args.max_pins)]
+        for label in picked:
+            add_pin(label)
+        gui_pin_info.value = pin_report()
+        refresh()
+        if not picked:
+            print(f"[pin] {args.pin} 에 맞는 변이가 0개 — pin 없이 띄운다")
+
     rows = [("video", args.video), ("frames", num_frames), ("points total", len(points)),
             ("static shown", f"{len(static_pick):,} / {len(static_idx):,}"),
             ("dynamic/frame", f"{int(np.median(dyn_counts) if dyn_counts else 0):,} (median)"),
@@ -730,7 +842,9 @@ def main():
             ("up", args.up), ("banks", " ".join(banks) or "-"),
             ("obb nodes", " ".join(f"{i}({'dyn' if m else 'stat'})" for i, _, m in graph_rows)
              or "-"),
-            ("motions", len(motions)), ("source jerk p95", f"{src_jerk:.2f} px/f3"),
+            ("motions", len(motions)),
+            ("pinned", f"{len(pins)} / {args.max_pins}  (GUI motion > pin current)"),
+            ("source jerk p95", f"{src_jerk:.2f} px/f3"),
             ("url", f"http://localhost:{args.port}")]
     width_key = max(len(k) for k, _ in rows)
     for key, value in rows:

@@ -31,6 +31,18 @@
   학습 중 val 씬 수 27 -> 100.
 
 ### Added
+- **`viser_cloud.py` target 카메라 여러 대 동시 표시 — `--pin` / GUI `pin current`
+  (2026-09-18, 사용자 "target 카메라 여러개 띄워서 볼 수 있게").** 지금까지 plan 카메라는
+  `motion` 슬라이더로 **한 번에 한 대**라, 갈아끼우는 순간 비교 대상이 사라져 "A 가 B 보다 더
+  도나 / 둘이 같은 자리에서 시작하나"를 볼 수가 없었다. pin 은 그 motion 을 `PIN_COLORS` 순환
+  색으로 `/pin/<slug>` 에 남겨 활성 motion(주황) 을 계속 바꿔도 화면에 살아 있게 한다.
+  pin 하나당 경로 선 + 전 프레임 프러스텀 + **현재 프레임 프러스텀(1.6배)** 셋을 같은 색으로
+  그리고, `frame` 슬라이더가 pin 들의 현재 프레임 프러스텀을 **동시에** 옮긴다 — 경로만으로는
+  "이 변이가 지금 어디를 보나"를 못 읽기 때문이다. `--pin` 은 라벨 부분일치 **OR** 이고
+  (`--variant` 의 AND 와 다르다 — pin 의 쓰임이 "서로 다른 것 여러 개"라 AND 면 한 종류만
+  남는다), 상한은 `--max_pins` 기본 8 (프러스텀이 변이당 49/`cam_stride` 개라 무제한이면
+  브라우저가 느려진다). GUI 는 `pin current` / `unpin current` / `clear pins` + 색↔라벨 대응을
+  적는 `pinned` 패널. 기존 `--bank` / `--banks` / `--variant` 동작은 그대로다.
 - **`scripts/vista4d_bank_to_dl3dv.py --bank_dirs / --per_scene_cap` + 새 드라이버
   `scripts/run_corpus_export.py` (2026-09-17, D200).** 뱅크 **여러 세대를 한 코퍼스로** 붓는다.
   씬마다 각 세대의 변이를 한 통에 모으고 `pick_key`(track 먼저 → `plan_tier` → grade →

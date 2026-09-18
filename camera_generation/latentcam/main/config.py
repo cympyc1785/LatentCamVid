@@ -148,6 +148,11 @@ class Config:
         t5_checkpoint_dir = "/data1/cympyc1785/LatentCamVid/video_generation/models/DiffSynth-Studio/Wan-AI/Wan2.2-TI2V-5B"
         t5_checkpoint_path = 'models_t5_umt5-xxl-enc-bf16.pth'
         t5_tokenizer_path = 'google/umt5-xxl'
+        # [new 2026-09-19] umt5 prefill 캐시 (`cache_umt5_embeddings.py`). None = 예전 그대로
+        # 매 스텝 인코더를 돈다. 캐시를 주면 `CachedT5TextEmbeddings` 가 대신 조회하고,
+        # 캐시에 없는 캡션만 원래 인코더로 넘어간다 (결과는 같고 miss 는 로그에 남는다).
+        text_emb_cache_path = None
+        text_emb_cache_mmap = True      # arm 끼리 page cache 를 공유한다 (9.6 GB × N 방지)
     elif text_encoder == 'CLIP':
         clip_repo_name = 'hf-hub:UCSC-VLAA/ViT-L-16-HTxt-Recap-CLIP'
 
@@ -262,6 +267,10 @@ class Config:
     geo_raw_cache_dir = None
     geo_raw_cache_preload = True    # scene 파일 전량을 __init__ 에서 RAM 에 올린다 (fork 공유)
     geo_raw_cache_mmap = False      # [new 2026-09-18, D200] 그 적재를 mmap 으로 (arm 끼리 공유)
+    # [new 2026-09-19] 캐시가 어느 dtype 으로 구워졌는지. 'float32' (기본) = 예전 그대로 —
+    # 다른 dtype 은 낡은 캐시로 보고 조용히 무시한다. 'bfloat16' 으로 두면 bf16 캐시를
+    # 그대로 받아 collate 의 memcpy 를 절반으로 줄인다 (소비 지점이 이미 `.float()` 한다).
+    geo_raw_cache_dtype = 'float32'
     # [new] per-context-view camera embedding channel-concatenated onto the geo tokens.
     # None = OFF (geo condition stays the plain (M, 768) LagerNVS tokens). 'relfirst' = 11-d pose
     # of each context view relative to the target's FIRST camera (trans / norm_scale), appended

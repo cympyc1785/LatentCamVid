@@ -3,6 +3,7 @@
 import logging
 import math
 
+import numpy as np
 import torch
 import torch.nn as nn
 import torch.nn.functional as F
@@ -512,3 +513,98 @@ class T5EncoderModel:
         seq_lens = mask.gt(0).sum(dim=1).long()
         context = self.model(ids, mask)
         return context, mask
+
+
+class CachedT5TextEmbeddings:
+    """[new 2026-09-19] `cache_umt5_embeddings.py` 가 구운 prefill 캐시를 읽는 T5 대역.
+
+    WHY: umt5 는 frozen 이고 캡션은 세그먼트 붙박이라 같은 문자열의 forward 를 epoch 마다
+    되풀이한다. D200 스텝 계측에서 그 forward 가 42~48 ms (arm ① 15.0%) 로 denoiser forward
+    보다 컸다. 캐시가 있으면 테이블 조회 + 패딩으로 끝난다.
+
+    `T5EncoderModel.__call__` 과 **같은 시그니처/같은 반환**이라 호출부는 안 바뀐다:
+      (texts: list[str], device) -> (context (B,text_len,dim) bf16, mask (B,text_len) int).
+
+    캐시는 유효 토큰만 이어 붙인 ragged 라 (`emb`+`offsets`) 여기서 0 패딩해 슬롯을 채운다.
+    padding 자리는 어차피 `key_padding_mask=~text_mask` 로 지워진다
+    (`camera_diffusion_model_latent.py:385`) — 원래 경로에서도 그 자리는 쓰이지 않는 값이었다.
+
+    **miss 는 죽지 않는다.** 캐시에 없는 문자열은 `fallback` (진짜 `T5EncoderModel`) 으로
+    그 자리에서 인코딩하고 첫 miss 때 한 번만 경고한다. fallback 이 None 이면 KeyError.
+    """
+
+    def __init__(self, cache_path, fallback=None, text_len=None, mmap=True, device=None):
+        obj = None
+        if mmap:
+            try:
+                obj = torch.load(cache_path, map_location='cpu', weights_only=False, mmap=True)
+            except Exception as e:                  # torch<2.1 이거나 legacy 직렬화
+                logging.warning(f'[umt5 cache] mmap 실패 -> 전량 적재 ({e})')
+        if obj is None:
+            obj = torch.load(cache_path, map_location='cpu', weights_only=False)
+        assert obj.get('format') == 'umt5_text_cache_v1', obj.get('format')
+        self.by_text = obj['by_text']
+        self.emb = obj['emb']                       # (sum_L, dim) bf16, mmap 이면 lazy
+        self.offsets = obj['offsets']
+        self.lens = obj['lens']
+        self.dim = int(obj['dim'])
+        self.cache_text_len = int(obj['text_len'])
+        self.text_len = int(text_len or self.cache_text_len)
+        self.fallback = fallback
+        self.dtype = self.emb.dtype
+        # [2026-09-19] 복사는 **numpy 뷰**로 한다 (FIX-D200-d). ATen 의 CPU copy_ 는
+        # numel > 32768 이면 at::parallel_for 로 넘어가고, 이 기계는 OMP 스레드가 124개라
+        # 25x4096 (=102,400) 짜리 한 줄을 복사하는 데 스레드 디스패치만 ~17 ms 든다
+        # (batch 8 = 140 ms; 같은 복사를 1스레드로 하면 2.4 ms). bf16 은 numpy dtype 이
+        # 없으므로 같은 2바이트인 int16 으로 봐서 **비트 그대로** memcpy 한다.
+        # 출력 버퍼도 `torch.zeros` 대신 `np.zeros` 로 잡는다 — 같은 이유로 4.2 M 원소
+        # 0-fill 이 parallel_for 로 넘어간다 (그쪽만 고치면 15 ms 가 남는다).
+        self._int_dtype = {2: torch.int16, 4: torch.int32}.get(self.emb.element_size())
+        assert self._int_dtype is not None, f'지원 안 하는 캐시 dtype: {self.dtype}'
+        self._np_dtype = {2: np.int16, 4: np.int32}[self.emb.element_size()]
+        self._emb_np = self.emb.view(self._int_dtype).numpy()
+        self.n_hit = 0
+        self.n_miss = 0
+        self._miss_warned = False
+        # 캐시보다 긴 슬롯을 요구하면 유효 토큰은 그대로지만 truncation 경계가 다르다.
+        if self.text_len > self.cache_text_len:
+            logging.warning(f'[umt5 cache] cfg.text_len={self.text_len} > 캐시 '
+                            f'{self.cache_text_len} — 캐시는 그 길이로 잘려 구워졌다')
+        print(f"[umt5 cache] {cache_path}: {len(self.by_text)} captions, "
+              f"emb {tuple(self.emb.shape)} {self.emb.dtype}, text_len {self.text_len} "
+              f"(baked {self.cache_text_len}), mmap={mmap}", flush=True)
+
+    def __call__(self, texts, device):
+        if isinstance(texts, str):
+            texts = [texts]
+        B, L, D = len(texts), self.text_len, self.dim
+        ctx_np = np.zeros((B, L, D), dtype=self._np_dtype)   # 위 __init__ 주석 참조
+        ctx = torch.from_numpy(ctx_np).view(self.dtype)      # 같은 메모리, dtype 만 되돌림
+        mask = torch.from_numpy(np.zeros((B, L), dtype=np.int64))
+        miss = []
+        for b, t in enumerate(texts):
+            i = self.by_text.get(t)
+            if i is None:
+                miss.append(b)
+                continue
+            n = min(int(self.lens[i]), L)
+            o = int(self.offsets[i])
+            ctx_np[b, :n] = self._emb_np[o:o + n]
+            mask[b, :n] = 1
+        self.n_hit += B - len(miss)
+        if miss:
+            self.n_miss += len(miss)
+            if not self._miss_warned:
+                self._miss_warned = True
+                print(f"[umt5 cache] MISS {len(miss)}/{B} — fallback 인코더로 처리한다 "
+                      f"(예: {texts[miss[0]][:80]!r})", flush=True)
+            if self.fallback is None:
+                raise KeyError(f'umt5 캐시에 없는 캡션이고 fallback 이 없다: {texts[miss[0]]!r}')
+            fc, fm = self.fallback([texts[b] for b in miss], device)
+            fc = fc.to(self.dtype).cpu()
+            fm = fm.cpu()
+            n = min(L, fc.shape[1])
+            for j, b in enumerate(miss):
+                ctx[b, :n] = fc[j, :n]
+                mask[b, :n] = fm[j, :n]
+        return ctx.to(device), mask.to(device)

@@ -513,6 +513,14 @@ def train():
             checkpoint_path=os.path.join(cfg.t5_checkpoint_dir, cfg.t5_checkpoint_path),
             tokenizer_path=os.path.join(cfg.t5_checkpoint_dir, cfg.t5_tokenizer_path),
             shard_fn=None)
+        # [new 2026-09-19] prefill 캐시가 있으면 조회로 대체한다. 원래 인코더는 **살려 둔 채**
+        # fallback 으로 넘겨서, 캐시에 없는 캡션이 와도 결과가 달라지지 않게 한다.
+        # cfg.text_emb_cache_path 가 null 이면 이 줄은 아무 일도 안 한다 (예전 동작 그대로).
+        if getattr(cfg, 'text_emb_cache_path', None):
+            from models.t5 import CachedT5TextEmbeddings
+            text_encoder = CachedT5TextEmbeddings(
+                cfg.text_emb_cache_path, fallback=text_encoder, text_len=cfg.text_len,
+                mmap=bool(getattr(cfg, 'text_emb_cache_mmap', True)))
     elif cfg.text_encoder == 'CLIP':
         from core_pkg.common.utils.clip_utils import get_model, encode_text_clip
         text_encoder, tokenizer = get_model(cfg.clip_repo_name, device=device)

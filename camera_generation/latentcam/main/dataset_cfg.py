@@ -505,7 +505,8 @@ def resolve_dataset_cfg(cfg, verbose=True):
                 say("[geo raw cache] WARNING: da3_cam_token_per_sample=false -> 캐시(B=1)와 "
                     "on-the-fly 폴백(B=batch_size)이 rel 2.3e-2 갈린다. true 로 켤 것")
             say(f"[geo raw cache] reading {geo_raw_cache_dir}/<scene_key>.pt "
-                f"(pre-ln (V,P,C) fp32; miss -> on-the-fly DA3). ln/proj 는 그대로 학습된다")
+                f"(pre-ln (V,P,C) {getattr(cfg, 'geo_raw_cache_dtype', None) or 'float32'}; "
+                f"miss -> on-the-fly DA3). ln/proj 는 그대로 학습된다")
     else:
         geo_raw_cache_dir = None
 

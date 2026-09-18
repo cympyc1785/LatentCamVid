@@ -55,6 +55,8 @@ clatr_ckpt_path: /data1/cympyc1785/LatentCamVid/camera_generation/latentcam/chec
 clatr_standardization: dynpose49_d200
 
 text_len: 128   # D200 da3 arm 과 동일.
+# [new 2026-09-19] umt5 prefill 캐시 — da3 arm 과 같은 파일 (캡션이 같은 코퍼스라 공유한다).
+text_emb_cache_path: /data1/cympyc1785/data/DynPose-LBM/latentcam_dynpose_d200/umt5_cache/text_len128.pt
 
 pose_source: da3
 target_pose_source: da3_target_poses
@@ -75,8 +77,10 @@ da3_geo_layers: last
 geo_view_sampling: context_uniform
 geo_num_views: 6
 geo_first_view_target_s: true
-geo_raw_cache_dir: /data1/cympyc1785/data/DynPose-LBM/latentcam_dynpose_d200/geo_raw_cache_da3
-geo_raw_cache_mmap: true         # 403 GB 캐시 — arm 마다 RAM 한 벌이면 4개에 1,612 GB (FIX 참조)
+# [2026-09-19] fp32 -> bf16 재굽기 (`convert_geo_raw_cache.py`). da3 arm 과 같은 디렉토리.
+geo_raw_cache_dir: /data1/cympyc1785/data/DynPose-LBM/latentcam_dynpose_d200/geo_raw_cache_da3_bf16
+geo_raw_cache_mmap: true         # 202 GB 캐시 — arm 마다 RAM 한 벌이면 4개에 806 GB (FIX 참조)
+geo_raw_cache_dtype: bfloat16    # 없으면 loader 가 "낡은 bf16 캐시"로 보고 전량 무시한다 (FIX-D200)
 da3_cam_token_per_sample: true
 
 anchor_pred_frame0: true

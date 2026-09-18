@@ -202,6 +202,11 @@ t5_dtype: bfloat16
 t5_checkpoint_dir: /data1/cympyc1785/LatentCamVid/video_generation/models/DiffSynth-Studio/Wan-AI/Wan2.2-TI2V-5B
 t5_checkpoint_path: models_t5_umt5-xxl-enc-bf16.pth
 t5_tokenizer_path: google/umt5-xxl
+# [new 2026-09-19] umt5 prefill 캐시 (`main/cache_umt5_embeddings.py` 가 굽는다).
+# null = 예전 그대로 매 스텝 umt5 forward. 경로를 주면 `models/t5.py:CachedT5TextEmbeddings` 가
+# 캡션 문자열로 조회하고, 캐시에 없는 문자열만 원래 인코더로 넘긴다(결과 동일 + miss 로그).
+text_emb_cache_path: null
+text_emb_cache_mmap: true
 point_encoder: concerto
 # ===== DL3DV data + geo (scene-image) conditioning (latentcam additions beyond the
 # original SCVideo text->camera config; [new] = added after config.py) =====
@@ -485,6 +490,15 @@ geo_raw_cache_preload: true   # __init__ 에서 전량 RAM 적재 (fork 로 work
 # (mmap 뒤 close; 10,169 파일 -> ~20k vma, max_map_count 65,530 이내).
 # 대신 첫 접근이 page fault 라 Lustre read 가 샘플 단위로 흩어진다 — 캐시가 데워지면 사라진다.
 geo_raw_cache_mmap: false
+# [new 2026-09-19] 이 캐시가 **어느 dtype 으로 구워졌는지**. float32(기본) = 예전 그대로이고,
+# 다른 dtype 파일은 "낡은 bf16 캐시"로 보고 조용히 무시한다 (그 판정이 원래 하드코딩이었다).
+# bfloat16 으로 두면 bf16 캐시를 그대로 받는다. 왜: D200 은 step 의 62%가 loader 이고 그 안의
+# 96%가 (V=6,P=576,C=3072) fp32 텐서 42 MB 를 collate 에서 stack + shm 으로 두 번 복사하는
+# 비용이다. bf16 이면 그 두 memcpy 가 절반이 되고, 소비 지점(train_latent_cam_dm.py:77,
+# infer_validation_sample.py:95)이 이미 `.to(device).float()` 이라 배선은 안 바뀐다.
+# 대신 fp32 on-the-fly 와 **비트 동일하지 않다** (실측 상대오차 3.3e-3, bf16 상한 3.9e-3).
+# 재굽기는 `main/convert_geo_raw_cache.py` (재추론이 아니라 순수 캐스트).
+geo_raw_cache_dtype: float32
 # [new 2026-09-06, D144] geo 토큰 per-view resampler. null = OFF = 예전 경로와 **비트 동일**
 # (모듈 자체를 안 만들므로 state_dict 키도 안 늘어난다).
 #   'perceiver' -> models/da3_geo_encoder.PerViewResampler 가 (B,V,P,3072) 을 (B,V,R,D) 로

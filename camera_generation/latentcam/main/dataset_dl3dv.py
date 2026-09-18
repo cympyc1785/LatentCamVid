@@ -364,6 +364,19 @@ class CamDataset(torch.utils.data.Dataset):
         scene 파일 52개를 공유한다."""
         return data_name.rsplit('_', 1)[0]
 
+    def _geo_raw_dtype(self):
+        """이 캐시가 어느 dtype 으로 구워졌다고 보는가. 기본 float32 = 예전 그대로.
+
+        [new 2026-09-19] 이 판정은 원래 `torch.float32` 하드코딩이었다 — bf16 파일이 보이면
+        "낡은 캐시"로 보고 전량 무시하고 on-the-fly DA3 로 떨어졌다. D200 에서 loader 비용을
+        반으로 줄이려고 bf16 으로 다시 구우면서 설정값으로 뺐다 (`geo_raw_cache_dtype`).
+        bf16 을 고르면 fp32 on-the-fly 와 비트 동일하지 않다 (실측 상대오차 3.3e-3)."""
+        d = getattr(self.cfg, 'geo_raw_cache_dtype', None) or 'float32'
+        t = getattr(torch, d, None)
+        if not isinstance(t, torch.dtype):
+            raise ValueError(f"geo_raw_cache_dtype={d!r} 은 torch dtype 이 아니다")
+        return t
+
     def _preload_geo_raw(self):
         """캐시 파일 전량을 __init__ 에서 올린다.
 
@@ -377,6 +390,7 @@ class CamDataset(torch.utils.data.Dataset):
         mmap 이면 page cache 한 벌을 arm 끼리 공유하고 압박 시 커널이 OOM 대신 회수한다."""
         keys = sorted({self.geo_raw_key(s[4]) for s in self.samples})
         mm = bool(getattr(self, 'geo_raw_cache_mmap', False))
+        want = self._geo_raw_dtype()
         hit, nbytes, badt = 0, 0, 0
         for k in keys:
             p = osp.join(self.geo_raw_cache_dir, f'{k}.pt')
@@ -384,20 +398,21 @@ class CamDataset(torch.utils.data.Dataset):
                 continue
             c = torch.load(p, map_location='cpu', weights_only=False, mmap=mm) if mm \
                 else torch.load(p, map_location='cpu', weights_only=False)
-            if c['raw'].dtype != torch.float32:
-                # bf16 로 굽던 시절의 낡은 캐시. 조용히 쓰면 on-the-fly 와 1.8e-3 만큼 갈린다.
+            if c['raw'].dtype != want:
+                # 설정과 다른 dtype 으로 구워진 캐시. 조용히 쓰면 기대한 경로와 갈린다.
                 # dtype 은 헤더만 보므로 mmap 이어도 페이지를 건드리지 않는다.
                 badt += 1
                 continue
             self._geo_raw_mem[k] = c
             hit += 1; nbytes += c['raw'].numel() * c['raw'].element_size()
         print(f"[geo raw cache] {'mmap 매핑' if mm else 'preloaded'} {hit}/{len(keys)} scenes "
-              f"({nbytes / 1e9:.2f} GB{' — page cache 공유, RSS 아님' if mm else ''}) "
-              f"from {self.geo_raw_cache_dir}"
+              f"({nbytes / 1e9:.2f} GB{' — page cache 공유, RSS 아님' if mm else ''}, "
+              f"dtype {str(want).replace('torch.', '')}) from {self.geo_raw_cache_dir}"
               + ("" if hit == len(keys) else "  <- 나머지는 on-the-fly DA3"))
         if badt:
-            print(f"[geo raw cache] WARNING: {badt} scene 이 fp32 가 아니라 무시했다 "
-                  f"(cache_geo_raw_da3.py 로 다시 구울 것 — 같은 디렉토리에 덮어쓴다)")
+            print(f"[geo raw cache] WARNING: {badt} scene 이 {str(want).replace('torch.', '')} 가 "
+                  f"아니라 무시했다 (geo_raw_cache_dtype 을 맞추거나 convert_geo_raw_cache.py 로 "
+                  f"다시 구울 것)")
 
     # ---- PE-AV 캐시 (video = scene 키 / text = segment 키) ------------------------------
     def _peav_scope(self):
@@ -1704,13 +1719,15 @@ class CamDataset(torch.utils.data.Dataset):
                 _p = osp.join(self.geo_raw_cache_dir, f'{_k}.pt')
                 if osp.exists(_p):
                     _c = torch.load(_p, map_location='cpu', weights_only=False)
-                    if _c['raw'].dtype != torch.float32:
-                        _c = None       # 낡은 bf16 캐시 -> on-the-fly (preload 경로와 같은 판정)
+                    if _c['raw'].dtype != self._geo_raw_dtype():
+                        _c = None       # dtype 불일치 -> on-the-fly (preload 경로와 같은 판정)
             if _c is not None:
-                # fp32 그대로 넘긴다. autocast(bf16) 아래서도 backbone 의 residual stream 은
-                # fp32 라 on-the-fly 출력이 fp32 다 — bf16 으로 내리면 ||d||/||a|| 1.8e-3 만큼
-                # 캐시 경로가 갈린다 (da3_geo_encoder.encode_raw docstring 참조).
-                out['geo_raw'] = _c['raw']                 # (V, P, C) fp32
+                # 구워진 dtype 그대로 넘긴다. 기본(fp32)에서는 예전과 글자 그대로 같다 —
+                # autocast(bf16) 아래서도 backbone 의 residual stream 은 fp32 라 on-the-fly
+                # 출력이 fp32 이고, bf16 으로 내리면 ||d||/||a|| 1.8e-3 만큼 갈린다
+                # (da3_geo_encoder.encode_raw docstring 참조). `geo_raw_cache_dtype` 으로
+                # bf16 을 고른 arm 은 그 차이를 감수하고 collate memcpy 를 반으로 줄인 것이다.
+                out['geo_raw'] = _c['raw']                 # (V, P, C) — geo_raw_cache_dtype
                 if self.geo_return_idxs:
                     self._attach_geo_ctx(out, scene_idx, _c['geo_idxs'].tolist())
                 return out

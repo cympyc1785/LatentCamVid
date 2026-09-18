@@ -5,6 +5,26 @@ All notable changes to the latentcam sub-project. Follows [Keep a Changelog](htt
 ## [Unreleased]
 
 ### Added
+- **umt5 prefill 캐시 (`main/cache_umt5_embeddings.py` + `text_emb_cache_path`) (2026-09-19).**
+  `step_timing` 이 잡아낸 두 번째 비용 — umt5 forward 가 arm ① 42.5 ms (15.0%) / arm ②
+  48.2 ms (10.0%) 로 **denoiser forward 보다 컸다**. 인코더는 frozen 이고 캡션은 세그먼트
+  붙박이라 epoch 마다 같은 문자열을 다시 돌고 있었다.
+  - 빌더는 캡션을 **인덱스 캐시**(`.latentcam_index/*.pt` 의 samples 4번째 원소 = 데이터셋이
+    실제로 쓰는 문자열)에서 긁고, 유효 토큰만 이어 붙인 ragged bf16 으로 저장한다
+    (`emb (sum_L,4096)` + `offsets`). d200 실측: 51,610 캡션 → **43,252 고유**, 평균 22.7 tok.
+    128 슬롯을 다 채우면 27 GB 인데 ragged 는 **9.6 GB** — 나머지는 어차피
+    `key_padding_mask=~text_mask` 로 지워지는 자리다.
+  - 읽기는 `models/t5.py:CachedT5TextEmbeddings` — `T5EncoderModel` 과 **같은 시그니처/같은
+    반환**이라 호출부는 안 바뀐다. `text_emb_cache_path: null` (기본) 이면 이 코드는 아예 안
+    돌아 예전 경로 그대로다. 캐시에 없는 캡션은 **원래 인코더(fallback)로 그 자리에서**
+    인코딩하고 첫 miss 만 로그에 남긴다 — 캐시 부족으로 학습이 죽거나 결과가 달라지지 않는다.
+  - 유효 토큰 값은 패딩 길이와 무관하다 (umt5 는 절대 위치 임베딩이 없고 padding key 는
+    마스크로 지워진다). 즉 캐시 경로는 **유효 구간에서 기존 경로와 같은 값**이다.
+- **`main/convert_geo_raw_cache.py`: geo raw 캐시 dtype 재굽기 (2026-09-19).**
+  `geo_raw_cache_dir` 의 `raw` 텐서를 다른 dtype 으로 캐스팅해 새 디렉토리에 다시 쓴다.
+  **DA3 재추론이 아니다** — 파일 안의 feature 를 dtype 만 바꿔 복사한다 (`geo_idxs`/`meta` 는
+  그대로). 8워커 실측 10,169편 **5.8분**, fp32 403 GB → bf16 **201.1 GiB** (err 0).
+  `--stage verify` 는 개수·키·dtype 전량 + 표본 값 대조를 돌린다.
 - **`step_timing`: 학습 스텝의 단계별 실측 시간 (기본 off) (2026-09-18).**
   "왜 이리 느린가"를 추측이 아니라 숫자로 답하기 위한 진단 스위치. `conf/config.yaml` 의
   `step_timing: 0` 이면 측정 코드가 아예 안 돌아 기존 run 과 동작·속도가 같다. `N>0` 이면
@@ -22,6 +42,33 @@ All notable changes to the latentcam sub-project. Follows [Keep a Changelog](htt
   - py-spy 워커 스택 분해(8 워커): `collate_fn (base.py:189)` = `torch.stack` 56.4%,
     `_share_fd_cpu_ (torch/storage.py:526)` 40.6%, **`np.load` 0.1%**. 병목은 디스크가 아니라
     `geo_raw` fp32 캐시(씬당 42.5 MB, 배치 8 = 340 MB)의 **메모리 복사 2회**다.
+- **`geo_raw_cache_dtype` 설정값 (기본 `float32`) (2026-09-19).**
+  캐시를 어느 dtype 으로 구웠다고 볼지 고른다. 기본값은 예전과 **글자 그대로 같다**.
+  `bfloat16` 으로 두면 bf16 캐시를 그대로 받아 collate 의 memcpy 를 절반으로 줄인다
+  (소비 지점이 이미 `.to(device).float()` 이라 텐서는 그대로 통과한다). D200 두 arm
+  yaml 에 배선했다 — 나머지 3 arm 은 `dynpose_d200_molmo2_da3` 를 defaults 로 물려받는다.
+  ⚠ bf16 을 고른 arm 은 fp32 on-the-fly 와 **비트 동일하지 않다** (실측 상대오차 3.3e-3).
+
+### Fixed
+- **bf16 geo raw 캐시를 loader 가 전량 무시했다 (FIX-D200-c) (2026-09-19).**
+  `dataset_dl3dv.py` 의 두 곳(`_preload_geo_raw`, `__getitem__` lazy 경로)이
+  `c['raw'].dtype != torch.float32` 로 fp32 를 하드코딩하고 있어, 손잡이 A 로 다시 구운
+  202 GiB 캐시를 통째로 버리고 10,169 scene 전부를 on-the-fly DA3 로 돌렸다. 학습은 죽지
+  않고 **느려지기만** 해서 tqdm 만 보면 안 잡힌다. `_geo_raw_dtype()` 로 판정을 통일하고
+  위 `geo_raw_cache_dtype` 를 따르게 했다. `dataset_cfg.py` 의 기동 print 도 실제 dtype 을
+  찍도록 고쳤다 (전에는 무조건 "fp32" 라고 적었다).
+- **umt5 prefill 캐시가 인코더보다 느렸다 — OMP 스레드 124개 (FIX-D200-d) (2026-09-19).**
+  캐시를 켜자 `text_vae` 가 42.5 → 106.6 ms 로 **커졌다**. 캐시 miss(0건)·GPU 경합·비동기
+  계측·Lustre I/O 를 차례로 배제했다 (8.2 GiB 를 RAM 에 전량 올려도 같은 105 ms).
+  범인은 `CachedT5TextEmbeddings.__call__` 의 텐서 복사다 — ATen 의 CPU `copy_`/`zero_` 는
+  numel > 32768 이면 `at::parallel_for` 로 넘어가는데 이 기계는 `torch.get_num_threads()` 가
+  **124** 라, 25×4096 한 줄을 복사하는 비용이 memcpy 가 아니라 **스레드 디스패치**다
+  (같은 호출을 `set_num_threads(1)` 로 재면 139.43 → 2.40 ms).
+  `models/t5.py` 에서 할당(`np.zeros`)과 복사를 numpy 로 돌렸다 — bf16 은 numpy dtype 이
+  없으므로 같은 2바이트 int16 으로 view 해 **비트 그대로** memcpy 한다. 결과 warm median
+  **1.75 ms**, 무작위 캡션 2.46 ms, 출력 bit-exact 확인.
+  `set_num_threads(1)` 로 안 고친 이유: 그건 프로세스 전역이라 DataLoader 워커·collate 까지
+  같이 1스레드가 된다. numpy 경로는 이 함수 안에서만 닫힌다.
 
 ### Changed
 - **D200 분할을 train:test = 9:1 로 재작성, validation 은 test 안의 1% (2026-09-18, 사용자 지시

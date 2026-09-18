@@ -4,6 +4,37 @@ All notable changes to the latentcam sub-project. Follows [Keep a Changelog](htt
 
 ## [Unreleased]
 
+### Changed
+- **D200 분할을 train:test = 9:1 로 재작성, validation 은 test 안의 1% (2026-09-18, 사용자 지시
+  "validation은 1%로 하되 train:test는 9:1이어야해").**
+  기존 holdout 은 100씬 / 506대 = **0.98%** 였다. "씬 수준 지표의 n 을 27 → 100 으로"가 목적
+  이었지 비율이 목적이 아니었는데, 이제 비율이 요구사항이다. 기동 12분차의 4 arm 을 중단하고
+  (wandb `n78mgkfi`/`55icy0gk`/`ulqm1j3t`/`1f4hu8p5` 폐기) 새 목록으로 재기동했다.
+  - `CinemaTraj/scripts/make_holdout_split.py` **신규** — 기존 seg_list 둘을 읽어 다시 나누기만
+    한다. **재굽기 없음**: `vista4d_bank_to_dl3dv.py:493-519` 의 `--test_videos` 는 각 줄이
+    어느 seg_list 로 가는지만 정하고 chunk/npz 는 안 건드리며, geo_raw(403 GB)·molmo2(305 GB)
+    캐시도 씬 단위라 그대로 쓴다.
+  - **씬당 카메라 수로 층화**해 뽑는다. d200 분포가 1:726 / 5:3287 / 6:5362 로 양극단이라
+    씬을 무작위로 뽑으면 test 의 씬당 대수가 train 과 달라진다. 실측 대/씬 train 5.057 vs
+    test 5.058. 결과: train 46,278대 / 9,152씬 (90.0%), test 5,144대 / 1,017씬 (10.0%),
+    그 안의 val 516대 / 102씬 (1.0%). step/epoch 6,364 → 5,784.
+  - legacy **27씬 ⊂ 100씬 ⊂ 1,017씬** 을 강제했다 — `test27` / `test100` 부분집합 지표로
+    D137/D194/D197 과 계속 대조할 수 있다.
+  - validation 은 별도 목록 파일이 아니다. `train_latent_cam_dm.py:737` 이 test 로더를
+    `val_max_batches × batch_size` 만큼만 돌기 때문에, val 102씬을 test 목록 **맨 앞**에 씬
+    라운드로빈으로 깔고 `val_max_batches: 20 → 64` (×8 = 512대 = val 516대의 99.2%) 로 그
+    블록을 덮는다. ⚠ 두 값은 **같이 움직인다** — `val_max_batches` 를 되돌리면 val 이 1% 가
+    아니게 된다. D200 root yaml 2개에 주석으로 박아뒀다.
+- **D200 CLaTr 게이지를 새 train split 으로 다시 구웠다 (`clatr_dynpose_d200_s91`).**
+  예전 게이지(`clatr_dynpose_d200_epoch149.ckpt`, wandb `bf7xk542`)는 train 50,915 로 학습해서
+  **새 test 5,144대 중 ~4,600대를 이미 본 상태**다. 게이지가 test 를 알면 caption 지표가
+  부풀고 그게 조용히 일어난다. prep train 46,277 / test 5,144 (diverged_pose 1대 탈락),
+  `dataset/standardization=dynpose49_d200` 재사용(`trajectory_dataset.py:43` 이
+  `standardize=False` 라 실제로 걸리는 건 num_cams=49 뿐 → 분할과 무관).
+  root yaml 2개의 `clatr_ckpt_path` 를 `clatr_dynpose_d200_s91_epoch149.ckpt` 로 돌렸다.
+  ⚠ ckpt 가 생기기 전까지 CLaTr eval 만 **조용히 건너뛴다** (학습은 안 죽는다) — 재분할 직후
+  몇 epoch 의 caption 지표가 비는 것은 그 때문이다.
+
 ### Added
 - **`geo_raw_cache_mmap` / `peav_cache_mmap` — 대형 per-scene 캐시를 RAM 대신 mmap 으로 preload
   (2026-09-18, D200 5-arm 기동 중 OOM 직전에 잡았다).**

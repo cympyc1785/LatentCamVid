@@ -11,10 +11,24 @@
 # "free-moving도 포함해서 세주고 clamped_low만 빼줘"). D197 이 쓰던 suspect 5종 필터는 안 쓴다.
 # 그래서 `aim=free` 변이가 26.79% (13,777/51,422) 그대로 들어온다 — molmo2 arm 들이 그 변이를
 # zero-embedding 으로 받는 이유가 이것이다 (`dynpose_d200_molmo2_da3.yaml` 머리말).
-# 씬 단위 holdout 은 고정 목록 `CinemaTraj/configs/dynpose_holdout_scenes_100.txt` **100씬 /
-# 506대 (0.98%)** 다 (md5 해시 분할 아님). legacy 27씬의 상위집합이라 D137/D194/D197 과
-# `test27` 부분집합으로 대조할 수 있다. test 목록은 **씬 라운드로빈 순서**로 쓰여 있어
-# `val_max_batches: 20` × `batch_size: 8` = 앞 160줄이 100씬 전부를 덮는다 (전 세대는 ~30씬).
+# ═══ 분할 — train:test = 9:1, val 은 test 안의 1% (사용자 지시 2026-09-18) ══════════════════
+# 기동 첫 판(폐기)은 holdout 이 100씬 / 506대 = **0.98%** 였다. 그건 "씬 수준 지표의 n 을
+# 27 -> 100 으로" 가 목적이었지 비율이 목적이 아니었다. 지금은 비율이 요구사항이다:
+#   train  46,278 대 (90.0%)   9,152 씬
+#   test    5,144 대 (10.0%)   1,017 씬   ← 씬 단위 holdout, md5 해시 분할 아님
+#     └ val   516 대 ( 1.0%)     102 씬   ← test 목록 **앞부분**
+# 목록은 `scripts/make_holdout_split.py` 가 **씬당 카메라 수로 층화**해 뽑았다 (d200 분포가
+# 1:726 / 2:472 / 3:143 / 4:179 / 5:3287 / 6:5362 로 양극단이라 무작위면 test 의 씬당 대수가
+# train 과 달라진다). 실측 대/씬 train 5.057 vs test 5.058.
+# legacy 27씬 ⊂ 100씬 ⊂ 1,017씬 을 강제했으므로 `test27` / `test100` 부분집합 지표로
+# D137/D194/D197 과 계속 대조할 수 있다.
+# validation 은 별도 목록 파일이 아니다 — `train_latent_cam_dm.py:737` 이 test 로더를
+# `val_max_batches × batch_size` 만큼만 돌기 때문에, val 102씬을 test 목록 맨 앞에 씬
+# 라운드로빈으로 깔고 **`val_max_batches: 64`** (×8 = 512대) 로 정확히 그 블록을 덮는다.
+# 512대가 102씬을 전부 포함하는 것을 검증했다(라운드로빈이라 씬당 최소 1대).
+# ⚠ `val_max_batches` 를 되돌리면 val 이 1% 가 아니게 된다. 두 값은 같이 움직인다.
+# 재굽기는 없었다 — `vista4d_bank_to_dl3dv.py:493-519` 의 `--test_videos` 는 각 줄이 어느
+# seg_list 로 가는지만 정하고 chunk/npz 와 geo_raw·molmo2 캐시는 씬 단위라 그대로 쓴다.
 #
 # ═══ CLaTr 게이지 ══════════════════════════════════════════════════════════════════════════
 # 이 세대는 **d200 코퍼스로 직접 학습한 CLaTr** 로 캡션 지표를 잰다 (아래 clatr_* 두 줄).
@@ -31,14 +45,21 @@
 exp_name: dynpose_d200_da3
 dl3dv_root: /data1/cympyc1785/data/DynPose-LBM/latentcam_dynpose_d200
 meta_csv: meta_dynpose.csv
-train_seg_list: /data1/cympyc1785/data/DynPose-LBM/latentcam_dynpose_d200/seg_list_dynpose_train.txt
-test_seg_list: /data1/cympyc1785/data/DynPose-LBM/latentcam_dynpose_d200/seg_list_dynpose_test.txt
+train_seg_list: /data1/cympyc1785/data/DynPose-LBM/latentcam_dynpose_d200/seg_list_dynpose_s91_train.txt
+test_seg_list: /data1/cympyc1785/data/DynPose-LBM/latentcam_dynpose_d200/seg_list_dynpose_s91_test.txt
+val_max_batches: 64   # ×batch_size 8 = 512대 = 코퍼스의 1%. 위 "분할" 절 참조 — 같이 움직인다
 coverage_blacklist_path: null
 
-# d200 train split 50,915개로 학습한 CLaTr (wandb trajectory-clip/bf7xk542, 150 epoch).
+# d200 **s91 train split 46,278개**로 학습한 CLaTr. 9:1 재분할 때 같이 다시 구웠다 —
+# 예전 게이지(`clatr_dynpose_d200_epoch149.ckpt`, wandb bf7xk542)는 train 50,915 로 학습해서
+# 새 test 5,144대 중 ~4,600대를 이미 본 상태였다. 게이지가 test 를 알면 caption 지표가 부풀고,
+# 그게 조용히 일어난다.
 # standardization 이름을 같이 넘겨야 padding 길이가 49 로 맞는다 — 빼면 config_eval.yaml 의
-# 기본값 0120(num_cams 120)이 그대로 걸린다.
-clatr_ckpt_path: /data1/cympyc1785/LatentCamVid/camera_generation/latentcam/checkpoints/clatr_dynpose_d200_epoch149.ckpt
+# 기본값 0120(num_cams 120)이 그대로 걸린다. 분할이 바뀌어도 `dynpose49_d200` 을 그대로 쓴다:
+# `trajectory_dataset.py:43` 이 standardize=False 라 실제로 걸리는 건 num_cams 뿐이다.
+# ⚠ 이 ckpt 가 아직 없으면 CLaTr eval 만 조용히 건너뛴다 (학습은 안 죽는다). 재분할 직후
+# 몇 epoch 의 caption 지표가 비어 있는 것은 그 때문이다.
+clatr_ckpt_path: /data1/cympyc1785/LatentCamVid/camera_generation/latentcam/checkpoints/clatr_dynpose_d200_s91_epoch149.ckpt
 clatr_standardization: dynpose49_d200
 
 text_len: 128   # D197 과 동일.

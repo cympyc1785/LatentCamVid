@@ -71,6 +71,15 @@ All notable changes to the latentcam sub-project. Follows [Keep a Changelog](htt
   같이 1스레드가 된다. numpy 경로는 이 함수 안에서만 닫힌다.
 
 ### Changed
+- **D200 CLaTr 게이지를 s91 실물로 교체 (2026-09-19 03:20).** `dynpose_d200_da3.yaml` /
+  `dynpose_d200_molmo2_da3.yaml` 의 `clatr_ckpt_path` 가 `clatr_dynpose_d200_s91_epoch149.ckpt`
+  **심링크**를 가리키고 있었고, 그 심링크의 실체는 옛 오염 게이지(`clatr_dynpose_d200_epoch149.ckpt`,
+  wandb `bf7xk542`)였다 — s91 게이지 학습이 끝날 때까지 쓰던 임시 배선이다. s91 완료
+  (wandb `6a5oy2vw`, `epoch=149-step=217050`) 후 실물을 `clatr_dynpose_d200_s91_real_epoch149.ckpt`
+  로 복사해 두 yaml 이 그 파일을 직접 가리키게 했다 (`_real_` 은 심링크가 아님을 이름에서 보이려는 것).
+  arm ③④⑤ 는 `defaults: - dynpose_d200_molmo2_da3` 로 물려받는다.
+  ⚠ **이 지점에서 FD/PRDC/clatr_score 곡선이 갈린다 — 모델이 변한 게 아니라 자가 바뀐 것이다.**
+  교체 전 구간의 caption 지표는 버릴 것: 옛 게이지는 새 test 5,144대 중 ~4,600대를 이미 봤다.
 - **D200 분할을 train:test = 9:1 로 재작성, validation 은 test 안의 1% (2026-09-18, 사용자 지시
   "validation은 1%로 하되 train:test는 9:1이어야해").**
   기존 holdout 은 100씬 / 506대 = **0.98%** 였다. "씬 수준 지표의 n 을 27 → 100 으로"가 목적

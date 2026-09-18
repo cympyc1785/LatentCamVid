@@ -51,7 +51,9 @@ coverage_blacklist_path: null
 # CLaTr 게이지는 D200 da3 arm 과 같다 (`dynpose_d200_da3.yaml` 머리말의 "CLaTr 게이지" 참조).
 # defaults 로 안 물려받는 파일이라 두 줄을 여기에도 적는다 — 5 arm 이 **같은 자**를 써야
 # arm 간 대조가 성립한다.
-clatr_ckpt_path: /data1/cympyc1785/LatentCamVid/camera_generation/latentcam/checkpoints/clatr_dynpose_d200_s91_epoch149.ckpt
+# [2026-09-19 02:31] 게이지 교체 지점 — 경위는 `dynpose_d200_da3.yaml` 의 같은 줄 주석 참조.
+# 옛 오염 게이지 심링크 -> s91 실물(wandb 6a5oy2vw). 이 지점에서 caption 지표 곡선이 갈린다.
+clatr_ckpt_path: /data1/cympyc1785/LatentCamVid/camera_generation/latentcam/checkpoints/clatr_dynpose_d200_s91_real_epoch149.ckpt
 clatr_standardization: dynpose49_d200
 
 text_len: 128   # D200 da3 arm 과 동일.

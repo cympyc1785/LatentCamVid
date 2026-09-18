@@ -59,7 +59,13 @@ coverage_blacklist_path: null
 # `trajectory_dataset.py:43` 이 standardize=False 라 실제로 걸리는 건 num_cams 뿐이다.
 # ⚠ 이 ckpt 가 아직 없으면 CLaTr eval 만 조용히 건너뛴다 (학습은 안 죽는다). 재분할 직후
 # 몇 epoch 의 caption 지표가 비어 있는 것은 그 때문이다.
-clatr_ckpt_path: /data1/cympyc1785/LatentCamVid/camera_generation/latentcam/checkpoints/clatr_dynpose_d200_s91_epoch149.ckpt
+# [2026-09-19 02:31] **게이지 교체 지점.** 여기까지는 `clatr_dynpose_d200_s91_epoch149.ckpt`
+# 심링크가 옛 오염 게이지(`clatr_dynpose_d200_epoch149.ckpt`, wandb bf7xk542)를 가리키고 있었다
+# — s91 학습이 끝날 때까지 임시로 쓰던 것이다. s91 완료(wandb 6a5oy2vw, epoch=149-step=217050)
+# 후 **실물**로 바꿨고, 이름도 심링크가 아니라 파일임이 드러나게 `_real_` 을 넣었다.
+# ⚠ 이 지점에서 FD/PRDC/clatr_score 곡선이 갈린다 — 모델 변화가 아니라 자가 바뀐 것이다.
+#   교체 전 구간의 caption 지표는 **버릴 것** (게이지가 test 5,144대 중 ~4,600대를 이미 봤다).
+clatr_ckpt_path: /data1/cympyc1785/LatentCamVid/camera_generation/latentcam/checkpoints/clatr_dynpose_d200_s91_real_epoch149.ckpt
 clatr_standardization: dynpose49_d200
 
 text_len: 128   # D197 과 동일.

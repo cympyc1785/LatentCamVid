@@ -20,6 +20,10 @@ epochs: 100
 # epoch 루프). experiment yaml 73개가 `epochs` 를 덮고 있어서(19개가 200) 기본값만으로는
 # 재실행 때 조용히 200 을 간다. `null` 이면 상한 없음 = 예전 동작 그대로.
 epoch_cap: 100
+# [new 2026-09-18] 진단용 단계별 스텝 시간. 0 = 끔(측정 코드가 아예 안 돈다 = 예전 동작 그대로).
+# N>0 이면 N 스텝마다 data/h2d/text_vae/geo/fwd/bwd_opt/log 평균 ms 를 찍는다. 구간 경계마다
+# cuda.synchronize() 가 걸려 파이프라인이 직렬화되므로 켠 run 은 평소보다 느리다 -> 상시 금지.
+step_timing: 0
 save_epoch: 10
 val_step: 5000
 val_max_batches: 20

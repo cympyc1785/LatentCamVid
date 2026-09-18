@@ -4,6 +4,25 @@ All notable changes to the latentcam sub-project. Follows [Keep a Changelog](htt
 
 ## [Unreleased]
 
+### Added
+- **`step_timing`: 학습 스텝의 단계별 실측 시간 (기본 off) (2026-09-18).**
+  "왜 이리 느린가"를 추측이 아니라 숫자로 답하기 위한 진단 스위치. `conf/config.yaml` 의
+  `step_timing: 0` 이면 측정 코드가 아예 안 돌아 기존 run 과 동작·속도가 같다. `N>0` 이면
+  N 스텝마다 `data / h2d / text_vae / geo / fwd / bwd_opt / log` 평균 ms 와 비중을 찍는다.
+  구간 경계마다 `torch.cuda.synchronize()` 가 걸리므로(비동기 GPU 를 정직하게 재려면 필수)
+  **켠 run 은 평소보다 느리다 — 상시 사용 금지, 진단 전용.**
+  - 배경: `py-spy` 가 `record`/`top` 모두 "Permission Denied" 로 실패한 원인은 권한이 아니라
+    `/proc/sys/kernel/yama/ptrace_scope = 1` 이었다 — **남의 프로세스엔 못 붙고 자식으로
+    띄우면 붙는다.** 자식으로 띄운 프로파일은 되지만 프로파일러가 프로세스를 멈춰가며 읽어
+    2.46 s/it (실제 0.263 s/it) 로 왜곡되어 절대 ms 를 못 쓴다. 그래서 sync 기반 계측을 넣었다.
+  - D200 arm ① (`dynpose_d200_da3`, B=8, GPU 4) 실측: `data 175.7ms 62.0% | text_vae 42.5ms
+    15.0% | bwd_opt 37.3ms 13.1% | fwd 26.2ms 9.3% | geo 1.1ms 0.4% | h2d 0.2ms | log 0.4ms
+    || total 283.4ms`. arm ② (`_molmo2_da3`): `data 321.2ms 66.5% | text_vae 48.2ms 10.0% |
+    bwd_opt 68.1ms 14.1% | fwd 43.9ms 9.1% | geo 0.9ms 0.2% || total 483.0ms`.
+  - py-spy 워커 스택 분해(8 워커): `collate_fn (base.py:189)` = `torch.stack` 56.4%,
+    `_share_fd_cpu_ (torch/storage.py:526)` 40.6%, **`np.load` 0.1%**. 병목은 디스크가 아니라
+    `geo_raw` fp32 캐시(씬당 42.5 MB, 배치 8 = 340 MB)의 **메모리 복사 2회**다.
+
 ### Changed
 - **D200 분할을 train:test = 9:1 로 재작성, validation 은 test 안의 1% (2026-09-18, 사용자 지시
   "validation은 1%로 하되 train:test는 9:1이어야해").**

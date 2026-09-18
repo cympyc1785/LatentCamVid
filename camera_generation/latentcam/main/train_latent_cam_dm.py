@@ -1039,6 +1039,19 @@ def train():
     _epochs = cfg.epochs if _cap is None else min(cfg.epochs, int(_cap))
     if _epochs != cfg.epochs and accelerator.is_main_process:
         print(f"[epoch_cap] cfg.epochs={cfg.epochs} -> {_epochs} (epoch_cap={_cap})")
+    # [new 2026-09-18] step_timing: 0 이면 예전 동작 그대로(측정 코드가 아예 안 돈다).
+    # N>0 이면 N 스텝마다 단계별 평균 ms 를 찍는다. GPU 가 비동기라 각 구간 끝에서
+    # cuda.synchronize() 를 걸어야 숫자가 맞는데, 그 sync 자체가 파이프라인을 직렬화하므로
+    # 켠 run 은 평소보다 느리다 -> 상시로 켜지 말 것 (진단 전용).
+    _st = int(getattr(cfg, 'step_timing', 0) or 0)
+    _acc = {k: 0.0 for k in ('data', 'h2d', 'text_vae', 'geo', 'fwd', 'bwd_opt', 'log')}
+
+    def _tick():
+        if not _st:
+            return 0.0
+        torch.cuda.synchronize()
+        return time.time()
+
     for epoch in range(start_epoch, _epochs):
         pbar = tqdm(train_dataloader)
         model.train()
@@ -1053,6 +1066,7 @@ def train():
             B = traj.shape[0]
 
             t2 = time.time()
+            _tA = _tick()                                # h2d 끝
             with torch.no_grad():
                 if cfg.load_points:
                     if 'pc' in data:
@@ -1117,7 +1131,8 @@ def train():
                 else:
                     traj_latents = traj
                 t4 = time.time()
-            
+            _tB = _tick()                                # text(umt5)+video cond+vae 끝
+
             if 'pc' in data and cfg.point_encoder == 'custom':
                 pc_embeds, pc_masks, point_obj = model.pc_encoder(point)
 
@@ -1146,6 +1161,7 @@ def train():
                         pc_embeds, pc_masks = geo_encode(geo_encoder, data, device)
             if pc_embeds is not None:
                 pc_embeds = attach_geo_cam(pc_embeds, data, device)
+            _tC = _tick()                                # geo (raw cache -> ln/proj) 끝
 
             noise = torch.randn_like(traj_latents)
             timesteps = torch.randint(
@@ -1179,11 +1195,13 @@ def train():
                     loss = loss + float(getattr(cfg, 'peav_readout_aux_w', 0.0)) * _aux
 
             t5 = time.time()
+            _tD = _tick()                                # denoiser forward 끝
             accelerator.backward(loss)
             opt.step()
             opt.zero_grad(set_to_none=True)
             global_step += 1
             t6 = time.time()
+            _tE = _tick()                                # backward+step 끝
             _log = {"train/loss": loss.item()}
             if _aux is not None:
                 _log["train/readout_aux_obb"] = _aux.item()   # 가중치 곱하기 전 원 손실
@@ -1202,6 +1220,24 @@ def train():
             #     f"total {t6-t0:.3f} | "
             # )
             t0 = time.time()
+            if _st:
+                _acc['data'] += t1 - _t_prev if step else 0.0
+                _acc['h2d'] += _tA - t1
+                _acc['text_vae'] += _tB - _tA
+                _acc['geo'] += _tC - _tB
+                _acc['fwd'] += _tD - _tC
+                _acc['bwd_opt'] += _tE - _tD
+                _acc['log'] += t0 - _tE
+                _t_prev = t0
+                if (step + 1) % _st == 0:
+                    _tot = sum(_acc.values()) or 1e-9
+                    _n = float(_st)
+                    print("[step_timing] " + " | ".join(
+                        f"{k} {v / _n * 1e3:6.1f}ms {v / _tot:5.1%}" for k, v in _acc.items())
+                        + f" || total {_tot / _n * 1e3:6.1f}ms", flush=True)
+                    _acc = {k: 0.0 for k in _acc}
+            else:
+                _t_prev = t0
 
         total_loss = accelerator.reduce(total_loss, reduction='sum')
         total_samples = accelerator.reduce(total_samples, reduction='sum')

@@ -72,6 +72,7 @@ geo_view_sampling: context_uniform
 geo_num_views: 6
 geo_first_view_target_s: true
 geo_raw_cache_dir: /data1/cympyc1785/data/DynPose-LBM/latentcam_dynpose_d200/geo_raw_cache_da3
+geo_raw_cache_mmap: true         # 403 GB 캐시 — arm 마다 RAM 한 벌이면 4개에 1,612 GB (FIX 참조)
 da3_cam_token_per_sample: true
 
 anchor_pred_frame0: true
@@ -79,6 +80,7 @@ anchor_pred_frame0: true
 # ─── Molmo2 CA (기존 PE-AV 슬롯을 그대로 재사용한다) ───────────────────────────────────────
 peav_video_cache_dir: /data1/cympyc1785/data/DynPose-LBM/latentcam_dynpose_d200/molmo2_cache/video
 peav_text_cache: /data1/cympyc1785/data/DynPose-LBM/latentcam_dynpose_d200/molmo2_cache/prefill.pt
+peav_cache_mmap: true      # video 캐시 305 GB — arm 마다 RAM 한 벌이면 4개에 1,220 GB (FIX 참조)
 peav_layer: null           # null = 마지막 층(ln_f 이후). 21 로 바꾸면 blocks[21] raw 출력.
 video_latent_dim: 2560     # Molmo2 LM hidden — video part (3136 tok)
 video_text_in_stream: true

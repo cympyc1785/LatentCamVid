@@ -261,6 +261,7 @@ class Config:
     # (Vista4D) 전용. 조건은 conf/config.yaml 주석 참조.
     geo_raw_cache_dir = None
     geo_raw_cache_preload = True    # scene 파일 전량을 __init__ 에서 RAM 에 올린다 (fork 공유)
+    geo_raw_cache_mmap = False      # [new 2026-09-18, D200] 그 적재를 mmap 으로 (arm 끼리 공유)
     # [new] per-context-view camera embedding channel-concatenated onto the geo tokens.
     # None = OFF (geo condition stays the plain (M, 768) LagerNVS tokens). 'relfirst' = 11-d pose
     # of each context view relative to the target's FIRST camera (trans / norm_scale), appended

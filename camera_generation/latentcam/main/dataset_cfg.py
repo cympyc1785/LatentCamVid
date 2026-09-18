@@ -184,6 +184,8 @@ class DatasetSpec:
     # (둘 다 켜면 위 캐시가 먼저 return 해서 이쪽이 죽은 코드가 된다 — dataset_cfg 가 막는다).
     geo_raw_cache_dir: Optional[str]
     geo_raw_cache_preload: bool
+    # [new 2026-09-18, D200] preload 를 mmap 으로. False = 예전 그대로 anonymous RAM.
+    geo_raw_cache_mmap: bool
     # --- custom geo (RGBD) 경로
     geo_custom: bool
     geo_custom_channels: str
@@ -544,6 +546,7 @@ def resolve_dataset_cfg(cfg, verbose=True):
         geo_latent_cache_dir=geo_latent_cache_dir,
         geo_raw_cache_dir=geo_raw_cache_dir,
         geo_raw_cache_preload=bool(getattr(cfg, 'geo_raw_cache_preload', True)),
+        geo_raw_cache_mmap=bool(getattr(cfg, 'geo_raw_cache_mmap', False)),
         geo_custom=geo_custom,
         geo_custom_channels=geo_custom_channels,
         geo_depth_cache_dir=geo_depth_cache_dir,

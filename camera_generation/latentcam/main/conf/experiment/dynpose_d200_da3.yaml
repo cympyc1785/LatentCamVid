@@ -62,6 +62,7 @@ geo_view_sampling: context_uniform
 geo_num_views: 6                    # _even_indices(49,6) = [0,10,19,29,38,48]
 geo_first_view_target_s: true
 geo_raw_cache_dir: /data1/cympyc1785/data/DynPose-LBM/latentcam_dynpose_d200/geo_raw_cache_da3
+geo_raw_cache_mmap: true         # 403 GB 캐시 — arm 마다 RAM 한 벌이면 4개에 1,612 GB (FIX 참조)
 da3_cam_token_per_sample: true   # 캐시는 B=1 로 구워진다 — 켜야 on-the-fly 폴백과 일치
 
 anchor_pred_frame0: true

@@ -5,6 +5,21 @@ All notable changes to the latentcam sub-project. Follows [Keep a Changelog](htt
 ## [Unreleased]
 
 ### Added
+- **`geo_raw_cache_mmap` / `peav_cache_mmap` — 대형 per-scene 캐시를 RAM 대신 mmap 으로 preload
+  (2026-09-18, D200 5-arm 기동 중 OOM 직전에 잡았다).**
+  `dataset_dl3dv._preload_geo_raw` / `_preload_peav` 는 캐시 파일을 __init__ 에서 **전량 anonymous
+  RAM** 으로 올린다 (fork 로 뜨는 DataLoader worker 가 copy-on-write 로 공유하게 하려는 설계).
+  두 함수의 크기 주석이 각각 **Vista4D 52 scene** / **PE-AV 264 scene** 기준이라 스케일이
+  10,169 scene 으로 커진 걸 못 따라갔다 — d200 의 `geo_raw_cache_da3` 는 **403 GB**,
+  `molmo2_cache/video` 는 **305 GB** 다. arm 4개면 합계가 RAM 1,771 GB 를 넘긴다.
+  - 두 스위치 다 **기본 `false` = 예전과 글자 그대로 같은 동작**. `true` 면 같은 자리를
+    `torch.load(..., mmap=True)` 로 읽어 page cache **한 벌**을 arm 끼리 공유하고, 압박 시
+    커널이 OOM 대신 회수한다.
+  - `peav_cache_mmap` 은 video 디렉토리와 text 파일(`prefill.pt` / `text.pt`) 양쪽에 걸린다.
+  - 실측(10,169 파일 전량): `torch.equal` **True**(`emb`/`emb_l21` 둘 다) · RSS 428→**441 MB**
+    (논리 163.3 GB) · vma 1,111→11,281(파일당 ~1, `vm.max_map_count` 65,530 이내) · fd 4 고정.
+  - D200 root yaml 2개에서 켠다 (`_da3` 는 geo 만, `_molmo2_da3` 는 둘 다 — 나머지 3 arm 은
+    `defaults` 로 물려받는다). 자세한 경위는 `FIX.log` 2026-09-18 항목.
 - **D200 코퍼스로 학습한 CLaTr 게이지 + `clatr_standardization` 설정 (2026-09-17, 사용자 지시
   "CLaTr도 이 데이터셋에 대해서 학습 돌려놔줘. 이걸로 학습 때 validation 평가해주고").**
   지금까지 학습 중 caption 지표(FD / PRDC / clatr_score)는 `clatr_epoch139_large.ckpt` 로 쟀는데

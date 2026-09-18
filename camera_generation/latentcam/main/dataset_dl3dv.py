@@ -349,6 +349,8 @@ class CamDataset(torch.utils.data.Dataset):
         # [new 2026-09-14, D194] 캐시가 마지막 층(`emb`) 옆에 중간 층(`emb_l{N}`) 도 들고 있을 때
         # 어느 쪽을 학습에 먹일지. null(기본)이면 `emb` — 예전 arm 과 글자 그대로 같다.
         self.peav_layer = getattr(cfg, 'peav_layer', None)
+        # [new 2026-09-18, D200] `geo_raw_cache_mmap` 과 같은 이유의 같은 스위치 (아래 참조).
+        self.peav_cache_mmap = bool(getattr(cfg, 'peav_cache_mmap', False))
         if self.peav_video_cache_dir or self.peav_text_cache:
             self._preload_peav()
 
@@ -363,26 +365,35 @@ class CamDataset(torch.utils.data.Dataset):
         return data_name.rsplit('_', 1)[0]
 
     def _preload_geo_raw(self):
-        """캐시 파일 전량을 __init__ 에서 RAM 에 올린다.
+        """캐시 파일 전량을 __init__ 에서 올린다.
 
         왜 lazy 로 안 하는가: DataLoader worker 는 fork 로 뜨므로 여기서 올려 두면 tensor storage
         가 copy-on-write 로 **공유**된다 (~2.2 GB 한 벌). worker 안에서 채우면 num_workers 배로
-        불어나고, 매번 read 하면 /data1(Lustre) 에서 샘플당 42 MB 를 다시 읽는다."""
+        불어나고, 매번 read 하면 /data1(Lustre) 에서 샘플당 42 MB 를 다시 읽는다.
+
+        `geo_raw_cache_mmap` (기본 False = 예전 그대로) 를 켜면 anonymous RAM 대신 mmap 으로
+        올린다. 위 "~2.2 GB" 는 Vista4D 52 scene 기준이고, dynpose 10,169 scene 은 같은 캐시가
+        403 GB 라 **arm 마다 한 벌**이면 4개에 1,612 GB — RAM 1,771 GB 를 넘긴다 (D200 1차 기동).
+        mmap 이면 page cache 한 벌을 arm 끼리 공유하고 압박 시 커널이 OOM 대신 회수한다."""
         keys = sorted({self.geo_raw_key(s[4]) for s in self.samples})
+        mm = bool(getattr(self, 'geo_raw_cache_mmap', False))
         hit, nbytes, badt = 0, 0, 0
         for k in keys:
             p = osp.join(self.geo_raw_cache_dir, f'{k}.pt')
             if not osp.exists(p):
                 continue
-            c = torch.load(p, map_location='cpu', weights_only=False)
+            c = torch.load(p, map_location='cpu', weights_only=False, mmap=mm) if mm \
+                else torch.load(p, map_location='cpu', weights_only=False)
             if c['raw'].dtype != torch.float32:
                 # bf16 로 굽던 시절의 낡은 캐시. 조용히 쓰면 on-the-fly 와 1.8e-3 만큼 갈린다.
+                # dtype 은 헤더만 보므로 mmap 이어도 페이지를 건드리지 않는다.
                 badt += 1
                 continue
             self._geo_raw_mem[k] = c
             hit += 1; nbytes += c['raw'].numel() * c['raw'].element_size()
-        print(f"[geo raw cache] preloaded {hit}/{len(keys)} scenes "
-              f"({nbytes / 1e9:.2f} GB) from {self.geo_raw_cache_dir}"
+        print(f"[geo raw cache] {'mmap 매핑' if mm else 'preloaded'} {hit}/{len(keys)} scenes "
+              f"({nbytes / 1e9:.2f} GB{' — page cache 공유, RSS 아님' if mm else ''}) "
+              f"from {self.geo_raw_cache_dir}"
               + ("" if hit == len(keys) else "  <- 나머지는 on-the-fly DA3"))
         if badt:
             print(f"[geo raw cache] WARNING: {badt} scene 이 fp32 가 아니라 무시했다 "
@@ -421,6 +432,12 @@ class CamDataset(torch.utils.data.Dataset):
         storage 를 copy-on-write 로 공유한다. 크기는 geo 쪽의 1/50 수준이다 (video 264 scene
         × 49 × 1792 fp16 = 46 MB, text 는 중복 제거 후 수천 문장 × 32 × 1024 fp16).
 
+        ⚠ 위 "46 MB" 는 **PE-AV 264 scene 기준**이고, D200 의 molmo2 캐시는 같은 자리에
+        10,169 scene / **305 GB** 다 (prefill.pt 19.95 GB, text.pt 7.65 GB 는 별도). 프로세스마다
+        한 벌이면 molmo2 arm 4개에 1,220 GB — RAM 1,771 GB 를 geo_raw(403 GB) 와 같이 넘긴다.
+        `peav_cache_mmap` (기본 False = 예전 그대로) 을 켜면 `_preload_geo_raw` 와 똑같이 mmap
+        으로 올려 page cache 한 벌을 arm 끼리 공유한다.
+
         video 가 scene 키인 근거는 d107 의 전 세그먼트가 frame_idx==(0,49) 라는 것뿐이다.
         캐시 빌더가 그 불변조건을 assert 하고, 여기서는 miss 를 조용히 넘기지 않는다 — video CA
         스트림은 배치 안에서 켜졌다 꺼졌다 할 수 없기 때문이다(한 샘플만 빠져도 stack 이 깨진다)."""
@@ -433,6 +450,7 @@ class CamDataset(torch.utils.data.Dataset):
         if self.peav_layer is not None:
             print(f"[peav] layer={self.peav_layer} -> 캐시 키 '{ekey}' 를 읽는다 "
                   f"(ln_f 이전 raw 출력. proj 앞 LayerNorm `peav_in_ln` 이 켜져 있어야 한다)")
+        mm = bool(getattr(self, 'peav_cache_mmap', False))
         if self.peav_video_cache_dir:
             keys = sorted({self.geo_raw_key(s[4]) for s in scope})
             miss = []
@@ -441,20 +459,21 @@ class CamDataset(torch.utils.data.Dataset):
                 if not osp.exists(p):
                     miss.append(k)
                     continue
-                d = torch.load(p, map_location='cpu', weights_only=False)
+                d = torch.load(p, map_location='cpu', weights_only=False, mmap=mm)
                 assert ekey in d, (f"[peav] video 캐시 {p} 에 '{ekey}' 가 없다 — "
                                    f"`--extra_layer {self.peav_layer}` 로 다시 구울 것 "
                                    f"(있는 키: {sorted(d)})")
                 self._peav_video_mem[k] = d[ekey]
             nb = sum(v.numel() * v.element_size() for v in self._peav_video_mem.values())
             print(f"[peav] video {len(self._peav_video_mem)}/{len(keys)} scenes "
-                  f"({nb / 1e6:.1f} MB) from {self.peav_video_cache_dir}")
+                  f"({nb / 1e6:.1f} MB{' — mmap, page cache 공유라 RSS 아님' if mm else ''}) "
+                  f"from {self.peav_video_cache_dir}")
             if miss:
                 raise FileNotFoundError(
                     f"[peav] video 캐시가 {len(miss)} scene 비어 있다 (예: {miss[:3]}). "
                     f"cache_peav_embeddings.py 를 먼저 돌릴 것 — 부분 캐시는 배치를 깨뜨린다")
         if self.peav_text_cache:
-            c = torch.load(self.peav_text_cache, map_location='cpu', weights_only=False)
+            c = torch.load(self.peav_text_cache, map_location='cpu', weights_only=False, mmap=mm)
             assert ekey in c, (f"[peav] text 캐시에 '{ekey}' 가 없다 — "
                                f"`--extra_layer {self.peav_layer}` 로 다시 구울 것 "
                                f"(있는 키: {sorted(k for k in c if k.startswith('emb'))})")
@@ -465,7 +484,8 @@ class CamDataset(torch.utils.data.Dataset):
             miss = [s[4] for s in scope if s[4] not in c['by_name']]
             print(f"[peav] text {c['emb'].shape[0]} distinct captions "
                   f"(L={c['text_len']}, template={c['template']}, "
-                  f"{c['emb'].numel() * 2 / 1e6:.1f} MB) from {self.peav_text_cache}")
+                  f"{c['emb'].numel() * 2 / 1e6:.1f} MB"
+                  f"{' — mmap' if mm else ''}) from {self.peav_text_cache}")
             if miss:
                 raise FileNotFoundError(
                     f"[peav] text 캐시에 {len(miss)} segment 가 없다 (예: {miss[:3]}). "

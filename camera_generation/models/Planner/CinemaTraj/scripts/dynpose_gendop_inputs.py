@@ -57,9 +57,11 @@ def main():
     parser.add_argument("--text_key", default=TEXT_KEY)
     parser.add_argument("--frame", type=int, default=0)    # 조건으로 줄 프레임 (frame0 공유 규약)
     parser.add_argument("--overwrite", action="store_true")
-    # D208. rgbd 를 아예 안 만들고 ② 텍스트 미러만 쓴다. `text_motion` ckpt 만 돌릴 때 필요하다 —
-    # dynpose-100k 는 `recon_and_seg/<scene>` 이 test 1,017 씬 중 107 편에만 남아 있어서
-    # 기본 경로로는 나머지 910 편이 `skipped` 로 빠지고 열거 자체가 10% 로 줄어든다.
+    # D208. rgbd 를 아예 안 만들고 ② 텍스트 미러만 쓴다. `text_motion` ckpt 만 돌릴 때,
+    # 또는 `--eval_data` 에 recon 이 일부만 있는 코퍼스에서 쓴다.
+    # 주의: 처음에 dynpose_d200 을 "recon 이 1,017 중 107 편뿐"이라 보고 이 플래그를 걸었는데
+    # 그건 `--eval_data` 를 `DynPose-LBM` 으로 준 탓이었다. d200 은 pooled dynpose-100k 라
+    # `DynPose-100K/eval_data` 밑에 1,017/1,017 다 있다 — 107 은 두 코퍼스의 교집합이었다.
     # 기본 off = 예전 동작 비트 동일.
     parser.add_argument("--text_only", action="store_true")
     args = parser.parse_args()

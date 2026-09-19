@@ -71,6 +71,14 @@ All notable changes to the latentcam sub-project. Follows [Keep a Changelog](htt
   같이 1스레드가 된다. numpy 경로는 이 함수 안에서만 닫힌다.
 
 ### Changed
+- **학습 상한을 100 → 50 epoch 으로 (2026-09-19, 사용자 지시 "학습 50epoch까지만 돌려도 될
+  것 같아").** `conf/config.yaml` 의 `epoch_cap: 100 -> 50`. 루프가 `range(start_epoch, 50)`
+  이라 **마지막 epoch 인덱스는 49**(총 50 epoch)이고, 그래서 experiment yaml 의
+  `ckpt_at_epochs: [50, 100]` 은 이제 한 번도 안 걸린다 — **최종 모델은 `last.pth` /
+  `resume.pth`**(epoch 49)다. `epochs` 를 덮는 experiment yaml 73개와 무관하게 여기서 잘린다.
+  ⚠ `epoch_cap` 은 **프로세스 기동 시점에** 읽힌다. 이미 돌고 있는 run 에는 안 먹으므로
+  D200 ①~④ 는 `tmp/d200/stop_at_epoch.py` 로 바깥에서 SIGINT 했다 (로그에 `Epoch 50 |`
+  tqdm 이 뜨면 = epoch 49 의 val·CLaTr·ckpt 저장까지 끝난 시점).
 - **D200 CLaTr 게이지를 s91 실물로 교체 (2026-09-19 03:20).** `dynpose_d200_da3.yaml` /
   `dynpose_d200_molmo2_da3.yaml` 의 `clatr_ckpt_path` 가 `clatr_dynpose_d200_s91_epoch149.ckpt`
   **심링크**를 가리키고 있었고, 그 심링크의 실체는 옛 오염 게이지(`clatr_dynpose_d200_epoch149.ckpt`,

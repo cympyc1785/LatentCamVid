@@ -19,7 +19,11 @@ epochs: 100
 # 위 `epochs` 를 experiment yaml 이 덮어도 **여기서 다시 자른다** (train_latent_cam_dm.py 의
 # epoch 루프). experiment yaml 73개가 `epochs` 를 덮고 있어서(19개가 200) 기본값만으로는
 # 재실행 때 조용히 200 을 간다. `null` 이면 상한 없음 = 예전 동작 그대로.
-epoch_cap: 100
+# [2026-09-19] 100 -> 50 (사용자 지시 "학습 50epoch까지만 돌려도 될 것 같아").
+# 루프가 `range(start_epoch, 50)` 이라 **마지막 epoch 인덱스는 49**, 총 50 epoch 이다.
+# 그래서 experiment yaml 의 `ckpt_at_epochs: [50, 100]` 은 이제 한 번도 안 걸린다 —
+# 최종 모델은 `last.pth` / `resume.pth`(= epoch 49) 다.
+epoch_cap: 50
 # [new 2026-09-18] 진단용 단계별 스텝 시간. 0 = 끔(측정 코드가 아예 안 돈다 = 예전 동작 그대로).
 # N>0 이면 N 스텝마다 data/h2d/text_vae/geo/fwd/bwd_opt/log 평균 ms 를 찍는다. 구간 경계마다
 # cuda.synchronize() 가 걸려 파이프라인이 직렬화되므로 켠 run 은 평소보다 느리다 -> 상시 금지.

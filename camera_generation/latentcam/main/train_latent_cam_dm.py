@@ -22,6 +22,7 @@ from base import Trainer  # ported to main/base.py (DL3DV dataset)
 from models.vae_intr_large import CameraVAE
 from models.t5 import T5EncoderModel
 from utils.data_utils import out_to_trajectory, make_intrinsics, inverse_camera_matrix
+from utils.rotation_utils import compute_rotation_matrix_from_ortho6d   # [D206] aim_loss
 from utils.eval_utils import run_command_in_dir
 from utils.pc_utils import get_ray_sim_per_point
 from diffusers import DDPMScheduler, DDIMScheduler
@@ -301,6 +302,89 @@ def readout_aux_loss(raw_model, data, device):
     # valid=0 = anchor 를 scene_graph 에서 못 찾은 변이. 손실에서 통째로 뺀다. 전부 invalid 면
     # 분자가 0 이라 손실 0 (clamp 는 0 나눗셈 방지용이고 .item() 동기화를 피하려는 것이기도 하다).
     return ((pred - tgt).pow(2) * valid).sum() / (valid.sum().clamp(min=1.0) * pred.shape[-1])
+
+
+def aim_loss(cfg, camera_vae, noise_scheduler, noisy_x, noise_pred, timesteps, data, device):
+    """[new 2026-09-20, D206] 카메라 forward 와 (카메라중심→subject) 사이 각을 좁히는 보조 손실.
+
+    readout_aux_loss 와의 차이: 저쪽은 **별도 head** 가 subject 좌표를 맞히는 표현 손실이라
+    DiT 출력에 기울기가 안 닿는다. 여기서는 DiT 가 예측한 eps 로 x0 를 복원하고 **궤적 VAE 로
+    디코드해서** 실제 카메라 pose 를 만든 뒤 각을 재므로, 기울기가 noise_pred 를 통해 궤적으로
+    직접 간다 (VAE 는 eval + frozen 이라 파라미터는 안 움직이고 통로 역할만 한다).
+
+    ── 게이지 (둘이 같은 자여야 뺄셈이 성립한다) ──────────────────────────────────────────
+      target_track (B,T,4)[xyz, valid] : frame-s 카메라 좌표의 subject OBB center / avg_scale
+                                         (dataset_dl3dv._track_cond)
+      decode(x0_hat) (B,T,11)          : rel_f = E_f @ inv(E_s) 의 rot6d + t/avg_scale
+                                         (dataset_dl3dv._target_out 의 cam_param 규약)
+    rot6d -> R 은 `compute_rotation_matrix_from_ortho6d` 가 x,y,z 를 **열**로 붙인 w2c 회전이다.
+      카메라 중심  c = -R^T t          (frame-s 좌표)
+      카메라 forward = R^T·(0,0,1) = R 의 **셋째 행**  -> `R[..., 2, :]`
+    분모(avg_scale)까지 같으므로 c 와 q 를 바로 뺄 수 있다.
+
+    ── 마스크 3중 ────────────────────────────────────────────────────────────────────────
+      valid        : anchor 를 scene_graph 에서 못 찾은 변이 제외 (track 채널 3)
+      aim_look_at  : `aim=="look_at"` 변이만 (cfg.aim_loss_gate='all' 이면 이 항 생략).
+                     free-moving 은 GT 각이 27~32° 라 손실이 GT 와 싸운다.
+      t < max_t    : x0_hat 은 1/sqrt(ᾱ_t) 배라 t 가 크면 궤적이라 부를 수 없다.
+    전부 걸러지면 분자가 0 이라 손실 0 (clamp 는 0 나눗셈 방지 + .item() 동기화 회피).
+
+    반환: (loss_aim, mean_angle_deg, n_used) — 셋 다 0-dim tensor. 조건이 없으면 None.
+    """
+    tt = data.get('target_track')
+    if tt is None:
+        return None
+    B, T = noisy_x.shape[0], tt.shape[1]
+
+    # x0_hat: DDPM 의 eps -> x0 복원. scheduler 가 v/sample 예측이면 이 식이 틀리므로 막는다.
+    if str(getattr(cfg, 'prediction_type', 'epsilon')) != 'epsilon':
+        raise ValueError(f"aim_loss 는 prediction_type='epsilon' 전용이다 "
+                         f"(got {cfg.prediction_type!r}) — x0 복원식을 같이 고칠 것")
+    ac = noise_scheduler.alphas_cumprod.to(device=device, dtype=noisy_x.dtype)[timesteps]
+    ac = ac.view(-1, *([1] * (noisy_x.dim() - 1)))
+    x0_hat = (noisy_x - (1.0 - ac).sqrt() * noise_pred) / ac.sqrt().clamp(min=1e-8)
+    # 게이트 밖(t 큰) 표본은 여기서 수천 배로 튄다. 마스크가 0 을 곱해 주지만 그 전에 VAE 를
+    # 통과하므로 inf -> 0*inf = NaN 이 될 수 있다. 유한 범위로 자른다 (게이트 안 표본은
+    # |x0| ~ 1 스케일이라 이 clamp 에 안 닿는다 = 손실값에 영향 없음).
+    x0_hat = x0_hat.clamp(-30.0, 30.0)
+
+    if getattr(cfg, 'use_vae', False):
+        traj_hat = camera_vae.decode(x0_hat * cfg.vae_latent_scale)          # (B,T,11)
+    else:
+        traj_hat = x0_hat
+    if traj_hat.shape[1] != T:
+        tt = F.interpolate(tt.transpose(1, 2).float(), size=traj_hat.shape[1],
+                           mode='linear', align_corners=True).transpose(1, 2)
+        T = traj_hat.shape[1]
+    tt = tt.to(device).float()                                               # (B,T,4)
+
+    R = compute_rotation_matrix_from_ortho6d(
+        traj_hat[..., 0:6].reshape(-1, 6)).view(B, T, 3, 3)
+    _tr = str(getattr(cfg, 'trans_repr', 'w2c'))
+    if _tr == 'w2c':
+        c = -torch.einsum('...ji,...j->...i', R, traj_hat[..., 6:9])         # -R^T t
+    elif _tr == 'c2w':
+        c = traj_hat[..., 6:9]                                               # 이미 카메라 중심
+    else:
+        raise ValueError(f"trans_repr must be 'w2c' | 'c2w', got {_tr!r}")
+    fwd = R[..., 2, :]                                                       # R^T·(0,0,1)
+
+    d = tt[..., :3] - c
+    cos = (fwd * d / d.norm(dim=-1, keepdim=True).clamp(min=1e-8)).sum(-1)   # (B,T)
+
+    m = tt[..., 3]                                                           # valid
+    if str(getattr(cfg, 'aim_loss_gate', 'look_at')) == 'look_at':
+        a = data.get('aim_look_at')
+        if a is None:
+            raise KeyError("aim_loss_gate='look_at' 인데 배치에 'aim_look_at' 이 없다 — "
+                           "dataset_dl3dv.__getitem__ 의 aim 배선을 확인할 것")
+        m = m * a.to(device).float().view(B, 1)
+    m = m * (timesteps < int(getattr(cfg, 'aim_loss_max_t', 250))).float().view(B, 1)
+
+    n = m.sum()
+    loss = ((1.0 - cos) * m).sum() / n.clamp(min=1.0)
+    deg = (torch.rad2deg(torch.acos(cos.detach().clamp(-1.0, 1.0))) * m).sum() / n.clamp(min=1.0)
+    return loss, deg, n
 
 
 def build_video_cond(data, device):
@@ -583,6 +667,19 @@ def train():
             if _vid_kw['peav_readout_aux_dim'] > 0:
                 assert _auxw > 0, \
                     "peav_readout_aux_dim>0 인데 peav_readout_aux_w=0 이면 head 가 학습되지 않는다"
+    # [new 2026-09-20, D206] aim aux loss 배선 확인. 0 이면 한 줄도 안 찍히고 경로도 안 탄다.
+    _aimw0 = float(getattr(cfg, 'aim_loss_w', 0.0) or 0.0)
+    if _aimw0 > 0:
+        assert str(getattr(cfg, 'prediction_type', 'epsilon')) == 'epsilon', \
+            "aim_loss_w>0 은 prediction_type='epsilon' 전용이다 (x0 복원식이 그 규약)"
+        assert str(getattr(cfg, 'aim_loss_gate', 'look_at')) in ('look_at', 'all'), \
+            f"aim_loss_gate must be 'look_at' | 'all', got {cfg.aim_loss_gate!r}"
+        assert bool(getattr(cfg, 'use_vae', False)), \
+            "aim_loss_w>0 은 latent arm 전용 (use_vae=false 면 x0 가 이미 궤적이라 무의미)"
+        print(f"(loss) aim aux: w={_aimw0} max_t={getattr(cfg, 'aim_loss_max_t', 250)} "
+              f"gate={getattr(cfg, 'aim_loss_gate', 'look_at')} "
+              f"— x0_hat 을 camera_vae 로 디코드해 카메라 forward↔subject 각을 좁힌다. "
+              f"모델 구조는 안 바뀐다 (target_track 은 입력이 아니라 손실 타깃)")
     # arm B (text_encoder='PEAV') 는 text CA 입력이 umt5 4096 이 아니라 PE-AV 1024 다.
     if cfg.text_encoder == 'PEAV':
         _geo_kw['text_dim'] = 1024
@@ -658,6 +755,14 @@ def train():
             camera_vae = CameraVAE(latent_dim=cfg.cam_dim).to(device)
         camera_vae.load_state_dict(torch.load(cfg.vae_ckpt_path, map_location=device))
         camera_vae.eval()
+        if float(getattr(cfg, 'aim_loss_w', 0.0) or 0.0) > 0:
+            # [new 2026-09-20, D206] aim_loss 는 encode 와 달리 **no_grad 밖에서** decode 한다
+            # (x0_hat 으로 기울기가 되돌아가야 하므로). 그대로 두면 VAE 파라미터에도 .grad 가
+            # 쌓이는데 opt 에 없어서 영원히 안 비워진다. 입력 쪽 기울기는 그대로 흐르고
+            # 파라미터 grad 만 안 만드는 것이 여기서 원하는 동작이다.
+            # 다른 arm 은 camera_vae 를 전부 no_grad 안에서만 쓰므로 이 줄이 없어도 무해하지만,
+            # 켜진 arm 에서만 바꿔 diff 를 좁힌다.
+            camera_vae.requires_grad_(False)
 
     # For evaluation (CLaTr) — optional
     clip_model = load_clip_model(cfg.clip_version, device=device) if _HAS_CLIP else None
@@ -1179,6 +1284,7 @@ def train():
                 device=device,
             ).long()
             _aux = None                                  # readout 보조 손실 (없으면 None)
+            _aim = None                                  # [D206] aim 보조 손실 (없으면 None)
             if getattr(cfg, 'is_ar', False):
                 # chunk-wise AR: teacher-forced causal self-attn over past clean latents
                 _raw = accelerator.unwrap_model(model)
@@ -1201,6 +1307,15 @@ def train():
                 _aux = readout_aux_loss(accelerator.unwrap_model(model), data, device)
                 if _aux is not None:
                     loss = loss + float(getattr(cfg, 'peav_readout_aux_w', 0.0)) * _aux
+                # [new 2026-09-20, D206] aim 보조 손실. aim_loss_w=0 (기본) 이면 호출조차
+                # 안 하므로 VAE decode 비용도 0 이고 loss 가 예전과 비트 동일하다.
+                _aim_w = float(getattr(cfg, 'aim_loss_w', 0.0) or 0.0)
+                if _aim_w > 0:
+                    _aim = aim_loss(cfg, camera_vae if cfg.use_vae else None,
+                                    noise_scheduler, noisy_x, noise_pred,
+                                    timesteps, data, device)
+                    if _aim is not None:
+                        loss = loss + _aim_w * _aim[0]
 
             t5 = time.time()
             _tD = _tick()                                # denoiser forward 끝
@@ -1213,8 +1328,20 @@ def train():
             _log = {"train/loss": loss.item()}
             if _aux is not None:
                 _log["train/readout_aux_obb"] = _aux.item()   # 가중치 곱하기 전 원 손실
+            if _aim is not None:
+                # aim_loss = 1-cos (가중치 곱하기 전), aim_deg = 같은 마스크의 평균 각도,
+                # aim_n = 그 스텝에서 손실에 실제로 들어간 (표본×프레임) 수. n 이 0 근처면
+                # 게이트(look_at / t<max_t / valid)가 배치를 통째로 걸러낸 것이다.
+                _log["train/aim_loss"] = _aim[0].item()
+                _log["train/aim_deg"] = _aim[1].item()
+                _log["train/aim_n"] = _aim[2].item()
             accelerator.log(_log, step=global_step)
-            pbar.set_description(f"Epoch {epoch} | Loss {loss.item():.4f}")
+            _desc = f"Epoch {epoch} | Loss {loss.item():.4f}"
+            if _aim is not None:
+                # wandb 없이 돌리는 smoke / screen 로그에서도 게이트가 보여야 한다
+                # (aim_n=0 이 계속되면 look_at·t·valid 중 하나가 배치를 통째로 걸러낸 것).
+                _desc += f" | aim {_log['train/aim_deg']:.1f}deg n{int(_log['train/aim_n'])}"
+            pbar.set_description(_desc)
 
             total_loss += loss.detach() * B
             total_samples += B

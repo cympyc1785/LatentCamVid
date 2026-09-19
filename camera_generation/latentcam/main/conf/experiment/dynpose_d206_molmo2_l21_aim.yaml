@@ -1,0 +1,69 @@
+# @package _global_
+# D206 — ③ `dynpose_d200_molmo2_l21_da3` 와 **네트워크가 완전히 같고** 손실만 한 항 늘어난 arm.
+#
+# ═══ 무엇을 거나 ══════════════════════════════════════════════════════════════════════════
+# 학습 스텝 안에서 DiT 가 예측한 eps 로 x0 를 복원하고, 그 x0 를 **궤적 VAE 로 디코드**해서
+# 진짜 카메라 pose 를 만든다. 거기서
+#     c(f)   = -R(f)^T t(f)            카메라 중심   (frame-s 좌표)
+#     fwd(f) =  R(f)[2, :]             카메라 forward (= R^T·(0,0,1))
+#     d(f)   =  q(f) - c(f)            카메라 -> subject OBB center
+# 를 만들고 `1 - cos(fwd, d)` 를 최소화한다. 즉 "카메라가 피사체를 향하게" 하는 항이다.
+#
+# ═══ ① D201-C(track concat) 와 무엇이 다른가 ═════════════════════════════════════════════
+# 같은 `target_track.npz` 를 읽지만 **쓰는 자리가 반대**다.
+#   D201-C  : track 을 x_t 에 concat 한다 -> 모델 **입력**. cond_dim>0 이라 네트워크가 달라지고,
+#             추론 때도 track 을 줘야 한다 (없으면 null 조건).
+#   D206    : track 은 **손실 타깃**으로만 쓴다. 입력 텐서도 state_dict 도 ③ 과 동일하고,
+#             추론 경로는 ③ 과 글자 그대로 같다 (aim_loss 는 학습 스텝에만 있다).
+# 그래서 `target_track_dim: 0` 을 **명시적으로** 남긴다 —
+# `camera_diffusion_model_latent.py:341 if self.cond_dim > 0:` 이 skip 되어야 ③ 과 동형이다.
+# `peav_readout_aux_dim` 도 0 그대로다 (D201-B 의 별도 head 는 여기 없다).
+#
+# ═══ 게이지: 두 좌표가 같은 자인가 ═══════════════════════════════════════════════════════
+# 뺄셈이 성립하려면 좌표계와 분모가 둘 다 같아야 한다. 실제로 같다:
+#   target_track (dataset_dl3dv._track_cond)
+#       q(f) = (E_s @ [p_world(f);1])[:3] / avg_scale        frame-s 카메라 좌표
+#   decode(x0_hat) (dataset_dl3dv._target_out 의 cam_param 규약을 되돌린 것)
+#       rel_f = E_f @ inv(E_s), rot6d = rel_f 의 첫 두 **열**, t = rel_f 의 t / avg_scale
+# 분모가 둘 다 `avg_scale_context_first_cam` 이라 스케일까지 닫힌다.
+# rot6d -> R 은 `compute_rotation_matrix_from_ortho6d` (x,y,z 를 **열**로) = w2c 회전이고,
+# `trans_repr: w2c` (부모 상속, config 기본값) 이므로 c = -R^T t 가 맞다.
+# ✔ 검증 (2026-09-20, d200 150씬 756변이): 위 cam_param 경로로 잰 cos 과 world 좌표에서
+#   바로 잰 cos 의 최대 차이 2.98e-7. 즉 축·원점·분모 셋 다 맞다.
+#
+# ═══ 왜 look_at 변이에만 거나 (aim_loss_gate) ════════════════════════════════════════════
+# **이 코퍼스에서 직접 잰** GT 각 (d200 150씬 756변이, 변이별 중앙값의 중앙값):
+#     aim=look_at  n=543  1.03°   프레임 중 >20° 인 비율 평균  1.12%
+#     aim=free     n=213 15.27°   "                        " 35.94%
+# (D194 vista 에서 재던 값 2.21~2.29° / 27~32° 와 자릿수는 같고 절대값은 코퍼스마다 다르다 —
+#  판정에 쓸 것은 위의 d200 수치다.)
+# free 변이는 GT 자체가 피사체를 안 겨냥한다(그게 그 preset 의 정의다). 거기에 손실을 걸면
+# GT 와 싸우는 항이 된다. 그래서 `aim=="look_at"` 인 변이만 통과시킨다.
+# 400씬 표본 2,027대 기준 구성비는 look_at 71.68% / free 28.32%.
+# => 수렴 목표는 `train/aim_deg` 가 1° 근처, `train/aim_loss` 가 1-cos(1°) ≈ 1.5e-4 근처다.
+#
+# ═══ 왜 t < 250 인가 (aim_loss_max_t) ════════════════════════════════════════════════════
+# x0_hat = (x_t - sqrt(1-ᾱ)·eps_hat)/sqrt(ᾱ) 는 t 가 크면 1/sqrt(ᾱ) 배로 부푼다.
+# scaled_linear(0.00085, 0.012) 에서 ᾱ 와 SNR:
+#     t=250  ᾱ 0.674  1/sqrt 1.22  SNR 2.07     <- 여기까지만 쓴다
+#     t=400  ᾱ 0.424  1/sqrt 1.53  SNR 0.74
+#     t=999  ᾱ 0.005  1/sqrt 14.65 SNR 0.005    <- 디코드해도 궤적이 아니다
+# 결과적으로 스텝당 손실에 들어가는 비율은 0.717 x 0.25 ≈ 18% (batch 8 이면 ~1.4대).
+# 남는 표본 수는 wandb `train/aim_n` 으로 매 스텝 보인다 — 0 이 계속되면 게이트 사고다.
+#
+# ═══ 가중치 ══════════════════════════════════════════════════════════════════════════════
+# 기저 손실(eps MSE) 은 plateau 에서 0.02~0.03. aim 항은 학습 초기 1-cos ~ 0.3~1.0,
+# GT 수준(1.03°) 이면 1.6e-4 이다. w=0.1 이면 초기 기여가 0.03~0.1 로 기저와 같은 자리수이고
+# 수렴하면 자연히 사라진다. 더 키우면 궤적이 조준에만 맞춰져 preset 형상을 잃을 위험이 있다.
+defaults:
+  - dynpose_d200_molmo2_l21_da3
+
+exp_name: dynpose_d206_molmo2_l21_aim
+
+aim_loss_w: 0.1
+aim_loss_max_t: 250
+aim_loss_gate: look_at
+
+# ↓ ③ 과 네트워크가 같아야 하므로 **바꾸지 말 것** (기본값이지만 의도를 남긴다).
+target_track_dim: 0        # >0 이면 x_t 에 concat 되어 D201-C 가 된다
+peav_readout_aux_dim: 0    # >0 이면 별도 head 가 생겨 D201-B 가 된다

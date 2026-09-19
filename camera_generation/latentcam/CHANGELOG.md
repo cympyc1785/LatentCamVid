@@ -5,6 +5,27 @@ All notable changes to the latentcam sub-project. Follows [Keep a Changelog](htt
 ## [Unreleased]
 
 ### Added
+- **aim 보조 손실 + D206 arm (`aim_loss_w` / `conf/experiment/dynpose_d206_molmo2_l21_aim.yaml`) (2026-09-20).**
+  학습 스텝 안에서 예측 eps 로 x0 를 복원하고 그 x0 를 **궤적 VAE 로 디코드**해 실제 pose 를
+  만든 뒤, 카메라 forward `R[2,:]` 와 (카메라중심 `-R^T t` → subject OBB center) 벡터 사이의
+  `1 - cos` 을 최소화한다 (`train_latent_cam_dm.aim_loss`).
+  - **모델 구조는 안 바뀐다.** track 은 입력이 아니라 **손실 타깃**으로만 쓰인다. D201-C
+    (`target_track_dim>0`, x_t 에 concat = 모델 입력) 와 D201-B (별도 readout head) 와는
+    쓰는 자리가 다르고, 추론 경로는 ③ `dynpose_d200_molmo2_l21_da3` 와 글자 그대로 같다.
+  - 게이지 검증: cam_param 경로로 잰 cos 과 world 좌표에서 바로 잰 cos 의 최대 차이
+    **2.98e-7** (d200 150씬 756변이). 축·원점·분모(`avg_scale_context_first_cam`) 셋 다 닫힌다.
+  - `aim_loss_gate: look_at` — d200 실측 GT 각(변이별 중앙값의 중앙값)이 `aim=look_at`
+    n=543 **1.03°**, `aim=free` n=213 **15.27°**. free 는 GT 가 애초에 겨냥을 안 하므로
+    손실을 걸면 GT 와 싸운다.
+  - `aim_loss_max_t: 250` — x0_hat 이 `1/sqrt(ᾱ)` 배로 부푼다. scaled_linear(0.00085,0.012)
+    에서 t=250 ᾱ 0.674 / SNR 2.07, t=999 ᾱ 0.005 / SNR 0.005.
+  - **기본값 `aim_loss_w: 0.0`** 이라 기존 arm 은 데이터셋 로드·VAE 디코드·손실 전부 미실행
+    (bit-identical). 켜질 때만 `camera_vae.requires_grad_(False)` 로 VAE 를 얼린다 — decode 가
+    `no_grad` 밖이라 안 얼리면 옵티마이저에 없는 파라미터에 `.grad` 가 영원히 쌓인다.
+  - 게이트 통과량은 매 스텝 `train/aim_n` (+ `train/aim_loss`, `train/aim_deg`) 로 보인다.
+    smoke(40씬/batch 4) 실측: 36 스텝 중 25 스텝 n>0, aim_deg 중앙값 7.0°.
+  - 데이터셋은 `prompts.json` 의 `aim` 필드만 `_aim_cache` 로 따로 읽는다 — `samples` 튜플에
+    원소를 **안 늘린다** (늘리면 `.latentcam_index/*.pt` 직렬화 캐시가 전부 깨진다).
 - **D201-C arm 추가 (`conf/experiment/dynpose_d201_molmo2_l21_track_d5.yaml`) (2026-09-19).**
   `dynpose_d200_molmo2_l21_da3` 에 subject OBB 궤적 concat 조건을 얹는다
   (`target_track_dim: 4` / `target_track_dropout: 0.5` / `target_track_val_drop: true`).

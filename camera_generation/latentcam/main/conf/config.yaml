@@ -589,6 +589,25 @@ peav_readout_queries: 49
 # head 출력은 DiT 로 되돌아가지 않으므로 추론에서 안 부르면 그게 곧 "MLP 를 뗀" 상태다.
 peav_readout_aux_dim: 0
 peav_readout_aux_w: 0.0       # 보조 손실 가중치. aux_dim>0 인데 0 이면 학습 진입점에서 assert.
+
+# ─── [new 2026-09-20, D206] aim aux loss ─────────────────────────────────────────────────
+# 학습 스텝 안에서 예측 x0 를 **궤적 VAE 로 디코드**해, 카메라 forward 와
+# (카메라중심 -> subject OBB center) 벡터 사이 각을 좁히는 보조 손실.
+# 바로 위 readout aux 와 다르다: 저쪽은 별도 head 가 subject 좌표를 맞히는 표현 손실이라
+# DiT 출력에 닿지 않고, 이쪽은 **DiT 가 예측한 x0 자체**를 디코드하므로 궤적에 직접 기울기가 간다.
+#   타깃 게이지: `target_track` (B,T,4)[xyz, valid] = frame-s 카메라 좌표 / avg_scale
+#   예측 게이지: decode(x0_hat) 의 rot6d/t = rel_f = E_f @ inv(E_s), 같은 avg_scale 로 나뉨
+#   => 분모까지 같은 자라 c = -R^T t 와 q 를 그대로 뺄 수 있다.
+# 0.0 (기본) = 이 경로를 아예 안 탄다 -> 기존 arm 과 손실이 비트 동일.
+# ⚠ target_track 을 쓰지만 **모델 입력이 아니다** (target_track_dim 과 무관, 네트워크 동일).
+aim_loss_w: 0.0
+# x0_hat = (x_t - sqrt(1-ᾱ)·eps_hat)/sqrt(ᾱ) 는 t 가 크면 1/sqrt(ᾱ) 가 폭발해(t=999 에서 ~30배)
+# 디코드 결과를 궤적이라 부를 수 없다. 이 timestep **미만** 표본만 손실에 넣는다.
+aim_loss_max_t: 250
+# 어느 표본에 거나. 'look_at' = prompts.json 의 `aim=="look_at"` 인 변이만. (D194 실측:
+# look_at 은 GT 각 중앙값 2.21~2.29°, >20° 가 0% — 손실이 이미 있는 규약을 강화한다.
+# aim=free 는 GT 각이 27~32° 라 손실이 GT 와 싸운다.) 'all' = valid track 이 있는 전 표본.
+aim_loss_gate: look_at
 geo_inseg_span: null          # in-seg sampling span override (null = full segment)
 geo_covis_radius: 2.0         # covisibility retrieval: ball radius
 geo_covis_theta0: 10.0        # covisibility retrieval: min view-angle separation (deg)

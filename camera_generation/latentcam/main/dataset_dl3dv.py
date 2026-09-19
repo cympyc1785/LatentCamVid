@@ -328,6 +328,11 @@ class CamDataset(torch.utils.data.Dataset):
         self._target_pose_cache = {}
         # target_track_dim>0: scene_idx -> {'track': (V,T,3) world, 'valid': (V,), 'keys': {str:i}}
         self._target_track_cache = {}
+        # [new 2026-09-20, D206] aim_loss_w>0: scene_idx -> {seg_key: 1.0 if aim=='look_at' else 0.0}
+        # prompts.json 의 `aim` 필드 하나만 뽑아 둔 것. samples 튜플에는 **안 넣는다** —
+        # 그 튜플은 <root>/.latentcam_index/*.pt 에 그대로 직렬화돼 있어(_load_index) 원소 수가
+        # 바뀌면 기존 인덱스 캐시가 전부 깨진다.
+        self._aim_cache = {}
         # lazy_dataset (default True): __init__ only builds the sample/scene index (from a persisted
         # cache when available); scene poses/paths are parsed on demand in __getitem__ + cached.
         self.lazy = spec.lazy_dataset or only_segments is not None
@@ -1191,6 +1196,22 @@ class CamDataset(torch.utils.data.Dataset):
         q = q / norm_scale.reshape(1, 1).float()
         return torch.cat([q, torch.ones(T, 1)], dim=-1)
 
+    def _aim_look_at(self, scene_idx, seg_key):
+        """[new 2026-09-20, D206] 이 변이가 `aim=="look_at"` 인가 -> 1.0 / 0.0.
+
+        aim aux loss(train_latent_cam_dm.aim_loss) 의 게이트. free-moving 변이는 GT 자체가
+        subject 를 안 겨냥하므로(각도 중앙값 27~32°) 손실을 걸면 GT 와 싸운다.
+        `aim` 키가 없는 옛 prompts.json 은 0.0 = 손실 제외 (조용히 전 표본에 거는 것보다
+        조용히 아무것도 안 거는 쪽이 wandb 의 `train/aim_n` 으로 바로 보인다).
+        """
+        cache = self._aim_cache.get(scene_idx)
+        if cache is None:
+            pj = json.load(open(self._prompts_path(self.scene_dir_list[scene_idx])))
+            cache = {str(k): (1.0 if str(v.get('aim', '')) == 'look_at' else 0.0)
+                     for k, v in pj.items()}
+            self._aim_cache[scene_idx] = cache
+        return cache.get(str(seg_key), 0.0)
+
     def _first_farthest_scale(self, extrinsics):
         """LagerNVS-style scale = 1.35 * max(||camera center - FIRST camera||) over the segment
         (relative to frame 0). Matches LagerNVS normalize(): scene_scale = 1.35*max ||t||."""
@@ -1684,10 +1705,18 @@ class CamDataset(torch.utils.data.Dataset):
         # [2026-09-15 / D195-A] `peav_readout_aux_dim>0` 도 같은 키를 쓴다 — 그쪽은 x_t 에
         # concat 하지 않고 **보조 손실의 타깃**으로만 읽는다 (train_latent_cam_dm.readout_aux_loss).
         # 둘 다 0 이면 키 자체가 안 생기고 손실이 조용히 None 이 되므로, 배선은 여기 한 줄이다.
+        # [2026-09-20 / D206] `aim_loss_w>0` 이 세 번째 소비자다 — concat 도 head 도 없이
+        # **손실 타깃**으로만 읽는다 (train_latent_cam_dm.aim_loss). 그래서 target_track_dim 은
+        # 0 인 채로 두고(네트워크 동형) 이 조건만 켠다.
+        _aim_w = float(getattr(self.cfg, 'aim_loss_w', 0.0) or 0.0)
         if (int(getattr(self.cfg, 'target_track_dim', 0) or 0) > 0
-                or int(getattr(self.cfg, 'peav_readout_aux_dim', 0) or 0) > 0):
+                or int(getattr(self.cfg, 'peav_readout_aux_dim', 0) or 0) > 0
+                or _aim_w > 0):
             out['target_track'] = self._track_cond(
                 scene_idx, data_name.split('_')[-1], extrinsics, norm_scale)
+        if _aim_w > 0 and str(getattr(self.cfg, 'aim_loss_gate', 'look_at')) == 'look_at':
+            out['aim_look_at'] = torch.tensor(
+                self._aim_look_at(scene_idx, data_name.split('_')[-1]), dtype=torch.float32)
 
         # [new 2026-09-03] PE-AV video/text 토큰 (D117 video CA). geo 캐시 분기가 아래에서 곧장
         # return 하므로 **그 앞에서** 붙여야 한다. 켜지 않으면 키 자체가 안 생긴다.

@@ -82,17 +82,30 @@ def load_entry_meta(corpus_root: str, video: str, name: str, prefix: str = "vist
             "variant_id": entry.get("variant_id", "")}
 
 
-def load_scores(scores_csv: str):
-    """latentcam eval 의 `preds_scores.csv` -> {entry_idx: captions/fscore}.
+def load_scores(scores_csv: str, video: str, name_prefix: str):
+    """latentcam eval 의 `preds_scores.csv` -> {entry_idx: captions/fscore}, **이 video 만**.
 
     WHY: eval 은 per-sample caption F1 을 CSV 로만 떨구고 렌더 쪽은 그걸 모른다. 어떤 궤적에서
     F1 이 0 이 되는지는 숫자로는 안 보이고 warp 를 나란히 봐야 보인다 -- 그래서 점수를 라벨에 박고
-    band 별 reel 로 묶는다. `filename` 은 `test/vista4d_<video>_<idx>_transforms_ref.` 꼴.
+    band 별 reel 로 묶는다. `filename` 은 `test/<prefix>_<video>_<idx>_transforms_ref.` 꼴.
+
+    WHY video 필터: 예전 구현은 `split("_")[-3]` 로 **idx 만** 키로 썼다. csv 가 video 하나짜리면
+    맞지만, val 전량 csv(100씬 512행)를 주면 같은 idx 가 씬마다 겹쳐 **마지막 씬 값으로 덮어써진
+    다** -- 라벨의 f1 이 남의 씬 점수가 되고 band reel 도 같이 틀어진다. 그래서 (video, idx) 로
+    가른 뒤 이 video 만 남긴다.
     """
     from csv import DictReader
+    head, tail = f"{name_prefix}_", "_transforms_ref."
+    out = {}
     with open(scores_csv, encoding="utf-8") as file:
-        return {int(row["filename"].split("_")[-3]): float(row["captions/fscore"])
-                for row in DictReader(file)}
+        for row in DictReader(file):
+            stem = row["filename"].split("/")[-1]
+            if not (stem.startswith(head) and stem.endswith(tail)):
+                continue
+            name, _, idx = stem[len(head):-len(tail)].rpartition("_")
+            if name == video:
+                out[int(idx)] = float(row["captions/fscore"])
+    return out
 
 
 def main(args):
@@ -131,7 +144,8 @@ def main(args):
                                   meta[n]["hole_fraction"] or 0.0))
 
     # caption F1 band. --scores_csv 없으면 전부 빈 dict 라 아래 분기가 통째로 no-op 이다.
-    scores = load_scores(args.scores_csv) if args.scores_csv else {}
+    scores = (load_scores(args.scores_csv, args.video, args.name_prefix)
+              if args.scores_csv else {})
     if scores and args.order == "fscore":
         names.sort(key=lambda n: -scores.get(int(n.rsplit("_", 1)[1]), -1.0))
     elif args.order == "fscore":

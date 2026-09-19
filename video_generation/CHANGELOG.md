@@ -7,6 +7,18 @@
 ## [Unreleased]
 
 ### Fixed
+- **`load_scores` 가 여러 씬짜리 `preds_scores.csv` 를 idx 로만 키잡아 f1 라벨이 남의 씬
+  점수가 됐다 (2026-09-19, D204).** `render_pred_depth_warp.py:85` 이 `filename` 을
+  `int(row["filename"].split("_")[-3])` 로 읽어 **entry idx 하나만** 키로 썼다. csv 가 video
+  한 편짜리면 맞지만, D200 val 전량 csv(100씬 **512행**)를 주면 같은 idx 가 씬마다 겹쳐
+  **6개 키(idx 0~5)로 붕괴**하고 마지막 씬 값만 남는다. 그 값이 SOURCE 타일 라벨에 **픽셀로
+  박히고**(`f1_tag`), `index.json` 의 `caption_fscore` 와 `f1_high/mid/low` band reel 분류도
+  같이 틀어진다. 실측: 08a0817a idx1 참값 1.000 -> 라벨 0.210, 0b2f6306 idx3 참값 1.000 ->
+  라벨 0.000. 씬 하나씩 돌리던 기존 용법에서는 드러나지 않다가 val 전량을 먹이면서 나타났다.
+  조치: `load_scores(scores_csv, video, name_prefix)` 로 시그니처를 바꿔
+  `<prefix>_<video>_<idx>_transforms_ref.` 를 앞뒤로 벗기고 **`rpartition("_")` 로 한 번만**
+  쪼개 `(video, idx)` 로 가른 뒤 현재 video 만 남긴다 (video 이름에 `_` 가 있어도 안전).
+  D204 선정 17대로 재검증 17/17 일치, 릴 재렌더 완료.
 - **`render_eval_val_warp.py` 가 변이 1개짜리 씬을 조용히 빠뜨렸다 (2026-09-19, D203).**
   D200 val 99씬을 돌린 결과가 **88편**이었다. 예외는 0건이고 `failed` 목록도 비어 있어서
   로그만 보면 전부 성공한 것처럼 보인다 — 줄어든 건 `done` 카운트 하나뿐이다.

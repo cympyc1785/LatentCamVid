@@ -6,6 +6,17 @@
 
 ## [Unreleased]
 
+### Added
+- **`eval_subject_in_frame.py --scenes <file>` — 씬 부분집합 (2026-09-19, D205).** d200 test 는
+  1,017 씬이고 실측이 **429 s/씬** (5 렌더 경로 × 49 프레임, `--subject_occlusion` 2-pass) 이라
+  전량은 단일 GPU 121 h 다. 기존에 씬 수를 줄이는 손잡이는 `--num_shards` 뿐이었고
+  (`--limit` 은 이름과 달리 **씬당 entry** 제한이라 씬당 entry 가 6 이하인 d200 에서는 no-op),
+  샤딩은 "쪼개기"지 "표본"이 아니다. 이제 돌릴 씬을 한 줄에 하나씩 적은 파일을 받는다.
+  표본 **규칙**은 스크립트 밖에 둔다 (랜덤 / 운동 층화 / preset 한정 중 무엇이었는지가
+  산출물 옆 파일로 남아야 하므로). 거르는 순서는 `--scenes` → 샤딩 — 반대면 샤드마다 표본
+  크기가 들쭉날쭉해진다. 기본 None = 전량 = 기존 동작과 비트 단위로 같다.
+  같이 고친 것: `--limit` 주석이 "0 = 씬 전량"이라고 잘못 적혀 있어 씬 수 손잡이로 오독됐다.
+
 ### Fixed
 - **`load_scores` 가 여러 씬짜리 `preds_scores.csv` 를 idx 로만 키잡아 f1 라벨이 남의 씬
   점수가 됐다 (2026-09-19, D204).** `render_pred_depth_warp.py:85` 이 `filename` 을

@@ -187,9 +187,23 @@ def main(args):
         scene = name[len(args.name_prefix) + 1:-(len(entry) + 1)]
         by_scene[scene].append((name, entry))
 
+    # 씬 부분집합. 전량이 감당 안 될 때(d200 test 1,017씬 = 실측 429 s/씬 → 단일 GPU 121 h)
+    # 표본을 **밖에서 정해** 넣는다. 표본 규칙(랜덤 / 운동 층화 / preset 한정)은 이 스크립트의
+    # 관심사가 아니다 — 파일 하나로 받아야 "어떤 표본이었나"가 산출물 옆에 남는다.
+    # 기본 None = 전량 = 기존 동작과 비트 단위로 같다.
+    if args.scenes:
+        with open(args.scenes, encoding="utf-8") as file:
+            wanted = {line.strip() for line in file if line.strip()}
+        missing = wanted - set(by_scene)
+        by_scene = {s: v for s, v in by_scene.items() if s in wanted}
+        assert by_scene, f"{args.scenes} 의 씬이 ref_eval_dir 에 하나도 없다"
+        print(f"[scenes] {len(by_scene)}/{len(wanted)} 씬 선택"
+              + (f"  (ref 에 없음 {len(missing)})" if missing else ""), flush=True)
+
     # 샤딩은 **씬 단위**다. entry 로 자르면 같은 씬의 점군을 샤드마다 다시 올리게 되는데,
     # 씬 하나 여는 비용(unproject)이 entry 하나 렌더보다 훨씬 크다. 기본값 1/0 은 전량 =
-    # 기존 동작과 비트 단위로 같다.
+    # 기존 동작과 비트 단위로 같다. `--scenes` 를 **먼저** 거르고 샤딩은 그 뒤다 — 순서가
+    # 반대면 샤드마다 표본 크기가 들쭉날쭉해진다.
     scenes = sorted(by_scene)
     if args.num_shards > 1:
         scenes = [s for i, s in enumerate(scenes) if i % args.num_shards == args.shard_id]
@@ -418,7 +432,12 @@ if __name__ == "__main__":
                         action="store_true", default=False)
     parser.add_argument("--no_subject_occlusion", dest="subject_occlusion",
                         action="store_false")
-    parser.add_argument("--limit", type=int, default=0)              # 0 = 씬 전량 (프로브용)
+    # 씬 **하나당** entry 수 제한 (프로브용). 씬 수는 안 줄인다 — d200 은 씬당 entry 가 6 이하라
+    # 이 값으로는 아무것도 안 줄어든다. 씬 수를 줄이려면 `--scenes` / `--num_shards` 를 쓸 것.
+    parser.add_argument("--limit", type=int, default=0)              # 0 = 씬당 entry 전량
+    # 돌릴 씬만 한 줄에 하나씩 적은 파일. None = 전량(기존 동작). 표본을 파일로 받는 이유는
+    # 산출물 옆에 "어떤 표본이었나"가 남아야 해서다 (main() 주석 참조).
+    parser.add_argument("--scenes", default=None)
     # 씬 단위 샤딩 (`sam3_seg_instances.py` 와 같은 패턴). 기본 1/0 = 전량, 기존 동작 그대로.
     parser.add_argument("--num_shards", type=int, default=1)
     parser.add_argument("--shard_id", type=int, default=0)

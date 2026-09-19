@@ -57,6 +57,11 @@ def main():
     parser.add_argument("--text_key", default=TEXT_KEY)
     parser.add_argument("--frame", type=int, default=0)    # 조건으로 줄 프레임 (frame0 공유 규약)
     parser.add_argument("--overwrite", action="store_true")
+    # D208. rgbd 를 아예 안 만들고 ② 텍스트 미러만 쓴다. `text_motion` ckpt 만 돌릴 때 필요하다 —
+    # dynpose-100k 는 `recon_and_seg/<scene>` 이 test 1,017 씬 중 107 편에만 남아 있어서
+    # 기본 경로로는 나머지 910 편이 `skipped` 로 빠지고 열거 자체가 10% 로 줄어든다.
+    # 기본 off = 예전 동작 비트 동일.
+    parser.add_argument("--text_only", action="store_true")
     args = parser.parse_args()
 
     with open(args.split, encoding="utf-8") as file:
@@ -70,7 +75,7 @@ def main():
 
     # ── ① scene 당 RGB/depth 한 벌
     scene_files, missing = {}, []
-    for scene in scenes:
+    for scene in [] if args.text_only else scenes:
         base = path.join(args.eval_data, "recon_and_seg", scene)
         video = path.join(base, "video.mp4")
         depth_exr = path.join(base, "depths", f"{args.frame:05d}.exr")
@@ -98,20 +103,21 @@ def main():
     depth_stats = []
     for line in lines:
         dataset, scene, index = line.split("/")
-        if scene not in scene_files:
+        if not args.text_only and scene not in scene_files:
             skipped.append(line)
             continue
-        entry_dir = path.join(rgbd_root, scene, index, "rgbd")
-        makedirs(path.dirname(entry_dir), exist_ok=True)
-        if path.islink(entry_dir) or path.exists(entry_dir):
-            if args.overwrite and path.islink(entry_dir):
-                os.remove(entry_dir)
-            else:
-                n_link += 1
-                entry_dir = None
+        entry_dir = None if args.text_only else path.join(rgbd_root, scene, index, "rgbd")
         if entry_dir is not None:
-            symlink(path.join(rgbd_root, "_scene", scene), entry_dir)
-            n_link += 1
+            makedirs(path.dirname(entry_dir), exist_ok=True)
+            if path.islink(entry_dir) or path.exists(entry_dir):
+                if args.overwrite and path.islink(entry_dir):
+                    os.remove(entry_dir)
+                else:
+                    n_link += 1
+                    entry_dir = None
+            if entry_dir is not None:
+                symlink(path.join(rgbd_root, "_scene", scene), entry_dir)
+                n_link += 1
 
         with open(path.join(args.corpus, dataset, scene, "da3", "prompts.json"),
                   encoding="utf-8") as file:

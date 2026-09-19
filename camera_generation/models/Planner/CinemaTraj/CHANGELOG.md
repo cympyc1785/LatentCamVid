@@ -38,7 +38,46 @@ Follows [Keep a Changelog](https://keepachangelog.com/).
   생성되는 `render.sh` 가 `trumans_gt_render.py --anim` 을 부르도록 배선. 기본 off 라 예전 `render.sh` 와 글자 동일.
   (플래그 이름이 `--cycles*` 로 시작하면 Cycles 애드온이 argv 를 prefix 매칭해 런을 죽인다 — 그래서 `--cdevice`/`--rgb_cdevice`.)
 
+- **`sample_camera_bank.py` / `fit_hole_ladder.py` `--mesh_margin_autoclamp` (2026-09-20).**
+  D207 1차 전량에서 fit 이 191 chunk 중 **11 편**에서 D47 legality assert 로 죽었다 —
+  `--mesh_margin_frac 0.08` 이 만든 임계(0.16~0.30 m)가 **소스 카메라 자신의 mesh 여유**
+  (0.10~0.28 m)보다 커서다. TRUMANS 는 실내라 카메라가 벽에 붙는 chunk 가 있고, 소스 카메라를
+  불법으로 판정하는 임계는 충돌이 아니라 버그다.
+  `--mesh_margin_autoclamp f` 를 주면 **그런 chunk 에서만** 임계를 `f × 소스여유` 로 내린다.
+  이미 합법인 chunk 는 코드 경로가 그대로라 **기본값 0.0 은 물론 켜도 비트 동일**이다.
+  내렸을 때는 `behind_context` 가 `mesh_margin_clamped=(before, after)` 를 반환하고 로그를 찍는다.
+  - `configs/bank/d207_trumans_pilot.json` 의 `fit.args` 에 `0.9` 로 켰다. 10/11 편이 rc=0 으로
+    복구됐다 (180 편은 손대지 않았다). 남은 `tru_0ab03928_a13_s3f0k6` 은 다른 assert
+    (`소스 카메라가 mesh 격자에서 unreachable`)라 이 플래그로는 안 산다.
+- **`run_gendop_eval.py` score 단계에 외부 베이스라인·표본·cloud_source 배선 (2026-09-20).**
+  전부 기본값이 예전 동작이라 기존 런과 비트 동일이다.
+  - `--extra_eval_dir LABEL=DIR` (반복 가능) — 우리 파이프라인 밖에서 만든 eval 폴더
+    (E.T./DIRECTOR)를 같은 표에 올린다. `--arm none` 은 GenDoP arm 을 하나도 안 올린다
+    (`arms=[]` 와 `arms=None` 을 `or ARMS` 로 못 가르므로 `stage_score` 쪽 분기를 고쳤고,
+    infer/evaldir 에서 빈 리스트가 조용히 "전부"로 되살아나는 것은 assert 로 막았다).
+  - `--scenes FILE` / `--out_tag` — D205 의 200 씬 표본(`tmp/d205/sample200_scenes.txt`)으로
+    재서 그 표와 열을 나란히 놓는다. `--subject_occlusion` 도 같이 넘긴다.
+  - `--cloud_source {npz,memory}`.
+- **`gendop_preds_to_eval_dir.py --caption_dir` (2026-09-20).**
+  `--caption_from ref` 일 때 캡션을 가져올 폴더를 따로 준다. 텍스트 조건을 갈아끼운 런
+  (`--text_dir`)이 지표 단계에서 **모델이 받지 않은** 문장을 읽는 것을 막는다.
+  `run_gendop_eval.py` 는 `--text_dir` 를 줬을 때 자동으로 같이 넘긴다. 기본값 None = ref 폴더.
+- **`dynpose_gendop_inputs.py --text_only` (2026-09-20).** rgbd 루프와 symlink 를 건너뛴다. 기본 off.
+- **`run_director_batch.py` (신규, 2026-09-20).** DIRECTOR(E.T.) 를 split 전량에 돌려
+  `gendop_preds_to_eval_dir.py` 가 먹는 npz 를 낸다. 모델·CLIP 을 한 번만 올리고 16 entry 씩
+  묶어 `Diffuser.sample()` 을 부른다 (`StackedRandomGenerator` 가 배치 원소마다 별도
+  `torch.Generator` 를 쓰므로 `seeds=[seed]*B` 는 개별 실행과 등가 — 이어달리기도 안전).
+  E.T. world(m) → scene-graph G(u) → 코퍼스 world 변환을 담고, **카메라 축 규약을 런마다 실측**해
+  찍는다 (5,144 entry: 카메라 +z 와 char−cam 사이 각 mean 36.63° / median 27.97° → **OpenCV**.
+  `run_director_vista.py` 에 "미검증"으로 남아 있던 항목이다).
+
 ### Changed
+- **`run_gendop_eval.py` `dynpose_d200` 의 `eval_data` 를 `DynPose-100K/eval_data` 로 정정
+  (2026-09-20).** d200 은 d185+d199 pooled = dynpose-100k 이라 recon 이 거기 있다. d137 까지
+  쓰던 `DynPose-LBM/eval_data` 를 물려받는 바람에 1,017 씬 중 **107 씬**(두 코퍼스가 겹치는 몫)만
+  잡혔고, 그 107 을 보고 "rgbd 입력이 10% 뿐"이라고 잘못 읽어 `text_only=True` 를 걸었다.
+  실제로는 `video.mp4` / `depths/00000.exr` 둘 다 **1,017/1,017** 이라 `gendop_rgbd` 도 돌릴 수
+  있다 — `text_only` 플래그는 남기되 이 코퍼스에서는 뗐다. score 단계도 이 루트로 recon 을 읽는다.
 - **GPU 정책: TRUMANS 작업에 한해 GPU 5 사용 가능** (2026-09-20 사용자 지시, `CLAUDE.md` 반영).
   뱅크 굽기·Blender 렌더·TRUMANS 캡션용 vLLM 이 해당한다. `run_bank.py` 는 `BANK_GPU_ALLOW=5` 를
   줘야 `--gpu 5` 를 받는다 (없으면 `--gpu` ∈ `"01234"` assert). 6,7 은 여전히 금지,

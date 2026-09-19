@@ -116,6 +116,35 @@ CORPORA = {
         },
         ref="d137_da3",
     ),
+    # D208 (2026-09-20, 5,144 entry = d200 test split 전량). 5-arm 학습이 쓰는 그 split 이다.
+    #
+    # **recon 루트가 다른 dynpose 세대와 다르다.** d200 은 d185+d199 pooled = dynpose-100k
+    # 이라 recon 이 `DynPose-100K/eval_data` 에 있다. d137 까지 쓰던 `DynPose-LBM/eval_data`
+    # 를 그대로 두면 1,017 씬 중 **107 씬**(두 코퍼스가 겹치는 몫)만 잡힌다 — 처음에 그 107 을
+    # 보고 "rgbd 가 10% 뿐"이라고 잘못 읽었다. 실제로는 video.mp4/depths 둘 다 1,017/1,017 이라
+    # `gendop_rgbd` 도 돌릴 수 있다. score 단계도 이 루트로 recon 을 읽는다.
+    #
+    # cloud.npz 는 0/1,017 이다 (D178 에서 디스크 저장을 없앴다) -> score 는
+    # `--cloud_source memory` 여야 한다. npz 모드면 전 씬이 "cloud/graph 없음" 으로 빠져
+    # 표가 통째로 nan 이 된다 (조용히 실패한다).
+    "dynpose_d200": dict(
+        corpus="/data1/cympyc1785/data/DynPose-LBM/latentcam_dynpose_d200",
+        split_name="seg_list_dynpose_s91_test.txt",
+        eval_data="/data1/cympyc1785/data/DynPose-100K/eval_data",
+        prefix="dynpose",
+        cloud_root=path.join(HERE, "out_dynpose"),
+        out=path.join(HERE, "results", "20260920_d208_gendop_d200"),
+        depth_norm="median",
+        # D200 5-arm 중 epoch 49 last 로 testset eval 이 끝난 넷 (2026-09-18 run 이름 기준).
+        # ⑤ molmo2_dec_l21 은 아직 학습 중이라 빠져 있다.
+        ours={
+            "d200_da3":             EVAL_MY + "20260918_140904_dynpose_d200_da3__last",
+            "d200_molmo2":          EVAL_MY + "20260918_140909_dynpose_d200_molmo2_da3__last",
+            "d200_molmo2_l21":      EVAL_MY + "20260918_140914_dynpose_d200_molmo2_l21_da3__last",
+            "d200_molmo2_dec":      EVAL_MY + "20260918_140919_dynpose_d200_molmo2_dec_da3__last",
+        },
+        ref="d200_da3",
+    ),
 }
 
 # GenDoP arm 2종. text 는 어느 ckpt 를 쓰든 --text_from_eval_dir 로 같은 문장을 받는다.
@@ -174,13 +203,16 @@ def eval_suffix(pose_length, text_tag=None, rescale=True, resample="index_pick",
             + ("" if scale_token else "_noscale"))
 
 
-def stage_inputs(C, overwrite=False):
+def stage_inputs(C, overwrite=False, text_only=False):
     makedirs(C["out"], exist_ok=True)
     cmd = [PY_GENDOP, "scripts/dynpose_gendop_inputs.py",
            "--split", split_path(C), "--corpus", C["corpus"],
            "--eval_data", C["eval_data"], "--out", C["out"]]
     if overwrite:
         cmd += ["--overwrite"]
+    # 코퍼스가 `text_only=True` 면 rgbd 를 안 만든다 (dynpose_d200 처럼 recon 이 일부만 남은 경우).
+    if text_only or C.get("text_only"):
+        cmd += ["--text_only"]
     return sh(cmd, tag="inputs")
 
 
@@ -220,7 +252,7 @@ def stage_infer(C, gpu, limit=None, depth_norm=None, pose_length=30, arms=None,
 
 
 def stage_evaldir(C, pose_length=30, arms=None, text_tag=None, rescale=True,
-                  resample="index_pick", scale_token=True):
+                  resample="index_pick", scale_token=True, text_dir=None):
     suffix = eval_suffix(pose_length, text_tag, rescale, resample, scale_token)
     # gendop_slerp 은 GenDoP 의 core/utils 를 import 하므로 그 env 로 돌려야 한다
     py = PY_LATENT if resample == "index_pick" else PY_GENDOP
@@ -234,6 +266,10 @@ def stage_evaldir(C, pose_length=30, arms=None, text_tag=None, rescale=True,
                "--src_poses", str(pose_length), "--n_poses", "49",
                "--resample", resample,
                "--caption_from", "ref"]
+        # 텍스트를 갈아끼운 런은 캡션도 그 폴더에서 가져와야 caption f-score 가 **모델이 받은**
+        # 문장을 읽는다. 안 주면 ref eval 폴더 = 예전 런과 비트 동일.
+        if text_dir:
+            cmd += ["--caption_dir", text_dir]
         if not rescale:
             cmd += ["--no_rescale"]
         if not scale_token:
@@ -244,19 +280,37 @@ def stage_evaldir(C, pose_length=30, arms=None, text_tag=None, rescale=True,
 
 
 def stage_score(C, gpu, pose_length=30, arms=None, text_tag=None, rescale=True,
-                resample="index_pick", scale_token=True):
+                resample="index_pick", scale_token=True, extra_eval_dir=(),
+                scenes=None, subject_occlusion=False, out_tag=None,
+                cloud_source="npz"):
+    """`arms` 가 빈 리스트면 GenDoP arm 없이 `--extra_eval_dir` 만 올린다 (E.T. 같은 외부 베이스라인).
+
+    `arms=None` 이 "전부"(기존 동작)이고 `arms=[]` 가 "하나도 없음"이라 `or ARMS` 로는 못 가른다.
+    """
     suffix = eval_suffix(pose_length, text_tag, rescale, resample, scale_token)
     cmd = [PY_VISTA, "scripts/eval_subject_in_frame.py",
            "--ref_eval_dir", C["ours"][C["ref"]], "--name_prefix", C["prefix"],
            "--cloud_root", C["cloud_root"],
-           "--corpus_root", C["corpus"], "--eval_data", path.dirname(C["eval_data"])]
+           "--corpus_root", C["corpus"], "--eval_data", path.dirname(C["eval_data"]),
+           # D178 이후 dynpose 는 cloud.npz 를 디스크에 안 남긴다 — npz 모드면 전 씬이
+           # "cloud/graph 없음" 으로 조용히 빠져 표가 통째로 nan 이 된다.
+           "--cloud_source", cloud_source]
     for label, d in C["ours"].items():
         cmd += ["--eval_dir", f"{label}={d}"]
-    for arm in arms or ARMS:
+    for arm in (ARMS if arms is None else arms):
         cmd += ["--eval_dir",
                 f"{arm['tag']}{suffix}="
                 + path.join(C["out"], f"eval_dir_{arm['tag']}{suffix}")]
-    cmd += ["--out", path.join(C["out"], f"subject_in_frame{suffix}.json")]
+    # 우리 파이프라인 밖에서 만든 eval 폴더(E.T./DIRECTOR 등)를 같은 표에 올린다.
+    for spec in extra_eval_dir:
+        cmd += ["--eval_dir", spec]
+    if scenes:
+        # 씬 표본을 파일로 고정한다 — D205 표와 같은 200 씬을 써야 열끼리 비교가 된다.
+        cmd += ["--scenes", scenes]
+    if subject_occlusion:
+        cmd += ["--subject_occlusion"]
+    cmd += ["--out", path.join(C["out"],
+                               f"subject_in_frame{out_tag or suffix}.json")]
     return sh(cmd, gpu=gpu, tag="score")
 
 
@@ -272,11 +326,14 @@ def main():
     # 모델이 직접 뽑을 포즈 수. 30 = 릴리즈 학습 길이(기본, 예전 런과 동일), 49 = 우리 코퍼스 길이
     ap.add_argument("--pose_length", type=int, default=30)
     # 한 arm 만 돌릴 때. 안 주면 ARMS 전부
-    ap.add_argument("--arm", default=None, choices=[a["tag"] for a in ARMS])
+    # `none` 은 GenDoP arm 을 하나도 안 올린다 — score 단계에서 `--extra_eval_dir` 만 볼 때.
+    ap.add_argument("--arm", default=None, choices=[a["tag"] for a in ARMS] + ["none"])
     # 이어달리기(기본)는 이미 있는 npz 를 건너뛴다. GenDoP 는 `generate_mode='sample'` 이고
     # seed 를 루프 **시작에 한 번** 심으므로, 중간부터 이으면 앞뒤 엔트리가 서로 다른 RNG
     # 스트림에서 나온다 — arm 전체가 config 로 재현이 안 된다. 중단 후 재개는 --overwrite.
     ap.add_argument("--overwrite", action="store_true")
+    # inputs 단계에서 rgbd 를 안 만든다 (코퍼스가 `text_only=True` 면 자동으로 켜진다).
+    ap.add_argument("--text_only", action="store_true")
     # 텍스트 조건을 갈아끼운다. 안 주면 ref arm 의 eval 폴더 = 예전 런과 비트동일.
     # `<dir>/test/<prefix>_<scene>_<idx>_caption.json` 모양이면 무엇이든 된다.
     ap.add_argument("--text_dir", default=None)
@@ -298,23 +355,40 @@ def main():
     # 예전 런과 비트동일용 (2026-09-07 사용자 지시로 지표는 `--no_scale_token` 으로 잰다).
     ap.add_argument("--scale_token", dest="scale_token", action="store_true", default=True)
     ap.add_argument("--no_scale_token", dest="scale_token", action="store_false")
+    # score 단계 전용. 우리 파이프라인 밖 베이스라인(E.T./DIRECTOR)의 eval 폴더를 `LABEL=DIR` 로
+    # 같은 표에 올린다. 여러 번 줄 수 있다.
+    ap.add_argument("--extra_eval_dir", action="append", default=[])
+    # 씬 표본 파일. D205 는 `tmp/d205/sample200_scenes.txt` 200 씬으로 쟀다 — 그 표와 열을
+    # 나란히 놓으려면 같은 파일을 줘야 한다. 안 주면 test split 전 씬(=기존 동작).
+    ap.add_argument("--scenes", default=None)
+    # 가림 열(`subject_visible_frac`/`_min`). D205 표에는 켜져 있다.
+    ap.add_argument("--subject_occlusion", action="store_true")
+    # 점수 JSON 파일명 접미사. 안 주면 eval_suffix (기존 동작). 같은 suffix 로 표본만 바꿔
+    # 여러 번 잴 때 덮어쓰기를 막는다.
+    ap.add_argument("--out_tag", default=None)
+    # dynpose 는 D178 이후 cloud.npz 가 디스크에 없다 -> `memory`. vista 는 아직 npz 가 있다.
+    ap.add_argument("--cloud_source", default="npz", choices=["npz", "memory"])
     a = ap.parse_args()
     assert not (a.text_dir and not a.text_tag), "--text_dir 를 주면 --text_tag 도 줄 것"
+    # infer/evaldir 는 `arms or ARMS` 라 빈 리스트가 조용히 "전부"로 되살아난다. score 전용.
+    assert not (a.arm == "none" and a.stage != "score"), "--arm none 은 --stage score 에서만"
 
     C = CORPORA[a.corpus]
-    arms = [x for x in ARMS if a.arm is None or x["tag"] == a.arm]
+    arms = [] if a.arm == "none" else [x for x in ARMS
+                                       if a.arm is None or x["tag"] == a.arm]
     rc = 0
     if a.stage in ("inputs", "all"):
-        rc = rc or stage_inputs(C, a.overwrite)
+        rc = rc or stage_inputs(C, a.overwrite, a.text_only)
     if a.stage in ("infer", "all"):
         rc = rc or stage_infer(C, a.gpu, a.limit, a.depth_norm, a.pose_length, arms,
                                a.overwrite, a.text_dir, a.text_tag)
     if a.stage in ("evaldir", "all"):
         rc = rc or stage_evaldir(C, a.pose_length, arms, a.text_tag, a.rescale, a.resample,
-                                 a.scale_token)
+                                 a.scale_token, a.text_dir)
     if a.stage in ("score", "all"):
         rc = rc or stage_score(C, a.gpu, a.pose_length, arms, a.text_tag, a.rescale,
-                               a.resample, a.scale_token)
+                               a.resample, a.scale_token, a.extra_eval_dir, a.scenes,
+                               a.subject_occlusion, a.out_tag, a.cloud_source)
     print(f"\n{'corpus':<12}{a.corpus}\n{'out':<12}{C['out']}\n"
           f"{'arms':<12}{[x['tag'] for x in arms]}\n{'rc':<12}{rc}")
 

@@ -742,6 +742,7 @@ def main(args):
                              mesh_grid=mesh_grid, src_bank_c2w=renderer.cam_c2w_src,
                              collision_source=args.collision_source,
                              mesh_margin_frac=args.mesh_margin_frac,
+                             mesh_margin_autoclamp=args.mesh_margin_autoclamp,
                              min_zcam_frac=args.behind_min_zcam)
               if args.collision_free else None)
     # D123 ②. G1 임계를 소스 실측 위에 얹는다. `behind` 를 먼저 지은 뒤 `clear_frac` 만 갈아
@@ -1814,6 +1815,11 @@ def build_parser():
     # 안 받아 0.02·S 로 4배 느슨했다. 0.08 이면 두 판이 같은 거리에서 걸린다 (TRUMANS S 중앙값
     # 1.81 기준 0.145 m). 예전 뱅크 재현은 `--mesh_margin_frac 0.02`.
     parser.add_argument("--mesh_margin_frac", default=0.08, type=float)
+    # D207. 벽에 붙어 찍은 chunk 는 소스 카메라 자신의 여유가 위 임계보다 작아 D47 assert 로
+    # chunk 째 죽는다 (TRUMANS 191 편 중 27 편). 값을 주면 **그런 chunk 에서만** 임계를
+    # `값 x 소스 최소여유` 로 내린다. 이미 합법인 chunk 는 건드리지 않으므로 0.0(기본)이든
+    # 0.9 든 나머지 chunk 는 비트 동일이다. 느슨해진 chunk 는 stdout 에 `autoclamp` 로 찍힌다.
+    parser.add_argument("--mesh_margin_autoclamp", default=0.0, type=float)
     # 투영 픽셀 하나만 보면 얇은 물체 가장자리를 스칠 때 옆 배경 depth 로 판정돼 안 걸린다.
     parser.add_argument("--behind_radius_px", default=2, type=int)
     # G1 시간축 정합 (2026-09-02). 켜면 `t != plan_frame` 인 소스 프레임의 **동적 픽셀**을 증거에서

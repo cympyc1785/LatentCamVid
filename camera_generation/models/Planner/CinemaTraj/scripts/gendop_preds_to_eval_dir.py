@@ -172,7 +172,11 @@ def main(args):
         else:
             # 지표용. CLaTr 은 텍스트 임베딩과 궤적을 맞춰 보므로 두 arm 이 **같은 문장**을 봐야
             # 궤적 차이만 남는 짝지은 비교가 된다 -> 기준 eval 폴더의 캡션을 그대로 쓴다.
-            shutil.copyfile(path.join(args.ref_eval_dir, "test", f"{name}_caption.json"), cap_out)
+            # `--caption_dir` 로 다른 캡션 판본(예: 정도부사 `text_mag`)을 줄 수 있다 —
+            # 모델이 **조건으로 받은** 문장과 지표가 읽는 문장이 어긋나면 caption f-score 가
+            # 다른 문장을 재게 된다. 기본값 None 은 ref_eval_dir 라 예전 런과 비트 동일이다.
+            cap_src = args.caption_dir or args.ref_eval_dir
+            shutil.copyfile(path.join(cap_src, "test", f"{name}_caption.json"), cap_out)
         rows.append((name, r_pred, r_gt, r_gt / r_pred))
         n_ok += 1
 
@@ -207,6 +211,9 @@ if __name__ == "__main__":
     parser.add_argument("--text_key", default="Movement")      # caption json 키 (npz 모드)
     # npz = GenDoP 이 받은 문장(영상 라벨용) / ref = 기준 eval 폴더 캡션(지표용, 짝지은 비교)
     parser.add_argument("--caption_from", choices=["npz", "ref"], default="npz")
+    # `--caption_from ref` 일 때 캡션을 가져올 폴더. 안 주면 `--ref_eval_dir` (예전 런과 동일).
+    # 텍스트 조건을 갈아끼운 런(`--text_dir`)은 그 폴더를 여기에도 줘야 지표가 같은 문장을 본다.
+    parser.add_argument("--caption_dir", default=None)
     # 4번 단계(rmax 를 GT 에서 빌려오기) 스위치. `--no_rescale` 이면 GenDoP 이 낸 크기를 그대로
     # 둔다 -> 축·원점만 맞추고 **스케일은 DataDoP 게이지 그대로**인 arm. 크기 축을 아무도 안
     # 빌린 raw 대조군이지만, 게이지가 씬 단위와 무관하므로 수치는 "게이지 차"를 같이 잰다.

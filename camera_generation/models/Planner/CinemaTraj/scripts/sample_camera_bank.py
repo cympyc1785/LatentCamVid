@@ -338,7 +338,8 @@ def behind_context(renderer, recon: dict, scale: float, num_src_frames: int, mar
                    measure_standoff: bool = False, graph: dict | None = None,
                    obb_margins: dict | None = None, time_match: bool = False,
                    mesh_grid: str = "", src_bank_c2w=None, collision_source: str = "depth",
-                   mesh_margin_frac: float | None = None, min_zcam_frac: float = 0.0):
+                   mesh_margin_frac: float | None = None, min_zcam_frac: float = 0.0,
+                   mesh_margin_autoclamp: float = 0.0):
     """G1 판정에 필요한 소스 관측 묶음. `measure_trajectory(behind=...)` 에 그대로 넣는다.
 
     되쏘아 볼 소스 프레임은 board 경로(`--behind_frames 7`)와 같은 방식으로 균등 추출한다.
@@ -376,6 +377,7 @@ def behind_context(renderer, recon: dict, scale: float, num_src_frames: int, mar
     frames = np.unique(np.linspace(0, renderer.num_frames - 1, num_src_frames)
                        .round().astype(int)).tolist()
     mesh = MeshClearance(mesh_grid) if mesh_grid else None
+    clamped = None
     if mesh is not None:
         if src_bank_c2w is not None:
             mesh.assert_anchor(src_bank_c2w)
@@ -384,11 +386,22 @@ def behind_context(renderer, recon: dict, scale: float, num_src_frames: int, mar
         src_clear, src_reach = mesh.static_clearance(mesh.cam_centers)
         assert src_reach.all(), \
             "소스 카메라가 mesh 격자에서 unreachable 이다 — 좌표계나 flood-fill 씨앗이 틀렸다"
+        # D207. 벽에 붙어 찍은 chunk 는 소스 카메라 자신의 여유가 임계보다 작아 위 D47 assert 로
+        # 통째로 죽는다 (TRUMANS 191 편 중 27 편). `--mesh_margin_autoclamp f` 를 주면 그런
+        # chunk 에서만 임계를 `f * src_clear.min()` 으로 **내려** 살린다. 임계가 이미 합법인
+        # chunk 에서는 아무 일도 안 일어나므로 0.0(기본) 은 물론이고 켜도 나머지는 비트 동일이다.
+        # 느슨해진 chunk 는 `mesh_margin_clamped` 로 기록해 나중에 가려낼 수 있게 한다.
+        if mesh_margin_autoclamp > 0.0 and src_clear.min() <= mesh_margin_frac * scale:
+            clamped = (mesh_margin_frac, float(mesh_margin_autoclamp * src_clear.min() / scale))
+            print(f"[behind] mesh 임계 {clamped[0]:.4f} -> {clamped[1]:.4f} (소스 여유 "
+                  f"{src_clear.min():.4f} m, scale {scale:.4f} m) — D207 autoclamp")
+            mesh_margin_frac = clamped[1]
         assert src_clear.min() > mesh_margin_frac * scale, (
             f"mesh 임계 {mesh_margin_frac * scale:.4f} m 가 소스 카메라 자신의 최소 여유 "
             f"{src_clear.min():.4f} m 보다 크다 (D47) — `--mesh_margin_frac` 를 낮출 것")
     return {"mesh": mesh, "collision_source": str(collision_source),
             "mesh_margin_frac": float(mesh_margin_frac),
+            "mesh_margin_clamped": clamped if mesh is not None else None,
             "depths": recon["depths"], "K": renderer.K_src, "cam_c2w": renderer.cam_c2w_src,
             "sky_mask": recon["sky_mask"], "scale": float(scale), "frames": frames,
             "dynamic_mask": (recon["dynamic_mask"].astype(bool) if time_match else None),
@@ -868,6 +881,7 @@ def main(args):
                              mesh_grid=mesh_grid, src_bank_c2w=renderer.cam_c2w_src,
                              collision_source=args.collision_source,
                              mesh_margin_frac=args.mesh_margin_frac,
+                             mesh_margin_autoclamp=args.mesh_margin_autoclamp,
                              min_zcam_frac=args.behind_min_zcam)
               if args.measure_behind else None)
 
@@ -1574,6 +1588,9 @@ def build_parser():
     # 가 depth 보다 엄해진다**. 그게 맞는 방향이다: τ 뱅크가 통과시킨 변이를 사다리가 다시
     # 거르므로, τ 단계에서 미리 걸러 두면 사다리 렌더가 줄어든다. 예전 뱅크는 0.02.
     parser.add_argument("--mesh_margin_frac", default=0.08, type=float)
+    # D207. `fit_hole_ladder.py` 의 같은 인자 참조 — 소스 카메라가 임계보다 벽에 가까운
+    # chunk 에서만 임계를 내려 D47 assert 로 죽는 것을 막는다. 0.0(기본) 이면 예전과 동일.
+    parser.add_argument("--mesh_margin_autoclamp", default=0.0, type=float)
     # G1 시간축 정합 (2026-09-02). 켜면 `t != plan_frame` 인 소스 프레임의 동적 픽셀을 증거에서
     # 뺀다. **D116 부터 기본 True** (사용자 지시 "일단 켜줘"). 순수하게 느슨해지는 방향이고
     # (parkour 4/664, snowboard 6/196 변이 변화, 감소 0건) 채널별 예산을 나눌 수 있게 된다.

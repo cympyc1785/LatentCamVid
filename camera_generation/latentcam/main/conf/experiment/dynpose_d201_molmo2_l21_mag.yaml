@@ -1,0 +1,63 @@
+# @package _global_
+# D201-A — `dynpose_d200_molmo2_l21_da3.yaml` 과 **캡션 한 축만** 다른 사본
+# (사용자 지시 2026-09-19: "molmo2_l21_da3 이 버전에서 caption 에 framing, 정도부사 추가해서").
+#
+# ⚠ 같은 캡션축을 D196 에서 한 번 시도했고 사용자가 "오히려 별로야"로 중단시켰다
+#   (EXPERIMENTS.log). 그때는 d194 코퍼스 + da3/molmo2 arm 이었고 여기는 d200 + molmo2_l21 이라
+#   조건이 다르지만, 결과를 읽을 때 그 전례를 같이 놓고 볼 것.
+#
+# ═══ 무엇이 바뀌나 ═══════════════════════════════════════════════════════════════════════
+#   d200  The camera dollies straight forward toward the man in a light grey shirt and cap
+#         standing by the grill.
+#   d201  The camera slightly dollies straight forward toward the man in a light grey shirt
+#         and cap standing by the grill, keeping him in a medium wide shot that tightens to a
+#         medium close-up shot with the white camper with a maroon stripe parked under a green
+#         roof also in frame.
+# 앞의 `slightly` 가 정도부사(`tau_max` / `pan_deg` 버킷), 뒤의 `keeping him in a ... shot` 이
+# framing 절이다.
+#
+# ═══ 어떻게 얹었나 — 코퍼스를 다시 export 하지 않는다 ════════════════════════════════════
+# 뱅크가 둘이라(d200 = hole_bank_d185 + hole_bank_d199) 두 단계 모두 뱅크별로 두 번 돈다.
+#   build_bank_captions.py --videos_file tmp/d201/videos_d185.txt --bank_dir hole_bank_d185 \
+#       --output_root out_dynpose --out_name captions_d201mag.json --prompt_style nl \
+#       --magnitude --nl_framing          # ← d200 캡션은 magnitude:false + nl_framing 꺼짐
+#   (같은 명령을 videos_d199.txt / hole_bank_d199 로 한 번 더)
+#   make_prompts_simple.py --root <corpus> --meta_csv meta_dynpose.csv --out_name prompts_mag.json \
+#       --captions_root <CinemaTraj>/out_dynpose --captions_bank_dir hole_bank_d185 \
+#       --captions_name captions_d201mag.json --allow_missing
+#   (같은 명령을 --captions_bank_dir hole_bank_d199 로 한 번 더)
+# `--allow_missing` 이 필요한 이유: 한 뱅크로 돌리면 다른 뱅크 씬은 캡션 파일이 없다. 그 씬은
+# **건너뛸 뿐 덮어쓰지 않으므로**(make_prompts_simple.py `caps is None -> continue`) 두 번 돌리면
+# 10,169 씬이 정확히 한 번씩 채워진다. 실측 `prompts_mag.json` 10,169 = `prompts.json` 10,169.
+# 뱅크 변이 수는 80,328 + 4,242 = 84,570 (코퍼스는 씬당 상한 6 으로 51,422 대만 쓴다).
+#
+# 세그먼트 키 / `frame_idx` / `variant_id` / pose 는 한 글자도 안 바뀐다. 따라서
+#   - `target_poses.npz` / `avg_scale*` / seg list 전부 그대로 유효
+#   - molmo2 캐시도 그대로 유효 — molmo2 가 읽는 건 `Track {target_text}.` 오버라이드고
+#     `target_text` 는 이 변경과 무관하다 (바뀌는 건 umt5 가 읽는 문장 하나뿐)
+#   - `geo_raw_cache_da3_bf16` 도 그대로
+#   - `.latentcam_index` 는 `prompts_file` 이 캐시 키에 들어가 새로 만들어진다
+#     (`dataset_dl3dv._load_index`: `__pfprompts_mag`). d200 인덱스는 안 건드린다.
+#
+# ═══ umt5 prefill 캐시는 **새로 구웠다** ═════════════════════════════════════════════════
+# 부모가 물고 있는 `umt5_cache/text_len128.pt` 는 옛 짧은 캡션으로 구운 것이라 이 arm 에서는
+# 전량 miss 다. miss 는 `CachedT5TextEmbeddings(fallback=text_encoder)` 가 실시간 인코딩으로
+# 메워 **결과는 같지만**, 속도 손잡이 B 가 통째로 무효가 된다 (text_vae 4.6ms -> 42.5ms).
+# 그래서 같은 스크립트로 prompts_mag 판을 따로 구웠다:
+#   main/cache_umt5_embeddings.py --gpu 4 --root <corpus> --text_len 128 \
+#       --source prompts --prompts_file prompts_mag.json --out umt5_cache/text_len128_mag.pt
+# (`--source index` 를 못 쓰는 이유: 이 arm 의 인덱스는 아직 없다.)
+#
+# ═══ text_len ═══════════════════════════════════════════════════════════════════════════
+# 문장이 두 배 가까이 길어지지만 D196 의 umt5 토큰 실측(6,894 세그먼트 전량)으로
+#   prompts.json      mean 24.6  p99 31  max 35
+#   prompts_mag.json  mean 47.1  p99 68  max 76
+# 라 `text_len: 128` 에서 잘리는 세그먼트가 0 건이다. 여기서 text_len 을 같이 올리면
+# 캡션축과 시퀀스축이 같이 움직여 원인을 못 가른다 — 부모 값 128 을 그대로 둔다.
+defaults:
+  - dynpose_d200_molmo2_l21_da3
+
+exp_name: dynpose_d201_molmo2_l21_mag
+
+prompts_file: prompts_mag.json   # ★ 부모와의 차이 ①
+text_emb_cache_path: /data1/cympyc1785/data/DynPose-LBM/latentcam_dynpose_d200/umt5_cache/text_len128_mag.pt   # ★ 차이 ② (①의 종속 결과)

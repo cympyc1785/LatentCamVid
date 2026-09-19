@@ -67,8 +67,21 @@ def captions_from_index(root):
 
 
 def captions_from_prompts(root, prompts_file='prompts.json'):
+    """`<root>/*/*/<f>` + `<root>/*/*/*/<f>` 두 깊이를 다 훑는다.
+
+    [2026-09-19] 원래는 2단계 glob 하나였다. vista4d 레이아웃(`<root>/<scene>/<sub>/prompts.json`)
+    에는 맞지만 dynpose 코퍼스는 `<root>/dynpose/<scene>/da3/prompts.json` 로 한 단계 깊어서
+    **0건**이 된다. 그런데 빈 리스트를 그냥 돌려주고 호출부가 CFG 용 빈 캡션 하나를 더 붙이므로
+    최종 로그가 `1 captions -> 1 unique` 로 찍힌다 — "캐시를 구웠다"고 믿으면서 전량 miss 하는
+    10 KB 짜리 캐시가 남는다 (실제로 한 번 그렇게 구웠다). 두 깊이를 다 보고, 그래도 0건이면
+    조용히 넘기지 말고 멈춘다. 경로가 서로 겹치지 않아 vista4d 결과는 비트 동일하다.
+    """
     out = []
-    for f in sorted(glob.glob(osp.join(root, '*', '*', prompts_file))):
+    found = sorted(glob.glob(osp.join(root, '*', '*', prompts_file))
+                   + glob.glob(osp.join(root, '*', '*', '*', prompts_file)))
+    if not found:
+        raise SystemExit(f"[src] {root}/*/*[/*]/{prompts_file} 0건 — 경로·파일명을 확인할 것")
+    for f in found:
         try:
             j = json.load(open(f))
         except Exception:

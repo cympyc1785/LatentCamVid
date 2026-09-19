@@ -5,6 +5,20 @@ All notable changes to the latentcam sub-project. Follows [Keep a Changelog](htt
 ## [Unreleased]
 
 ### Added
+- **D201 두 arm 추가 (`conf/experiment/dynpose_d201_molmo2_l21_{mag,readout}.yaml`) (2026-09-19).**
+  둘 다 `dynpose_d200_molmo2_l21_da3` 를 상속하고 **서로 다른 축 하나씩만** 움직인다.
+  - `_mag` (캡션축): `prompts_file: prompts_mag.json` — 뱅크 캡션을 `--magnitude --nl_framing`
+    으로 다시 구워(`captions_d201mag.json`, hole_bank_d185 80,328 + d199 4,242 변이)
+    `make_prompts_simple.py` 로 10,169 씬에 얹었다. 정도부사 + framing 절이 돌아온다.
+    umt5 prefill 캐시도 그 문장으로 새로 구웠다 (`umt5_cache/text_len128_mag.pt`) — 부모가
+    물고 있는 `text_len128.pt` 를 그대로 쓰면 전량 miss 라 fallback 인코딩으로 조용히
+    느려진다 (결과는 같다). `text_len: 128` 은 유지 (D196 실측 max 76 tok, 절단 0).
+    ⚠ 같은 캡션축을 D196 에서 시도했고 사용자가 "오히려 별로야"로 중단시킨 전례가 있다.
+  - `_readout` (모델축): 캡션은 d200 그대로 두고 molmo2 스트림에 `PeavReadout`
+    (49 query × 2층) + subject OBB center probe head (`aux_dim 3`, `aux_w 0.1`) 를 단다.
+    D195-A(`dynpose_d194_molmo2_l21_readout`) 와 같은 배선. 전제인
+    `<scene>/da3/target_track.npz` 를 d200 코퍼스에 전량 생성했다
+    (`export_target_track.py`, 10,169 씬 / 51,422 변이 / valid 100%).
 - **umt5 prefill 캐시 (`main/cache_umt5_embeddings.py` + `text_emb_cache_path`) (2026-09-19).**
   `step_timing` 이 잡아낸 두 번째 비용 — umt5 forward 가 arm ① 42.5 ms (15.0%) / arm ②
   48.2 ms (10.0%) 로 **denoiser forward 보다 컸다**. 인코더는 frozen 이고 캡션은 세그먼트
@@ -50,6 +64,13 @@ All notable changes to the latentcam sub-project. Follows [Keep a Changelog](htt
   ⚠ bf16 을 고른 arm 은 fp32 on-the-fly 와 **비트 동일하지 않다** (실측 상대오차 3.3e-3).
 
 ### Fixed
+- **`cache_umt5_embeddings.py --source prompts` 가 dynpose 코퍼스에서 0건이었다 (2026-09-19).**
+  glob 이 `<root>/*/*/<prompts_file>` 2단계 고정이라 vista4d 레이아웃에만 맞고 dynpose
+  (`<root>/dynpose/<scene>/da3/prompts.json`) 는 한 단계 깊어 아무것도 못 찾았다. 그런데 빈
+  리스트를 그대로 돌려주고 호출부가 CFG 용 빈 캡션 하나를 더 붙이므로 로그가
+  `1 captions -> 1 unique` 로 찍힌다 — "구웠다"고 믿으면서 10 KB 짜리 전량-miss 캐시가 남는다
+  (D201-A 준비 중 실제로 한 번 그렇게 구웠다). 두 깊이를 다 훑고, 그래도 0건이면 멈춘다.
+  경로가 겹치지 않아 vista4d 결과는 비트 동일. `--source index` (기본) 경로는 무변경.
 - **bf16 geo raw 캐시를 loader 가 전량 무시했다 (FIX-D200-c) (2026-09-19).**
   `dataset_dl3dv.py` 의 두 곳(`_preload_geo_raw`, `__getitem__` lazy 경로)이
   `c['raw'].dtype != torch.float32` 로 fp32 를 하드코딩하고 있어, 손잡이 A 로 다시 구운

@@ -31,6 +31,35 @@
   학습 중 val 씬 수 27 -> 100.
 
 ### Added
+- **`render_eval_val_warp.py` — eval validation 전량을 씬당 1편으로 굽는 루프 드라이버
+  (2026-09-19, D203, 사용자 "validation 돌아간 것들도 subject 가 움직이는 영상에 한해서 씬마다
+  depth warp 비교영상").** `render_pred_depth_warp.py` 는 `--video` 를 하나만 받아서 씬이
+  수백 개면 셸 루프가 되고, 그러면 임포트(~15 s)가 씬 수만큼 곱해진다. 이 스크립트는 그
+  `main()` 을 **한 프로세스 안에서** 씬 루프로 돌리고, 씬당 산출물은 `all_entries.mp4` 하나만
+  `<scene>.mp4` 로 끌어올린 뒤 나머지(per-entry warp, reel_target)는 지운다 — 전부 그 안에
+  들어 있어 중복이다. 예전처럼 다 남기려면 `--keep_entries`. 씬 목록은 `--entries_json`
+  (`[{scene, idx}, ...]`) 으로 받고, **어떤 변이를 담을지 고르는 일은 이 스크립트 바깥**이다
+  (이번엔 `dyn_*` anchor = subject 가 움직이는 변이 444대 / 99씬). 씬 하나가 죽어도 루프는
+  계속 돌고 끝에 실패 목록을 찍는다. `--shard i/n` 으로 씬을 갈라 여러 프로세스에 태운다.
+  `<scene>.mp4` 가 이미 있으면 건너뛰므로 재실행이 안전하다 (`--overwrite` 로 강제).
+  이를 위해 `render_pred_depth_warp.py` 의 argparse 블록을 `build_parser()` 로 분리했다 —
+  드라이버가 **같은 인자 정의를 그대로 재사용**해야 두 경로가 갈라지지 않는다. 동작 변화 없음.
+  주의: GPU 1장에 샤드 3개를 태우면 OOM 이다 (렌더 1회가 최대 16 GiB 를 한 번에 잡는다).
+  실측으로 80 GB 카드에 **2 샤드**가 상한.
+- **`configs/bank/d202_vista_snowboard.json` / `d202w_vista_snowboard_wide.json` — snowboard
+  를 D200 학습 설정으로 재굽기 (2026-09-19, D202, 사용자 "학습 끝난걸로 snowboard 비디오랑
+  학습시랑 비슷한 caption 들로").** 코퍼스에 있던 snowboard 뱅크는 `hole_bank_k6` 세대라
+  preset 이름이 `straight_ease`/`push_in_arc` 같은 옛 어휘이고, 지금 captioner 는
+  `PRESETS['straight_ease']` 의 aim 이 free 인데 뱅크 행은 look_at 이라며 assert 로 죽는다.
+  그래서 **d185 설정 그대로 snowboard 만 다시 굽는다** — d202 는 `d185_dynpose100k_grid5`
+  에서 `output_root`(out_dynpose -> out) / `eval_data`(null = vista 기본) / 세대 디렉토리 /
+  `require_markers`(`.graph_s115` + `.cloud_s115`) 넷만 바꾼다. snowboard 는 dynpose 가
+  아니라 **vista4d 데이터**라 recon/graph/cloud 가 전부 vista 쪽 트리에 있다.
+  d202 는 씬당 5대 슬롯 계획이라 snowboard 에서 7대(→ 필터 후 6대)밖에 안 남아 릴로 보기엔
+  적다. d202w 는 **route 만** 풀어(anchor 2+2 -> 3+3, `--slot_plan`/`--free_moving`/
+  `--target_variants` 제거, fit `--fallback_target` 5 -> 40) preset 합집합 29대를 굽는다 —
+  tau/fit/emit 인자와 캡션 생성기는 d202 와 글자 그대로 같으므로 **어느 preset 을 몇 개
+  고르냐만** 넓어진다. 두 뱅크 합집합 dedup 후 26대가 코퍼스로 나갔다.
 - **`viser_cloud.py` target 카메라 여러 대 동시 표시 — `--pin` / GUI `pin current`
   (2026-09-18, 사용자 "target 카메라 여러개 띄워서 볼 수 있게").** 지금까지 plan 카메라는
   `motion` 슬라이더로 **한 번에 한 대**라, 갈아끼우는 순간 비교 대상이 사라져 "A 가 B 보다 더

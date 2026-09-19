@@ -236,7 +236,8 @@ def main(args):
     print(f"{'out':<14}{args.out_dir}")
 
 
-if __name__ == "__main__":
+def build_parser():
+    """씬 루프 드라이버(`render_eval_val_warp.py`)가 같은 인자를 재사용할 수 있게 분리."""
     parser = ArgumentParser(description=__doc__)
     parser.add_argument("--video", required=True)
     parser.add_argument("--eval_dir", action="append", required=True,
@@ -273,4 +274,8 @@ if __name__ == "__main__":
     parser.add_argument("--scores_csv", default=None)        # eval 의 preds_scores.csv
     parser.add_argument("--f1_high", type=float, default=0.8)   # 이 이상 -> reel_f1_high.mp4
     parser.add_argument("--f1_low", type=float, default=0.0)    # 이 이하 -> reel_f1_low.mp4
-    main(parser.parse_args())
+    return parser
+
+
+if __name__ == "__main__":
+    main(build_parser().parse_args())

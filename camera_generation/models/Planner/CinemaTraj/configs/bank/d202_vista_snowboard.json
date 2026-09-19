@@ -1,0 +1,30 @@
+{
+  "_why": "D202 (사용자 지시 2026-09-19 \"학습 끝난걸로 snowboard 비디오랑 학습시랑 비슷한 caption들로 돌려서 depth warp 영상들 한번에 볼 수 있게 만들어줘\") — snowboard 로 D200 모델을 추론하려면 **학습 분포와 같은 preset 어휘·캡션 문체**가 필요하다. 코퍼스에 있는 snowboard 뱅크는 `hole_bank_k6` 세대라 preset 이름이 `straight_ease`/`push_in_arc` 같은 옛 어휘이고, 지금 captioner 는 `PRESETS['straight_ease']` 의 aim 이 free 라며 assert 로 죽는다. 그래서 **d185 설정 그대로 snowboard 만 다시 굽는다**.",
+
+  "_d185와_다른_점": "`output_root`(out_dynpose -> out) / `eval_data`(DynPose-100K -> null = vista 기본) / 세대 디렉토리 이름 / `require_markers`(`.graph_d157` -> vista 의 `.graph_s115` + `.cloud_s115`) 넷뿐이다. route/tau/fit/emit 인자는 d185 를 글자 그대로 옮겨 적었다 — `load_config` 의 `extends` 가 **최상위 키 단위 덮어쓰기**라 route 를 부분 수정할 수 없어서, out 이름 한 줄 때문에 블록을 통째로 다시 쓴다.",
+
+  "_왜_grid5인가": "D200 코퍼스 = hole_bank_d185 + hole_bank_d199 이고 d199 는 d185 가 못 구운 씬을 회수한 것이라, 학습이 본 preset 분포의 본체는 d185 다. 씬당 5대(anchor 2 x 슬롯 2 + free-moving 1)면 snowboard 한 편에서 비교할 변이 수로도 충분하다.",
+
+  "extends": "d185_dynpose100k_grid5.json",
+  "generation": "d202",
+  "output_root": "out",
+  "eval_data": null,
+  "exec": "inproc",
+  "tau_bank_dir": "bank_d202",
+  "bank_dir": "hole_bank_d202",
+  "require_markers": [".graph_s115", ".cloud_s115"],
+  "route": {
+    "out": "preset_route_d202.json",
+    "args": [
+      "--num_external", "0",
+      "--max_dynamic_anchors", "2", "--max_static_anchors", "2", "--max_anchors", "2",
+      "--min_anchor_sep", "2.0",
+      "--slot_plan", "grid2x2",
+      "--slot_pair_fill", "substitute",
+      "--free_moving", "rotate",
+      "--track_min_drift_u", "0.05",
+      "--target_variants", "5",
+      "--skip_if_empty"
+    ]
+  }
+}

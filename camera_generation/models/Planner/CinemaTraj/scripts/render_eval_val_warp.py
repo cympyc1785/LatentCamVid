@@ -24,7 +24,7 @@ import json
 import sys
 import traceback
 from argparse import ArgumentParser
-from os import listdir, makedirs, path, remove, rename
+from os import listdir, makedirs, path, remove, rename, rmdir
 from time import time
 
 CINEMATRAJ_ROOT = path.dirname(path.dirname(path.abspath(__file__)))
@@ -44,13 +44,22 @@ def scene_entries(entries_json: str):
 
 
 def compact(scene_dir: str, scene: str, out_dir: str):
-    """씬 폴더에서 all_entries.mp4 만 `<scene>.mp4` 로 끌어올리고 나머지는 지운다."""
+    """씬 폴더에서 릴 하나만 `<scene>.mp4` 로 끌어올리고 나머지는 지운다.
+
+    WHY fallback: `render_pred_depth_warp` 는 entry 가 1개면 all_entries.mp4 를 쓰지
+    않는다 (per-entry 파일과 내용이 같아서). val 99씬 중 11씬이 여기 걸려 조용히
+    빠졌다 — 예외가 아니라 `done` 카운트만 줄어서 로그로는 안 보인다.
+    """
     src = path.join(scene_dir, "all_entries.mp4")
     if not path.exists(src):
-        return False
+        single = [n for n in listdir(scene_dir) if n.endswith("__warp.mp4")]
+        if len(single) != 1:
+            return False
+        src = path.join(scene_dir, single[0])
     rename(src, path.join(out_dir, f"{scene}.mp4"))
     for name in listdir(scene_dir):
         remove(path.join(scene_dir, name))
+    rmdir(scene_dir)                                  # 빈 껍데기 디렉토리를 남기지 않는다
     return True
 
 

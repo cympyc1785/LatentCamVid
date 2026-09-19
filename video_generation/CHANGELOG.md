@@ -58,6 +58,21 @@
   학습 중 val 씬 수 27 -> 100.
 
 ### Added
+- **`CinemaTraj/scripts/USAGE.md` — GenDoP baseline 배선·사용법 문서 (2026-09-19, D206,
+  사용자 "GenDop 모델 배선 상태랑 batch화 되어있는지 봐줘 ... 사용법 해당 폴더에 USAGE.md로").**
+  코드는 한 줄도 안 바꿨다 — 이미 있는 손잡이를 근거(파일:줄)와 함께 적은 것이다. 담은 것:
+  (1) 리포 두 벌 중 `pipeline/GenDoP` 가 실제로 import 되고 vendored 쪽과 `min_chunk_size`
+  가 10 vs 12 로 다르다; (2) **배치화 — 우리 추론 경로는 안 되어 있다.** upstream
+  `eval_batch.py:473` 만 `batch_size=8` 이고 우리 `gendop_release_infer.py:311` 은 엔트리당
+  1회 `generate` 다 (게다가 `eval_batch.py` 도 후처리는 `:400-463` 에서 다시 1개씩 돈다);
+  (3) **rmax 안 곱한 raw normalized = `--raw --no_scale_token`** — 배포 `eval_batch.py:462`
+  는 scale 이 안 걸린 `camera_pose` 로 JSON 을 쓰고 scale 이 걸린 `c2ws` 사본은 주석 처리된
+  `draw_json` 전용이다 (`:446-452`); (4) 텍스트 2종 — (A) 우리 캡션은 `--text_from_eval_dir`
+  로 배선 완료, (B) GT 궤적 tagging+captioning 은 `caption_cameras_datadop.py --sets latentcam`
+  이 코퍼스 안 `da3/captions_gendop/` 에 쓰고 `gendop_release_infer.py --root <코퍼스>` 로
+  직접 물리면 되지만 **`run_gendop_eval.py` 드라이버에는 안 물려 있다** (파일명 규약이
+  `<idx>_caption.json` vs `test/<prefix>_<scene>_<idx>_caption.json` 로 다르다);
+  (5) `CORPORA` 에 **d200 항목이 없고** d200 코퍼스에 `captions_gendop/` 도 없다.
 - **`render_eval_val_warp.py` — eval validation 전량을 씬당 1편으로 굽는 루프 드라이버
   (2026-09-19, D203, 사용자 "validation 돌아간 것들도 subject 가 움직이는 영상에 한해서 씬마다
   depth warp 비교영상").** `render_pred_depth_warp.py` 는 `--video` 를 하나만 받아서 씬이

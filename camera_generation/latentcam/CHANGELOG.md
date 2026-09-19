@@ -5,6 +5,17 @@ All notable changes to the latentcam sub-project. Follows [Keep a Changelog](htt
 ## [Unreleased]
 
 ### Added
+- **D201-C arm 추가 (`conf/experiment/dynpose_d201_molmo2_l21_track_d5.yaml`) (2026-09-19).**
+  `dynpose_d200_molmo2_l21_da3` 에 subject OBB 궤적 concat 조건을 얹는다
+  (`target_track_dim: 4` / `target_track_dropout: 0.5` / `target_track_val_drop: true`).
+  **모델 코드 변경 0** — D195-B(`dynpose_d194_molmo2_l21_track_d5`) 가 쓰던 경로를 d200
+  코퍼스 위에서 켜는 것뿐이다. 앞선 두 세대(D195/D196)는 subject 조건을 **한 쌍**으로
+  돌렸는데(readout+aux = "맞히게 한다" / track_d5 = "그냥 준다") d200 세대는 D201-B 로
+  readout 쪽만 기동해 짝이 비어 있었다. 짝이 없으면 D201-B 의 결과가 "subject 정보가 도움이
+  되는가"인지 "readout 이라는 배선이 도움이 되는가"인지 못 가른다.
+  `val_drop: true` 라 val 눈금은 ③ l21 대조군과 같다 (추론은 track 없이).
+  전제인 `<scene>/da3/target_track.npz` 는 D201-B 용으로 이미 전량 있다 (실측 10,169/10,169 씬).
+  캡션·pose·seg list·모델 입력 토큰이 안 바뀌므로 캐시 재굽기 0.
 - **D201 두 arm 추가 (`conf/experiment/dynpose_d201_molmo2_l21_{mag,readout}.yaml`) (2026-09-19).**
   둘 다 `dynpose_d200_molmo2_l21_da3` 를 상속하고 **서로 다른 축 하나씩만** 움직인다.
   - `_mag` (캡션축): `prompts_file: prompts_mag.json` — 뱅크 캡션을 `--magnitude --nl_framing`

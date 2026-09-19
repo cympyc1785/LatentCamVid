@@ -344,6 +344,11 @@ def main():
     parser.add_argument("--rgb_samples", default=48, type=int)
     parser.add_argument("--rgb_engine", default="cycles", choices=["cycles", "eevee"], type=str)
     parser.add_argument("--rgb_cdevice", default="GPU", choices=["CPU", "GPU"], type=str)
+    #    D207. 생성되는 render.sh 가 `trumans_gt_render.py --anim` 을 부른다 — 프레임마다
+    #    render job 을 새로 만드는 대신 카메라를 keyframe 으로 굽고 한 번에 돌린다. 실측상
+    #    프레임 시간의 95% 가 job 마다 반복되는 씬 재동기화라 여기가 제일 큰 손잡이다
+    #    (`trumans_gt_render.py` §애니메이션 렌더). 기본 off = 예전 render.sh 와 글자 동일.
+    parser.add_argument("--anim", action="store_true")
     parser.add_argument("--gpu", default=0, type=int)
     #    D90. preset 하나당 Blender 프로세스 하나라 (출력 PNG 이름이 프레임 번호라 한 프로세스가
     #    두 pose set 을 같은 번호로 못 쓴다) 40 preset 을 GPU 1장에 몰면 2시간이 넘는다.
@@ -586,7 +591,7 @@ run() {{
         --poses "$npz" --frames {f0} {f1} {step} --passes rgb \\
         --res {args.res[0]} {args.res[1]} --lens {lens} \\
         --rgb_engine {args.rgb_engine} --rgb_samples {args.rgb_samples} \\
-        --rgb_cdevice {args.rgb_cdevice} \\
+        --rgb_cdevice {args.rgb_cdevice} {"--anim" if args.anim else ""} \\
         --out "$OUT/$name" > "$OUT/$name.log" 2>&1
     echo "[render] $name rc=$?  $(date +%H:%M:%S)"
 }}

@@ -436,9 +436,76 @@ def main(args):
     link_pass_sockets(tree, layers, outs)
     eevee_has_indexob = layers.outputs.get("IndexOB") is not None
 
+    # --- D207: 애니메이션 렌더 (`--anim`) ---------------------------------------------------
+    # **왜 있나.** 아래 루프는 프레임마다 `bpy.ops.render.render()` 를 따로 부르는데, 그 한 번이
+    # 곧 Cycles 세션 하나다 — 세션마다 씬을 통째로 다시 device 로 올린다. `use_persistent_data`
+    # 는 **한 render job 안의 프레임 사이**에서만 먹지 job 경계는 못 넘는다.
+    # 실측 (results/20260901_trumans_preset_blender/.../truck_left.log, 49 프레임, 640x360,
+    #  48 spp, OPTIX, Blender 자체 phase 타임스탬프 집계):
+    #     Updating Geometry BVH   1.173 s/frame  25.4%
+    #     Updating Images         1.093 s/frame  23.7%
+    #     Scene, ViewLayer        0.935 s/frame  20.3%
+    #     Updating Lights         0.648 s/frame  14.0%
+    #     Loading render kernels  0.263 s/frame   5.7%   <- 프레임마다 다시 로드한다
+    #     Sample (=진짜 path tracing) 0.211 s/frame 4.6%
+    # 즉 **렌더 자체는 4.6% 고 95% 가 재동기화**다. 한 번의 animation render 로 묶으면 그 재동기화가
+    # job 당 1회로 줄고 애니메이션된 것(사람 armature)만 프레임마다 갱신된다.
+    #
+    # **어떻게 정확도를 지키나.** 카메라 pose 를 프레임에 keyframe 으로 굽고 보간을 CONSTANT 로
+    # 둔다. 렌더는 keyframe 이 박힌 프레임에서만 일어나므로(`frame_step = step`) 보간 구간을
+    # 아예 안 지난다 — 값은 프레임 루프와 비트 동일해야 한다 (`--anim_verify` 가 실제로 잰다).
+    #
+    # **제약.** rgb 단독 패스 + 균일 간격(step>0) + `--poses`/`--camera_pose_pkl` 일 때만 켠다.
+    # depth/index 는 프레임마다 엔진·필터를 갈아끼우므로 한 job 으로 못 묶는다.
+    # 기본 off = 예전 동작 비트 동일.
+    if args.anim:
+        assert want_rgb and not need_cycles, \
+            "--anim 은 --passes rgb 전용이다 (depth/index 는 프레임마다 엔진을 바꾼다)"
+        assert poses_gl is not None, "--anim 은 --poses / --camera_pose_pkl 이 필요하다"
+        assert step > 0, "--anim 은 균일 간격 프레임만 된다 (--frame_list 는 불가)"
+        assert args.rgb_engine == "cycles", "--anim 은 cycles rgb 경로만 검증했다"
+
+        cam_obj.rotation_mode = "QUATERNION"        # euler 는 keyframe 사이에서 뒤집힌다
+        for order, frame in enumerate(frames):
+            scene.frame_set(frame)
+            cam_obj.matrix_world = poses_gl[order]
+            bpy.context.view_layer.update()
+            for channel in ("location", "rotation_quaternion", "scale"):
+                cam_obj.keyframe_insert(data_path=channel, frame=frame)
+        for fcurve in cam_obj.animation_data.action.fcurves:
+            for kp in fcurve.keyframe_points:
+                kp.interpolation = "CONSTANT"
+
+        for node in outs.values():
+            node.mute = True
+        composite.mute = False
+        scene.render.engine = "CYCLES"
+        scene.cycles.samples = args.rgb_samples
+        scene.cycles.use_denoising = True
+        scene.cycles.use_adaptive_sampling = True
+        scene.cycles.pixel_filter_type = "BLACKMAN_HARRIS"
+        scene.cycles.filter_width = 1.5
+        scene.cycles.max_bounces = args.rgb_bounces
+        scene.cycles.device = rgb_cdevice
+        scene.frame_start, scene.frame_end, scene.frame_step = frames[0], frames[-1], step
+        # `#####` 는 Blender 가 0 채움 프레임 번호로 바꾼다 -> 프레임 루프와 같은 `frame_01777.png`.
+        scene.render.filepath = path.join(out, "rgb", "frame_#####")
+        t0 = time.time()
+        bpy.ops.render.render(animation=True, write_still=False)
+        t_all = time.time() - t0
+        print(f"[gt] anim render {len(frames)} frames in {t_all:.1f}s "
+              f"({t_all / len(frames):.2f}s/frame)")
+        cameras = []
+        for order, frame in enumerate(frames):
+            scene.frame_set(frame)
+            bpy.context.view_layer.update()
+            cameras.append(camera_record(cam_obj, scene, frame, order))
+        timings = [{"frame": f, "rgb_s": t_all / len(frames), "cycles_s": 0.0,
+                    "total_s": t_all / len(frames)} for f in frames]
+
     # --- 렌더 루프 -------------------------------------------------------------------------
-    cameras, timings = [], []
-    for order, frame in enumerate(frames):
+    cameras, timings = ([], []) if not args.anim else (cameras, timings)
+    for order, frame in enumerate([] if args.anim else frames):
         scene.frame_set(frame)
         if poses_gl is not None:
             cam_obj.matrix_world = poses_gl[order]
@@ -573,6 +640,9 @@ def main(args):
             "index_npy": bytes_of("index", frames[0], "npy") if want_index else 0,
         },
         "keep_exr": bool(args.keep_exr),
+        # D207. True 면 `timings_s` 는 프레임별 실측이 아니라 **job 전체를 프레임 수로 나눈 값**이다
+        # (animation render 는 프레임 경계를 python 에 안 돌려준다). 합계는 정확하다.
+        "anim": bool(args.anim),
     }
     meta["bytes_per_frame"]["total"] = sum(meta["bytes_per_frame"].values())
     with open(path.join(out, "render_meta.json"), "w", encoding="utf-8") as file:
@@ -639,4 +709,7 @@ if __name__ == "__main__":
     parser.add_argument("--keep_exr", dest="keep_exr", action="store_true")
     parser.add_argument("--no_keep_exr", dest="keep_exr", action="store_false")
     parser.set_defaults(keep_exr=False)
+    # D207. 카메라를 keyframe 으로 굽고 **한 번의 animation render** 로 전 프레임을 돌린다.
+    # rgb 단독 + 균일 간격일 때만. 기본 off = 예전 동작 비트 동일 (§애니메이션 렌더).
+    parser.add_argument("--anim", action="store_true")
     sys.exit(main(parser.parse_args(cli_argv())))

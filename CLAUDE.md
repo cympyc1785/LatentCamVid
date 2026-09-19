@@ -9,11 +9,38 @@ Dynamic camera and video generation with from source video and user prompt.
 ## Don't
 
 - 실험 결과를 임의로 요약 금지 (wandb 원본 수치 그대로).
-- GPU 4~7 사용 금지. `CUDA_VISIBLE_DEVICES`는 항상 0~3 범위에서만 지정할 것.
+- GPU 5~7 사용 금지. `CUDA_VISIBLE_DEVICES`는 항상 0~4 범위에서만 지정할 것 (2026-09-06 사용자 지시).
+  - **예외: TRUMANS 작업에 한해 GPU 5 사용 가능** (2026-09-20 사용자 지시). 뱅크 굽기·Blender 렌더·
+    TRUMANS 캡션용 vLLM 이 여기 해당한다. 6,7 은 여전히 금지이고, TRUMANS 가 아닌 학습/추론은
+    0~4 그대로다. CinemaTraj `run_bank.py` 는 `BANK_GPU_ALLOW=5` 를 줘야 `--gpu 5` 를 받는다.
 
 ## Coding conventions
 
 - 기존의 핵심 작동 구조가 있다면 option에 따라 분기를 쳐서 기존의 방식도 똑같이 돌아가게끔 유지.
+
+### bash 지양, python 우선
+
+새 스크립트는 **python 으로 쓴다**. bash 는 "python 하나를 인자만 바꿔서 부르는 래퍼"가 되기 쉽고,
+그런 래퍼는 실험(dNN)마다 복붙되어 서로 몇 줄만 다른 파일이 쌓인다.
+
+- 다단계 파이프라인(graph→cloud→route→fit→emit 같은 것)은 **하나의 python 드라이버 + `--stage` 인자**로 만든다.
+  실험별 차이는 스크립트를 새로 만들지 말고 **설정(JSON/argparse 기본값)으로** 표현한다.
+- 샤딩·screen 기동처럼 bash 가 불가피한 부분만 얇게 남기고, 로직은 python 에 둔다.
+- 일회성 조사 코드는 파일로 남기지 않는다. 재사용 가치가 생긴 시점에만 `scripts/` 에 승격한다.
+
+### 임시 파일은 `<repo>/tmp/`
+
+`/tmp` 는 **쓰지 않는다** — 시스템이 임의로 비울 수 있어 scene 목록·로그가 조용히 사라진다.
+대신 `/data1/cympyc1785/LatentCamVid/tmp/` 아래에 작업 단위 하위 폴더를 만든다 (예: `tmp/d149/`).
+gitignore 대상이며, 작업이 끝나면 남길 것만 `results/` 로 옮기고 나머지는 정리한다.
+
+### 산출물은 압축적으로
+
+파일 개수와 용량이 계속 느는 것을 기본 실패 모드로 간주한다.
+
+- 로그는 **전량 tee 하지 말고** 진행 표시·경고·요약만 남긴다. 학습 수치는 wandb 가 원본이므로 stdout 을 통째로 저장하지 않는다.
+- 세대별 산출물(`bank_dNN`, `hole_bank_dNN` 등)은 최신 세대 + 대조에 실제로 쓰는 세대만 남긴다.
+- 중간 산출물을 지울 때는 **먼저 목록과 근거를 사용자에게 보고하고 승인을 받은 뒤** 지운다.
 
 ## Specifics
 
@@ -27,6 +54,12 @@ Dynamic camera and video generation with from source video and user prompt.
 
 ## 작업 흐름
 
+### 실행은 Claude 가 끝까지 한다
+
+**사용자에게 명령어를 대신 실행해 달라고 넘기지 않는다.** 계획 단계에서 "이 명령은 내가 직접 돌릴 수 있는가"를
+먼저 확인하고, 못 돌리는 형태라면 돌릴 수 있는 형태로 계획을 바꾼다. 사용자에게 넘기는 것은 마지막 수단이고,
+그때는 왜 자동으로 못 하는지를 함께 설명한다.
+
 코드 변경 작업이 끝나면 **반드시** 다음을 수행한다:
 1. 변경 내용을 `CHANGELOG.md`의 `[Unreleased]`에 기록
 2. 사용자에게 어느 카테고리에 추가했는지 알려줄 것
@@ -36,13 +69,13 @@ Dynamic camera and video generation with from source video and user prompt.
 학습 진행 시 다음 과정을 따른다:
 1. 학습 설정이 이전과 어떻게 달라졌는지 사용자의 지시에 맞게 변경되었는지 이상이 생길만한 부분은 있는지 확인하여 이상이 없을 시 wandb run name과 함께 `EXPERIMENTS.log`에 기록한다.
 2. 먼저 smoke test를 진행하여 학습 코드가 정상적으로 돌아가는지 확인 후 이상이 있다면 고친 후 `FIX.log`에 기록 후 사용자에게 보고한다.
-3. 사용자의 명시적 지시가 없으면 GPU 0~3 중 가장 여유가 있는 GPU만을 사용한다.
+3. 사용자의 명시적 지시가 없으면 GPU 0~4 중 가장 여유가 있는 GPU만을 사용한다.
 4. screen train1~4에서 돌리고 어떤 screen에 어떤 학습이 돌아가고 있는지 기억한다.
 5. 학습을 돌려놓고 모니터링을 걸어 주기적으로 확인하여 정상적으로 학습이 돌아가고 있는지 확인하고 이상이 있다면 고친 후 `FIX.log`에 기록 후 사용자에게 보고한다.
 
 추론 진행 시 다음 과정을 따른다:
 1. 모델을 학습했을 때의 config와 일치하는지 먼저 확인하고 다른 설정값이 사용자의 명시적 지시에 의한 것이 아니라면 학습했을 때의 설정을 따르고 사용자에게 고지해준다.
-2. 사용자의 명시적 지시가 없으면 GPU 0~3 중 가장 여유가 있는 GPU만을 사용한다.
+2. 사용자의 명시적 지시가 없으면 GPU 0~4 중 가장 여유가 있는 GPU만을 사용한다.
 3. screen infer1~4에서 돌리고 어떤 screen에서 어떤 추론이 돌아가고 있는지 기억한다.
 4. 결과물은 results에 저장하고 추론 당시의 config값들과 input을 같이 결과 폴더 안에 정리하여 저장한다.
 

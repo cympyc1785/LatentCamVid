@@ -340,9 +340,17 @@ def merge(args):
 
     `(name, arm)` 로 중복을 제거한다: 샤드 경계가 씬이라 원칙적으로 겹치지 않지만, 재실행한
     샤드를 지우지 않고 같은 glob 에 남겨 두면 그 씬만 두 번 세어져 평균이 조용히 기운다.
+
+    `--scenes` 를 같이 주면 **합치면서** 그 씬만 남긴다. 전량 샤드가 이미 있으면 표본 표는
+    다시 렌더할 필요가 없다 — 같은 행을 거르기만 하면 되고, 수치는 표본을 따로 돌린 것과
+    같다. 열마다 씬 집합이 다르면 비교가 안 되므로, 거른 뒤 **arm 별 씬 수**를 찍는다.
     """
     shards = sorted(glob(args.merge))
     assert shards, f"{args.merge} 에 샤드 JSON 이 없다"
+    wanted = None
+    if args.scenes:
+        with open(args.scenes, encoding="utf-8") as file:
+            wanted = {line.strip() for line in file if line.strip()}
     rows, skipped, seen, labels = [], [], set(), ["gt"]
     for shard_path in shards:
         with open(shard_path, encoding="utf-8") as file:
@@ -350,6 +358,8 @@ def merge(args):
         labels += [l for l in rep["arms"] if l not in labels]
         n0 = len(rows)
         for row in rep["rows"]:
+            if wanted is not None and row["scene"] not in wanted:
+                continue
             key = (row["name"], row["arm"])
             if key in seen:
                 continue
@@ -361,9 +371,17 @@ def merge(args):
     labels = [l for l in labels if any(r["arm"] == l for r in rows)]
     names = {r["name"] for r in rows}
     print(f"\nentries {len(names)} / rows {len(rows)} / arms {labels}")
+    # 서로 다른 작업의 샤드를 합칠 때(우리 arm 만 돈 샤드 + 베이스라인만 돈 샤드) 한쪽이
+    # 덜 끝나 있으면 열마다 분모가 달라진다. 조용히 지나가면 "같은 표"로 읽히므로 찍는다.
+    per_arm = {l: len({r["scene"] for r in rows if r["arm"] == l}) for l in labels}
+    if len(set(per_arm.values())) > 1:
+        print(f"[경고] arm 별 씬 수가 다르다 — 열끼리 같은 분모가 아니다: {per_arm}")
+    else:
+        print(f"scenes/arm {next(iter(per_arm.values()))}")
 
     report = {"format": "subject_in_frame_v1", "center_box": args.center_box,
-              "merged_from": shards, "arms": {l: "" for l in labels if l != "gt"},
+              "merged_from": shards, "scenes_file": args.scenes,
+              "arms": {l: "" for l in labels if l != "gt"},
               "entries": len(names), "skipped": skipped, "rows": rows}
     summarize(rows, labels, args, report)
     if args.out:
@@ -437,6 +455,7 @@ if __name__ == "__main__":
     parser.add_argument("--limit", type=int, default=0)              # 0 = 씬당 entry 전량
     # 돌릴 씬만 한 줄에 하나씩 적은 파일. None = 전량(기존 동작). 표본을 파일로 받는 이유는
     # 산출물 옆에 "어떤 표본이었나"가 남아야 해서다 (main() 주석 참조).
+    # `--merge` 와 같이 주면 렌더 없이 **합치면서** 거른다 — 전량 샤드에서 표본 표를 뽑을 때.
     parser.add_argument("--scenes", default=None)
     # 씬 단위 샤딩 (`sam3_seg_instances.py` 와 같은 패턴). 기본 1/0 = 전량, 기존 동작 그대로.
     parser.add_argument("--num_shards", type=int, default=1)

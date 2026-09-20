@@ -8,6 +8,15 @@ Follows [Keep a Changelog](https://keepachangelog.com/).
 ## [Unreleased]
 
 ### Added
+- **`eval_subject_in_frame.py --merge` 에 `--scenes` 필터 + arm 별 씬 수 경고 (2026-09-20).**
+  전량 샤드가 이미 있으면 표본(200 씬) 표는 다시 렌더할 필요가 없다 — 같은 행을 거르기만 하면
+  되고 수치는 표본을 따로 돌린 것과 같다. `--merge` 없이 쓰는 기존 경로는 **비트 동일**
+  (`wanted is None` 이면 분기 자체가 없다).
+  - 서로 다른 작업의 샤드를 합칠 때(우리 5 arm 만 돈 샤드 + 베이스라인 6 열만 돈 샤드)
+    한쪽이 덜 끝나 있으면 열마다 분모가 달라진다. 합친 뒤 **arm 별 씬 수**를 찍고, 어긋나면
+    `[경고]` 를 낸다 — 조용히 지나가면 같은 표로 읽힌다.
+  - `report["scenes_file"]` 에 표본 파일 경로를 남긴다 (`--scenes` 는 산출물 옆에 "어떤
+    표본이었나"가 남아야 한다는 기존 규칙과 같은 이유).
 - **`eval_collision_rate.py` 에 `dynpose_d200` 코퍼스 + `--scenes` / `--extra_eval_dir` /
   `--per_scene_max` (2026-09-20).** D200 5 arm 의 testset 충돌률을 재려고 붙였다.
   기존 `vista_d121` 경로는 **비트 동일** — 새 키(`eval_data`/`graph_root`)는 코퍼스 dict 에서

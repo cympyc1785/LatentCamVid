@@ -48,6 +48,22 @@ quaternion_to_matrix` 가 0 노름으로 나눠 회전 3x3 을 통째로 NaN 으
 875 중 3 entry, 각 1~2 프레임). `decode_tokens` 가 **직전 프레임 회전으로 때우고** 그 개수를
 npz `n_zero_quat` / config `zero_quat_entries` / 요약 `zero_quat` 에 남긴다. 조용히 고치지 않는다.
 
+`--batch_size` — 한 번의 `model.generate` 에 엔트리 N 개를 같이 넣는다. 기본 1 이 기존 동작
+(비트동일). 생성은 `10*pose_length+1` 스텝짜리 autoregressive 디코드라 B=1 이면 GPU 가 거의
+놀고 (실측 util 26%, 3.37 s/entry) 스텝 수는 B 와 무관하므로 배치가 거의 그대로 배수 이득이다.
+`core/models.py:283 generate` 는 `assert B == 1` 이 주석 처리돼 있어 B>1 을 이미 받는다 —
+GenDoP 리포는 여전히 **0줄 수정**이다.
+
+  전제: **`--forbid_eos` 가 켜져 있어야 한다.** EOS 가 허용되면 엔트리마다 길이가 달라지고,
+  먼저 끝난 시퀀스는 `pad_token_id=0` 으로 채워지는데 `models.py:358` 이 전 토큰에서 3 을 빼
+  `-3` 을 만들어 `:359 assert np.all(tokens >= 0)` 이 죽는다. 그래서 `--batch_size > 1` 인데
+  `forbid_eos` 가 꺼져 있으면 **1 로 되돌린다** (조용히 터뜨리지 않는다). `pose_length != 30`
+  이면 forbid_eos 가 auto-on 이라 우리 49-포즈 런은 그대로 배치가 된다.
+
+  RNG: `opt.generate_mode='sample'` (top_k=10) 이라 배치 경계가 바뀌면 같은 엔트리라도 다른
+  샘플이 나온다. 이건 이어달리기(`--overwrite` 없이 재개)가 이미 갖고 있던 성질과 같다
+  (`run_gendop_eval.py` 의 `--overwrite` 주석). 배치 크기는 config.json 에 적는다.
+
 `--cond_mode depth+image+text` 는 릴리즈의 **text_rgbd** ckpt 용 분기다. 텍스트에 더해 생성 영상
 frame0 의 RGB 와 MonST3R depth 를 조건으로 준다 (`eval.py:311-313` 과 같이 `num_cond_tokens`
 77 -> 591 = 77 텍스트 + 257 이미지 + 257 depth). RGB/depth 는 `eval_data/gen/<scene>/<name>/
@@ -284,6 +300,12 @@ def main(args):
     args.forbid_eos = (opt.pose_length != 30) if args.forbid_eos is None else args.forbid_eos
     if args.forbid_eos:
         forbid_eos_in_logits(opt.eos_token_id)
+    if args.batch_size > 1 and not args.forbid_eos:
+        # EOS 가 살아 있으면 길이가 엔트리마다 달라 pad(0) 가 섞이고, models.py:358-359 의
+        # `output_ids - 3` / `assert >= 0` 이 터진다. 조용히 죽는 대신 배치를 포기한다.
+        print(f"[gendop] batch_size {args.batch_size} -> 1 (forbid_eos 가 꺼져 있어 "
+              f"길이가 엔트리마다 다르다; --forbid_eos 를 주면 배치가 된다)", flush=True)
+        args.batch_size = 1
     # kiui.seed_everything 은 함수 안 import 를 거부한다 — 같은 일을 직접 한다.
     import random
     random.seed(args.seed)
@@ -308,6 +330,44 @@ def main(args):
 
     done, skipped, degen, no_rgbd, lengths, zero_quat = 0, 0, [], [], {}, []
     no_caption = []      # --text_from_eval_dir 접두사/이름 규약이 어긋난 엔트리
+    pending = []         # 이번 배치에 들어갈 엔트리 (batch_size=1 이면 항상 1개)
+
+    def flush():
+        """모아둔 엔트리를 한 번의 generate 로 돌리고 각각 npz 로 쓴다."""
+        nonlocal done
+        if not pending:
+            return
+        texts = [job["text"] for job in pending]
+        if pending[0]["rgbd"] is None:
+            conds = texts
+        else:
+            # eval.py:196-215 의 조립 순서 그대로: [[text], rgb(B,3,H,W), depth(B,1,H,W)].
+            # depth 는 cpu 로 둔다 — `models.py:211` 이 encoder device 로 직접 옮긴다.
+            conds = [texts,
+                     torch.stack([job["rgb"] for job in pending]).to(device),
+                     torch.stack([job["depth"] for job in pending])]
+        with torch.no_grad(), torch.autocast(device_type="cuda", dtype=torch.float16):
+            tokens = model.generate(conds, max_new_tokens=opt.test_max_seq_length, clean=True)
+        for job, token in zip(pending, tokens):
+            token = (torch.as_tensor(np.asarray(token)) if not torch.is_tensor(token)
+                     else token.cpu())
+            c2w, scale, bad, n_zq = decode_tokens(token, opt, strict=args.strict_pose_length)
+            if n_zq:
+                zero_quat.append(f"{job['scene']}/{job['name']}:{n_zq}")
+            rgbd = job["rgbd"]
+            np.savez(job["out_path"], c2w=c2w, scale=scale, degenerate=bad,
+                     n_zero_quat=n_zq, n_poses=int(c2w.shape[0]),
+                     text=np.array(job["text"]), caption_path=np.array(job["cap_path"]),
+                     rgb_path=np.array("" if rgbd is None else rgbd[0]),
+                     depth_path=np.array("" if rgbd is None else rgbd[1]))
+            if bad:
+                degen.append(f"{job['scene']}/{job['name']}")
+            lengths[int(c2w.shape[0])] = lengths.get(int(c2w.shape[0]), 0) + 1
+            done += 1
+        pending.clear()
+        if done % 20 < args.batch_size:
+            print(f"  {done}/{len(rows)}", flush=True)
+
     for kind, scene, name, cap_path in rows:
         out_path = path.join(args.out, f"{kind}__{scene}__{name}.npz")
         if path.exists(out_path) and not args.overwrite:
@@ -335,34 +395,18 @@ def main(args):
                 continue
         with open(cap_path, encoding="utf-8") as file:
             text = json.load(file)[args.text_key]
-        if rgbd is None:
-            conds = [text]
-        else:
-            # eval.py:196-215 의 조립 순서 그대로: [[text], rgb(1,3,H,W), depth(1,1,H,W)].
-            # depth 는 cpu 로 둔다 — `models.py:211` 이 encoder device 로 직접 옮긴다.
-            rgb = standard_image(rgbd[0], opt.target_height, opt.target_width,
-                                 args.rgbd_fit).to(device)
-            depth = standard_depth(rgbd[1], opt.target_height, opt.target_width,
-                                   args.depth_norm, args.depth_target_median, args.rgbd_fit)
-            conds = [[text], rgb.expand(1, -1, -1, -1), depth.expand(1, -1, -1, -1)]
-        with torch.no_grad(), torch.autocast(device_type="cuda", dtype=torch.float16):
-            tokens = model.generate(conds, max_new_tokens=opt.test_max_seq_length, clean=True)
-        token = tokens[0]
-        token = torch.as_tensor(np.asarray(token)) if not torch.is_tensor(token) else token.cpu()
-        c2w, scale, bad, n_zq = decode_tokens(token, opt, strict=args.strict_pose_length)
-        if n_zq:
-            zero_quat.append(f"{scene}/{name}:{n_zq}")
-        np.savez(out_path, c2w=c2w, scale=scale, degenerate=bad,
-                 n_zero_quat=n_zq, n_poses=int(c2w.shape[0]),
-                 text=np.array(text), caption_path=np.array(cap_path),
-                 rgb_path=np.array("" if rgbd is None else rgbd[0]),
-                 depth_path=np.array("" if rgbd is None else rgbd[1]))
-        if bad:
-            degen.append(f"{scene}/{name}")
-        lengths[int(c2w.shape[0])] = lengths.get(int(c2w.shape[0]), 0) + 1
-        done += 1
-        if done % 20 == 0:
-            print(f"  {done}/{len(rows)}", flush=True)
+        job = dict(kind=kind, scene=scene, name=name, cap_path=cap_path,
+                   out_path=out_path, text=text, rgbd=rgbd)
+        if rgbd is not None:
+            job["rgb"] = standard_image(rgbd[0], opt.target_height, opt.target_width,
+                                        args.rgbd_fit)
+            job["depth"] = standard_depth(rgbd[1], opt.target_height, opt.target_width,
+                                          args.depth_norm, args.depth_target_median,
+                                          args.rgbd_fit)
+        pending.append(job)
+        if len(pending) >= args.batch_size:
+            flush()
+    flush()
 
     with open(path.join(args.out, "config.json"), "w", encoding="utf-8") as file:
         json.dump({"resume": args.resume, "text_key": args.text_key, "seed": args.seed,
@@ -372,6 +416,7 @@ def main(args):
                    "pose_length": opt.pose_length,
                    "strict_pose_length": args.strict_pose_length,
                    "forbid_eos": args.forbid_eos,
+                   "batch_size": args.batch_size,
                    "n_poses_hist": {str(k): v for k, v in sorted(lengths.items())},
                    "cond_mode": opt.cond_mode,
                    "num_cond_tokens": opt.num_cond_tokens, "n_entries": len(rows),
@@ -451,4 +496,7 @@ if __name__ == "__main__":
     # `assert np.all(tokens >= 0)` 가 EOS 를 -1 로 만들어 죽는 걸 막는다 (docstring §forbid_eos).
     parser.add_argument("--forbid_eos", action="store_true", default=None)
     parser.add_argument("--no_forbid_eos", dest="forbid_eos", action="store_false")
+    # 한 generate 에 넣을 엔트리 수. 1 = 기존 동작(비트동일). forbid_eos 가 꺼져 있으면 1 로
+    # 강등된다 (docstring §batch_size). 디코드 스텝 수는 B 와 무관해 거의 배수 이득이다.
+    parser.add_argument("--batch_size", type=int, default=1)
     main(parser.parse_args())

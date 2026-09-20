@@ -218,7 +218,7 @@ def stage_inputs(C, overwrite=False, text_only=False):
 
 
 def stage_infer(C, gpu, limit=None, depth_norm=None, pose_length=30, arms=None,
-                overwrite=False, text_dir=None, text_tag=None):
+                overwrite=False, text_dir=None, text_tag=None, batch_size=1):
     depth_norm = depth_norm or C["depth_norm"]
     # 기본은 ref arm 의 eval 폴더(= latentcam 이 실제로 받은 문장). `--text_dir` 를 주면
     # 같은 모양의 다른 폴더로 갈아끼운다 (예: `gendop_style_captions.py` 가 만든 분포 정합 문장).
@@ -238,6 +238,8 @@ def stage_infer(C, gpu, limit=None, depth_norm=None, pose_length=30, arms=None,
             # 학습 길이보다 길게 요구하는 것이므로 strict 폴백은 끈다 (짧게 끝나면 나온 만큼 디코드)
             # --forbid_eos 는 infer 쪽 auto (pose_length != 30 이면 on) 에 맡긴다
             cmd += ["--pose_length", str(pose_length), "--no_strict_pose_length"]
+        if batch_size != 1:
+            cmd += ["--batch_size", str(batch_size)]
         if overwrite:
             cmd += ["--overwrite"]
         if arm["cond"] != "text":
@@ -369,6 +371,9 @@ def main():
     ap.add_argument("--out_tag", default=None)
     # dynpose 는 D178 이후 cloud.npz 가 디스크에 없다 -> `memory`. vista 는 아직 npz 가 있다.
     ap.add_argument("--cloud_source", default="npz", choices=["npz", "memory"])
+    # infer 단계에서 한 generate 에 넣을 엔트리 수. 1 = 예전 런과 비트동일.
+    # GenDoP 생성은 10*pose_length+1 스텝 autoregressive 라 B=1 이면 GPU 가 논다.
+    ap.add_argument("--batch_size", type=int, default=1)
     a = ap.parse_args()
     assert not (a.text_dir and not a.text_tag), "--text_dir 를 주면 --text_tag 도 줄 것"
     # infer/evaldir 는 `arms or ARMS` 라 빈 리스트가 조용히 "전부"로 되살아난다. score 전용.
@@ -382,7 +387,7 @@ def main():
         rc = rc or stage_inputs(C, a.overwrite, a.text_only)
     if a.stage in ("infer", "all"):
         rc = rc or stage_infer(C, a.gpu, a.limit, a.depth_norm, a.pose_length, arms,
-                               a.overwrite, a.text_dir, a.text_tag)
+                               a.overwrite, a.text_dir, a.text_tag, a.batch_size)
     if a.stage in ("evaldir", "all"):
         rc = rc or stage_evaldir(C, a.pose_length, arms, a.text_tag, a.rescale, a.resample,
                                  a.scale_token, a.text_dir)

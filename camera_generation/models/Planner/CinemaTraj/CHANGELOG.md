@@ -8,6 +8,23 @@ Follows [Keep a Changelog](https://keepachangelog.com/).
 ## [Unreleased]
 
 ### Added
+- **`gendop_release_infer.py --batch_size` (+ `run_gendop_eval.py --batch_size` 배선) (2026-09-21).**
+  한 번의 `model.generate` 에 엔트리 N 개를 같이 넣는다. **기본 1 = 기존 동작(비트동일)** 이라
+  예전 호출은 그대로다.
+  - 왜: 생성은 `10*pose_length+1`(=491) 스텝 autoregressive 디코드인데 B=1 이면 GPU 가 논다.
+    실측 **17.8 entry/min (3.37 s/entry), GPU util 26%** (dynpose d200 test 런, 최근 300개 기준).
+    디코드 스텝 수는 B 와 무관하므로 배치는 거의 그대로 배수 이득이다.
+  - GenDoP 리포는 여전히 **0줄 수정** — `core/models.py:283 generate` 는 `assert B == 1` 이
+    이미 주석 처리돼 있어 B>1 을 받는다. `prefix_allowed_tokens_fn` 도 batch_id 별로 돈다.
+  - **전제: `forbid_eos` 가 켜져 있어야 한다.** EOS 를 허용하면 엔트리마다 길이가 달라지고
+    먼저 끝난 시퀀스가 `pad_token_id=0` 으로 채워지는데, `models.py:358` 이 전 토큰에서 3 을
+    빼 `-3` 을 만들어 `:359 assert np.all(tokens >= 0)` 이 죽는다. 그래서 `--batch_size > 1`
+    인데 forbid_eos 가 꺼져 있으면 **조용히 터뜨리지 않고 1 로 되돌린다** (사유를 찍는다).
+    `pose_length != 30` 이면 forbid_eos 가 auto-on 이라 49-포즈 런은 그대로 배치된다.
+  - 이어달리기는 이미 공짜다 — 출력이 엔트리당 `.npz` 고 `path.exists` 스킵 가드가 있어
+    같은 `--out` 으로 다시 띄우면 남은 것만 돈다. RNG 는 `generate_mode='sample'` 이라 배치
+    경계가 바뀌면 같은 엔트리도 다른 샘플이 나온다 (재개가 원래 갖고 있던 성질과 같다).
+    `batch_size` 는 `config.json` 에 적는다.
 - **`eval_subject_in_frame.py --merge` 에 `--scenes` 필터 + arm 별 씬 수 경고 (2026-09-20).**
   전량 샤드가 이미 있으면 표본(200 씬) 표는 다시 렌더할 필요가 없다 — 같은 행을 거르기만 하면
   되고 수치는 표본을 따로 돌린 것과 같다. `--merge` 없이 쓰는 기존 경로는 **비트 동일**

@@ -8,6 +8,10 @@ Follows [Keep a Changelog](https://keepachangelog.com/).
 ## [Unreleased]
 
 ### Added
+- **`eval_collision_rate.py` 에 `vista_d215` 코퍼스 (2026-09-21).** 루트는 `vista_d121` 과 같지만
+  **코퍼스가 다르므로 entry 인덱스의 뜻이 다르다** — d121 arm 을 여기 섞으면 안 된다
+  (`variant_id` 가 코퍼스 키가 아니듯 entry 인덱스도 아니다). `arms` 엔 `gt` + seed 42 하나만
+  박아 두고 다른 seed 는 `--extra_eval_dir s1234=...` 로 붙인다.
 - **`route_presets.py --anchor_ids_file` + `configs/bank/d215_vista_objcentric.json` (2026-09-21).**
   `{"<video>": ["dyn_1", ...]}` JSON 한 장으로 씬마다 anchor 를 못 박는다. **안 주면 기본값
   `""` = 기존 `pick_anchors` 경로 그대로**(비트 동일).
@@ -30,6 +34,13 @@ Follows [Keep a Changelog](https://keepachangelog.com/).
     `--track_mode add --track_min_drift_u 0.05`. 문턱은 tau 단계(`--track_dynamic_only
     --track_min_drift_u 0.05`, d185 상속)와 **같은 값**이어야 한다 — 다르면 라우팅이 붙인
     track 슬롯을 뱅크가 조용히 버린다(D166).
+  - tau 블록도 한 줄 다르다: **`--min_subject_area` 0.005 -> 0.001**. 1차 굽기에서 17 편 중
+    **6 편이 `no_surviving_anchors` 로 통째로 빠졌는데**, 이유는 사람이 고른 그 피사체가 소스
+    frame 0 에서 작아서였다 — snowboard 0.00151 / soapbox 0.00113 / drive-desert 0.00440 /
+    mountain-hike 0.00388 / avocado-slice 0.00222 (전부 0.005 미만), magnifying-glass 0.0.
+    기본 세대는 면적 1등 anchor 를 쓰니 이 컷에 안 걸리지만 D215 는 anchor 를 사람이 못 박으므로
+    컷을 피사체에 맞춰 내린다. **magnifying-glass 는 0.0 이라 이 값으로도 못 살린다**
+    (frame 0 에 아예 안 보인다 = 조준할 것이 없다).
 - **`gendop_release_infer.py --batch_size` (+ `run_gendop_eval.py --batch_size` 배선) (2026-09-21).**
   한 번의 `model.generate` 에 엔트리 N 개를 같이 넣는다. **기본 1 = 기존 동작(비트동일)** 이라
   예전 호출은 그대로다.

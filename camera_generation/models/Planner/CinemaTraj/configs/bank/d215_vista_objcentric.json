@@ -9,6 +9,25 @@
   "generation": "d215",
   "tau_bank_dir": "bank_d215",
   "bank_dir": "hole_bank_d215",
+  "_tau가_다른_점": "`--min_subject_area` 0.005 -> 0.001 한 줄. 나머지 인자는 d185 를 글자 그대로 옮겨 적은 것이다 (`extends` 가 최상위 키 단위 덮어쓰기라 한 줄을 고치려면 블록을 통째로 다시 써야 한다). 1차 굽기에서 17편 중 6편이 `no_surviving_anchors` 로 통째로 빠졌는데, 이유는 **사용자가 고른 그 피사체가 소스 frame 0 에서 작아서**였다 — snowboard 0.00151 / soapbox 0.00113 / drive-desert 0.0044 / mountain-hike 0.00388 / avocado-slice 0.00222 (전부 0.005 미만). 기본 세대는 면적 1등 anchor 를 쓰니 이 컷에 안 걸리지만, D215 는 anchor 를 사람이 못 박으므로 컷을 피사체에 맞춰 내린다. magnifying-glass 만 0.0 — frame 0 에 아예 안 보여서 이 값으로도 못 살린다 (조준할 것이 없다).",
+
+  "tau": {
+    "args": [
+      "--cloud_source", "memory",
+      "--tau_ladder", "0.10", "0.20", "0.35", "0.60", "1.00",
+      "--variant_pool", "full",
+      "--aim_keyframes", "6", "--keyframe_aim", "auto", "--keyframe_ease", "smooth_kf",
+      "--fixed_focal", "--deroll", "--no_preview", "--skip_on_empty",
+      "--device", "cuda",
+      "--orbit_fixed_sweep", "--min_sweep_deg", "20", "--behind_src_frames", "49",
+      "--tau_ref", "follow",
+      "--track_dynamic_only", "--track_min_drift_u", "0.05",
+      "--trackings", "lock", "--preset_tracking",
+      "--behind_min_zcam", "0.02",
+      "--tau_denom", "S",
+      "--min_subject_area", "0.001"
+    ]
+  },
   "route": {
     "out": "preset_route_d215.json",
     "args": [

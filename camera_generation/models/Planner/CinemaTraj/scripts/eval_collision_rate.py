@@ -145,6 +145,21 @@ CORPORA = {
              path.join(D200, "20260919_172530_dynpose_d200_molmo2_dec_l21_da3__last"), "pred"),
         ],
     },
+    # D215 (사용자 지시 2026-09-21). vista keeper 17 씬을 사람이 고른 dynamic subject 하나만
+    # 보고 도는 object-centric preset 으로 다시 구운 코퍼스. 루트는 `vista_d121` 과 같지만
+    # **코퍼스가 다르므로 entry 인덱스의 뜻이 다르다** — d121 arm 을 여기 섞으면 안 된다
+    # (entry 인덱스는 코퍼스 키가 아니다, §eval_subject_in_frame.assert_corpus_matches).
+    # arm 은 `gt` 와 seed 42 하나만 박아 둔다. 다른 seed 는 `--extra_eval_dir s1234=...` 로.
+    "vista_d215": {
+        "prefix": "vista4d",
+        "eval_data": EVAL_DATA,
+        "graph_root": path.join(CINEMATRAJ_ROOT, "out"),
+        "ref": path.join(D200, "d215_s42__last"),
+        "arms": [
+            ("gt", path.join(D200, "d215_s42__last"), "ref"),
+            ("d200_molmo2_l21_s42", path.join(D200, "d215_s42__last"), "pred"),
+        ],
+    },
 }
 
 # OpenGL(c2w, +Y up / −Z fwd) → OpenCV. 중심(translation)은 안 바뀌므로 판정에는 영향이 없지만,

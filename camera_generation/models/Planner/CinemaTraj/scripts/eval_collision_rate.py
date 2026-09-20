@@ -50,6 +50,10 @@ recon 그대로다 (실측: `transforms_ref` 의 frame0 이 `recon_and_seg/<vide
         --corpus vista_d121 --out results/20260907_d159_collision
     # 임계를 이미 정했으면
     ... --knn_r 0.0126
+    # dynpose d200 5 arm — subject_in_frame 과 같은 200 씬 표본으로
+    OPENCV_IO_ENABLE_OPENEXR=1 python scripts/eval_collision_rate.py \
+        --corpus dynpose_d200 --scenes ../../../../tmp/d205/sample200_scenes.txt \
+        --out results/20260920_d205_collision_d200
 """
 import sys
 from argparse import ArgumentParser
@@ -70,11 +74,17 @@ VISTA4D_ROOT = path.normpath(path.join(CINEMATRAJ_ROOT, "..", "..", "..", "..",
                                        "video_generation", "models", "Vista4D"))
 LATENTCAM = "/data1/cympyc1785/LatentCamVid/camera_generation/latentcam"
 D156 = path.join(CINEMATRAJ_ROOT, "results/20260906_d156_gendop_d121")
+D200 = path.join(LATENTCAM, "eval_my")
 
+# `eval_data` 는 **`eval_data/` 의 부모**다 — `scene_graph/io.py:88` 이 다시 붙인다.
+# (`run_gendop_eval.py:60-63` 이 같은 함정을 기록해 뒀다. 거기 상수는 `eval_data` 까지라
+#  score 단계에서 `path.dirname` 을 쳐서 넘긴다.)
 # arm 라벨은 `tmp/d156/run_clatr_d121.py` 와 같은 규약이다 (D124 = da3+molmo2, D133 = molmo2 단독).
 CORPORA = {
     "vista_d121": {
         "prefix": "vista4d",
+        "eval_data": EVAL_DATA,
+        "graph_root": path.join(CINEMATRAJ_ROOT, "out"),
         "ref": path.join(LATENTCAM,
                          "eval_my/20260904_165917_vista4d_d121_da3_t128__epoch100__seed42"),
         "arms": [
@@ -108,6 +118,31 @@ CORPORA = {
              path.join(D156, "eval_dir_gendop_rgbd_raw_slerp_noscale"), "pred"),
             ("gendop_gdstyle_p30_slerp",
              path.join(D156, "eval_dir_gendop_rgbd_gdstyle_raw_slerp_noscale"), "pred"),
+        ],
+    },
+    # D200 pooled(d185+d199) 코퍼스의 5 arm. recon 은 `DynPose-100K/eval_data` 에 있고
+    # scene_graph 는 `out_dynpose` 다 (`run_gendop_eval.py` 의 `dynpose_d200` 과 같은 루트).
+    # 여기서는 `cloud.npz` 를 읽지 않는다 — 점군을 recon depth 에서 직접 세우고
+    # `scene_graph.json` 에서는 `S` 만 읽으므로 D178 의 cloud 삭제와 무관하다.
+    # 5,144 엔트리 × 1,017 씬 전량은 비싸므로 `--scenes` 로 D205 의 200 씬 표본만 재는 것을 권한다
+    # (subject_in_frame 표와 같은 표본이라 열을 나란히 놓을 수 있다).
+    "dynpose_d200": {
+        "prefix": "dynpose",
+        "eval_data": "/data1/cympyc1785/data/DynPose-100K",
+        "graph_root": path.join(CINEMATRAJ_ROOT, "out_dynpose"),
+        "ref": path.join(D200, "20260918_140904_dynpose_d200_da3__last"),
+        "arms": [
+            ("gt", path.join(D200, "20260918_140904_dynpose_d200_da3__last"), "ref"),
+            ("d200_da3", path.join(D200, "20260918_140904_dynpose_d200_da3__last"), "pred"),
+            ("d200_molmo2", path.join(D200, "20260918_140909_dynpose_d200_molmo2_da3__last"),
+             "pred"),
+            ("d200_molmo2_l21",
+             path.join(D200, "20260918_140914_dynpose_d200_molmo2_l21_da3__last"), "pred"),
+            ("d200_molmo2_dec",
+             path.join(D200, "20260918_140919_dynpose_d200_molmo2_dec_da3__last"), "pred"),
+            # ⑤ 만 run 디렉토리 날짜가 다르다 (09-19 재기동본).
+            ("d200_molmo2_dec_l21",
+             path.join(D200, "20260919_172530_dynpose_d200_molmo2_dec_l21_da3__last"), "pred"),
         ],
     },
 }
@@ -166,16 +201,34 @@ def scene_points(recon, stride: int, edge_thr: float):
 
 def main(args):
     corpus = CORPORA[args.corpus]
+    # 예전 코퍼스 dict 에는 이 두 키가 없었다 — 없으면 vista 상수로 떨어져 동작이 같다.
+    eval_data = corpus.get("eval_data", EVAL_DATA)
+    graph_root = corpus.get("graph_root", path.join(CINEMATRAJ_ROOT, "out"))
+    arms = list(corpus["arms"])
+    for spec in args.extra_eval_dir:                    # LABEL=DIR, 반복 가능
+        label, _, folder = spec.partition("=")
+        assert folder, f"--extra_eval_dir 는 LABEL=DIR 꼴이어야 한다: {spec}"
+        arms.append((label, folder, "pred"))
+
     names = [l.strip() for l in open(path.join(corpus["ref"], "test_valid.txt"),
                                      encoding="utf-8") if l.strip()]
+    keep = None
+    if args.scenes:
+        keep = {l.strip() for l in open(args.scenes, encoding="utf-8") if l.strip()}
+        names = [n for n in names
+                 if n[len(corpus["prefix"]) + 1:].rsplit("_", 1)[0] in keep]
     if args.limit:
         names = names[:args.limit]
     by_scene = {}
     for name in names:
         scene = name[len(corpus["prefix"]) + 1:].rsplit("_", 1)[0]
         by_scene.setdefault(scene, []).append(name)
+    # 씬이 많으면 목록을 통째로 찍는 건 로그만 불린다.
+    shown = sorted(by_scene) if len(by_scene) <= 12 else f"{sorted(by_scene)[:6]} ..."
+    if keep is not None:
+        print(f"{'scenes file':<16}{args.scenes}  ({len(by_scene)}/{len(keep)} 씬 매칭)")
     print(f"{'corpus':<16}{args.corpus}\n{'entries':<16}{len(names)}"
-          f"\n{'scenes':<16}{len(by_scene)}  {sorted(by_scene)}")
+          f"\n{'scenes':<16}{len(by_scene)}  {shown}")
     print(f"{'G1':<16}margin {args.behind_margin_frac:g}·S  clear {args.behind_clear_frac:g}·S  "
           f"min_zcam {args.behind_min_zcam:g}·S  src_frames {args.behind_src_frames}  "
           f"radius {args.behind_radius_px}px  time_match {args.time_match}")
@@ -185,10 +238,10 @@ def main(args):
 
     rows = []                                                     # 엔트리 × arm 한 줄씩
     for scene in sorted(by_scene):
-        with open(path.join(CINEMATRAJ_ROOT, "out", scene, "scene_graph.json"),
+        with open(path.join(graph_root, scene, "scene_graph.json"),
                   encoding="utf-8") as file:
             scale = float(json_load(file)["scale"]["S"])
-        recon = load_scene(EVAL_DATA, scene, VISTA4D_ROOT)
+        recon = load_scene(eval_data, scene, VISTA4D_ROOT)
         num_src = len(recon["cam_c2w"])
         src_frames = sorted(set(np.rint(np.linspace(
             0, num_src - 1, min(args.behind_src_frames, num_src))).astype(int).tolist()))
@@ -200,7 +253,7 @@ def main(args):
             print(f"[{scene}] S {scale:.4f}  points {len(points):,}  "
                   f"entries {len(by_scene[scene])}", flush=True)
 
-        for arm, folder, kind in corpus["arms"]:
+        for arm, folder, kind in arms:
             done = 0
             for name in by_scene[scene]:
                 poses = load_poses(folder, name, kind)
@@ -265,7 +318,7 @@ def main(args):
     def summarize(pool):
         """arm -> 지표 dict. `pool` 이 전체면 코퍼스 요약, scene 하나면 scene 요약."""
         out = {}
-        for arm, _folder, _kind in corpus["arms"]:
+        for arm, _folder, _kind in arms:
             sub = [r for r in pool if r["arm"] == arm and not r["missing"]]
             if not sub:
                 continue
@@ -297,6 +350,9 @@ def main(args):
 
     makedirs(args.out, exist_ok=True)
     config = {"corpus": args.corpus, "metric": args.metric, "n_entries": len(names),
+              "n_scenes": len(by_scene), "scenes_file": args.scenes,
+              "eval_data": eval_data, "graph_root": graph_root,
+              "arms": [[a, f, k] for a, f, k in arms],
               "knn": {"k": args.knn_k, "r_normalized": knn_r, "stride": args.stride,
                       "edge_thr": args.edge_thr, "calib_arm": args.knn_calib_arm,
                       "target_rate": args.knn_target_rate,
@@ -342,7 +398,12 @@ def main(args):
               f"{entry.get('n_static', -1):>10}"
               + fmt(entry.get("knn_per_arc_mean")) + fmt(entry.get("knn_per_arc_pooled"))
               + fmt(entry.get("g1_per_arc_mean"))[1:] + fmt(entry.get("g1_per_arc_pooled"))[1:])
-    for scene, per_arm in by_scene.items():
+    # 씬 블록은 JSON 에 전부 남기되 **출력만** 자른다 — 200 씬이면 표가 200개가 된다.
+    shown_scenes = list(by_scene.items())[:args.per_scene_max]
+    if len(shown_scenes) < len(by_scene):
+        print(f"\n[per-scene] {len(by_scene)} 씬 중 앞 {len(shown_scenes)} 개만 출력 "
+              f"(전량은 collision_rate.json 의 by_scene)")
+    for scene, per_arm in shown_scenes:
         n = max(e["n"] for e in per_arm.values())
         print(f"\n[scene {scene}]  n={n}")
         print(f"{'arm':<26}{'kNN rate':>10}{'kNN frame':>11}{'d_k med':>10}"
@@ -364,6 +425,11 @@ if __name__ == "__main__":
                                                    "results/20260907_d159_collision"))
     parser.add_argument("--metric", default="both", choices=("g1", "knn", "both"))
     parser.add_argument("--limit", default=0, type=int)          # smoke 용 엔트리 수 제한
+    # 씬 표본 파일 (씬 이름 한 줄씩). subject_in_frame 표와 같은 표본을 쓰라고 있는 것이다.
+    parser.add_argument("--scenes", default=None)
+    # 코퍼스 dict 밖의 eval 폴더를 pred arm 으로 추가 (E.T./GenDoP 베이스라인).
+    parser.add_argument("--extra_eval_dir", action="append", default=[],
+                        metavar="LABEL=DIR")
     # --- kNN ---
     parser.add_argument("--knn_k", default=10, type=int)         # 경계 떠 있는 점 1개에 안 흔들리게
     parser.add_argument("--knn_r", default=None, type=float)     # 주면 캘리브레이션 안 한다
@@ -373,6 +439,7 @@ if __name__ == "__main__":
     # scene 별 재집계 표 + JSON `by_scene`. 기본 on — 코퍼스 평균만 보면 엔트리 많은 씬에 가려진다.
     parser.add_argument("--per_scene", action="store_true", default=True)
     parser.add_argument("--no_per_scene", dest="per_scene", action="store_false")
+    parser.add_argument("--per_scene_max", default=12, type=int)  # 출력만 자른다 (JSON 은 전량)
     parser.add_argument("--knn_target_rate", default=0.01, type=float)
     parser.add_argument("--stride", default=4, type=int)         # 점군 솎음 (밀도가 r 을 정한다)
     parser.add_argument("--edge_thr", default=0.05, type=float)  # |∇log z| 컷

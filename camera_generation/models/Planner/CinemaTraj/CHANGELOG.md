@@ -7,6 +7,24 @@ Follows [Keep a Changelog](https://keepachangelog.com/).
 
 ## [Unreleased]
 
+### Added
+- **`eval_collision_rate.py` 에 `dynpose_d200` 코퍼스 + `--scenes` / `--extra_eval_dir` /
+  `--per_scene_max` (2026-09-20).** D200 5 arm 의 testset 충돌률을 재려고 붙였다.
+  기존 `vista_d121` 경로는 **비트 동일** — 새 키(`eval_data`/`graph_root`)는 코퍼스 dict 에서
+  없으면 예전 상수(`Vista4D-Eval-Data`, `out/`)로 떨어지고, 새 인자 기본값은 전부 무동작이다.
+  - 코퍼스마다 recon 루트와 scene_graph 루트가 다르다 — d200 은
+    `DynPose-100K` + `out_dynpose`. `eval_data` 는 **`eval_data/` 의 부모**를 적는다
+    (`scene_graph/io.py:88` 이 다시 붙인다. `run_gendop_eval.py:60-63` 에 같은 함정이 기록돼 있다).
+  - `cloud.npz` 는 안 읽는다. 점군은 recon depth 에서 직접 세우고 `scene_graph.json` 에서는
+    `S` 만 읽으므로 D178 의 cloud 삭제와 무관하다 — `--cloud_source` 같은 게 필요 없다.
+  - `--scenes FILE` 로 D205 의 200 씬 표본만 잰다. 5,144 엔트리 × 1,017 씬 전량은 비싸고,
+    같은 표본을 써야 `subject_in_frame` 표와 열을 나란히 놓을 수 있다.
+  - `--per_scene_max` 는 **출력만** 자른다 (JSON `by_scene` 은 전량). 200 씬이면 씬 블록이
+    200 개 찍힌다.
+  - 실행 전 200 씬 전부에 `scene_graph.json` / `recon_and_seg` / `depths` / `seg_instances`
+    가 있는지 확인했다 (결손 0). 중간에 죽지 않게 하려고 스킵 분기를 넣는 대신 사전 검증을 택했다 —
+    조용한 스킵은 "다 쟀다"로 읽힌다.
+
 ### Changed
 - **`run_gendop_eval.py` `dynpose_d200.ours` 에 arm ⑤ `d200_molmo2_dec_l21` 추가 (2026-09-20).**
   ⑤ 가 14:34:49 에 `epoch_cap 50` 완주(rc=0)해 testset eval 을 돌릴 수 있게 됐다. 이 항목이

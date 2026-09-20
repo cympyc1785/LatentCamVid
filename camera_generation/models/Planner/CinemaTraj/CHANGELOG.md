@@ -7,6 +7,15 @@ Follows [Keep a Changelog](https://keepachangelog.com/).
 
 ## [Unreleased]
 
+### Changed
+- **`run_gendop_eval.py` `dynpose_d200.ours` 에 arm ⑤ `d200_molmo2_dec_l21` 추가 (2026-09-20).**
+  ⑤ 가 14:34:49 에 `epoch_cap 50` 완주(rc=0)해 testset eval 을 돌릴 수 있게 됐다. 이 항목이
+  빠져 있으면 D208 합산 score 가 **⑤ 없이** 9시간을 돌고 끝난다 — ⑤ 는 epoch 50 val 에서
+  loss_traj / loss_latent / clatr fcd / caption fscore 4개 1등이라 비교표의 핵심이다.
+  15:33 에 시작한 score 를 2분 만에 끊고 ⑤ 를 채운 뒤 재기동했다.
+  - ⑤ 만 run 디렉토리 날짜가 다르다 (`20260919_172530_...`, 09-19 재기동본). 동명 디렉토리가
+    5개 있고 `ckpts/last.pth` 는 이 하나뿐이라, 앞 4개와 같은 09-18 이름으로 찾으면 없다.
+
 ### Added
 - **TRUMANS 전량 뱅크 세대 `d207T` (`configs/bank/d207_trumans_pilot.json`) (2026-09-20).**
   TRUMANS-Lite 191 chunk 을 **d185 라우팅 축**(`route_presets` grid2x2 슬롯)으로 다시 굽는다.

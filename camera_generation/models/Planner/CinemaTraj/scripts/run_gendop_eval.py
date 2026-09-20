@@ -135,13 +135,14 @@ CORPORA = {
         cloud_root=path.join(HERE, "out_dynpose"),
         out=path.join(HERE, "results", "20260920_d208_gendop_d200"),
         depth_norm="median",
-        # D200 5-arm 중 epoch 49 last 로 testset eval 이 끝난 넷 (2026-09-18 run 이름 기준).
-        # ⑤ molmo2_dec_l21 은 아직 학습 중이라 빠져 있다.
+        # D200 5-arm 전부 epoch_cap 50 last 로 testset eval 을 마쳤다.
+        # ⑤ 만 run 디렉토리 날짜가 다르다 (09-19 재기동본) — 09-18 이름으로 찾으면 없다.
         ours={
             "d200_da3":             EVAL_MY + "20260918_140904_dynpose_d200_da3__last",
             "d200_molmo2":          EVAL_MY + "20260918_140909_dynpose_d200_molmo2_da3__last",
             "d200_molmo2_l21":      EVAL_MY + "20260918_140914_dynpose_d200_molmo2_l21_da3__last",
             "d200_molmo2_dec":      EVAL_MY + "20260918_140919_dynpose_d200_molmo2_dec_da3__last",
+            "d200_molmo2_dec_l21":  EVAL_MY + "20260919_172530_dynpose_d200_molmo2_dec_l21_da3__last",
         },
         ref="d200_da3",
     ),

@@ -1,0 +1,25 @@
+{
+  "_why": "D215 (사용자 지시 2026-09-21 \"keep된 scene들 전부 main dynamic subject를 target으로 삼아서 object-centric preset으로 caption 만들어서 ...로 seed 바꿔가면서 돌려서\" + \"object-centric preset은 dynamic subject가 일정 이상 움직일 경우 track도 해줘\") — vista keeper 17편을 **사람이 고른 그 피사체**만 보고 도는 카메라로 굽는다. tau/fit/emit 은 d202w 를 그대로 물려받는다(= d185 = D200 학습 분포). 달라지는 것은 route 하나다.",
+
+  "_route가_다른_점": "① `--anchor_ids_file` 로 anchor 를 못 박는다. keeper 17편 실측에서 면적 순 1등(`pick_anchors` 기본)이 릴에서 고른 이동량 1등과 **9편(53%) 불일치**였고 그중 5편은 아예 `stat_*` 였다. ② `--slot_whitelist` 에서 object-centric 이 아닌 두 슬롯을 뺀다 — `rotate`(pan_*)는 targetless 라 캡션에 target 절이 없고, `lateral`(truck_*)은 aim=free 라 target 절과 화면이 어긋난다(task #134). 남는 여섯은 전부 anchor 를 조준한다. ③ `--free_moving off` — free-moving 변이는 정의상 target 이 없다.",
+
+  "_track은_어디서_갈리나": "`--track_mode add` + `--track_min_drift_u 0.05`. `route()` 가 `anchor_track_eligible = moving ∧ center_drift_u > 0.05` 로 판정해, 넘는 씬만 `TRACK_KEEP_SLOTS ∩ whitelist`(arc/orbit/static) + 보너스 슬롯 하나에 `track_` 을 붙이고 나머지는 비-track 으로 남긴다. 못 넘는 씬은 여섯 슬롯 전부 비-track 이다. keeper 17편 중 9편이 문턱을 넘는다 (drift 1.3485 ~ 0.0554 vs 0.0403 ~ 0.0082). 문턱은 tau 단계(`--track_dynamic_only --track_min_drift_u 0.05`, d185 상속)와 **같은 값**이어야 한다 — 다르면 라우팅이 붙인 track 슬롯을 뱅크가 조용히 버린다(D166).",
+
+  "extends": "d202w_vista_snowboard_wide.json",
+  "generation": "d215",
+  "tau_bank_dir": "bank_d215",
+  "bank_dir": "hole_bank_d215",
+  "route": {
+    "out": "preset_route_d215.json",
+    "args": [
+      "--num_external", "0",
+      "--free_moving", "off",
+      "--anchor_ids_file", "/data1/cympyc1785/LatentCamVid/tmp/d215/anchors.json",
+      "--slot_plan", "full",
+      "--slot_whitelist", "advance,recede,arc,orbit,vertical,static",
+      "--track_mode", "add",
+      "--track_min_drift_u", "0.05",
+      "--skip_if_empty"
+    ]
+  }
+}

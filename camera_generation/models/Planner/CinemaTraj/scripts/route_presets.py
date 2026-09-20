@@ -463,19 +463,48 @@ def pick_external(shapes_json: str, video: str, num: int, taken_slots):
     return out
 
 
+def load_anchor_ids(file_path: str, video: str):
+    """`--anchor_ids_file` -> 이 영상에 못 박은 anchor id 목록. 안 주면 `None` (= 옛 동작).
+
+    D215 (사용자 지시 2026-09-21 "keep된 scene들 전부 main dynamic subject를 target으로").
+    `pick_anchors` 는 **면적 순**으로 고르는데 사람이 릴을 보고 고른 피사체는 **이동량 순**
+    1등이다. keeper 17씬 실측: 9편(53%)에서 둘이 다른 노드를 가리켰고, 그중 5편은 면적 1등이
+    아예 `stat_*`(정지 배경)였다. 문턱(`--anchor_min_drift_u`)으로는 못 맞춘다 — 그건 후보를
+    자를 뿐 남은 것들의 **순서**는 여전히 면적이라, 문턱을 넘긴 큰 정지 물체가 그대로 1등이다.
+
+    파일 형식은 `{"<video>": ["dyn_1", ...], ...}` 한 장이다. 영상마다 값이 다른데
+    `run_bank.py` 의 `route.args` 는 세대 config 하나에서 전 영상에 공통으로 붙으므로,
+    per-video 값을 인자로는 못 넘긴다 — 그래서 경로 하나를 주고 안에서 영상을 찾는다.
+    목록에 없는 영상은 `None` 을 돌려줘 그 씬만 기존 선택 규칙으로 돈다.
+    """
+    if not file_path:
+        return None
+    with open(file_path, encoding="utf-8") as file:
+        table = json.load(file)
+    got = table.get(video)
+    return list(got) if got else None
+
+
 def main(args):
     out_root = args.output_root or path.join(CINEMATRAJ_ROOT, "out")
     graph_path = path.join(out_root, args.video, "scene_graph.json")
     with open(graph_path, encoding="utf-8") as file:
         graph = json.load(file)
-    anchors = pick_anchors(graph, args.min_area_frac,
-                           args.max_dynamic_anchors, args.max_static_anchors,
-                           args.max_anchors, args.min_anchor_sep,
-                           min_drift_u=args.anchor_min_drift_u,
-                           require_frame0=args.anchor_require_frame0)
-    why = ("anchor 후보가 없다 (max_area_frac 하한을 낮추거나 graph 를 확인"
-           + (f"; --anchor_min_drift_u {args.anchor_min_drift_u} 로 걸렀다)"
-              if args.anchor_min_drift_u > 0 else ")"))
+    forced = load_anchor_ids(args.anchor_ids_file, args.video)
+    if forced is None:
+        anchors = pick_anchors(graph, args.min_area_frac,
+                               args.max_dynamic_anchors, args.max_static_anchors,
+                               args.max_anchors, args.min_anchor_sep,
+                               min_drift_u=args.anchor_min_drift_u,
+                               require_frame0=args.anchor_require_frame0)
+        why = ("anchor 후보가 없다 (max_area_frac 하한을 낮추거나 graph 를 확인"
+               + (f"; --anchor_min_drift_u {args.anchor_min_drift_u} 로 걸렀다)"
+                  if args.anchor_min_drift_u > 0 else ")"))
+    else:
+        by_id = {n["id"]: n for n in graph["nodes"]}
+        anchors = [by_id[i] for i in forced if i in by_id]
+        why = (f"--anchor_ids_file 가 지정한 {forced} 가 이 씬의 노드에 없다 "
+               f"(그래프를 다시 구웠으면 id 가 밀렸을 수 있다)")
     if not anchors and args.skip_if_empty:
         print(why, file=sys.stderr)
         raise SystemExit(3)
@@ -803,6 +832,11 @@ def build_parser():
     # D181: `track.frames` 에 프레임 0 이 없는 노드를 anchor 후보에서 뺀다 (기본 off = 옛 동작).
     # 뱅크의 frame 0 가시성 게이트를 라우팅이 미리 아는 것 — 근거는 `pick_anchors` docstring.
     parser.add_argument("--anchor_require_frame0", action="store_true", default=False)
+    # D215: `{"<video>": ["dyn_1"]}` JSON 으로 anchor 를 못 박는다 (빈 값 = 끔 = 옛 동작).
+    # 목록에 있는 영상은 `--max_*_anchors` / `--min_anchor_sep` / `--anchor_min_drift_u` /
+    # `--anchor_require_frame0` 를 **전부 우회**한다 — 사람이 이미 고른 노드라 다시 거를 이유가
+    # 없고, 걸러지면 그 씬이 조용히 다른 피사체로 구워진다. 근거는 `load_anchor_ids`.
+    parser.add_argument("--anchor_ids_file", default="", type=str)
     # D181: 라우팅된 슬롯 중 **이것만** 남긴다 (쉼표 목록, 빈 문자열 = 끔 = 옛 동작).
     # 슬롯 이름이지 preset 이름이 아니다 — `orbit` 은 away side 와 track 여부에 따라
     # `track_orbit_left` / `orbit_right` 등으로 풀린다. preset 이름을 직접 적게 하지 않는 이유:

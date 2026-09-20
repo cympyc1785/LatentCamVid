@@ -8,6 +8,28 @@ Follows [Keep a Changelog](https://keepachangelog.com/).
 ## [Unreleased]
 
 ### Added
+- **`route_presets.py --anchor_ids_file` + `configs/bank/d215_vista_objcentric.json` (2026-09-21).**
+  `{"<video>": ["dyn_1", ...]}` JSON 한 장으로 씬마다 anchor 를 못 박는다. **안 주면 기본값
+  `""` = 기존 `pick_anchors` 경로 그대로**(비트 동일).
+  - 왜: `pick_anchors` 는 `max_area_frac` **면적 순**으로 고르는데, 사람이 릴을 보고 고른
+    피사체는 **이동량(`center_drift_u`) 순** 1등이다. keeper 17 씬 실측에서 **9 편(53%)** 이
+    서로 다른 노드를 가리켰고 그중 **5 편은 면적 1등이 아예 `stat_*`**(정지 배경)였다
+    (car-roundabout / snowboard / soapbox / drive-desert / magnifying-glass / snow-dog /
+    hike / mountain-hike / avocado-slice).
+  - **문턱(`--anchor_min_drift_u`)으로는 못 고친다** — 그건 후보를 자를 뿐 남은 것들의
+    *순서*는 여전히 면적이라, 문턱을 넘긴 큰 정지 물체가 그대로 1등이다.
+  - 파일 경로 하나를 받는 이유: `run_bank.py` 의 `route.args` 는 세대 config 하나에서 전
+    영상에 **공통으로** 붙으므로 per-video 값을 인자로 못 넘긴다. 목록에 없는 영상은
+    `None` 을 돌려줘 그 씬만 예전 선택 규칙으로 돈다.
+  - 목록에 있는 영상은 `--max_*_anchors` / `--min_anchor_sep` / `--anchor_min_drift_u` /
+    `--anchor_require_frame0` 를 **전부 우회**한다 — 사람이 이미 고른 노드라 다시 거를 이유가
+    없고, 걸러지면 그 씬이 조용히 다른 피사체로 구워진다.
+  - `d215_vista_objcentric.json` 은 `d202w` 를 물려받아 **route 만** 바꾼다:
+    `--slot_whitelist advance,recede,arc,orbit,vertical,static` (= `rotate`(pan_*, targetless)
+    와 `lateral`(truck_*, aim=free — task #134) 제외), `--free_moving off`,
+    `--track_mode add --track_min_drift_u 0.05`. 문턱은 tau 단계(`--track_dynamic_only
+    --track_min_drift_u 0.05`, d185 상속)와 **같은 값**이어야 한다 — 다르면 라우팅이 붙인
+    track 슬롯을 뱅크가 조용히 버린다(D166).
 - **`gendop_release_infer.py --batch_size` (+ `run_gendop_eval.py --batch_size` 배선) (2026-09-21).**
   한 번의 `model.generate` 에 엔트리 N 개를 같이 넣는다. **기본 1 = 기존 동작(비트동일)** 이라
   예전 호출은 그대로다.

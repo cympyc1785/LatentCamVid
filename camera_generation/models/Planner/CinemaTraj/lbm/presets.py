@@ -249,6 +249,16 @@ PRESETS = {
     "track_crane_down":     (lambda n, c: T.crane(-c["lateral"], c["radius"], n), "look_at", False),
     "track_pedestal_up":    (lambda n, c: T.pedestal(c["lateral"], n), "free", False),
     "track_pedestal_down":  (lambda n, c: T.pedestal(-c["lateral"], n), "free", False),
+    # 합성 1칸 (사용자 지시 2026-09-22 "588도 track dolly in, track pedestal down,
+    # track dolly in pedestal down"). 비-track 짝 `pedestal_down_dolly_in` 의 track 판이라
+    # 이름은 `track_` + 그 이름 그대로다 — 요청 문장은 "dolly in pedestal down" 순서지만
+    # 어휘 규칙이 `<주동작>_<부동작>` 이고 비-track 쪽이 pedestal 을 주동작으로 이미 잡아
+    # 뒀으므로, 같은 동작에 이름이 둘 생기지 않게 그 순서를 따른다 (동작은 동일: 하강+전진).
+    # aim 은 비-track 짝과 같은 `free` — pedestal 도 dolly_in 도 재조준을 안 한다 (D90 비대칭).
+    # `PRESET_FOLLOW` 가 접두어로 gain 을 켜므로 추종 배선은 여기 말고 손댈 곳이 없다.
+    "track_pedestal_down_dolly_in": (lambda n, c: T.compose(T.pedestal(-c["lateral"], n),
+                                                            T.dolly(c["dolly"], n)),
+                                     "free", False),
     # arc 4칸 (D82). 이름 규칙상 `track_` + 비-track 이름이므로 DSL 에 새 어휘가 생기는 게 아니라
     # 기존 `arc` primitive 의 빈 칸이 채워지는 것이다. 추종이 arc 에서 특히 의미가 있는 이유:
     # arc 는 **곡선으로 접근/후퇴하며 재조준**(aim="look_at")하는 동작이라, subject 가 움직이면

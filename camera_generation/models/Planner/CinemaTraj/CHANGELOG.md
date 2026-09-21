@@ -8,6 +8,14 @@ Follows [Keep a Changelog](https://keepachangelog.com/).
 ## [Unreleased]
 
 ### Added
+- **preset `track_pedestal_down_dolly_in` (2026-09-22).** 비-track 짝
+  `pedestal_down_dolly_in`(하강+전진)의 track 판. 사용자가 dynpose #588 을
+  "track dolly in / track pedestal down / track dolly in pedestal down" 세 개로 돌려
+  달라고 했는데 세 번째가 어휘에 없었다. 이름은 어휘 규칙(`track_` + 비-track 이름,
+  `<주동작>_<부동작>`)을 따라 pedestal 을 앞에 뒀다 — 요청 문장 순서로 새 이름을 만들면
+  같은 동작에 이름이 둘 생긴다. `aim="free"`(구성 primitive 둘 다 재조준 없음),
+  `PRESET_FOLLOW`/`PRESET_TAU_REF` 는 접두어로 자동 적용되므로 dict 한 줄이 전부다.
+  기존 45종 동작은 비트 동일.
 - **`scripts/run_gendop_eval.py` CORPORA `vista_d241` (2026-09-22).** `vista_d238` 과
   **카메라가 같고 문장만 짧은** 대조군. 지칭구를 "the man in a light shirt and dark pants
   walking up a rocky slope" → "the man walking on a rocky slope" 로 줄여 캡션만 다시 구운

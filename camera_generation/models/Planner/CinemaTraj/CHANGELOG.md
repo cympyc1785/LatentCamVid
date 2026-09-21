@@ -8,6 +8,25 @@ Follows [Keep a Changelog](https://keepachangelog.com/).
 ## [Unreleased]
 
 ### Added
+- **`scripts/bank_to_vista4d_cams.py --cam_dir` — npz 저장 위치 분기 (2026-09-21, D221).**
+  기본은 여전히 Vista4D 가 읽는 `<eval_data>/eval_data/cameras/<video>/` 다. 릴 번들처럼
+  **생성을 안 돌리고 카메라만 보관**할 때는 번들 폴더로 직접 굽는다 — d215 릴 47건 x 4 arm
+  = 188 개의 안 쓰는 npz 를 공유 eval_data 에 쌓지 않기 위한 것이다.
+- **`scripts/run_gendop_eval.py` 에 `vista_d215` 코퍼스 (2026-09-21, D221).** d215 test 92
+  entry 에 GenDoP 릴리즈 ckpt 를 **우리 캡션 그대로** 돌리는 항목. arm 은 모델 3개가 아니라
+  한 ckpt(d200 molmo2_l21)의 seed 3개이고 캡션이 셋 다 같으므로 `ref` 는 s42 하나면 된다.
+  depth 게이지는 vista_d121 과 같은 `median`.
+- **`scripts/bank_to_vista4d_cams.py --preds` — 모델 예측 궤적을 Vista4D 카메라로
+  (2026-09-21, D221).** 지금까지 이 다리는 뱅크 `poses.npz` 한 곳에서만 pose 를 읽었다.
+  "d215 seed 3개를 Vista4D 로 생성" 하려면 소스가 평가 산출물
+  `<eval_dir>/test/<entry>_transforms_{pred,ref}.json` 이어야 한다. 뱅크 경로는 그대로 두고
+  (`--variants` 와 둘 중 정확히 하나) 분기만 추가했다. world 가정은 같다 — 예측도 recon world
+  절대 미터다. 다른 건 셋뿐: (1) 그 JSON 은 nerfstudio(OpenGL) c2w 라 `GL2CV` 로 돌린다
+  (`render_pred_depth_warp.py` 와 같은 식 — depth warp 릴과 같은 카메라여야 한다),
+  (2) 해상도가 절반(640x360)으로 적혀 있어 `fl_x/fl_y` 를 `recon cx / json cx` 배 한다,
+  (3) frame0 가 회귀 결과라 정확히 소스와 같지 않아(bmx-bumps 실측 6 mm / 0.15도)
+  `--frame0_tol` 기본값이 소스에 따라 갈린다 (뱅크 1e-6 / 예측 0.05).
+  `--pred_kind ref` 로 같은 entry 의 뱅크 GT 도 뽑아 같은 눈금에서 대조한다.
 - **`configs/bank/d220_dynpose_objcentric.json` — car_29a9a7d0 "그냥 track" 세대
   (2026-09-21).** d219(`--slot_whitelist arc` -> `track_pull_out_arc_right`)와 슬롯 하나만
   다르다: `static` 슬롯은 `route_presets.py:342` 에서 `track_look_at`(추종 가능할 때) /

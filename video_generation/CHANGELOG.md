@@ -7,6 +7,11 @@
 ## [Unreleased]
 
 ### Added
+- **`results/20260819_vista4d_eval/run_eval_gen.sh` 가 절대경로 `CSV=` 를 받는다
+  (2026-09-21, D221).** 두 단계 모두 `$R/$CSV` 로 고정돼 있어 metadata 를 그 결과 폴더 안에
+  둘 때만 돌았다. 다른 작업(D221 은 `tmp/d221/`)의 metadata 를 먹이면
+  `.../20260819_vista4d_eval//data1/.../meta_shard0.csv` 로 이어붙어 FileNotFoundError 다.
+  `case $CSV in /*)` 로 갈라 `CSVP` 를 만들었다 — 상대경로 기존 용법은 그대로다.
 - **`eval_subject_in_frame.py --scenes <file>` — 씬 부분집합 (2026-09-19, D205).** d200 test 는
   1,017 씬이고 실측이 **429 s/씬** (5 렌더 경로 × 49 프레임, `--subject_occlusion` 2-pass) 이라
   전량은 단일 GPU 121 h 다. 기존에 씬 수를 줄이는 손잡이는 `--num_shards` 뿐이었고

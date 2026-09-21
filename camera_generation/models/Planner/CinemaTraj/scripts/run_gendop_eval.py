@@ -146,6 +146,28 @@ CORPORA = {
         },
         ref="d200_da3",
     ),
+    # D221 (2026-09-21, 92 entry). D215 의 vista keeper 17씬 object-centric 뱅크.
+    # arm 이 "모델 3개"가 아니라 **한 모델의 seed 3개**다 — 같은 ckpt(d200 molmo2_l21)를
+    # seed 만 바꿔 돌린 것이라 GenDoP 과의 대조는 s42 하나로 충분하고, 나머지 둘은 우리 쪽
+    # 분산을 같은 표에 얹어 두려고 넣는다. 캡션은 셋이 동일하므로 `ref` 가 어느 seed 든 같다.
+    # recon 은 vista_d121 과 같은 Vista4D-Eval-Data 이고 cloud.npz 도 디스크에 있다
+    # (`out/<scene>/cloud.npz`) — 다만 d215 뱅크는 `--cloud_source memory` 로 구웠으므로
+    # score 단계는 d215 드라이버와 같게 memory 로 줘야 기하가 어긋나지 않는다.
+    "vista_d215": dict(
+        corpus="/data1/cympyc1785/data/Vista4D-Eval-Data/latentcam_d215",
+        split_name="seg_list_d215_test.txt",
+        eval_data="/data1/cympyc1785/data/Vista4D-Eval-Data/eval_data",
+        prefix="vista4d",
+        cloud_root=path.join(HERE, "out"),
+        out=path.join(HERE, "results", "20260921_d221_gendop_d215"),
+        depth_norm="median",       # DA3 depth — vista_d121 과 같은 게이지
+        ours={
+            "d215_s42":   EVAL_MY + "d215_s42__last",
+            "d215_s1234": EVAL_MY + "d215_s1234__last",
+            "d215_s2026": EVAL_MY + "d215_s2026__last",
+        },
+        ref="d215_s42",
+    ),
 }
 
 # GenDoP arm 2종. text 는 어느 ckpt 를 쓰든 --text_from_eval_dir 로 같은 문장을 받는다.

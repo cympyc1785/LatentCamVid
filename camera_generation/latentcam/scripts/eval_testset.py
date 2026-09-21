@@ -248,11 +248,16 @@ def main():
     if _vld > 0:
         _vtd = int(getattr(cfg, 'video_text_dim', 1024) or 1024) \
             if getattr(cfg, 'video_text_in_stream', False) else 0
+        # [new 2026-09-21, D217] video_text_fuse 도 같이 넘긴다 — 'frame_concat' arm 은
+        # video_proj 의 in_features 가 2560 이 아니라 5120 이라, 안 넘기면 strict load 가
+        # shape mismatch 로 죽는다. 기본 'token' 이면 기존 arm 과 동일.
         _vid_kw = dict(video_latent_dim=_vld, video_text_dim=_vtd,
                        peav_in_ln=bool(getattr(cfg, 'peav_in_ln', True)),
-                       video_gate=bool(getattr(cfg, 'video_gate', True)))
+                       video_gate=bool(getattr(cfg, 'video_gate', True)),
+                       video_text_fuse=str(getattr(cfg, 'video_text_fuse', 'token') or 'token'))
         print(f"(model) video CA: video_latent_dim={_vld} video_text_dim={_vtd} "
-              f"in_ln={_vid_kw['peav_in_ln']} gate={_vid_kw['video_gate']}")
+              f"in_ln={_vid_kw['peav_in_ln']} gate={_vid_kw['video_gate']} "
+              f"fuse={_vid_kw['video_text_fuse']}")
     model = CameraDiffusionModel(cam_dim=cfg.cam_dim, cond_dim=_track_dim, **_geo_kw, **_vid_kw)
     sd = torch.load(ckpt_path, map_location='cpu')
     sd = sd['model'] if isinstance(sd, dict) and 'model' in sd else sd

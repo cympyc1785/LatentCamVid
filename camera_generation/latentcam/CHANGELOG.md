@@ -5,6 +5,26 @@ All notable changes to the latentcam sub-project. Follows [Keep a Changelog](htt
 ## [Unreleased]
 
 ### Added
+- **video CA 의 text 융합 축 옵션 `video_text_fuse` + D217 arm
+  (`conf/experiment/dynpose_d200_molmo2_decfuse_l21_da3.yaml`) (2026-09-21).**
+  `_build_video_tok` 이 video/text 두 파트를 합치는 축을 고른다.
+  - `token` (기본) = 기존 그대로. `cat([text_tok, video_tok], dim=1)` — 49 + 3136 = 3185 토큰,
+    파트마다 자기 LN/proj/PE. **state_dict·동작이 비트 동일**하다.
+  - `frame_concat` (신규) = **채널축 프레임 정렬**. molmo2 decode 캐시의 49 슬롯은
+    `--decode_keep points --fps 2.0` 덕분에 프레임과 1:1 이고 video 캐시는 49프레임 × 8×8
+    patch = 3136 이다. 토큰축 concat 은 이 정렬을 안 쓰므로, 프레임 f 의 decode feature 를
+    그 프레임의 patch 64개에 broadcast 해 `(3136, 2560+2560)` 한 덩어리로 만들고
+    **projection 하나**(`video_proj` in_features 5120)로 넣는다. `video_text_proj` 는 아예
+    생성되지 않고 key_padding_mask 는 `video_mask` 하나만 쓴다.
+  - 두 파트는 스케일이 달라 concat **전에 각각** LayerNorm 한다 (FIX-D117 와 같은 이유).
+    트랙 점이 없는 프레임은 text 절반만 0 이고 visual 절반은 산다. `aim=free` 변이는 49슬롯
+    전부 0 + mask False 라 부모 arm 과 동일하게 visual-only 로 떨어진다.
+  - **molmo2 캐시 재굽기 0회** — 기존 `video/<scene>.pt` + `text.pt` 를 그대로 조합한다.
+    3136 = 49 × 64 정렬은 모델이 assert 로 확인한다.
+  - `scripts/eval_testset.py` 의 모델 생성부에도 같은 kwarg 를 넘긴다. 안 넘기면 `video_proj`
+    in_features 가 2560 으로 만들어져 strict load 가 shape mismatch 로 죽는다.
+  - smoke(200씬/1 epoch, GPU 0): `(model) video CA: ... fuse=frame_concat`, 학습 + val +
+    CLaTr 전 구간 통과 (`val/loss_traj=2.873523`).
 - **aim 보조 손실 + D206 arm (`aim_loss_w` / `conf/experiment/dynpose_d206_molmo2_l21_aim.yaml`) (2026-09-20).**
   학습 스텝 안에서 예측 eps 로 x0 를 복원하고 그 x0 를 **궤적 VAE 로 디코드**해 실제 pose 를
   만든 뒤, 카메라 forward `R[2,:]` 와 (카메라중심 `-R^T t` → subject OBB center) 벡터 사이의

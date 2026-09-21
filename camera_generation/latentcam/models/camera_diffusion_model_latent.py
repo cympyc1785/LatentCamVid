@@ -154,6 +154,7 @@ class CameraDiffusionModel(nn.Module):
         peav_readout_layers=0,
         peav_readout_queries=49,
         peav_readout_aux_dim=0,
+        video_text_fuse="token",
     ):
         super().__init__()
 
@@ -224,17 +225,32 @@ class CameraDiffusionModel(nn.Module):
         # 0 = video 토큰만 (arm B / 기본).
         self.video_text_dim = int(video_text_dim)
         self.peav_in_ln = bool(peav_in_ln)
+        # [new 2026-09-21, D217] text part 를 video part 와 **어느 축으로** 합칠지.
+        #   "token"        = 기존 (기본). [text 토큰 | video 토큰] 토큰축 concat, proj 2개.
+        #   "frame_concat" = molmo2 decode 캐시 전용. decode 슬롯 49개는 `--decode_keep points
+        #                    --fps 2.0` 덕분에 **프레임과 1:1 정렬**돼 있고 video 캐시는
+        #                    49프레임 × 8×8 patch = 3136 이다. 토큰축으로 이어 붙이면 이 정렬이
+        #                    버려지므로, 프레임 f 의 decode feature 를 그 프레임의 patch 64개에
+        #                    **채널축으로** 붙여 (3136, 2560+2560) 한 덩어리로 만들고 projection
+        #                    하나로 넣는다. 캐시는 기존 두 개를 그대로 쓴다 (molmo2 재굽기 0회).
+        self.video_text_fuse = str(video_text_fuse or "token")
+        assert self.video_text_fuse in ("token", "frame_concat"), self.video_text_fuse
         # video 스트림이 꺼진 arm 에서도 속성은 존재해야 forward 분기가 성립한다.
         self.peav_readout_layers = 0
         self.readout = None
         if self.video_latent_dim > 0:
+            _fuse = self.video_text_dim > 0 and self.video_text_fuse == "frame_concat"
             self.video_ln = (nn.LayerNorm(self.video_latent_dim) if self.peav_in_ln
                              else nn.Identity())
-            self.video_proj = nn.Linear(self.video_latent_dim, hidden_dim)
+            # frame_concat 은 두 파트를 **각각** LN 한 뒤 (scale 이 다르다 — FIX-D117) 채널축으로
+            # 이어 붙이므로 입력 차원이 합이고 proj 는 하나뿐이다.
+            self.video_proj = nn.Linear(
+                self.video_latent_dim + (self.video_text_dim if _fuse else 0), hidden_dim)
             if self.video_text_dim > 0:
                 self.video_text_ln = (nn.LayerNorm(self.video_text_dim) if self.peav_in_ln
                                       else nn.Identity())
-                self.video_text_proj = nn.Linear(self.video_text_dim, hidden_dim)
+                if not _fuse:
+                    self.video_text_proj = nn.Linear(self.video_text_dim, hidden_dim)
             self.mod3 = nn.Linear(hidden_dim, hidden_dim * 2)
             # [new 2026-09-03 / FIX-D117] video 스트림만 **0 초기화 residual gate** 로 붙인다.
             # 기존 스트림은 `h = CA(...)` 로 잔차를 **덮어쓴다** (CrossAttention.forward 가
@@ -295,6 +311,25 @@ class CameraDiffusionModel(nn.Module):
         반환: (tok (B,L,hidden), key_padding_mask (B,L) bool = True 가 마스킹 대상 | None)
         """
         B, device = video_emb.shape[0], video_emb.device
+        if (self.video_text_fuse == "frame_concat" and self.video_text_dim > 0
+                and video_text_emb is not None):
+            # (B, T, Ct) decode 와 (B, T*P, Cv) video 를 프레임 단위로 채널 concat.
+            T, P = video_text_emb.shape[1], video_emb.shape[1] // max(video_text_emb.shape[1], 1)
+            assert video_emb.shape[1] == T * P, \
+                f"frame_concat: video 토큰 {video_emb.shape[1]} 이 decode 슬롯 {T} 의 배수가 아니다"
+            tt = self.video_text_ln(video_text_emb)
+            if video_text_mask is not None:
+                # 해당 프레임에 decode 슬롯이 없으면 text 절반은 0 (visual 절반은 살린다).
+                tt = tt * video_text_mask.unsqueeze(-1)
+            vv = self.video_ln(video_emb).reshape(B, T, P, -1)
+            vt = self.video_proj(
+                torch.cat([vv, tt.unsqueeze(2).expand(-1, -1, P, -1)], dim=-1).reshape(
+                    B, T * P, -1))
+            vt = vt + positional_encoding(
+                vt.shape[-2], vt.shape[-1], device=device).unsqueeze(0).expand(B, -1, -1)
+            if video_mask is not None:
+                vt = vt * video_mask.unsqueeze(-1)
+            return vt, (None if video_mask is None else ~video_mask)
         vt = self.video_proj(self.video_ln(video_emb))
         vt = vt + positional_encoding(
             vt.shape[-2], vt.shape[-1], device=device).unsqueeze(0).expand(B, -1, -1)

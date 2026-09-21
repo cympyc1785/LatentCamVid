@@ -644,11 +644,15 @@ def train():
         # D117 arm A 는 예전과 비트 동일하고, D124 Molmo2 arm 만 2560 으로 덮는다.
         _vtd = int(getattr(cfg, 'video_text_dim', 1024) or 1024) \
             if getattr(cfg, 'video_text_in_stream', False) else 0
+        # [new 2026-09-21, D217] video_text_fuse: text part 를 토큰축(기존)에 붙일지 프레임 정렬
+        # 채널축에 붙일지. 기본 'token' 이면 예전 arm 과 state_dict·동작이 비트 동일하다.
         _vid_kw = dict(video_latent_dim=_vld, video_text_dim=_vtd,
                        peav_in_ln=bool(getattr(cfg, 'peav_in_ln', True)),
-                       video_gate=bool(getattr(cfg, 'video_gate', True)))
+                       video_gate=bool(getattr(cfg, 'video_gate', True)),
+                       video_text_fuse=str(getattr(cfg, 'video_text_fuse', 'token') or 'token'))
         print(f"(model) video CA: video_latent_dim={_vld} video_text_dim={_vtd} "
               f"in_ln={_vid_kw['peav_in_ln']} gate={_vid_kw['video_gate']} "
+              f"fuse={_vid_kw['video_text_fuse']} "
               f"(순서 text CA -> video CA -> geo CA)")
         # [new 2026-09-15] cfg.peav_readout_layers>0: 캐시 토큰을 바로 video CA 에 먹이지 않고
         # learnable shallow transformer 로 요약한 뒤 그 출력을 key/value 로 쓴다. 0 (기본) 이면

@@ -92,6 +92,31 @@ i 의 색과 그 자리를 지나는 선의 색이 어긋나고, 그러면 "색 
 경로는 catmull-rom 스플라인이 아니라 **`add_line_segments` 생꺾은선**으로 그린다. 스플라인은
 지금 보려는 그 jitter 를 부드럽게 만들어 버린다.
 
+## d221 번들 브라우저 (`--bundle`)
+
+`results/20260921_d221_bundles/<scene>/` 를 통째로 올린다. 뱅크 대신 **모델 예측**을 씬과 같이
+보는 경로다 — 레이아웃이 `<preset>/cameras/{gt,s42,s1234,s2026,gendop}.npz` 라, preset x arm
+을 전부 motion 으로 펴서 같은 슬라이더에 꽂는다 (라벨 `<preset>/<arm>`). `cloud.npz` 와
+`scene_graph.json` 도 **번들 폴더에서** 읽는다 — 번들의 graph 는 그 세대의 스냅샷이라 `out/` 을
+다시 구운 뒤에도 그 카메라를 낳은 씬과 같이 볼 수 있다.
+
+**좌표 변환이 없다.** `cam_c2w` 는 이미 recon world 의 절대 pose·절대 미터이고 recon world
+원점이 소스 frame0 카메라다 (bmx-bumps 실측 `meta_cam_c2w[0] == I`, 8.9e-8). 그 증거로
+`gt.npz` 가 뱅크 변이 `hole_bank_d215/dyn_0__crane_up__hole0.2` 와 위치 2.2e-7 로 일치한다.
+앵커를 한 번 더 곱하면 궤적이 두 번 옮겨져 점군과 어긋난다 (`bank_to_vista4d_cams.py` 의
+docstring 이 이 가정의 단일 출처다).
+
+프러스텀 화각은 **arm 자기 focal** 로 그린다 (`intrinsics[0]`). 예측은 focal 이 조금씩 다른데
+(s42 fx 2287.88 vs recon 2293.41) 소스 K 로 통일하면 그 zoom 차이가 화면에서 사라진다.
+반대로 `jerk p95` 는 소스 focal 로 정규화한다 — arm 마다 분모가 다르면 숫자를 못 비교한다.
+
+info 패널은 `caption.json` 을 그대로 읽는다. 그 파일이 `variant_id`/`tau_max`/`hole_fraction`/
+`subject_in_frame` 을 들고 있어 뱅크의 `bank.json` 자리를 메운다. `anchor_id` 는
+`variant_id` 앞머리(`dyn_0__...`)에서 뽑는다 — 없으면 subject track 초록선이 안 그려진다.
+
+`--bundle_presets` / `--bundle_arms` 로 목록을 줄인다 (3 preset x 5 arm = 15개라 한 preset 의
+5 arm 만 보려면 preset 을 걸어야 한다).
+
 ## target 카메라 여러 대 동시에 (`--pin` / GUI `pin current`)
 
 슬라이더는 **한 번에 한 대**라 "A 가 B 보다 더 도나 / 둘이 같은 자리에서 시작하나"를 못 본다 —
@@ -111,7 +136,7 @@ motion(주황) 을 계속 바꿔도 화면에 살아 있게 한다. pin 색은 *
 입력이라 여기가 떨면 카메라도 떤다). GUI 에 preset/gain/smooth/k 와 `jerk p95`(px/frame³,
 `|Δ³p|/z_med·fx` — 화면에서 실제로 몇 px 흔들리는지)를 같이 띄운다.
 
-입력  : `<out>/<video>/cloud.npz` (format `lbm_cloud_v1`)
+입력  : `<out>/<video>/cloud.npz` (format `lbm_cloud_v1`) — `--bundle` 이면 `<bundle>/cloud.npz`
         선택: `<out>/<video>/<bank>/poses.npz` + `bank.json` (plan 카메라 오버레이)
 출력  : 브라우저 (`http://localhost:<port>`)
 
@@ -119,6 +144,11 @@ motion(주황) 을 계속 바꿔도 화면에 살아 있게 한다. pin 색은 *
     python -u scripts/viser_cloud.py --video snowboard --port 8084
     python -u scripts/viser_cloud.py --video snowboard --port 8084 \
         --source_on --no_plan_gradient --plan_color 255,140,40     # 예전 동작 그대로
+    python -u scripts/viser_cloud.py --port 8090 \
+        --bundle results/20260921_d221_bundles/bmx-bumps          # 예측 15개 (3 preset x 5 arm)
+    python -u scripts/viser_cloud.py --port 8090 --no_cloud \
+        --bundle results/20260921_d221_bundles/bmx-bumps --bundle_presets crane_up \
+        --pin crane_up/gt crane_up/s42 crane_up/s1234 crane_up/s2026  # 4대 동시 대조
     python scripts/viser_cloud.py --video snowboard --port 8084 --no_cloud \
         --banks follow_smooth_bank notrack_bank worldaim_bank
     python scripts/viser_cloud.py --video snowboard --port 8084 \
@@ -130,7 +160,7 @@ import json
 import sys
 import time
 from argparse import ArgumentParser
-from os import path
+from os import listdir, path
 
 import numpy as np
 import viser
@@ -249,6 +279,70 @@ def load_motions(out_root: str, video: str, banks, variant_filter=()):
     return motions
 
 
+# 번들 arm 표시 순서. `gt` 를 맨 앞에 두는 이유는 슬라이더 0번이 곧 기준선이어야 하기
+# 때문이다 — 예측부터 보면 "이게 GT 대비 얼마나 틀어졌나"를 볼 때마다 슬라이더를 되감아야 한다.
+# 여기 없는 이름의 npz 가 생기면 뒤에 사전순으로 붙는다 (목록에서 빠지지 않게).
+BUNDLE_ARMS = ("gt", "s42", "s1234", "s2026", "gendop")
+
+
+def load_bundle(bundle_root: str, presets=(), arms=(), variant_filter=()):
+    """d221 번들 -> `load_motions` 와 **같은 모양** [(label, c2w (F,4,4), row)].
+
+    레이아웃: `<bundle>/<preset>/cameras/{gt,s42,s1234,s2026,gendop}.npz`, 라벨은
+    `<preset>/<arm>`.
+
+    **좌표 변환이 없다.** `cam_c2w` 는 이미 recon world 의 절대 pose·절대 미터이고, recon
+    world 원점이 소스 frame0 카메라다 (bmx-bumps 실측 `meta_cam_c2w[0] == I`, 8.9e-8). 그
+    증거로 `gt.npz` 가 뱅크 변이 `hole_bank_d215/dyn_0__crane_up__hole0.2` 와 위치 2.2e-7 로
+    일치한다. 앵커를 한 번 더 곱하면 궤적이 그만큼 두 번 옮겨져 점군과 어긋난다
+    (`bank_to_vista4d_cams.py` 도 같은 가정으로 굽는다 — 그 파일 docstring 이 단일 출처다).
+
+    `caption.json` 을 row 에 합친다. 그 파일이 `variant_id`/`tau_max`/`hole_fraction`/
+    `subject_in_frame` 을 들고 있어서 뱅크의 `bank.json` 자리를 그대로 메운다 (info 패널이
+    같은 키를 읽는다). `anchor_id` 는 `variant_id` 앞머리(`dyn_0__...`)에서 뽑는다 — 이게
+    없으면 follow 의 입력인 subject track 초록선이 안 그려진다.
+    """
+    if isinstance(variant_filter, str):
+        variant_filter = [variant_filter] if variant_filter else []
+    want_presets, want_arms = set(presets or ()), set(arms or ())
+    motions = []
+    for preset in sorted(d for d in listdir(bundle_root)
+                         if path.isdir(path.join(bundle_root, d, "cameras"))):
+        if want_presets and preset not in want_presets:
+            continue
+        cam_dir = path.join(bundle_root, preset, "cameras")
+        caption = {}
+        cap_path = path.join(bundle_root, preset, "caption.json")
+        if path.isfile(cap_path):
+            with open(cap_path, encoding="utf-8") as file:
+                caption = json.load(file)
+        found = sorted(f[:-4] for f in listdir(cam_dir) if f.endswith(".npz"))
+        order = [a for a in BUNDLE_ARMS if a in found] + [a for a in found
+                                                          if a not in BUNDLE_ARMS]
+        for arm in order:
+            if want_arms and arm not in want_arms:
+                continue
+            label = f"{preset}/{arm}"
+            if not all(token in label for token in variant_filter):
+                continue
+            data = np.load(path.join(cam_dir, f"{arm}.npz"))
+            c2w = data["cam_c2w"].astype(np.float64)
+            row = dict(caption)
+            row["bundle"], row["preset"], row["arm"] = True, preset, arm
+            # 예측은 자기 focal 을 들고 있다 (s42 fx 2287.88 vs recon 2293.41) — 프러스텀을
+            # 소스 K 로 통일해 그리면 그 zoom 차이가 화면에서 사라진다.
+            if "intrinsics" in data.files and len(data["intrinsics"]):
+                row["fx"], row["fy"] = (float(data["intrinsics"][0][0]),
+                                        float(data["intrinsics"][0][1]))
+            variant = str(caption.get("variant_id", ""))
+            row["anchor_id"] = variant.split("__")[0] if "__" in variant else ""
+            row["path_len_u"] = round(float(np.linalg.norm(
+                np.diff(c2w[:, :3, 3], axis=0), axis=-1).sum()), 4)
+            motions.append((label, c2w, row))
+    assert motions, f"번들 {bundle_root} 에서 {list(variant_filter)} 에 맞는 arm 이 0개다"
+    return motions
+
+
 def subject_tracks_world(graph_path: str):
     """scene_graph 의 `track.center_smooth` (graph frame G) -> world -> {node_id: (F,3)}.
 
@@ -364,7 +458,14 @@ def motion_report(label: str, row: dict, plan_c2w: np.ndarray, track, z_med: flo
     표 하나로 갈린다 (D73 근거).
     """
     gain = float(row.get("follow_gain", 0) or 0)
-    lines = [label,
+    # 번들 arm 은 preset/τ/follow 손잡이가 아니라 **어느 arm 인가**가 첫 정보다. focal 을 같이
+    # 적는 이유: 예측마다 focal 이 달라 프러스텀 화각이 다른데, 그걸 모르면 화각 차이가
+    # 궤적 차이로 잘못 읽힌다.
+    head = ([f"arm         {row.get('arm', '?')}  preset {row.get('preset', '?')}  "
+             f"fx {row.get('fx', 0):.1f}",
+             f"caption     {(row.get('prompt_camera_with_scene_video') or {}).get('concise', '-')[:96]}"]
+            if row.get("bundle") else [])
+    lines = [label, *head,
              f"preset      {row.get('preset', '?')}  {row.get('speed', '')} "
              f"{row.get('tracking', '')} b{row.get('look_at_bias', 0)}",
              # g0 이면 offset 이 통째로 0 이라 창 크기가 궤적을 못 바꾼다 — 그때 창을 적으면
@@ -410,6 +511,15 @@ def main():
     # motion 브라우저. 뱅크 여러 개를 통째로 올리고 슬라이더로 갈아끼운다. 비우면 --bank 한 개만
     # 고정으로 그리는 기존 동작 그대로 (--variant 필터는 두 경로 모두에 걸린다).
     parser.add_argument("--banks", nargs="*", default=[], type=str)
+    # d221 번들 scene 폴더. 주면 cloud.npz / scene_graph.json 도 **그 폴더에서** 읽는다
+    # (번들은 cloud 를 symlink, graph 는 스냅샷으로 들고 있어 그 세대의 씬이 재현된다).
+    # `--banks` 와 같이 줄 수 있다 — 그때 뱅크는 여전히 `--out/<video>` 에서 찾는다.
+    parser.add_argument("--bundle", default="", type=str,
+                        help="d221 번들 scene 폴더 (예: results/20260921_d221_bundles/bmx-bumps)")
+    parser.add_argument("--bundle_presets", nargs="*", default=[], type=str,
+                        help="이 preset 만 (기본 전부)")
+    parser.add_argument("--bundle_arms", nargs="*", default=[], type=str,
+                        help="이 arm 만 (gt s42 s1234 s2026 gendop, 기본 전부)")
     # 기동 직후부터 **동시에** 그려둘 target 카메라. 라벨 부분일치(OR)라 `--pin orbit_left
     # dolly_in` 처럼 주면 맞는 변이를 전부 pin 한다. 띄운 뒤에는 GUI `motion > pin current`
     # 로 늘리고 줄인다. 활성 motion(주황) 은 pin 과 별개로 계속 그려진다.
@@ -473,7 +583,15 @@ def main():
 
     add_frustums, gl2cv = import_frustum_helpers(args.viewer_root)
 
-    cloud_path = path.join(args.out, args.video, "cloud.npz")
+    # 번들을 주면 씬도 번들에서 읽는다 — 번들의 graph 는 그 세대의 **스냅샷**이라, out/ 을
+    # 다시 구운 뒤에도 그때 카메라를 낳은 그래프와 같이 볼 수 있다.
+    bundle_root = path.abspath(args.bundle) if args.bundle else ""
+    if bundle_root and args.video == parser.get_default("video"):
+        # 번들 폴더 이름이 곧 씬 이름이다. `--video` 를 안 준 채 뱅크까지 얹으려 할 때
+        # 기본값(snowboard)으로 엉뚱한 씬을 열지 않게 여기서 맞춘다.
+        args.video = path.basename(bundle_root)
+    scene_root = bundle_root or path.join(args.out, args.video)
+    cloud_path = path.join(scene_root, "cloud.npz")
     data = np.load(cloud_path)
     num_frames = int(data["visible_num_frames"])
     # npz 는 lazy 라 --no_cloud 일 때는 아예 안 꺼낸다 (37M 점 = 로딩 수십 초).
@@ -593,7 +711,11 @@ def main():
     src_jerk = jerk_px(cam_c2w[:, :3, 3], z_med, focal)
 
     banks = list(args.banks) or ([args.bank] if args.bank else [])
-    motions = load_motions(args.out, args.video, banks, args.variant) if banks else []
+    # 번들을 앞에 둔다 — 둘을 같이 올리는 건 "예측이 뱅크 변이와 얼마나 다른가"를 볼 때이고,
+    # 그때 슬라이더 0번은 번들 gt 여야 한다.
+    motions = load_bundle(bundle_root, args.bundle_presets, args.bundle_arms,
+                          args.variant) if bundle_root else []
+    motions += load_motions(args.out, args.video, banks, args.variant) if banks else []
     graph_path = path.join(args.out, args.video, "scene_graph.json")
     tracks = subject_tracks_world(graph_path)
 
@@ -773,6 +895,11 @@ def main():
         for probe in probes:
             probe["cam"].thickness = value
 
+    def cam_fx_fy(row):
+        """프러스텀 화각. 번들 arm 은 자기 focal 을 쓰고, 뱅크는 소스 K 를 쓴다."""
+        return (float(row.get("fx") or focal),
+                float(row.get("fy") or intrinsics[0, 1, 1]))
+
     def plan_colors():
         """(frame 0 색, 현재 프레임 색) target 색. 피커가 단일 출처다.
 
@@ -811,8 +938,9 @@ def main():
         # 램프는 **변이의 프레임 수**로 만든다 (num_frames 로 굳히면 F 가 다른 뱅크에서 색이
         # 끝까지 안 가거나 잘린다).
         ramp = plan_ramp(len(plan_c2w))
-        plan_cams = list(add_frustums(server, "/cam_plan", plan_gl, focal,
-                                      float(intrinsics[0, 1, 1]), width, height, color,
+        fx_v, fy_v = cam_fx_fy(row)
+        plan_cams = list(add_frustums(server, "/cam_plan", plan_gl, fx_v, fy_v,
+                                      width, height, color,
                                       cam_scale, downsample=args.cam_stride))
         paint_ramp(plan_cams, ramp)
         handles = list(plan_cams)
@@ -820,8 +948,8 @@ def main():
         # 담으면 갈아끼울 때 같은 handle 을 두 번 remove 하게 된다.
         draw_line("plan", "/plan_path", path_segments(plan_c2w[:, :3, 3]),
                   ramp_segments(ramp), cam_scale * 0.10)
-        now = list(add_frustums(server, "/cam_plan_now", plan_gl[:1], focal,
-                                float(intrinsics[0, 1, 1]), width, height, now_color,
+        now = list(add_frustums(server, "/cam_plan_now", plan_gl[:1], fx_v, fy_v,
+                                width, height, now_color,
                                 cam_scale * 1.6)) if args.now_cams else []
         track = tracks.get(str(row.get("anchor_id", "")))
         drop_line("track")
@@ -839,8 +967,14 @@ def main():
         """라벨 -> viser 노드 경로. `/` 가 계층 구분자라 라벨의 `bank/variant` 를 그대로 못 쓴다."""
         return "/pin/" + "".join(c if c.isalnum() or c in "_-" else "_" for c in label)
 
-    def add_pin(label: str):
-        """motion 하나를 고정 색으로 그려 두고 활성 motion 이 바뀌어도 남긴다."""
+    def add_pin(label: str, palette: bool = False):
+        """motion 하나를 고정 색으로 그려 두고 활성 motion 이 바뀌어도 남긴다.
+
+        `palette` 는 **기동 `--pin` 전용**이다. 피커 스냅샷은 "방금 그 색으로 보던 궤적이 pin
+        하는 순간 튀지 않게" 하려는 것인데, 기동 시엔 피커를 바꿀 틈이 없어 여러 개를 주면
+        전부 같은 색이 된다 (실측: `--pin crane_up/gt crane_up/s42` 둘 다 (255,40,40)) —
+        그러면 여러 대를 구분한다는 pin 의 목적 자체가 깨진다. GUI 버튼은 스냅샷 그대로다.
+        """
         if label in pins or len(pins) >= int(args.max_pins):
             return
         index = [m[0] for m in motions].index(label)
@@ -852,17 +986,18 @@ def main():
         # 순환은 "여러 대를 구분한다"가 목적이었는데, 실제로는 방금 고른 색으로 보던 궤적이
         # pin 하는 순간 엉뚱한 색으로 바뀌어 대조가 끊겼다. 스냅샷이라 피커를 바꾼 뒤 다시
         # pin 하면 그 pin 만 새 색을 갖는다 — 구분은 사용자가 직접 준다.
-        color = (PIN_COLORS[pin_seq["n"] % len(PIN_COLORS)] if args.pin_palette
-                 else plan_colors()[0])
+        color = (PIN_COLORS[pin_seq["n"] % len(PIN_COLORS)]
+                 if (args.pin_palette or palette) else plan_colors()[0])
         pin_seq["n"] += 1
         node, plan_gl = pin_node(label), plan_c2w @ gl2cv
-        cams = list(add_frustums(server, node + "/cam", plan_gl, focal,
-                                 float(intrinsics[0, 1, 1]), width, height, color,
+        fx_v, fy_v = cam_fx_fy(row)
+        cams = list(add_frustums(server, node + "/cam", plan_gl, fx_v, fy_v,
+                                 width, height, color,
                                  cam_scale, downsample=args.cam_stride))
         # 현재 프레임 프러스텀만 1.6배로 크게 — pin 을 여러 대 켜면 선이 엉켜서 "이 변이가 지금
         # 어디를 보고 있나"를 경로만으로는 못 읽는다. 같은 색이라 소속은 유지된다.
         now = list(add_frustums(
-            server, node + "/now", plan_gl[:1], focal, float(intrinsics[0, 1, 1]),
+            server, node + "/now", plan_gl[:1], fx_v, fy_v,
             width, height, color, cam_scale * 1.6)) if args.now_cams else []
         # 경로선은 `lines` 로 관리한다 (굵기 슬라이더가 여기만 본다). pin["handles"] 에는 안
         # 담는다 — 담으면 remove_pin 이 drop_line 과 겹쳐 같은 handle 을 두 번 지운다.
@@ -1317,7 +1452,7 @@ def main():
         picked = [m[0] for m in motions
                   if any(token in m[0] for token in args.pin)][:int(args.max_pins)]
         for label in picked:
-            add_pin(label)
+            add_pin(label, palette=True)
         gui_pin_info.value = pin_report()
         refresh()
         if not picked:
@@ -1330,6 +1465,9 @@ def main():
             ("camera size", f"{cam_scale:.4f}  (GUI view > camera size 로 조절)"),
             ("probe vfov", f"{PROBE_FOV_DEG:.0f} deg  (소스는 {src_vfov_deg:.1f} deg)"),
             ("up", args.up), ("banks", " ".join(banks) or "-"),
+            ("bundle", (f"{bundle_root}  (arm 표시순 {'/'.join(BUNDLE_ARMS)})")
+                       if bundle_root else "-"),
+            ("scene root", scene_root),
             ("obb nodes", " ".join(f"{i}({'dyn' if m else 'stat'})" for i, _, m in graph_rows)
              or "-"),
             ("motions", len(motions)),
@@ -1356,7 +1494,8 @@ def main():
             ("now cams", f"{'on' if args.now_cams else 'off'}  "
                          f"(현재 프레임 1.6배 프러스텀 / --now_cams)"),
             ("pin color", "PIN_COLORS 순환 (--pin_palette)" if args.pin_palette
-                          else "target start 피커의 현재 색 (pin 시점 스냅샷, gradation 없음)"),
+                          else "GUI 버튼 = target start 피커 스냅샷 / 기동 --pin = "
+                               "PIN_COLORS 순환 (gradation 없음)"),
             ("url", f"http://localhost:{args.port}")]
     width_key = max(len(k) for k, _ in rows)
     for key, value in rows:

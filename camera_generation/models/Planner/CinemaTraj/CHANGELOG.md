@@ -8,6 +8,18 @@ Follows [Keep a Changelog](https://keepachangelog.com/).
 ## [Unreleased]
 
 ### Added
+- **`scripts/viser_frame.py` — 영상 프레임 고르기 + 그 한 장 png 저장 (2026-09-21).**
+  릴에서 "몇 번째 프레임에서 카메라가 벽을 뚫는가"를 찾을 때 영상 플레이어는 프레임 번호를
+  안 알려주고, 초 단위로 긁어 `ffmpeg -ss` 로 다시 뽑으면 그 초가 어느 프레임인지 또 어긋난다.
+  여기서는 슬라이더 값이 곧 프레임 인덱스이고 파일 이름(`<stem>_f0023.png`)에 그 번호가 박혀
+  `viser_cloud.py` 의 frame 슬라이더와 같은 번호로 대조된다. 영상 여러 개를 같이 받아
+  (`--video a.mp4 b.mp4 ...`) **프레임 슬라이더를 공유**한다 — arm 5개를 스크립트 5번 띄워
+  보면 슬라이더가 따로 움직여 "같은 프레임"을 못 맞춘다. `save frame (all videos)` 는 지금
+  프레임을 전 영상에서 한 장씩 뽑고, 길이가 모자란 영상은 **건너뛴다** (클램프하면 다른
+  프레임을 같은 번호로 저장해 대조가 거짓이 된다). 디코드는 `decord` 지연 랜덤 접근 + 프레임
+  캐시이고, 못 여는 컨테이너만 `imageio` 전량 디코드로 내려간다. 같은 프레임을 두 번 누르면
+  `_2`/`_3` 이 붙는다 (덮어쓰면 방금 저장한 것이 조용히 사라진다).
+  실측: `warp_f0023.png` 이 `decord[23]` 과 maxdiff 0.
 - **`scripts/bank_to_vista4d_cams.py --cam_dir` — npz 저장 위치 분기 (2026-09-21, D221).**
   기본은 여전히 Vista4D 가 읽는 `<eval_data>/eval_data/cameras/<video>/` 다. 릴 번들처럼
   **생성을 안 돌리고 카메라만 보관**할 때는 번들 폴더로 직접 굽는다 — d215 릴 47건 x 4 arm
@@ -38,6 +50,12 @@ Follows [Keep a Changelog](https://keepachangelog.com/).
   생성물을 커밋해 두는 이유는 뱅크가 어떤 설정으로 구워졌는지 남기기 위해서다.
 
 ### Fixed
+- **`viser_cloud.py` 기동 `--pin` 여러 개가 전부 같은 색이던 것 (2026-09-21).** 같은 날
+  pin 색을 `target start` 피커 스냅샷으로 바꾼 것의 부작용이다 — 스냅샷은 "방금 그 색으로
+  보던 궤적이 pin 하는 순간 튀지 않게" 하려는 것인데, 기동 시엔 피커를 바꿀 틈이 없어
+  `--pin crane_up/gt crane_up/s42` 가 둘 다 (255,40,40) 이 됐다 (실측). 여러 대를 구분한다는
+  pin 의 목적 자체가 깨지므로 **기동 `--pin` 만 `PIN_COLORS` 순환**으로 되돌렸다.
+  GUI `pin current` 는 스냅샷 그대로다.
 - **`viser_cloud.py` 프러스텀이 통째로 안 보이던 것 — `line_width` 는 폐기된 별칭이었다
   (2026-09-21).** 바로 앞에 넣은 `apply_cam_lw()` 가 `handle.line_width = 0.02` 로 굵기를
   먹였는데, viser 1.1.0 에서 그건 `thickness` 의 **폐기된 별칭**이고 대입하는 순간
@@ -50,6 +68,20 @@ Follows [Keep a Changelog](https://keepachangelog.com/).
   `dir(handle)` 에 `thickness` 가 안 보이는 게 함정이다 — 동적 prop 이라 런타임에만 있다.
 
 ### Changed
+- **`viser_cloud.py --bundle` — d221 번들을 씬과 같이 본다 (2026-09-21).**
+  `results/20260921_d221_bundles/<scene>/` 를 통째로 올려 `<preset>/cameras/{gt,s42,s1234,
+  s2026,gendop}.npz` 를 preset x arm 으로 펴서 기존 motion 슬라이더에 꽂는다 (라벨
+  `<preset>/<arm>`, bmx-bumps 3x5 = 15개). `cloud.npz`/`scene_graph.json` 도 **번들 폴더에서**
+  읽는다 — 번들 graph 는 그 세대의 스냅샷이라 `out/` 을 다시 구운 뒤에도 그 카메라를 낳은
+  씬과 같이 볼 수 있다. `--bundle_presets` / `--bundle_arms` 로 목록을 줄인다.
+  **좌표 변환이 없다**: `cam_c2w` 는 이미 recon world 절대 pose·절대 미터이고 recon world
+  원점이 소스 frame0 카메라다 (bmx-bumps 실측 `meta_cam_c2w[0] == I`, 8.9e-8). 그 증거로
+  `gt.npz` 가 뱅크 변이 `hole_bank_d215/dyn_0__crane_up__hole0.2` 와 위치 2.2e-7 로 일치한다.
+  앵커를 한 번 더 곱하면 궤적이 두 번 옮겨진다 (`bank_to_vista4d_cams.py` docstring 이 이
+  가정의 단일 출처다). 프러스텀 화각은 **arm 자기 focal** (s42 fx 2287.88 vs recon 2293.41)
+  이지만 `jerk p95` 는 소스 focal 로 정규화한다 — arm 마다 분모가 다르면 숫자를 비교할 수
+  없다. info 패널은 `caption.json` 을 그대로 읽는다 (그 파일이 `variant_id`/`tau_max`/
+  `hole_fraction`/`subject_in_frame` 을 들고 있어 `bank.json` 자리를 메운다).
 - **`viser_cloud.py` target 궤적이 시간 gradation (frame 0 빨강 -> 마지막 파랑), 소스 카메라는
   기본 꺼짐 (2026-09-21).** 단색이면 프러스텀 49대(stride 2 면 25대)가 전부 같은 색이라
   시작과 끝이 구분되지 않아서, 궤적을 눈으로 보고도 어느 쪽으로 흐르는지(dolly_in / dolly_out)

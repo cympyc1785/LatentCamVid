@@ -7,6 +7,14 @@ Follows [Keep a Changelog](https://keepachangelog.com/).
 
 ## [Unreleased]
 
+### Added
+- **`results/20260921_d215_complexall/run_d215.py --free_mode {zero,off}` (기본 `zero`, 2026-09-21).**
+  `--stage molmo2` 가 `cache_molmo2_embeddings.py --free_mode` 로 하드코딩 `zero` 를 넘기고
+  있었는데, 그쪽 `prepare_items:485` 는 **aim=='free' 변이가 0개면 assert 로 죽는다**.
+  세대에 look_at preset 하나만 있으면(D228 mountain-hike `dolly_in_look_at`) 그 조건에 걸린다.
+  그때는 free 집합이 어차피 공집합이라 `off` 와 동작이 같으므로 인자로 뺐다.
+  기본값이 `zero` 라 기존 호출(D215/D224/D226/D227)은 비트 동일.
+
 ### Fixed
 - **동적 점이 0개인 점군에서 depth warp 가 움직이는 물체를 49프레임 겹쳐 그리던 것
   (2026-09-21).** `--allow_no_seg` 경로(SAM3 미실행)는 `dynamic_mask` 가 전부 0 이라

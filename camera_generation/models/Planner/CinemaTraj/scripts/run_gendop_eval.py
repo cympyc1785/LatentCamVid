@@ -272,6 +272,25 @@ CORPORA = {
         },
         ref="d244_s42",
     ),
+    # D254 (2026-09-22, 1 entry). dynpose #2186 (`5ec7f200`, 도로 위 파란 차) 를
+    # `track_crane_up` 하나로 지목해 구운 판. 나머지는 d244 와 같다 (같은 ckpt, seed 3개,
+    # 같은 recon 루트/­depth_norm). entry 가 **1개**라 FCD/PRDC 는 물론 fscore 도
+    # 0 아니면 1 로만 나온다 — arm 간 비교에 쓰지 말 것.
+    "dynpose_d254": dict(
+        corpus="/data1/cympyc1785/data/DynPose-LBM/latentcam_d254",
+        split_name="seg_list_d254_test.txt",
+        eval_data="/data1/cympyc1785/data/DynPose-100K/eval_data",
+        prefix="dynpose",
+        cloud_root=path.join(HERE, "out_dynpose"),
+        out=path.join(HERE, "results", "20260922_d254_gendop_2186_crane"),
+        depth_norm="median",
+        ours={
+            "d254_s42":   EVAL_MY + "d254_s42__last",
+            "d254_s1234": EVAL_MY + "d254_s1234__last",
+            "d254_s2026": EVAL_MY + "d254_s2026__last",
+        },
+        ref="d254_s42",
+    ),
 }
 
 # GenDoP arm 2종. text 는 어느 ckpt 를 쓰든 --text_from_eval_dir 로 같은 문장을 받는다.

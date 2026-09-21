@@ -16,6 +16,13 @@ Follows [Keep a Changelog](https://keepachangelog.com/).
   같은 동작에 이름이 둘 생긴다. `aim="free"`(구성 primitive 둘 다 재조준 없음),
   `PRESET_FOLLOW`/`PRESET_TAU_REF` 는 접두어로 자동 적용되므로 dict 한 줄이 전부다.
   기존 45종 동작은 비트 동일.
+- **`scripts/run_gendop_eval.py` CORPORA `dynpose_d254` (2026-09-22).** dynpose #2186
+  (`5ec7f200`, 도로 위 파란 차)을 `track_crane_up` 하나로 지목해 구운 1-entry 코퍼스의
+  GenDoP 대조군. 사용자가 "car_5ec7f200 track_crane_up gendop 도" 라고 해서 추가했다.
+  플래그·ckpt·recon 루트·`depth_norm` 은 `dynpose_d244` 와 한 글자도 다르지 않다 —
+  두 표를 나란히 읽으려면 gauge 가 같아야 한다. entry 가 **1개**라 FCD/PRDC 는 NaN 이고
+  fscore 도 0 아니면 1 로만 나오니 arm 간 비교에 쓰지 말 것. 표 항목 하나 추가라
+  기존 코퍼스 동작은 그대로다.
 - **`scripts/run_gendop_eval.py` CORPORA `dynpose_d244` (2026-09-22).** dynpose #386
   (`370548b3`, 터널 보행자)을 `track_dolly_in` / `track_dolly_in_look_at` 두 preset 으로
   지목해 구운 2-entry 코퍼스의 GenDoP 대조군. 사용자가 "#386 은 gendop 도" 라고 해서

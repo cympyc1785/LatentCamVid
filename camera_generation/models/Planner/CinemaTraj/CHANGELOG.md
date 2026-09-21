@@ -8,6 +8,27 @@ Follows [Keep a Changelog](https://keepachangelog.com/).
 ## [Unreleased]
 
 ### Added
+- **`scripts/route_presets.py --force_presets` — 슬롯 표를 건너뛰고 preset 을 이름으로 지목
+  (2026-09-21, D224).** `route()` 의 슬롯 표는 **슬롯당 preset 을 하나로 못 박아** 둬서,
+  사람이 이름으로 부르는 요청 중 라우팅으로는 아예 안 나오는 것이 있다 — `advance` 는
+  `dolly_in_look_at` 고정이라 맨 `dolly_in` 이 없고, `arc` 는 `pull_out_arc_*` 고정이라
+  `push_in_arc_*` 가 없으며, `orbit`/`vertical` 은 away 쪽 한 방향뿐이다. `--slot_whitelist`
+  로는 "이 슬롯을 허용" 까지만 되고 그 슬롯이 무엇을 낼지는 못 고른다. 이 인자는 슬롯 목록을
+  **통째로** 사람이 준 preset 들로 갈아끼우고 슬롯 이름을 `forced:<preset>` 으로 적어
+  `reasons.forced_replaced` 에 원래 슬롯이 뭐였는지 남긴다. 기본값(빈 문자열)이면 예전 경로와
+  비트 동일이다 — 코퍼스 굽기에는 쓰지 않는다.
+- **`configs/bank/d224_forced.json` — 지목 preset 세대 (2026-09-21, D224).** 사용자가 preset 을
+  이름으로 지목한 세 씬(mountain-hike / parkour / golf)을 굽는다. d215 의 tau/fit/emit 을 그대로
+  물려받되 route 만 `--force_presets` 로 간다. **d215 뱅크에 얹지 않은 이유**는 같은
+  `hole_bank_d215`/`latentcam_d215` 에 카메라를 더 얹으면 `seg_list_d215_test.txt` 의 행 순서가
+  밀려, 이미 평가를 끝낸 eval 폴더들이 **조용히** 다른 행을 가리키게 되기 때문이다.
+- **`lbm/presets.py` 에 `pedestal_down_dolly_in` (2026-09-21, D224).** 하강하면서 전진.
+  `orbit_left_pedestal_up` 과 같은 `<주동작>_<부동작>` 표기이고 aim 은 두 구성 primitive 와 같은
+  `free` 다 — pedestal 도 dolly_in 도 조준을 안 하므로(조준은 `_look_at` 으로만 표기, D90 비대칭)
+  여기만 `look_at` 으로 두면 어휘 규칙이 깨진다. 실측 `t48 [0, 0.35, 0.35]` = `pedestal_down`
+  `[0, 0.35, 0]` + `dolly_in` `[0, 0, 0.35]` 의 합. preset 수 43 → 44.
+- **`configs/caption_presets.json` 에 `pedestal_down_dolly_in`** — axis `pedestal`,
+  phrase "drops straight down while pushing in toward {target}" (2026-09-21, D224).
 - **`scripts/viser_frame.py` — 영상 프레임 고르기 + 그 한 장 png 저장 (2026-09-21).**
   릴에서 "몇 번째 프레임에서 카메라가 벽을 뚫는가"를 찾을 때 영상 플레이어는 프레임 번호를
   안 알려주고, 초 단위로 긁어 `ffmpeg -ss` 로 다시 뽑으면 그 초가 어느 프레임인지 또 어긋난다.
@@ -50,6 +71,28 @@ Follows [Keep a Changelog](https://keepachangelog.com/).
   생성물을 커밋해 두는 이유는 뱅크가 어떤 설정으로 구워졌는지 남기기 위해서다.
 
 ### Fixed
+- **`viser_cloud.py` 가 잘못된 env 에서 cloud 를 다 읽은 뒤에야 죽던 것 (2026-09-21).**
+  이 스크립트는 env `vista4d`(viser 1.1.0) 용인데 `latentcam` 의 viser 는 1.0.30 이라
+  `add_line_segments(thickness=...)` 를 안 받는다. 실패 지점이 `draw_line` 이라
+  **cloud.npz(1.4 GB)를 다 읽은 뒤** TypeError 가 났다 — 잘못된 env 로 띄우면 몇 분 기다린
+  끝에 죽는다. `require_viser_thickness()` 를 `parse_args()` 직후로 당겨 0.6초에 멈추고
+  올바른 python 으로 된 실행 명령을 그대로 찍는다. 호환 shim 을 넣지 않은 이유: 1.0.30 의
+  `line_width` 는 단위가 **screen 픽셀**이라 이름만 바꿔 끼우면 world 0.007 이 0.007 픽셀이
+  돼 선과 프러스텀이 통째로 안 보인다 (아래 "프러스텀이 통째로 안 보이던 것" 과 같은 증상) —
+  조용히 깨진 화면보다 멈추는 게 낫다. `viser_frame.py` 는 thickness 를 안 쓰므로 1.0.30
+  에서도 돈다 (`gui.add_image` / `.image` / `.max` 대입 전부 확인).
+- **`run_d215.py` 세대 축이 molmo2 캐시·override·eval 폴더까지 안 오던 것 (2026-09-21, D224).**
+  `MOLMO_CACHE`/`OVERRIDE` 는 모듈 상수라 **import 시점의 d215 값**이 박혔고 `eval_dir()` 은
+  이름에 `d215_` 를 하드코딩하고 있었다. 그대로 두면 `--generation d224` 로 불러도 캐시는 d215
+  자리에 굽고, eval 은 `d215_s42__last` 가 이미 있다며 **건너뛰고**, 릴은 그 옛 예측을 그린다 —
+  세 단계 전부 rc=0 이라 안 들킨다. 호출 시점에 푸는 함수(`molmo_cache()`/`override_path()`)로
+  바꾸고 eval 폴더 이름에 세대를 물렸다 (`f"{GENERATION}_s{seed}__last"`).
+- **`configs/bank/d224_forced.json` 이 track 게이트를 못 끄던 것 (2026-09-21, D224).**
+  `--track_dynamic_only` 를 인자 목록에서 **빼기만** 했는데, 이 인자는
+  `sample_camera_bank.py:1500` 에서 `action="store_true", default=True` 라 빼도 켜진 채다.
+  그 결과 mountain-hike 가 지목한 4개 중 `track_dolly_in`/`track_push_in_arc_left` 둘이
+  route 는 통과하고 **뱅크에서만 조용히 빠졌다** (`bank.json` 의 `follow_gains:["0"]`,
+  변이 10개가 preset 2종). 끄는 스위치는 `--no_track_dynamic_only` 다. 고친 뒤 4대 전량 나온다.
 - **`viser_cloud.py` 기동 `--pin` 여러 개가 전부 같은 색이던 것 (2026-09-21).** 같은 날
   pin 색을 `target start` 피커 스냅샷으로 바꾼 것의 부작용이다 — 스냅샷은 "방금 그 색으로
   보던 궤적이 pin 하는 순간 튀지 않게" 하려는 것인데, 기동 시엔 피커를 바꿀 틈이 없어
@@ -68,6 +111,20 @@ Follows [Keep a Changelog](https://keepachangelog.com/).
   `dir(handle)` 에 `thickness` 가 안 보이는 게 함정이다 — 동적 prop 이라 런타임에만 있다.
 
 ### Changed
+- **`scripts/run_gendop_eval.py` 기본값이 `--raw` + `--no_scale_token` (2026-09-21, D222).**
+  사용자 지시("gendop 돌릴때 rmax 곱하면 안되고 raw 로 normalized 되어서 나오는 원본 코드
+  그대로 나온걸 저장해서 써야해"). 지금까지는 GenDoP 출력에 우리 쪽에서 rmax 를 곱해 미터로
+  되돌렸는데, 그건 원저자 코드에 없는 후처리라 베이스라인이 우리 가정을 타게 된다.
+  eval_dir 이름도 `eval_dir_gendop_text_p49_raw_noscale` 로 갈라 예전 산출물과 안 섞이게 했다.
+- **`results/20260921_d215_complexall/run_d215.py` 에 세대 축 + `--force_presets_map`
+  (2026-09-21, D224).** 드라이버가 d215 한 세대에 못박혀 있어서, 지목 preset 을 구우려면
+  스크립트를 통째로 복사해야 했다 (CLAUDE.md §"실험별 차이는 설정으로"). `--generation` /
+  `--bank_dir` / `--config` / `--corpus_root` / `--seg_prefix` / `--meta_csv` / `--tmp` 를 인자로
+  올리고, `--force_presets_map` 에 `{씬: "preset1,preset2"}` JSON 을 주면 `bake_configs()` 가
+  **씬마다** base config 를 복사해 그 씬의 `--force_presets` 만 덧붙인 뒤 `run_bank.py` 를 씬별로
+  돌린다 (`run_bank.py` 는 config 하나를 영상 목록 전체에 적용하므로 씬별로 다른 preset 을 못 준다).
+  파생 config 를 쓸 때 `extends` 를 절대경로로 박는다 — `run_bank.load_config` 가 `extends` 를
+  **원본 config 폴더 기준**으로 푼다. 인자를 안 주면 예전과 비트 동일(한 벌 실행).
 - **`viser_cloud.py` 프러스텀 화각이 카메라 K 대신 고정 60도 (2026-09-21).** 소스/예측의
   자기 화각을 쓰면 망원 씬에서 프러스텀이 바늘처럼 길어져 "이 카메라가 어디에 있나"를 가늠할
   수가 없다 — bmx-bumps 소스 vfov 17.8°(fy 2293 @ 720p), camel 16.4°. `probe camera` 는 이미

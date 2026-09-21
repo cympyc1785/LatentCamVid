@@ -136,6 +136,9 @@ motion(주황) 을 계속 바꿔도 화면에 살아 있게 한다. pin 색은 *
 입력이라 여기가 떨면 카메라도 떤다). GUI 에 preset/gain/smooth/k 와 `jerk p95`(px/frame³,
 `|Δ³p|/z_med·fx` — 화면에서 실제로 몇 px 흔들리는지)를 같이 띄운다.
 
+env   : **`vista4d`** (viser >= 1.1.0). `latentcam` 의 viser 1.0.30 은 `thickness` 가 없어
+        기동 직후 멈춘다 (`require_viser_thickness`) — 그쪽은 `line_width` 가 screen 픽셀이라
+        이름만 바꿔 끼우면 선과 프러스텀이 통째로 안 보인다.
 입력  : `<out>/<video>/cloud.npz` (format `lbm_cloud_v1`) — `--bundle` 이면 `<bundle>/cloud.npz`
         선택: `<out>/<video>/<bank>/poses.npz` + `bank.json` (plan 카메라 오버레이)
 출력  : 브라우저 (`http://localhost:<port>`)
@@ -160,6 +163,7 @@ import json
 import sys
 import time
 from argparse import ArgumentParser
+from inspect import signature
 from os import listdir, path
 
 import numpy as np
@@ -218,6 +222,28 @@ PLAN_COLOR_END = (40, 80, 255)       # frame F-1
 # "이 박스가 따라 움직여야 하는가"를 못 가른다). `--obb_color_dyn/_static` 로 덮는다.
 OBB_DYN_COLOR = (80, 200, 255)       # 하늘색
 OBB_STATIC_COLOR = (0, 200, 170)     # 청록
+
+
+VISTA4D_PY = "/data1/cympyc1785/miniconda3/envs/vista4d/bin/python"
+
+
+def require_viser_thickness():
+    """`add_line_segments(thickness=...)` 가 있는지 **cloud 를 읽기 전에** 확인한다.
+
+    이 스크립트는 env `vista4d` (viser 1.1.0) 용이다. `latentcam` 의 viser 1.0.30 은 그 인자가
+    `line_width` 이고 단위가 **screen 픽셀**이라, 이름만 바꿔 끼우면 world 0.007 이 0.007
+    픽셀이 돼 선과 프러스텀이 통째로 안 보인다 (CHANGELOG 의 "프러스텀이 통째로 안 보이던
+    것" 이 그 증상) — 조용히 깨진 화면보다 여기서 멈추는 게 낫다.
+
+    확인을 함수 맨 앞으로 당긴 이유: 원래 실패 지점이 `draw_line` 이라 cloud.npz(1.4 GB)를
+    다 읽은 **뒤**에 죽었다. 잘못된 env 로 띄우면 몇 분 기다린 끝에 TypeError 를 본다.
+    """
+    if "thickness" in signature(viser.SceneApi.add_line_segments).parameters:
+        return
+    raise SystemExit(
+        f"[env] viser {viser.__version__} 은 `thickness` 를 안 받는다 (1.1.0 이상 필요).\n"
+        f"      이 스크립트는 env vista4d 용이다. 아래로 다시 띄운다:\n"
+        f"        {VISTA4D_PY} -u " + " ".join(sys.argv))
 
 
 def parse_rgb(text: str, fallback):
@@ -583,6 +609,7 @@ def main():
                         help="이 노드 id 의 OBB 만 띄운다 (예: dyn_0). 기본 = 전부")
     parser.add_argument("--viewer_root", default=VIEWER_ROOT_DEFAULT, type=str)
     args = parser.parse_args()
+    require_viser_thickness()          # cloud.npz(1.4 GB) 를 읽기 전에 env 를 가른다
 
     src_color = parse_rgb(args.src_color, SRC_COLOR)
     src_now_color = parse_rgb(args.src_now_color, SRC_NOW_COLOR)

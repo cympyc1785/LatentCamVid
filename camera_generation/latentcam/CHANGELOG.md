@@ -5,6 +5,27 @@ All notable changes to the latentcam sub-project. Follows [Keep a Changelog](htt
 ## [Unreleased]
 
 ### Added
+- **`scripts/eval/clatr_score_dir.py` — 임의의 eval 폴더에 CLaTr 지표를 매기는 드라이버
+  (2026-09-21).** `eval_testset.py` 는 자기가 방금 만든 `--out` 폴더에만 CLaTr 을 돌린다.
+  베이스라인 예측(GenDoP / E.T.)은 `run_gendop_eval.py --stage evaldir` 이 만든
+  `eval_dir_*/` 로 따로 떨어지는데, 그 안에도 `test/<entry>_transforms_{pred,ref}.json` +
+  `_caption.json` 이 같은 규약으로 들어 있으므로 `src.extraction` → `src.eval_only` 두
+  단계를 그대로 돌릴 수 있다. 기존 코드는 **한 줄도 안 바뀐다** (새 파일 하나).
+  - 사용: `python scripts/eval/clatr_score_dir.py ours=<eval_my/...> gendop=<eval_dir_...>`.
+  - `ensure_split()` — `test_valid.txt` 가 없으면 `test/*_transforms_ref.json` 에서 만든다.
+  - `ensure_caption_feats()` — CLaTr caption modality 는 **미리 인코딩된 CLIP feature**
+    (`seq/test/<e>_caption.npy`, `token/...`)를 읽는다(`caption_dataset.py:65`).
+    `eval_testset.py:436-439` 는 추론 루프 안에서 이걸 같이 떨구므로 밖에서 만든 폴더엔
+    없다 → 캡션 json 에서 같은 인코더(`ViT-B/32`, `max_token_length=None`)로 재생성한다.
+    **이미 있으면 안 건드린다** (우리 런 것을 덮으면 그 폴더 지표가 재현이 안 된다).
+  - **게이지**: `--standardization` 기본 None = CLaTr configs 기본값(`'0120'`).
+    `eval_testset.py:486` 도 `dataset/standardization` 을 **안 넘기므로** 기존 숫자 전부가
+    이 게이지다 (런 `config.yaml` 의 `clatr_standardization: dynpose49_d200` 은 안 쓰인다).
+    비교군에는 같은 인자를 줄 것.
+  - **`metrics.json` 의 `clatr/clatr_score` 는 0 에서 잘린다** —
+    `evaluate/eval/src/metrics/modules/clatr_score.py:33` 이 `torch.max(score, 0)`.
+    음수 코사인은 `preds_scores.csv` 의 per-row 값으로 봐야 한다
+    (실측 D240 gendop: 집계 0.0 / raw −0.2197).
 - **video CA 의 text 융합 축 옵션 `video_text_fuse` + D217 arm
   (`conf/experiment/dynpose_d200_molmo2_decfuse_l21_da3.yaml`) (2026-09-21).**
   `_build_video_tok` 이 video/text 두 파트를 합치는 축을 고른다.

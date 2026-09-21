@@ -8,6 +8,18 @@ Follows [Keep a Changelog](https://keepachangelog.com/).
 ## [Unreleased]
 
 ### Added
+- **`scripts/run_gendop_eval.py` CORPORA `vista_d234` (2026-09-21).** soapbox
+  `track_orbit_right` **1 entry** 짜리 코퍼스. d215 의 soapbox 캡션은 anchor 라벨 그대로
+  "wheel" 이었는데 d234 에서 `--desc_override` 로 지칭구를 "the blue cart" 로 바꿔 다시
+  구웠다. GenDoP 을 **그 바뀐 문장**("The camera tracks the blue cart while orbiting to the
+  right around it.")으로 조건화하려면 d215 코퍼스로는 안 되므로 항목을 따로 뒀다 —
+  같은 씬이지만 조건 텍스트가 다르다. `CORPORA` 에 dict 하나 추가한 것뿐이라 기존 코퍼스는
+  비트 동일.
+  - entry 1개라 **FCD/PRDC 는 전부 NaN** 이다(집합 지표). 읽을 수 있는 건
+    `clatr/clatr_score`·`clatr/pred_ref_cosine`·caption p/r/f 뿐이고 분포 지표는 인용 금지.
+  - 실행: `--stage inputs` → `--stage infer --arm gendop_text` → `--stage evaldir --arm
+    gendop_text --resample gendop_slerp` →
+    `results/20260921_d240_gendop_d234/eval_dir_gendop_text_raw_slerp_noscale`.
 - **preset `orbit_left_pedestal_down` (2026-09-21).** `orbit_left_pedestal_up` 의 하강 짝으로,
   부호만 뒤집는다 (`pedestal_down_dolly_in` 이 쓰는 `-c["lateral"]` 과 같은 규약). aim 은 `_up`
   과 같은 `look_at` — 궤도가 주동작이라 조준이 필요하다. 사용자 지시("hike 도 orbit left,

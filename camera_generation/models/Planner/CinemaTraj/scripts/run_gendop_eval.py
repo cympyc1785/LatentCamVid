@@ -168,6 +168,27 @@ CORPORA = {
         },
         ref="d215_s42",
     ),
+    # D240 (2026-09-21, 1 entry). soapbox `track_orbit_right` 하나짜리 코퍼스다 — d215 의
+    # soapbox 캡션은 anchor 라벨 그대로 "wheel" 이었고, d234 에서 `--desc_override` 로
+    # 지칭구를 "the blue cart" 로 바꿔 다시 구웠다. GenDoP 을 **그 바뀐 문장**으로 돌리려면
+    # d215 코퍼스로는 안 되므로 항목을 따로 둔다 (같은 씬이지만 조건 텍스트가 다르다).
+    #   entry 1개라서 FCD/PRDC 는 의미가 없다 — 읽을 수 있는 건 `clatr/clatr_score` 와
+    #   caption 지표뿐이다. 분포 지표를 이 표에서 인용하지 말 것.
+    "vista_d234": dict(
+        corpus="/data1/cympyc1785/data/Vista4D-Eval-Data/latentcam_d234",
+        split_name="seg_list_d234_test.txt",
+        eval_data="/data1/cympyc1785/data/Vista4D-Eval-Data/eval_data",
+        prefix="vista4d",
+        cloud_root=path.join(HERE, "out"),
+        out=path.join(HERE, "results", "20260921_d240_gendop_d234"),
+        depth_norm="median",
+        ours={
+            "d234_s11": EVAL_MY + "d234_s11__last",
+            "d234_s22": EVAL_MY + "d234_s22__last",
+            "d234_s33": EVAL_MY + "d234_s33__last",
+        },
+        ref="d234_s11",
+    ),
 }
 
 # GenDoP arm 2종. text 는 어느 ckpt 를 쓰든 --text_from_eval_dir 로 같은 문장을 받는다.

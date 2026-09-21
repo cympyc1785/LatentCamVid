@@ -8,6 +8,14 @@ Follows [Keep a Changelog](https://keepachangelog.com/).
 ## [Unreleased]
 
 ### Changed
+- **`viser_cloud.py` `dynamic: all frames` 체크박스 -> `dynamic frames` 드롭다운 (2026-09-21).**
+  `current frame`(기본) / `interval` / `all frames` 세 갈래. 체크박스 시절엔 중간이 없어서
+  "1장 아니면 49장"이었는데, 궤적을 겹쳐 보려면 띄엄띄엄이 필요하다 (49장 전부는 움직이는
+  물체가 49개 복사본으로 번져서 아무것도 안 보인다 — 모듈 docstring 의 4D 설명 그대로).
+  기본값 `current frame` 은 예전 체크박스 해제 상태와 **화면이 같다**. 동적 점군과 동적 OBB 가
+  **같은 집합**을 쓴다: 점만 띄엄띄엄 켜지고 박스는 한 장이면 어느 프레임의 박스인지 대응이
+  안 보인다. 자매 스크립트 `viser_scene.py` 가 이미 쓰던 구성을 옮겨 온 것이라 두 뷰어의
+  `view` 폴더가 이제 같은 손잡이를 갖는다.
 - **`viser_cloud.py` OBB 색 반전 — 동적이 하늘색 (2026-09-21).** `(255,70,190)` 자홍/
   `(80,200,255)` 하늘색 이던 것을 **동적=하늘색 `(80,200,255)` / 정적=청록 `(0,200,170)`** 로
   바꿨다. 보는 대상은 거의 항상 동적 subject 인데 눈에 먼저 들어오는 색이 정적 배경 박스에
@@ -16,6 +24,25 @@ Follows [Keep a Changelog](https://keepachangelog.com/).
   `--obb_color_dyn` / `--obb_color_static` (`"R,G,B"`) 로 덮는다.
 
 ### Added
+- **`viser_cloud.py` GUI `obb` 폴더 + `view` 폴더 손잡이 복원 (2026-09-21).** `viser_scene.py`
+  에만 있던 것들을 옮겨 왔다 — `viser_cloud.py` 에서 **지워진 적은 없다**(그 파일 전체 이력이
+  7커밋이고 전부 추가다). 새로 생긴 것:
+  - `obb` 폴더: `dynamic OBB` / `static OBB` / `labels` 개별 체크박스(예전엔 마스터 하나),
+    `dynamic color` / `static color` rgb 피커, `OBB thickness` 슬라이더.
+  - `view` 폴더: `fps`(재생 속도 — 예전엔 `time.sleep(0.08)` 상수), `range start` / `range end`,
+    `frame interval (every N)`, `camera thickness`, `path thickness x`.
+  - **OBB 색 피커가 이제 가능한 이유**: 드래그마다 249개를 다시 그리는 대신 **버전 도장**
+    (`obb_version`)을 찍고 `obb_show` 가 "보이게 되는 순간"에만 빚을 갚는다. `current frame`
+    모드면 매번 9개뿐이라 즉시 돈다 (`all frames` + 드래그만 여전히 무겁고, 그건 코드에
+    적어 뒀다). 이전 항목의 "OBB 는 GUI 피커를 안 준다"를 뒤집는다.
+  - **굵기는 다시 그릴 필요가 없다** — `line_width` 는 line/frustum handle 양쪽에서 갱신되는
+    프로퍼티다 (`colors` 만 아니다). 단위가 셋 다 다르다: 프러스텀은 world 절대값, OBB 는
+    `cam_scale` 배율(씬마다 scale 이 100배 다르다), 경로선은 **선별 기준값의 배율**(소스 0.08 /
+    plan 0.10 비율이 슬라이더를 밀어도 유지된다).
+  - 경로선 배율을 GUI handle 이 아니라 dict(`lw`)로 들고 있는 이유: 소스 경로선은 GUI 를 만들기
+    **전에** 그려져서 그 시점에 슬라이더를 읽으면 없다. 콜백이 dict 를 갱신한다.
+  - 경로선은 `state["handles"]` / `pin["handles"]` 에 **안 담고** `lines` 로만 관리한다 —
+    양쪽에 담으면 `drop_line` 과 일괄 remove 가 같은 handle 을 두 번 지운다.
 - **`viser_cloud.py` GUI `camera colors` 폴더 + 색 플래그 (2026-09-21).** 지금까지 색을 바꿀 수
   있는 카메라는 probe 뿐이었는데, 정작 대조하는 건 **gt(소스) 와 pred(활성 target)** 다.
   피커 4개 — `source (gt)` / `source now` / `target (pred)` / `target now`. 계열마다 둘인 이유:

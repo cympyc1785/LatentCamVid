@@ -22,6 +22,25 @@
 숫자 3개라 축이 41° 기울어도 JSON 만 봐서는 안 보인다. 격자가 실제 바닥과 어긋나 있으면
 그 씬의 elevation·ground 게이트 판정이 전부 기울어진 축 위에서 났다는 뜻이다.
 
+GUI `obb` 폴더에서 동적/정적/라벨을 따로 끄고, 색(rgb 피커)과 선 굵기를 바꾼다. 색은
+`--obb_color_dyn`/`--obb_color_static` 으로 처음부터 지정할 수도 있다. 굵기가 색과 **다른
+경로**로 도는 이유: viser line handle 은 `line_width` 는 갱신되는 프로퍼티인데 `colors` 는
+아니라, 색을 바꾸려면 remove 후 다시 그리는 수밖에 없다. 동적 OBB 는 노드×프레임이라
+snowboard 만 해도 249개고, 색을 바꿀 때마다 전부 다시 그리면 브라우저가 멎는다. 그래서
+**버전 도장(`obb_version`)** 을 찍어 두고 `obb_show` 가 "보이게 되는 순간"에만 빚을 갚는다 —
+`current frame` 모드면 매번 9개뿐이다.
+
+## view 폴더 — 어느 프레임을 띄우나
+
+`dynamic frames (points+OBB)` 가 세 갈래다: `current frame`(기본, 한 장) / `interval`(range
+start~end 를 `frame interval (every N)` 간격으로) / `all frames`(전 구간을 그 간격으로).
+동적 점군과 동적 OBB 가 **같은 집합**을 쓴다 — 궤적을 한 화면에 겹쳐 보려고 프레임을 띄엄띄엄
+켜는 게 목적인데 점만 켜지고 박스는 한 장만 나오면 대응이 안 보이기 때문이다.
+
+굵기 손잡이는 셋이고 서로 단위가 다르다: `camera thickness`(프러스텀, world 절대값) ·
+`path thickness x`(경로선, 선마다 다른 기준값에 곱하는 **배율** — 소스 0.08 / plan 0.10 비율이
+슬라이더를 밀어도 유지된다) · `OBB thickness`(cam_scale 배율 — 씬마다 scale 이 100배 다르다).
+
 ## motion 브라우저 (`--banks`)
 
 뱅크 여러 개를 통째로 올려두고 **슬라이더로 motion 을 갈아끼운다**. 이게 필요한 이유는
@@ -407,15 +426,33 @@ def main():
     # line_width/visible/wxyz/position 뿐이고 colors 는 없다. 그래서 색 피커가 움직이면 같은
     # 이름으로 remove 후 다시 add 한다 (프러스텀은 `.color` 대입이 먹으니 그쪽은 그대로 둔다).
     # 이름이 같으므로 재생성해도 씬 트리에 중복 노드가 남지 않는다.
-    lines = {}
+    # 굵기는 반대다 — `line_width` 는 갱신되는 프로퍼티라 다시 그릴 필요가 없다. 그래서 선마다
+    # **기준 굵기**를 따로 들고(`line_base`) 슬라이더는 거기 곱하는 배율로 둔다. 소스 0.08 /
+    # plan 0.10 처럼 원래 다른 값을 쓰던 비율이 슬라이더를 움직여도 유지된다.
+    lines, line_base = {}, {}
+    # 배율을 GUI handle 이 아니라 dict 로 들고 있는 이유: 소스 경로선은 GUI 를 만들기 **전에**
+    # 그려지는데, 그때 슬라이더를 읽으려 하면 아직 없다. 슬라이더 콜백이 이 값을 갱신한다.
+    lw = {"path": 1.0}
 
     def draw_line(key, name, segments, color, thickness):
+        drop_line(key)
+        line_base[key] = float(thickness)
+        lines[key] = server.scene.add_line_segments(
+            name, segments, colors=color, thickness=float(thickness) * path_lw())
+        return lines[key]
+
+    def drop_line(key):
         old = lines.pop(key, None)
+        line_base.pop(key, None)
         if old is not None:
             old.remove()
-        lines[key] = server.scene.add_line_segments(name, segments, colors=color,
-                                                    thickness=thickness)
-        return lines[key]
+
+    def path_lw():
+        return float(lw["path"])
+
+    def apply_path_lw():
+        for key, handle in lines.items():
+            handle.line_width = line_base[key] * path_lw()
 
     # 소스 카메라 경로도 선으로 — plan 이 떠는지 판단하려면 "원래 소스는 얼마나 떠는가"가
     # 있어야 한다. snowboard 소스는 |jerk| p95 가 plan 의 8배다.
@@ -492,7 +529,20 @@ def main():
     # ---- scene graph 오버레이: OBB(정적 1개 / 동적 프레임별) + 지면 격자 ----
     # 동적 OBB 를 프레임별 handle 로 쪼개는 이유는 동적 점군과 같다 — 49개를 한꺼번에 그리면
     # 움직이는 박스가 겹쳐서 아무것도 안 보인다. refresh() 가 점군과 같은 슬라이더로 껐다 켠다.
+    #
+    # handle 을 그대로 들지 않고 **entry dict** 로 감싸는 이유는 색 때문이다. viser 1.1.0 선
+    # handle 은 `line_width` 만 갱신되고 `colors` 는 없어서, 색을 바꾸려면 지웠다 다시 그려야
+    # 한다. snowboard 는 동적 5노드 x 49프레임 + 정적 4 = 249개라 피커를 끌 때마다 249번
+    # 다시 그리면 브라우저가 멎는다. 그래서 선분 좌표를 entry 에 들고 있다가 **보이는 순간에만**
+    # 다시 그린다 (`obb_version` 이 뒤처진 entry 가 stale). `current frame` 에서 실제로 보이는
+    # 건 9개뿐이라 드래그가 가볍다.
     obb_static, obb_dyn, obb_labels, ground_handle, graph_rows = [], [[] for _ in range(num_frames)], [], None, []
+    obb_version = {"n": 0}                    # 색/굵기가 바뀔 때마다 +1
+
+    def obb_entry(name, segments, moving, visible):
+        return {"name": name, "seg": segments, "moving": moving, "handle": None,
+                "version": -1, "visible": bool(visible)}
+
     if args.obb and path.isfile(graph_path):
         with open(graph_path, encoding="utf-8") as file:
             graph = json.load(file)
@@ -500,24 +550,22 @@ def main():
         T_gw = np.asarray(graph["frames"]["T_gw"], dtype=float)
         for node in graph["nodes"]:
             moving = bool(node.get("moving")) and bool(node.get("track"))
-            color = obb_dyn_color if moving else obb_static_color
             extent = node["obb"]["extent"]
-            thickness = cam_scale * 0.06
             if moving:
                 centers = np.asarray(node["track"]["center_smooth"], dtype=float)
                 yaws = np.asarray(node["track"]["yaw"], dtype=float)
                 for f in range(min(num_frames, len(centers))):
-                    obb_dyn[f].append(server.scene.add_line_segments(
+                    obb_dyn[f].append(obb_entry(
                         f"/obb/{node['id']}/f{f:03d}",
                         obb_segments_world(centers[f], extent, yaw_to_R(yaws[f]), T_wg),
-                        colors=color, thickness=thickness, visible=(f == 0)))
+                        True, f == 0))
                 anchor_g = centers[0]
             else:
-                obb_static.append(server.scene.add_line_segments(
+                obb_static.append(obb_entry(
                     f"/obb/{node['id']}",
                     obb_segments_world(node["obb"]["center"], extent,
                                        np.asarray(node["obb"]["R"], dtype=float), T_wg),
-                    colors=color, thickness=thickness))
+                    False, True))
                 anchor_g = np.asarray(node["obb"]["center"], dtype=float)
             top = np.asarray(anchor_g, float) + np.array([0.0, 0.0, float(extent[2]) / 2 + 0.01])
             obb_labels.append(server.scene.add_label(
@@ -534,6 +582,25 @@ def main():
                 ground_grid_world(float(graph["ground"]["ground_z"]), T_wg,
                                   span.mean(axis=0), half),
                 colors=(110, 120, 140), thickness=cam_scale * 0.03)
+
+    def obb_apply(entry):
+        """entry 를 현재 색·굵기로 (다시) 그린다. 색을 못 갈아끼우니 remove 후 add."""
+        if entry["handle"] is not None:
+            entry["handle"].remove()
+        color = (tuple(int(c) for c in gui_obb_dyn_color.value) if entry["moving"]
+                 else tuple(int(c) for c in gui_obb_stat_color.value))
+        entry["handle"] = server.scene.add_line_segments(
+            entry["name"], entry["seg"], colors=color,
+            thickness=cam_scale * float(gui_obb_lw.value), visible=entry["visible"])
+        entry["version"] = obb_version["n"]
+
+    def obb_show(entry, visible: bool):
+        """보이게 하는 순간에만 stale 을 갚는다 — 249개를 매 드래그마다 다시 그리지 않으려고."""
+        entry["visible"] = bool(visible)
+        if visible and entry["version"] != obb_version["n"]:
+            obb_apply(entry)
+        elif entry["handle"] is not None:
+            entry["handle"].visible = bool(visible)
 
     # 현재 선택된 motion 의 handle 들. 갈아끼울 때 통째로 remove 한다 — 같은 이름으로 덮어쓰면
     # 프러스텀 수가 줄어들 때(다른 F) 이전 것이 남는다.
@@ -553,6 +620,17 @@ def main():
         pin_cams = [pair for pin in pins.values() for pair in pin["cams"]]
         for handle, ratio in src_cams + state["cams"] + pin_cams:
             handle.scale = value * ratio
+
+    def apply_cam_lw():
+        """프러스텀 선 굵기. 크기(scale)와 **다른 축**이다 — 작은 프러스텀을 굵게 그려야
+        점군에 안 묻히는 씬이 있고, 반대로 큰 프러스텀은 가늘어야 뒤가 보인다.
+        `line_width` 는 갱신되는 프로퍼티라 다시 그릴 필요가 없다 (색과 다르다)."""
+        value = float(gui_cam_lw.value)
+        pin_cams = [pair for pin in pins.values() for pair in pin["cams"]]
+        for handle, _ in src_cams + state["cams"] + pin_cams:
+            handle.line_width = value
+        for probe in probes:
+            probe["cam"].line_width = value
 
     def plan_colors():
         """(전 프레임, 현재 프레임) target 색. 피커가 단일 출처다."""
@@ -579,14 +657,15 @@ def main():
                                 float(intrinsics[0, 1, 1]), width, height, now_color,
                                 cam_scale * 1.6))
         track = tracks.get(str(row.get("anchor_id", "")))
+        drop_line("track")
         if track is not None and len(track) > 1:
-            handles.append(server.scene.add_line_segments(
-                "/subject_track", path_segments(track), colors=(60, 220, 90),
-                thickness=cam_scale * 0.08))
+            draw_line("track", "/subject_track", path_segments(track), (60, 220, 90),
+                      cam_scale * 0.08)
         state.update(handles=handles + now, now=now, c2w=plan_c2w, label=label,
                      cams=[(h, 1.0) for h in plan_cams] + [(h, 1.6) for h in now])
         gui_info.value = motion_report(label, row, plan_c2w, track, z_med, focal, src_jerk)
         apply_cam_scale()
+        apply_cam_lw()
         refresh()
 
     def pin_node(label: str):
@@ -609,13 +688,15 @@ def main():
         # 어디를 보고 있나"를 경로만으로는 못 읽는다. 같은 색이라 소속은 유지된다.
         now = list(add_frustums(server, node + "/now", plan_gl[:1], focal,
                                 float(intrinsics[0, 1, 1]), width, height, color, cam_scale * 1.6))
-        line = server.scene.add_line_segments(
-            node + "/path", path_segments(plan_c2w[:, :3, 3]), colors=color,
-            thickness=cam_scale * 0.10)
-        pins[label] = {"handles": cams + now + [line], "now": now, "c2w": plan_c2w,
+        # 경로선은 `lines` 로 관리한다 (굵기 슬라이더가 여기만 본다). pin["handles"] 에는 안
+        # 담는다 — 담으면 remove_pin 이 drop_line 과 겹쳐 같은 handle 을 두 번 지운다.
+        draw_line(("pin", label), node + "/path", path_segments(plan_c2w[:, :3, 3]), color,
+                  cam_scale * 0.10)
+        pins[label] = {"handles": cams + now, "now": now, "c2w": plan_c2w,
                        "cams": [(h, 1.0) for h in cams] + [(h, 1.6) for h in now],
                        "color": color, "row": row}
         apply_cam_scale()
+        apply_cam_lw()
 
     def remove_pin(label: str):
         pin = pins.pop(label, None)
@@ -623,6 +704,7 @@ def main():
             return
         for handle in pin["handles"]:
             handle.remove()
+        drop_line(("pin", label))
 
     def pin_report():
         if not pins:
@@ -650,16 +732,59 @@ def main():
     with server.gui.add_folder("view"):
         gui_frame = server.gui.add_slider("frame", min=0, max=num_frames - 1, step=1, initial_value=0)
         gui_play = server.gui.add_checkbox("play", initial_value=False)
+        # 재생 속도. 예전에는 루프가 0.08 s 로 박혀 있어서 "빨라서 못 보겠다"를 못 고쳤다.
+        gui_fps = server.gui.add_slider("fps", min=1, max=30, step=1, initial_value=12)
         gui_static = server.gui.add_checkbox("static cloud", initial_value=True)
-        gui_dyn_all = server.gui.add_checkbox("dynamic: all frames", initial_value=False)
-        gui_obb = server.gui.add_checkbox("scene graph OBB", initial_value=True,
-                                          disabled=not (obb_static or any(obb_dyn)))
+        gui_dyn = server.gui.add_checkbox("dynamic cloud", initial_value=True)
+        # 동적 점군 + 동적 OBB 를 **몇 프레임 띄울지**. 체크박스 하나(현재/전부)로는 가운데가
+        # 없었다 — 전부 띄우면 49겹이라 아무것도 안 보이고, 한 장만 띄우면 "이 물체가 어디로
+        # 갔나"가 안 보인다. 구간 + 간격이 그 사이를 만든다 (잔상처럼 떨어져 보인다).
+        # 기본은 `current frame` = 예전 동작 그대로.
+        gui_dyn_mode = server.gui.add_dropdown(
+            "dynamic frames (points+OBB)", options=["current frame", "interval", "all frames"],
+            initial_value="current frame")
+        gui_span_lo = server.gui.add_slider("range start", min=0, max=num_frames - 1, step=1,
+                                            initial_value=0)
+        gui_span_hi = server.gui.add_slider("range end", min=0, max=num_frames - 1, step=1,
+                                            initial_value=num_frames - 1)
+        # 간격은 `all frames` 에서도 먹는다 — 전 프레임 잔상을 실제로 읽게 만드는 손잡이가 이거다.
+        gui_frame_step = server.gui.add_slider("frame interval (every N)", min=1,
+                                               max=max(2, num_frames // 2), step=1,
+                                               initial_value=5)
         gui_ground = server.gui.add_checkbox("ground grid", initial_value=True,
                                              disabled=ground_handle is None)
         gui_size = server.gui.add_slider("point size", min=point_size * 0.25, max=point_size * 4.0,
                                          step=point_size * 0.05, initial_value=point_size)
         gui_cam = server.gui.add_slider("camera size", min=cam_scale * 0.1, max=cam_scale * 10.0,
                                         step=cam_scale * 0.05, initial_value=cam_scale)
+        # 프러스텀 선 굵기(world 단위). viser 기본 0.02 를 초기값으로 둔다.
+        gui_cam_lw = server.gui.add_slider("camera thickness", min=0.002,
+                                           max=max(0.05, cam_scale), step=0.002,
+                                           initial_value=min(0.02, max(0.05, cam_scale)))
+        # 경로선 굵기 **배율**. 소스 0.08 / plan 0.10 처럼 원래 다른 값을 쓰던 비율을 유지한다.
+        gui_path_lw = server.gui.add_slider("path thickness x", min=0.2, max=5.0, step=0.1,
+                                            initial_value=1.0)
+
+    with server.gui.add_folder("obb"):
+        # 예전엔 체크박스 하나로 OBB·라벨을 통째로 껐다 켰다. 동적/정적/라벨을 따로 끄는 게
+        # 필요한 이유: 정적 박스가 씬을 덮어 동적 박스를 가리는 씬이 있고, 라벨은 노드가 9개만
+        # 돼도 화면 글자가 겹친다.
+        _has_obb = bool(obb_static or any(obb_dyn))
+        gui_obb = server.gui.add_checkbox("scene graph OBB", initial_value=True,
+                                          disabled=not _has_obb)
+        gui_obb_dyn_on = server.gui.add_checkbox("dynamic OBB", initial_value=True,
+                                                 disabled=not any(obb_dyn))
+        gui_obb_stat_on = server.gui.add_checkbox("static OBB", initial_value=True,
+                                                  disabled=not obb_static)
+        gui_obb_labels = server.gui.add_checkbox("labels", initial_value=True,
+                                                 disabled=not obb_labels)
+        gui_obb_dyn_color = server.gui.add_rgb("dynamic color", initial_value=obb_dyn_color,
+                                               disabled=not any(obb_dyn))
+        gui_obb_stat_color = server.gui.add_rgb("static color", initial_value=obb_static_color,
+                                                disabled=not obb_static)
+        # cam_scale 배율이다 (world 절대값이 아니라) — 씬마다 scale 이 100배 다르다.
+        gui_obb_lw = server.gui.add_slider("OBB thickness", min=0.01, max=0.60, step=0.01,
+                                           initial_value=0.06, disabled=not _has_obb)
 
     with server.gui.add_folder("camera colors"):
         # gt(소스) / pred(활성 target) 두 계열. 기본색이 씬에 따라 안 보일 때가 있어서 손잡이를
@@ -697,23 +822,42 @@ def main():
         gui_probe_info = server.gui.add_text("pose", initial_value="", multiline=True,
                                              disabled=True)
 
+    def shown_frames():
+        """지금 띄울 프레임 집합. `current frame` / `interval` / `all frames` 세 갈래.
+
+        `interval` 은 구간 `[lo, hi]` 를 `step` 칸마다 — 구간은 "어디부터 어디까지", 간격은
+        "그중 몇 장 건너뛰고"로 **다른 축**이다. 현재 프레임은 구간 밖이어도 늘 포함한다
+        (frame 슬라이더를 밀었는데 화면이 비면 슬라이더가 고장난 것처럼 보인다).
+        """
+        f = int(gui_frame.value)
+        mode = str(gui_dyn_mode.value)
+        step = max(1, int(gui_frame_step.value))
+        if mode == "current frame":
+            return {f}
+        lo, hi = (0, num_frames - 1) if mode == "all frames" else \
+            (min(int(gui_span_lo.value), int(gui_span_hi.value)),
+             max(int(gui_span_lo.value), int(gui_span_hi.value)))
+        return {i for i in range(lo, hi + 1) if (i - lo) % step == 0} | {f}
+
     def refresh():
         f = int(gui_frame.value)
-        show_all = bool(gui_dyn_all.value)
+        frames = shown_frames()
+        show_dyn = bool(gui_dyn.value)
         for i, handle in enumerate(dyn_handles):
-            handle.visible = show_all or (i == f)
+            handle.visible = show_dyn and (i in frames)
         if static_handle is not None:
             static_handle.visible = bool(gui_static.value)
         show_obb = bool(gui_obb.value)
-        for handle in obb_static:
-            handle.visible = show_obb
+        for entry in obb_static:
+            obb_show(entry, show_obb and bool(gui_obb_stat_on.value))
         for handle in obb_labels:
-            handle.visible = show_obb
+            handle.visible = show_obb and bool(gui_obb_labels.value)
         # 동적 OBB 는 점군과 **같은 규칙**으로 켠다 — 박스만 전 프레임 켜두면 박스가 점군보다
         # 앞선 프레임에 있어도 어긋난 걸 못 알아챈다.
-        for i, handles in enumerate(obb_dyn):
-            for handle in handles:
-                handle.visible = show_obb and (show_all or i == f)
+        show_dyn_obb = show_obb and bool(gui_obb_dyn_on.value)
+        for i, entries in enumerate(obb_dyn):
+            for entry in entries:
+                obb_show(entry, show_dyn_obb and i in frames)
         if ground_handle is not None:
             ground_handle.visible = bool(gui_ground.value)
         src_now[0].wxyz, src_now[0].position = _pose(src_gl[f], gl2cv)
@@ -758,11 +902,21 @@ def main():
 
     gui_motion.on_update(lambda _: switch(gui_motion.value))
     gui_pick.on_update(lambda _: switch([m[0] for m in motions].index(gui_pick.value)))
-    gui_frame.on_update(lambda _: refresh())
-    gui_static.on_update(lambda _: refresh())
-    gui_dyn_all.on_update(lambda _: refresh())
-    gui_obb.on_update(lambda _: refresh())
-    gui_ground.on_update(lambda _: refresh())
+    for widget in (gui_frame, gui_static, gui_dyn, gui_dyn_mode, gui_span_lo, gui_span_hi,
+                   gui_frame_step, gui_obb, gui_obb_dyn_on, gui_obb_stat_on, gui_obb_labels,
+                   gui_ground):
+        widget.on_update(lambda _: refresh())
+
+    # OBB 색·굵기: version 을 올리고 refresh() 를 부르면 **지금 보이는 것만** 다시 그려진다.
+    # 숨어 있는 것들은 다음에 켜질 때 갚는다 (obb_show). 전 프레임을 켜 둔 상태에서 피커를
+    # 끌면 그때는 249개가 다 보이므로 실제로 249번 다시 그린다 — 느린 건 그 조합뿐이다.
+    def repaint_obb(_event=None):
+        obb_version["n"] += 1
+        refresh()
+
+    gui_obb_dyn_color.on_update(repaint_obb)
+    gui_obb_stat_color.on_update(repaint_obb)
+    gui_obb_lw.on_update(repaint_obb)
 
     @gui_size.on_update
     def _(_event):
@@ -772,6 +926,12 @@ def main():
             handle.point_size = float(gui_size.value)
 
     gui_cam.on_update(lambda _: apply_cam_scale())
+    gui_cam_lw.on_update(lambda _: apply_cam_lw())
+
+    @gui_path_lw.on_update
+    def _(_event):
+        lw["path"] = float(gui_path_lw.value)
+        apply_path_lw()
 
     # 색 갈아끼우기. 프러스텀은 `.color` 대입, 경로선은 remove + re-add (draw_line).
     # 계열 안에서 "현재 프레임"인지는 `(handle, ratio)` 의 ratio 로 가른다 — 크기 배율과 색
@@ -950,7 +1110,11 @@ def main():
             ("colors", f"gt {src_color}/now {src_now_color}  "
                        f"pred {plan_color}/now {plan_now_color}  (GUI camera colors)"),
             ("obb colors", f"dyn {obb_dyn_color}  static {obb_static_color}  "
-                           f"(--obb_color_dyn/_static)"),
+                           f"(GUI obb / --obb_color_dyn/_static)"),
+            ("obb handles", f"{sum(len(e) for e in obb_dyn)} dyn + {len(obb_static)} static  "
+                            f"(GUI obb > OBB thickness / dynamic·static color)"),
+            ("frame set", f"GUI view > dynamic frames = current frame  "
+                          f"(interval / all frames + frame interval)"),
             ("url", f"http://localhost:{args.port}")]
     width_key = max(len(k) for k, _ in rows)
     for key, value in rows:
@@ -959,7 +1123,9 @@ def main():
     while True:
         if gui_play.value:
             gui_frame.value = (int(gui_frame.value) + 1) % num_frames
-        time.sleep(0.08)
+        # 재생 중이 아닐 때까지 fps 를 따르면 손잡이를 놓을 때 반응이 굼뜬다 — 멈춰 있을 때는
+        # 고정 간격으로 돌고 GUI 콜백에 맡긴다.
+        time.sleep(1.0 / max(1.0, float(gui_fps.value)) if gui_play.value else 0.08)
 
 
 def _pose(c2w_gl: np.ndarray, gl2cv: np.ndarray):

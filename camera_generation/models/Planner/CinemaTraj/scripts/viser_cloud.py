@@ -17,7 +17,7 @@
 
 ## scene graph 오버레이 (`--obb` 기본 켬 / `--no_obb` 로 예전 동작)
 
-`scene_graph.json` 이 있으면 노드 OBB(정적=청록 1개, 동적=자홍, 프레임 슬라이더 따라감)와
+`scene_graph.json` 이 있으면 노드 OBB(**동적=하늘색**, 프레임 슬라이더 따라감 / 정적=청록)와
 **G 의 `z = ground_z` 지면 격자**를 같이 그린다. 격자가 필요한 이유: `gravity.up_world` 는
 숫자 3개라 축이 41° 기울어도 JSON 만 봐서는 안 보인다. 격자가 실제 바닥과 어긋나 있으면
 그 씬의 elevation·ground 게이트 판정이 전부 기울어진 축 위에서 났다는 뜻이다.
@@ -92,6 +92,32 @@ PROBE_COLORS = [(255, 60, 220), (60, 200, 255), (255, 210, 60), (150, 255, 120),
 # 팔레트가 겹치면 기능 자체가 무의미해진다. 개수를 넘기면 순환한다.
 PIN_COLORS = [(60, 200, 255), (255, 60, 220), (255, 230, 60), (150, 255, 120),
               (180, 140, 255), (0, 160, 255), (255, 100, 100), (120, 255, 220)]
+
+# [2026-09-21] 카메라 두 계열의 기본색. 여기 상수로 올려 둔 이유는 GUI `camera colors` 피커가
+# 이 값을 초기값으로 읽고, `--src_color` / `--plan_color` 가 기동 시 덮기 때문이다 — 세 군데가
+# 같은 숫자를 각자 적어 두면 피커가 화면과 다른 색을 가리킨다.
+#   gt   = 소스 카메라 (씬이 준 궤적)
+#   pred = 활성 motion 의 target 카메라 (뱅크가 낸 궤적)
+SRC_COLOR = (140, 140, 140)          # 소스 프러스텀 + 경로선
+SRC_NOW_COLOR = (60, 200, 90)        # 소스의 **현재 프레임** 프러스텀 (1.6배)
+PLAN_COLOR = (255, 140, 40)          # 활성 target 프러스텀 + 경로선
+PLAN_NOW_COLOR = (255, 80, 0)        # target 의 현재 프레임 프러스텀 (1.6배)
+
+# scene graph OBB. **동적이 하늘색**이다 — 보는 대상이 거의 항상 동적 subject 라서, 눈이 먼저
+# 가야 하는 쪽에 원래 쓰던 색을 준다. 정적은 겹치지 않게 청록으로 민다 (둘 다 하늘색이면
+# "이 박스가 따라 움직여야 하는가"를 못 가른다). `--obb_color_dyn/_static` 로 덮는다.
+OBB_DYN_COLOR = (80, 200, 255)       # 하늘색
+OBB_STATIC_COLOR = (0, 200, 170)     # 청록
+
+
+def parse_rgb(text: str, fallback):
+    """`"80,200,255"` -> (80, 200, 255). 빈 문자열이면 기본색 그대로."""
+    if not text:
+        return tuple(int(c) for c in fallback)
+    parts = [int(v) for v in str(text).replace(" ", "").split(",")]
+    if len(parts) != 3 or not all(0 <= v <= 255 for v in parts):
+        raise SystemExit(f"색은 0~255 세 개여야 한다: {text!r}")
+    return tuple(parts)
 
 
 def import_frustum_helpers(viewer_root: str):
@@ -301,8 +327,25 @@ def main():
     parser.add_argument("--no_obb", dest="obb", action="store_false")
     parser.add_argument("--ground_grid", dest="ground_grid", action="store_true", default=True)
     parser.add_argument("--no_ground_grid", dest="ground_grid", action="store_false")
+    # 색 (전부 `"R,G,B"` 0~255, 빈 문자열이면 위 상수). 카메라 두 계열은 띄운 뒤 GUI
+    # `camera colors` 로도 바꾼다 — 여기 플래그는 **기동 시 기본값**이고 피커가 그 값을 읽는다.
+    # OBB 는 GUI 를 안 준다: 동적 박스가 노드×프레임이라 snowboard 만 245개고, viser 1.1.0
+    # 선 handle 은 색을 바꿔 끼울 수가 없어 드래그 한 번에 245개를 다시 그려야 한다.
+    parser.add_argument("--src_color", default="", type=str)
+    parser.add_argument("--src_now_color", default="", type=str)
+    parser.add_argument("--plan_color", default="", type=str)
+    parser.add_argument("--plan_now_color", default="", type=str)
+    parser.add_argument("--obb_color_dyn", default="", type=str)
+    parser.add_argument("--obb_color_static", default="", type=str)
     parser.add_argument("--viewer_root", default=VIEWER_ROOT_DEFAULT, type=str)
     args = parser.parse_args()
+
+    src_color = parse_rgb(args.src_color, SRC_COLOR)
+    src_now_color = parse_rgb(args.src_now_color, SRC_NOW_COLOR)
+    plan_color = parse_rgb(args.plan_color, PLAN_COLOR)
+    plan_now_color = parse_rgb(args.plan_now_color, PLAN_NOW_COLOR)
+    obb_dyn_color = parse_rgb(args.obb_color_dyn, OBB_DYN_COLOR)
+    obb_static_color = parse_rgb(args.obb_color_static, OBB_STATIC_COLOR)
 
     add_frustums, gl2cv = import_frustum_helpers(args.viewer_root)
 
@@ -351,18 +394,32 @@ def main():
     src_gl = cam_c2w @ gl2cv  # CV c2w -> add_frustums 가 먹는 GL c2w
     src_cams = [(h, 1.0) for h in add_frustums(
         server, "/cam_source", src_gl, float(intrinsics[0, 0, 0]),
-        float(intrinsics[0, 1, 1]), width, height, (140, 140, 140), cam_scale,
+        float(intrinsics[0, 1, 1]), width, height, src_color, cam_scale,
         downsample=args.cam_stride)]
     src_now = add_frustums(server, "/cam_source_now", src_gl[:1], float(intrinsics[0, 0, 0]),
-                           float(intrinsics[0, 1, 1]), width, height, (60, 200, 90),
+                           float(intrinsics[0, 1, 1]), width, height, src_now_color,
                            cam_scale * 1.6)
     src_cams += [(h, 1.6) for h in src_now]
 
     focal = float(intrinsics[0, 0, 0])
+
+    # 경로선은 **색을 갈아끼울 수가 없다** — viser 1.1.0 의 LineSegmentsHandle 이 내놓는 건
+    # line_width/visible/wxyz/position 뿐이고 colors 는 없다. 그래서 색 피커가 움직이면 같은
+    # 이름으로 remove 후 다시 add 한다 (프러스텀은 `.color` 대입이 먹으니 그쪽은 그대로 둔다).
+    # 이름이 같으므로 재생성해도 씬 트리에 중복 노드가 남지 않는다.
+    lines = {}
+
+    def draw_line(key, name, segments, color, thickness):
+        old = lines.pop(key, None)
+        if old is not None:
+            old.remove()
+        lines[key] = server.scene.add_line_segments(name, segments, colors=color,
+                                                    thickness=thickness)
+        return lines[key]
+
     # 소스 카메라 경로도 선으로 — plan 이 떠는지 판단하려면 "원래 소스는 얼마나 떠는가"가
     # 있어야 한다. snowboard 소스는 |jerk| p95 가 plan 의 8배다.
-    server.scene.add_line_segments("/src_path", path_segments(cam_c2w[:, :3, 3]),
-                                   colors=(150, 150, 150), thickness=cam_scale * 0.08)
+    draw_line("src", "/src_path", path_segments(cam_c2w[:, :3, 3]), src_color, cam_scale * 0.08)
     src_jerk = jerk_px(cam_c2w[:, :3, 3], z_med, focal)
 
     banks = list(args.banks) or ([args.bank] if args.bank else [])
@@ -443,7 +500,7 @@ def main():
         T_gw = np.asarray(graph["frames"]["T_gw"], dtype=float)
         for node in graph["nodes"]:
             moving = bool(node.get("moving")) and bool(node.get("track"))
-            color = (255, 70, 190) if moving else (80, 200, 255)
+            color = obb_dyn_color if moving else obb_static_color
             extent = node["obb"]["extent"]
             thickness = cam_scale * 0.06
             if moving:
@@ -497,20 +554,29 @@ def main():
         for handle, ratio in src_cams + state["cams"] + pin_cams:
             handle.scale = value * ratio
 
+    def plan_colors():
+        """(전 프레임, 현재 프레임) target 색. 피커가 단일 출처다."""
+        return (tuple(int(c) for c in gui_plan_color.value),
+                tuple(int(c) for c in gui_plan_now_color.value))
+
     def select(index: int):
         label, plan_c2w, row = motions[int(index)]
         for handle in state["handles"]:
             handle.remove()
         plan_gl = plan_c2w @ gl2cv
+        # 색은 상수가 아니라 **피커의 현재 값**을 읽는다 — 안 그러면 motion 을 갈아끼우는 순간
+        # 사용자가 고른 색이 기본색으로 되돌아간다.
+        color, now_color = plan_colors()
         plan_cams = list(add_frustums(server, "/cam_plan", plan_gl, focal,
-                                      float(intrinsics[0, 1, 1]), width, height, (255, 140, 40),
+                                      float(intrinsics[0, 1, 1]), width, height, color,
                                       cam_scale, downsample=args.cam_stride))
         handles = list(plan_cams)
-        handles.append(server.scene.add_line_segments(
-            "/plan_path", path_segments(plan_c2w[:, :3, 3]), colors=(255, 140, 40),
-            thickness=cam_scale * 0.10))
+        # 경로선은 handles 에 안 담는다 — draw_line 이 키 하나로 이전 것을 지우므로, 여기에도
+        # 담으면 갈아끼울 때 같은 handle 을 두 번 remove 하게 된다.
+        draw_line("plan", "/plan_path", path_segments(plan_c2w[:, :3, 3]), color,
+                  cam_scale * 0.10)
         now = list(add_frustums(server, "/cam_plan_now", plan_gl[:1], focal,
-                                float(intrinsics[0, 1, 1]), width, height, (255, 80, 0),
+                                float(intrinsics[0, 1, 1]), width, height, now_color,
                                 cam_scale * 1.6))
         track = tracks.get(str(row.get("anchor_id", "")))
         if track is not None and len(track) > 1:
@@ -594,6 +660,19 @@ def main():
                                          step=point_size * 0.05, initial_value=point_size)
         gui_cam = server.gui.add_slider("camera size", min=cam_scale * 0.1, max=cam_scale * 10.0,
                                         step=cam_scale * 0.05, initial_value=cam_scale)
+
+    with server.gui.add_folder("camera colors"):
+        # gt(소스) / pred(활성 target) 두 계열. 기본색이 씬에 따라 안 보일 때가 있어서 손잡이를
+        # 둔다 — 회색 소스는 밝은 점군에 묻히고, 주황 target 은 노을·모래 씬에서 배경과 붙는다.
+        # 계열마다 피커가 둘인 이유: "현재 프레임" 프러스텀이 크기(1.6배)**와 색**으로 구분되는데,
+        # 하나로 합치면 frame 슬라이더를 밀 때 어느 것이 지금인지 다시 못 읽는다.
+        # 초기값은 `--src_color` 등 기동 플래그를 그대로 받는다.
+        gui_src_color = server.gui.add_rgb("source (gt)", initial_value=src_color)
+        gui_src_now_color = server.gui.add_rgb("source now", initial_value=src_now_color)
+        gui_plan_color = server.gui.add_rgb("target (pred)", initial_value=plan_color,
+                                            disabled=not motions)
+        gui_plan_now_color = server.gui.add_rgb("target now", initial_value=plan_now_color,
+                                                disabled=not motions)
 
     with server.gui.add_folder("probe camera"):
         # frustum 과 gizmo 를 따로 끈다. 자리를 정하고 나면 화살표가 프러스텀을 가려서
@@ -693,6 +772,29 @@ def main():
             handle.point_size = float(gui_size.value)
 
     gui_cam.on_update(lambda _: apply_cam_scale())
+
+    # 색 갈아끼우기. 프러스텀은 `.color` 대입, 경로선은 remove + re-add (draw_line).
+    # 계열 안에서 "현재 프레임"인지는 `(handle, ratio)` 의 ratio 로 가른다 — 크기 배율과 색
+    # 구분이 같은 한 곳에서 나와야 둘이 어긋나지 않는다.
+    def repaint_src(_event=None):
+        color = tuple(int(c) for c in gui_src_color.value)
+        now_color = tuple(int(c) for c in gui_src_now_color.value)
+        for handle, ratio in src_cams:
+            handle.color = now_color if ratio > 1.0 else color
+        draw_line("src", "/src_path", path_segments(cam_c2w[:, :3, 3]), color, cam_scale * 0.08)
+
+    def repaint_plan(_event=None):
+        color, now_color = plan_colors()
+        for handle, ratio in state["cams"]:
+            handle.color = now_color if ratio > 1.0 else color
+        if state["c2w"] is not None:
+            draw_line("plan", "/plan_path", path_segments(state["c2w"][:, :3, 3]), color,
+                      cam_scale * 0.10)
+
+    gui_src_color.on_update(repaint_src)
+    gui_src_now_color.on_update(repaint_src)
+    gui_plan_color.on_update(repaint_plan)
+    gui_plan_now_color.on_update(repaint_plan)
 
     def active_probe():
         """드롭다운이 가리키는 probe. 지워진 이름이 남아 있을 수 있으니 없으면 마지막 것."""
@@ -845,6 +947,10 @@ def main():
             ("motions", len(motions)),
             ("pinned", f"{len(pins)} / {args.max_pins}  (GUI motion > pin current)"),
             ("source jerk p95", f"{src_jerk:.2f} px/f3"),
+            ("colors", f"gt {src_color}/now {src_now_color}  "
+                       f"pred {plan_color}/now {plan_now_color}  (GUI camera colors)"),
+            ("obb colors", f"dyn {obb_dyn_color}  static {obb_static_color}  "
+                           f"(--obb_color_dyn/_static)"),
             ("url", f"http://localhost:{args.port}")]
     width_key = max(len(k) for k, _ in rows)
     for key, value in rows:

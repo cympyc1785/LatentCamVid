@@ -7,7 +7,28 @@ Follows [Keep a Changelog](https://keepachangelog.com/).
 
 ## [Unreleased]
 
+### Changed
+- **`viser_cloud.py` OBB 색 반전 — 동적이 하늘색 (2026-09-21).** `(255,70,190)` 자홍/
+  `(80,200,255)` 하늘색 이던 것을 **동적=하늘색 `(80,200,255)` / 정적=청록 `(0,200,170)`** 로
+  바꿨다. 보는 대상은 거의 항상 동적 subject 인데 눈에 먼저 들어오는 색이 정적 배경 박스에
+  붙어 있었다. 정적을 같은 하늘색으로 두면 "이 박스가 따라 움직여야 하는가"를 못 가르므로
+  청록으로 민다 (snowboard 는 동적 5 / 정적 4 라 두 계열이 늘 같이 떠 있다).
+  `--obb_color_dyn` / `--obb_color_static` (`"R,G,B"`) 로 덮는다.
+
 ### Added
+- **`viser_cloud.py` GUI `camera colors` 폴더 + 색 플래그 (2026-09-21).** 지금까지 색을 바꿀 수
+  있는 카메라는 probe 뿐이었는데, 정작 대조하는 건 **gt(소스) 와 pred(활성 target)** 다.
+  피커 4개 — `source (gt)` / `source now` / `target (pred)` / `target now`. 계열마다 둘인 이유:
+  "현재 프레임" 프러스텀은 크기(1.6배) **와 색** 둘로 구분되는데 하나로 합치면 frame 슬라이더를
+  밀 때 어느 것이 지금인지 다시 못 읽는다. 기동 기본값은 `--src_color` / `--src_now_color` /
+  `--plan_color` / `--plan_now_color`, 안 주면 예전 색 그대로다 (회색/초록, 주황/진주황).
+  - **경로선은 `remove` 후 다시 `add` 한다** — viser 1.1.0 의 `LineSegmentsHandle` 은
+    `line_width/name/position/remove/visible/wxyz` 만 내놓고 `colors` 가 없다. 프러스텀만
+    `.color` 대입이 먹는다. 같은 이름으로 다시 그리므로 씬 트리에 중복이 안 남는다.
+  - **OBB 는 GUI 피커를 안 준다** — 동적 박스가 노드×프레임이라 snowboard 만 245개고, 위의
+    remove+re-add 를 드래그마다 245번 해야 한다. CLI 플래그만 둔다.
+  - `select()` 는 색 상수가 아니라 **피커의 현재 값**을 읽는다. 안 그러면 motion 을 갈아끼우는
+    순간 사용자가 고른 색이 기본색으로 되돌아간다.
 - **`eval_collision_rate.py` 에 `vista_d215` 코퍼스 (2026-09-21).** 루트는 `vista_d121` 과 같지만
   **코퍼스가 다르므로 entry 인덱스의 뜻이 다르다** — d121 arm 을 여기 섞으면 안 된다
   (`variant_id` 가 코퍼스 키가 아니듯 entry 인덱스도 아니다). `arms` 엔 `gt` + seed 42 하나만

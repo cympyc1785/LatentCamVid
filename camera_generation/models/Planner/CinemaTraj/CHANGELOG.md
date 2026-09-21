@@ -45,6 +45,27 @@ Follows [Keep a Changelog](https://keepachangelog.com/).
   parkour 가 preset 6종 × 36 후보 = 936 변이로 열거되며 드러났다. 씬당 anchor 가 하나뿐이라
   route 가 내보낸 `--presets` 를 뒤에 오는 `--presets dolly_in_look_at` 로 덮는다 (argparse
   last-wins).
+- **`configs/bank/d260_vista_front36_shellgates_off.json` (2026-09-22).** D259 의 36칸 격자가
+  576행 중 **141행(24.5%)만** 움직이고 389행이 `clamped_low` 였다. binding 을 세어 보니
+  `collision 235 / occlusion 60 / obb 42 / ground 39 / approach 13` 으로, **295 (76%)** 가
+  단안 depth shell artifact 였다 — 점군은 소스 시점 표면 **한 겹**이라 피사체 옆·뒤 카메라는
+  껍질 안쪽에 앉고, `behind_frac` 은 소스 화면으로 되투영하므로 **관측 안 된 공간이 전부
+  "뒤"로** 찍힌다. `subject_visible_frac` 도 분모가 소스에서 본 subject 점이라 뒤에서는
+  정의상 0 이다 (parkour left_low/back_low 실측 0.000). 그래서 **shell 에 기대는 두
+  게이트만** 껐다: G1 collision (`--max_behind_frac -1`) · G3 occlusion
+  (`--min_subject_visible 0`). G5 obb · G6 ground/elev · G7 approach 는 scene graph 의
+  OBB·중력면에서 나와 "관측됐나"와 무관하므로 **그대로 뒀다**. 코드 변경 0 — 모든 게이트에
+  이미 off 값이 있었다. τ 단계 인자가 d259 와 한 글자도 안 달라서 `tau_bank_dir` 을
+  `bank_d259` 로 두고 `stages` 를 `fit,emit` 으로 줄였다 (같은 τ 뱅크 위 게이트 ablation 이라
+  d259 와 **행 단위로** 짝지어 읽힌다).
+  처음 계획에 있던 "hole 예산도 판정에서 뺀다"는 **실측이 기각했다** — D259 576행에서 `hole`
+  이 binding 인 행은 **0** 이고, `--hole_mode excess`(기본)가 `target_hole = hole_static +
+  0.20` 이라 시작 pose 가 만든 구멍은 이미 면제돼 있다 (car-roundabout hole 0.498 /
+  hole_static 0.495, drive-desert 0.185/0.185). 사다리는 손 안 댔다.
+  결과(16편, magnifying-glass 는 anchor `subject_area 0.0` 으로 tau 단계에서 빠짐):
+  moving **141 -> 262** (24.5% -> 45.5%), `clamped_low` **389 -> 252**, 방위 분포
+  `front 49/right 44/left 37/back 11` -> `front 70/right 68/back 63/left 61`.
+  남은 clamp 의 binding 은 `obb 156 / ground 59 / approach 37`.
 - **preset `track_pedestal_down_dolly_in` (2026-09-22).** 비-track 짝
   `pedestal_down_dolly_in`(하강+전진)의 track 판. 사용자가 dynpose #588 을
   "track dolly in / track pedestal down / track dolly in pedestal down" 세 개로 돌려

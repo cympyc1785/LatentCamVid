@@ -24,7 +24,7 @@
 
 GUI `obb` 폴더에서 동적/정적/라벨을 따로 끄고, 색(rgb 피커)과 선 굵기를 바꾼다. 색은
 `--obb_color_dyn`/`--obb_color_static` 으로 처음부터 지정할 수도 있다. 굵기가 색과 **다른
-경로**로 도는 이유: viser line handle 은 `line_width` 는 갱신되는 프로퍼티인데 `colors` 는
+경로**로 도는 이유: viser line handle 은 `thickness` 는 갱신되는 프로퍼티인데 `colors` 는
 아니라, 색을 바꾸려면 remove 후 다시 그리는 수밖에 없다. 동적 OBB 는 노드×프레임이라
 snowboard 만 해도 249개고, 색을 바꿀 때마다 전부 다시 그리면 브라우저가 멎는다. 그래서
 **버전 도장(`obb_version`)** 을 찍어 두고 `obb_show` 가 "보이게 되는 순간"에만 빚을 갚는다 —
@@ -40,6 +40,14 @@ start~end 를 `frame interval (every N)` 간격으로) / `all frames`(전 구간
 굵기 손잡이는 셋이고 서로 단위가 다르다: `camera thickness`(프러스텀, world 절대값) ·
 `path thickness x`(경로선, 선마다 다른 기준값에 곱하는 **배율** — 소스 0.08 / plan 0.10 비율이
 슬라이더를 밀어도 유지된다) · `OBB thickness`(cam_scale 배율 — 씬마다 scale 이 100배 다르다).
+
+굵기를 코드에서 바꿀 때는 **`handle.thickness`** 에 넣는다. `handle.line_width` 는 viser 1.1.0
+에서 그것의 폐기된 별칭이고, 대입하면 `thickness_units` 가 `"screen"` 으로 못 박혀 world 값이
+픽셀로 재해석된다 — 0.02 world 프러스텀에 0.02 를 넣으면 0.02 **픽셀**이 돼 화면에서 사라진다.
+
+`paths`(경로선 전체)와 `probe camera` 는 **기본 꺼짐**이다. 둘 다 프러스텀보다 눈에 먼저 들어와
+정작 보려는 카메라 자세를 덮는다 (경로선은 49프레임 꺾은선, probe 는 gizmo 화살표). 예전처럼
+처음부터 켜려면 `--paths_on` / `--probe_on`.
 
 ## motion 브라우저 (`--banks`)
 
@@ -356,6 +364,12 @@ def main():
     parser.add_argument("--plan_now_color", default="", type=str)
     parser.add_argument("--obb_color_dyn", default="", type=str)
     parser.add_argument("--obb_color_static", default="", type=str)
+    # 경로선·probe 는 기본 꺼짐이다. 둘 다 프러스텀보다 눈에 먼저 들어와서, 정작 보려는
+    # "카메라가 어디서 어디를 보나"를 가린다. 예전 동작(둘 다 켜짐)은 이 플래그로 돌아온다.
+    parser.add_argument("--paths_on", action="store_true",
+                        help="카메라 경로선을 처음부터 켠다 (기본 꺼짐, GUI view > paths)")
+    parser.add_argument("--probe_on", action="store_true",
+                        help="probe 카메라(프러스텀+gizmo)를 처음부터 켠다 (기본 꺼짐)")
     parser.add_argument("--viewer_root", default=VIEWER_ROOT_DEFAULT, type=str)
     args = parser.parse_args()
 
@@ -423,22 +437,25 @@ def main():
     focal = float(intrinsics[0, 0, 0])
 
     # 경로선은 **색을 갈아끼울 수가 없다** — viser 1.1.0 의 LineSegmentsHandle 이 내놓는 건
-    # line_width/visible/wxyz/position 뿐이고 colors 는 없다. 그래서 색 피커가 움직이면 같은
+    # thickness/visible/wxyz/position 뿐이고 colors 는 없다. 그래서 색 피커가 움직이면 같은
     # 이름으로 remove 후 다시 add 한다 (프러스텀은 `.color` 대입이 먹으니 그쪽은 그대로 둔다).
     # 이름이 같으므로 재생성해도 씬 트리에 중복 노드가 남지 않는다.
-    # 굵기는 반대다 — `line_width` 는 갱신되는 프로퍼티라 다시 그릴 필요가 없다. 그래서 선마다
+    # 굵기는 반대다 — `thickness` 는 갱신되는 프로퍼티라 다시 그릴 필요가 없다. 그래서 선마다
     # **기준 굵기**를 따로 들고(`line_base`) 슬라이더는 거기 곱하는 배율로 둔다. 소스 0.08 /
     # plan 0.10 처럼 원래 다른 값을 쓰던 비율이 슬라이더를 움직여도 유지된다.
     lines, line_base = {}, {}
-    # 배율을 GUI handle 이 아니라 dict 로 들고 있는 이유: 소스 경로선은 GUI 를 만들기 **전에**
-    # 그려지는데, 그때 슬라이더를 읽으려 하면 아직 없다. 슬라이더 콜백이 이 값을 갱신한다.
-    lw = {"path": 1.0}
+    # 배율·표시 여부를 GUI handle 이 아니라 dict 로 들고 있는 이유: 소스 경로선은 GUI 를 만들기
+    # **전에** 그려지는데, 그때 위젯을 읽으려 하면 아직 없다. 위젯 콜백이 이 값을 갱신한다.
+    # `show` 기본이 False 인 이유: 49프레임 경로선 3~4개가 프러스텀보다 굵게 화면을 덮어
+    # 정작 봐야 할 카메라 자세가 안 보인다. `--paths_on` 이나 GUI 체크박스로 켠다.
+    lw = {"path": 1.0, "show": bool(args.paths_on)}
 
     def draw_line(key, name, segments, color, thickness):
         drop_line(key)
         line_base[key] = float(thickness)
         lines[key] = server.scene.add_line_segments(
-            name, segments, colors=color, thickness=float(thickness) * path_lw())
+            name, segments, colors=color, thickness=float(thickness) * path_lw(),
+            visible=bool(lw["show"]))
         return lines[key]
 
     def drop_line(key):
@@ -450,9 +467,17 @@ def main():
     def path_lw():
         return float(lw["path"])
 
+    # `handle.line_width = v` 를 쓰면 안 된다 — viser 1.1.0 에서 그건 `thickness` 의 **폐기된
+    # 별칭**이고, 대입하는 순간 `thickness_units` 를 `"screen"` 으로 못 박는다 (예전 line_width
+    # 가 픽셀이었으니 그 뜻을 지키려고). world 0.02 로 만든 선에 0.02 를 넣으면 0.02 **픽셀**이
+    # 돼서 화면에서 사라진다. `thickness` 에 직접 넣으면 단위가 world 그대로다.
     def apply_path_lw():
         for key, handle in lines.items():
-            handle.line_width = line_base[key] * path_lw()
+            handle.thickness = line_base[key] * path_lw()
+
+    def apply_path_vis():
+        for handle in lines.values():
+            handle.visible = bool(lw["show"])
 
     # 소스 카메라 경로도 선으로 — plan 이 떠는지 판단하려면 "원래 소스는 얼마나 떠는가"가
     # 있어야 한다. snowboard 소스는 |jerk| p95 가 plan 의 8배다.
@@ -624,13 +649,15 @@ def main():
     def apply_cam_lw():
         """프러스텀 선 굵기. 크기(scale)와 **다른 축**이다 — 작은 프러스텀을 굵게 그려야
         점군에 안 묻히는 씬이 있고, 반대로 큰 프러스텀은 가늘어야 뒤가 보인다.
-        `line_width` 는 갱신되는 프로퍼티라 다시 그릴 필요가 없다 (색과 다르다)."""
+        `thickness` 는 갱신되는 프로퍼티라 다시 그릴 필요가 없다 (색과 다르다).
+        **`line_width` 에 넣으면 안 된다** — 폐기된 별칭이라 단위가 screen(픽셀) 로 못 박혀
+        world 0.02 가 0.02 픽셀이 되고, 프러스텀이 통째로 안 보인다."""
         value = float(gui_cam_lw.value)
         pin_cams = [pair for pin in pins.values() for pair in pin["cams"]]
         for handle, _ in src_cams + state["cams"] + pin_cams:
-            handle.line_width = value
+            handle.thickness = value
         for probe in probes:
-            probe["cam"].line_width = value
+            probe["cam"].thickness = value
 
     def plan_colors():
         """(전 프레임, 현재 프레임) target 색. 피커가 단일 출처다."""
@@ -762,6 +789,9 @@ def main():
                                            max=max(0.05, cam_scale), step=0.002,
                                            initial_value=min(0.02, max(0.05, cam_scale)))
         # 경로선 굵기 **배율**. 소스 0.08 / plan 0.10 처럼 원래 다른 값을 쓰던 비율을 유지한다.
+        # 경로선 전체(소스·target·pin·subject track). 기본 꺼짐 — 49프레임 꺾은선이
+        # 프러스텀보다 굵어 카메라 자세를 덮는다. 굵기 슬라이더는 켠 상태에서만 의미가 있다.
+        gui_path = server.gui.add_checkbox("paths", initial_value=bool(args.paths_on))
         gui_path_lw = server.gui.add_slider("path thickness x", min=0.2, max=5.0, step=0.1,
                                             initial_value=1.0)
 
@@ -802,8 +832,10 @@ def main():
     with server.gui.add_folder("probe camera"):
         # frustum 과 gizmo 를 따로 끈다. 자리를 정하고 나면 화살표가 프러스텀을 가려서
         # "이 카메라가 뭘 보나"를 확인할 수가 없다.
-        gui_probe = server.gui.add_checkbox("show frustum", initial_value=True)
-        gui_probe_giz = server.gui.add_checkbox("show gizmo", initial_value=True)
+        # 기본 꺼짐 (`--probe_on` 으로 예전 동작). probe 는 "여기서 보면 어떻게 보이나"를
+        # 물을 때만 쓰는 도구인데, gizmo 화살표가 원점 근처 소스 프러스텀을 통째로 가린다.
+        gui_probe = server.gui.add_checkbox("show frustum", initial_value=bool(args.probe_on))
+        gui_probe_giz = server.gui.add_checkbox("show gizmo", initial_value=bool(args.probe_on))
         gui_probe_size = server.gui.add_slider(
             "probe size", min=cam_scale * 0.1, max=cam_scale * 10.0, step=cam_scale * 0.05,
             initial_value=cam_scale * 1.6)
@@ -932,6 +964,11 @@ def main():
     def _(_event):
         lw["path"] = float(gui_path_lw.value)
         apply_path_lw()
+
+    @gui_path.on_update
+    def _(_event):
+        lw["show"] = bool(gui_path.value)
+        apply_path_vis()
 
     # 색 갈아끼우기. 프러스텀은 `.color` 대입, 경로선은 remove + re-add (draw_line).
     # 계열 안에서 "현재 프레임"인지는 `(handle, ratio)` 의 ratio 로 가른다 — 크기 배율과 색
@@ -1074,7 +1111,8 @@ def main():
     gui_probe_snap.on_click(probe_snap)
     gui_probe_aim.on_click(probe_aim)
 
-    probe_0 = make_probe(*_pose(src_gl[0], gl2cv), PROBE_FOV_DEG, cam_scale * 1.6, True, True)
+    probe_0 = make_probe(*_pose(src_gl[0], gl2cv), PROBE_FOV_DEG, cam_scale * 1.6,
+                         bool(args.probe_on), bool(args.probe_on))
     bind_probe(probe_0)
     refresh_probe_list(probe_0["name"])
 
@@ -1115,6 +1153,8 @@ def main():
                             f"(GUI obb > OBB thickness / dynamic·static color)"),
             ("frame set", f"GUI view > dynamic frames = current frame  "
                           f"(interval / all frames + frame interval)"),
+            ("paths", f"{'on' if args.paths_on else 'off'}  (GUI view > paths / --paths_on)"),
+            ("probe", f"{'on' if args.probe_on else 'off'}  (GUI probe camera / --probe_on)"),
             ("url", f"http://localhost:{args.port}")]
     width_key = max(len(k) for k, _ in rows)
     for key, value in rows:

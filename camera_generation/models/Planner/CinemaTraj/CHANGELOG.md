@@ -7,7 +7,24 @@ Follows [Keep a Changelog](https://keepachangelog.com/).
 
 ## [Unreleased]
 
+### Fixed
+- **`viser_cloud.py` 프러스텀이 통째로 안 보이던 것 — `line_width` 는 폐기된 별칭이었다
+  (2026-09-21).** 바로 앞에 넣은 `apply_cam_lw()` 가 `handle.line_width = 0.02` 로 굵기를
+  먹였는데, viser 1.1.0 에서 그건 `thickness` 의 **폐기된 별칭**이고 대입하는 순간
+  `thickness_units` 를 `"screen"` 으로 못 박는다 (예전 `line_width` 가 픽셀이었으니 그 뜻을
+  유지하려고 — 라이브러리 주석에 그렇게 적혀 있다). 프러스텀은 `thickness=0.02`
+  **world** 로 만들어졌으므로 같은 숫자가 0.02 **픽셀**로 재해석돼 화면에서 사라졌다.
+  경로선은 살아 있었는데, 그쪽은 생성 시 `thickness=` 인자로 world 값을 받고 슬라이더를
+  건드리기 전엔 `apply_path_lw()` 가 안 돌기 때문이다 — "path 만 보인다"는 증상이 여기서 나왔다.
+  `.thickness` 에 직접 대입하도록 고쳤다 (`apply_cam_lw` / `apply_path_lw` 둘 다).
+  `dir(handle)` 에 `thickness` 가 안 보이는 게 함정이다 — 동적 prop 이라 런타임에만 있다.
+
 ### Changed
+- **`viser_cloud.py` 경로선과 probe 카메라가 기본 꺼짐 (2026-09-21).** 둘 다 프러스텀보다 눈에
+  먼저 들어와 정작 보려는 카메라 자세를 덮는다 — 경로선은 49프레임 꺾은선 3~4개,
+  probe 는 gizmo 화살표가 원점 근처 소스 프러스텀을 가린다. GUI `view > paths` 체크박스가
+  새로 생겼고 (소스·target·pin·subject track 전부를 한 번에), probe 는 기존
+  `show frustum`/`show gizmo` 의 초기값만 뒤집었다. **예전 동작은 `--paths_on` / `--probe_on`.**
 - **`viser_cloud.py` `dynamic: all frames` 체크박스 -> `dynamic frames` 드롭다운 (2026-09-21).**
   `current frame`(기본) / `interval` / `all frames` 세 갈래. 체크박스 시절엔 중간이 없어서
   "1장 아니면 49장"이었는데, 궤적을 겹쳐 보려면 띄엄띄엄이 필요하다 (49장 전부는 움직이는

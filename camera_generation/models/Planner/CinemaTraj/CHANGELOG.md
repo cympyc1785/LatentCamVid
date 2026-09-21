@@ -61,6 +61,16 @@ Follows [Keep a Changelog](https://keepachangelog.com/).
     전체**를 잡았기 때문이다 (`seg_instances/golf/meta.json` id 5). 별건.
 
 ### Changed
+- **`viser_frame.py` 저장 prefix 를 GUI 에서 직접 고친다 (2026-09-22).** 새 `save prefix`
+  텍스트 입력. 자동값(`--name_from`)이 초기값이고, **손대지 않은 동안에만** 영상 전환을
+  따라간다 — 타이핑한 이름이 드롭다운을 돌릴 때마다 지워지면 손잡이가 아니라 방해물이 된다.
+  입력은 `clean_prefix` 가 정리한다: `/` 는 `save_png` 의 `path.join` 이 **하위 폴더 경로**로
+  해석해 없는 폴더에 쓰려다 죽거나 `--out_dir` 밖에 파일을 만들고, 공백은 나중에 쉘에서 인용
+  부호를 빼먹는 사고를 만든다 (둘 다 `_` 로 치환). 비우면 자동값으로 돌아간다.
+  `save frame (all videos)` 는 직접 지정한 prefix 를 **머리**로 쓰고 영상별 자동값을 뒤에
+  붙인다 (`fig3` -> `fig3_crane_up_f0023.png` …) — 지정한 이름 하나만 쓰면 N 장이 전부 같은
+  이름이 돼 `_2`/`_3` 로만 갈린다. info 패널이 `save as <이름>.png (직접 지정 / 자동)` 로
+  누르기 전 이름을 보여준다.
 - **`viser_frame.py` 저장 파일 prefix 를 파일명 -> **부모 폴더 이름** (2026-09-21).**
   번들 릴은 preset 폴더마다 파일명이 똑같이 `warp.mp4` 라, 파일명으로 저장하면 세 preset 이
   전부 `warp_f0023.png` 가 되고 `_2`/`_3` 로만 갈려 어느 preset 인지 알 수 없었다 — 구분되는

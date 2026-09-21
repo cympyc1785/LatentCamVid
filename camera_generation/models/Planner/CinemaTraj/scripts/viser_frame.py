@@ -31,6 +31,13 @@
 안 갈리므로 `--name_from both`(부모_파일명) 를 쓴다 — 겹치면 기동 시 경고한다.
 `--name_from stem` 이 예전 동작이다. 같은 프레임을 또 누르면 `_2`, `_3` 이 붙는다
 (덮어쓰면 방금 저장한 것이 조용히 사라진다).
+
+prefix 는 GUI `save prefix` 에서 **직접 고친다**. 자동값이 초기값으로 들어가고, 손대지 않은
+동안에만 영상 전환을 따라간다 — 타이핑한 이름이 드롭다운을 돌릴 때마다 지워지면 손잡이가
+아니라 방해물이 된다. 입력은 `clean_prefix` 가 정리한다 (`/` 는 `path.join` 이 하위 폴더로
+해석해 `--out_dir` 밖에 쓰게 되고, 공백은 나중에 쉘에서 인용 부호를 빼먹는 사고를 만든다).
+`save frame (all videos)` 는 직접 지정한 prefix 를 **머리**로 쓰고 영상별 자동값을 뒤에 붙인다
+— 지정한 이름 하나만 쓰면 N 장이 전부 같은 이름이 돼 `_2`/`_3` 로만 갈린다.
 `save all videos` 는 지금 프레임을 **전 영상에서** 한 장씩 뽑는다 — arm 비교 그림을 만들 때
 드롭다운을 5번 돌리는 것이 실제 병목이었다.
 
@@ -110,6 +117,19 @@ class Clip:
         return self.cache[index]
 
 
+def clean_prefix(text: str, fallback: str) -> str:
+    """사용자가 GUI 에 타이핑한 prefix -> 파일 이름으로 쓸 수 있는 문자열.
+
+    `/` 를 그대로 두면 `save_png` 의 `path.join` 이 **하위 폴더 경로**로 해석해, 없는 폴더에
+    쓰려다 죽거나 `--out_dir` 밖에 파일을 만든다. 공백도 막는다 — 나중에 쉘에서 그 파일을
+    다룰 때 인용 부호를 빼먹는 사고가 반드시 한 번은 난다. 비면 `fallback`(자동 prefix)으로
+    돌아간다: 빈 이름으로 `_f0023.png` 를 만들면 어느 영상인지 알 수가 없다.
+    """
+    keep = "".join(c if (c.isalnum() or c in "_-.") else "_" for c in str(text).strip())
+    keep = keep.strip("_")
+    return keep or fallback
+
+
 def save_png(image: np.ndarray, out_dir: str, stem: str, index: int) -> str:
     """`<out_dir>/<stem>_f0012.png`. 이미 있으면 `_2`, `_3` … 을 붙인다.
 
@@ -160,6 +180,8 @@ def main():
 
     server = viser.ViserServer(port=args.port)
     state = {"clip": clips[0], "frame": int(np.clip(args.frame, 0, clips[0].count - 1))}
+    # 마지막으로 넣어 준 자동 prefix. GUI 값이 이것과 같으면 "사용자가 안 건드렸다" 로 본다.
+    auto = {"value": clips[0].prefix(args.name_from)}
 
     gui_pick = server.gui.add_dropdown("video", options=labels, initial_value=labels[0],
                                        disabled=len(labels) == 1)
@@ -171,9 +193,22 @@ def main():
     # 이미지는 GUI 패널에 둔다. 3D 씬(`scene.add_image`)에 두면 카메라를 맞춰야 화면을 채워서,
     # "프레임 하나를 크게 본다"는 목적에 손이 하나 더 든다.
     gui_image = server.gui.add_image(clips[0].frame(state["frame"]), label="", format="jpeg")
+    # 저장 prefix 를 **화면에서 고친다**. 자동값(`--name_from`)을 초기값으로 넣고, 사용자가
+    # 손대지 않은 동안에만 영상 전환에 따라 따라간다 (`auto` 가 그 판정을 들고 있다) —
+    # 타이핑한 이름이 드롭다운을 돌릴 때마다 지워지면 손잡이가 아니라 방해물이 된다.
+    gui_prefix = server.gui.add_text("save prefix",
+                                     initial_value=clips[0].prefix(args.name_from))
     gui_save = server.gui.add_button("save frame")
     gui_save_all = server.gui.add_button("save frame (all videos)")
     gui_saved = server.gui.add_text("saved", initial_value="", multiline=True, disabled=True)
+
+    def cur_prefix():
+        """지금 저장에 쓸 prefix (GUI 값 정리, 비면 자동값)."""
+        return clean_prefix(gui_prefix.value, state["clip"].prefix(args.name_from))
+
+    def touched():
+        """사용자가 prefix 를 직접 고쳤는가. 영상 전환 시 덮어쓸지 판단한다."""
+        return clean_prefix(gui_prefix.value, auto["value"]) != auto["value"]
 
     def redraw():
         clip, index = state["clip"], int(gui_frame.value)
@@ -188,8 +223,8 @@ def main():
             f"decoder     {clip.kind}   캐시 {len(clip.cache)}/{clip.count} 프레임",
             f"path        {clip.path}",
             f"out_dir     {args.out_dir}",
-            f"save as     {clip.prefix(args.name_from)}_f{index:04d}.png  "
-            f"(--name_from {args.name_from})",
+            f"save as     {cur_prefix()}_f{index:04d}.png"
+            + ("   (직접 지정)" if touched() else f"   (자동 --name_from {args.name_from})"),
         ])
 
     @gui_pick.on_update
@@ -200,26 +235,37 @@ def main():
         # 옛 상한에 잘린다. 반대 방향은 viser 가 value 를 상한으로 당겨 준다.
         gui_frame.max = max(clip.count - 1, 0)
         gui_frame.value = int(np.clip(state["frame"], 0, clip.count - 1))
+        # 손대지 않은 prefix 만 새 영상의 자동값으로 따라가게 한다.
+        new_auto = clip.prefix(args.name_from)
+        if not touched():
+            gui_prefix.value = new_auto
+        auto["value"] = new_auto
         redraw()
 
     gui_frame.on_update(lambda _: redraw())
+    gui_prefix.on_update(lambda _: redraw())        # 타이핑하는 동안 `save as` 를 따라가게
 
     @gui_save.on_click
     def _(_event):
         clip, index = state["clip"], int(gui_frame.value)
-        out = save_png(clip.frame(index), args.out_dir, clip.prefix(args.name_from), index)
+        out = save_png(clip.frame(index), args.out_dir, cur_prefix(), index)
         gui_saved.value = f"{out}\n{gui_saved.value}"[:2000]
         print(f"[save] {out}")
 
     @gui_save_all.on_click
     def _(_event):
         index = int(gui_frame.value)
+        # prefix 를 직접 지정했으면 그것을 **머리**로 쓰고 영상별 자동값을 뒤에 붙인다. 지정한
+        # 이름 하나만 쓰면 N 장이 전부 같은 이름이 돼 `_2`/`_3` 로만 갈린다 — 손으로 고친
+        # 이름을 살리면서 영상 구분도 유지하는 유일한 방법이다.
+        head = cur_prefix() if touched() else ""
         done = []
         for clip in clips:
             if index >= clip.count:        # 길이가 다른 영상은 건너뛴다 (클램프하면 다른
                 continue                   # 프레임을 같은 번호로 저장해 대조가 거짓이 된다)
+            base = clip.prefix(args.name_from)
             done.append(save_png(clip.frame(index), args.out_dir,
-                                 clip.prefix(args.name_from), index))
+                                 f"{head}_{base}" if head else base, index))
         gui_saved.value = "\n".join(done + [gui_saved.value])[:2000]
         print(f"[save all] {len(done)}장 (frame {index})")
 

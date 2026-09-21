@@ -116,6 +116,22 @@ All notable changes to the latentcam sub-project. Follows [Keep a Changelog](htt
   ⚠ bf16 을 고른 arm 은 fp32 on-the-fly 와 **비트 동일하지 않다** (실측 상대오차 3.3e-3).
 
 ### Fixed
+- **`.latentcam_index` 캐시가 코퍼스 재굽기를 못 잡아 옛 세그먼트(캡션↔변이 어긋남)를
+  재사용하던 것 (2026-09-21).** `dataset_dl3dv.py _load_index()` 의 캐시 키는 **설정만** 본다
+  (`meta_csv` / `nf<num_frames>` / `bo` / `k` / `cb` / `ms` / `bl` + `__ps`/`__as`/`__pf`) —
+  **내용 해시가 없다.** 그래서 같은 세대 이름으로 변이를 다시 구우면 옛 인덱스가 그대로 붙는다.
+  유일한 staleness 검사는 `scene_dir_list[0]` 디렉토리 존재 여부뿐이었다.
+  - 실측(D229 lady-running): 변이 2개 시절 캐시(20:54)가 변이 3개 코퍼스(20:59)에 재사용돼
+    `seg_list_d229_test.txt` 3줄인데 `eval_meta.json n_heldout_segments: 2`,
+    `eval_s42.log:13 [seg-list split] train 0/0 , val 2/3 (ids missing from dataset skipped)`.
+    더 나쁜 건 살아남은 2개도 `_0`/`_1` 이름만 같고 **다른 변이의 캡션**을 달고 있었다.
+    eval 은 rc=0, 릴도 그려져서 `n_heldout_segments` 말고는 흔적이 없다. `--force` 로도 안 고쳐진다.
+  - `_prompts_newer_than(cache_path)` 추가 — 인덱스에 든 scene 의 `prompts.json` mtime 이
+    캐시보다 새로우면(또는 파일이 사라졌으면) 캐시를 버리고 다시 빌드한다. 비용은 scene 당
+    `stat` 1회(인덱스 빌드는 같은 파일을 json 으로 여니 10배). `cfg.index_cache_mtime_check=False`
+    로 끌 수 있고 기본 True.
+  - 검증: `[index cache] STALE (prompts newer than cache: …)` → `[index build] 3 samples / 1 scenes`
+    → `val 3/3` → `n_heldout 3`.
 - **변이가 전부 `aim=free` 인 씬에서 molmo2 캐시가 `KeyError` 로 죽었다 (2026-09-21).**
   `cache_molmo2_embeddings.py` 의 `by_scene` 은 `FREE_PAIR = ('', '')` sentinel 을 **제외하고**
   만들어진다 — free 변이는 씬을 가리지 않고 0 행 하나로 모이기 때문이다. 그런데 씬 루프는

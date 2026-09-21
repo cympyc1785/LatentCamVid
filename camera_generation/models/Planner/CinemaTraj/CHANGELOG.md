@@ -8,6 +8,15 @@ Follows [Keep a Changelog](https://keepachangelog.com/).
 ## [Unreleased]
 
 ### Added
+- **preset `orbit_left_pedestal_down` (2026-09-21).** `orbit_left_pedestal_up` 의 하강 짝으로,
+  부호만 뒤집는다 (`pedestal_down_dolly_in` 이 쓰는 `-c["lateral"]` 과 같은 규약). aim 은 `_up`
+  과 같은 `look_at` — 궤도가 주동작이라 조준이 필요하다. 사용자 지시("hike 도 orbit left,
+  pull out orbit left, orbit left pedestal down").
+  - `lbm/presets.py` `PRESETS` 항목 + `configs/caption_presets.json`
+    (`axis: orbit`, `"orbits to the left around {target} while descending"`).
+    캡션 항목이 없으면 `build_bank_captions.py:599-602` assert 로 죽는다.
+  - `route_presets.py` 변경 없음 (`orbit_left_pedestal_up` 도 참조가 없다). `PRESET_TAU_REF`
+    는 `track_*` 만 자동 배정하므로 영향 없다. 기존 preset 44종은 비트 동일.
 - **`results/20260921_d215_complexall/run_d215.py --free_mode {zero,off}` (기본 `zero`, 2026-09-21).**
   `--stage molmo2` 가 `cache_molmo2_embeddings.py --free_mode` 로 하드코딩 `zero` 를 넘기고
   있었는데, 그쪽 `prepare_items:485` 는 **aim=='free' 변이가 0개면 assert 로 죽는다**.

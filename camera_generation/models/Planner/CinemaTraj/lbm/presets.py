@@ -185,6 +185,13 @@ PRESETS = {
     "orbit_left_pedestal_up": (lambda n, c: T.compose(T.true_orbit(c["sweep"], c["radius"], n),
                                                       T.pedestal(c["lateral"], n)),
                                "look_at", False),
+    #   orbit_left_pedestal_down — 위의 하강 짝 (사용자 지시 2026-09-21 "hike도 orbit left,
+    #                            pull out orbit left, orbit left pedestal down"). 부호만 뒤집는다
+    #                            (`pedestal_down_dolly_in` 이 쓰는 `-c["lateral"]` 과 같은 규약).
+    #                            aim 은 `_up` 과 같은 `look_at` — 궤도가 주동작이라 조준이 필요하다.
+    "orbit_left_pedestal_down": (lambda n, c: T.compose(T.true_orbit(c["sweep"], c["radius"], n),
+                                                        T.pedestal(-c["lateral"], n)),
+                                 "look_at", False),
     #   pedestal_down_dolly_in — 하강하면서 전진 (사용자 지시 2026-09-21 "vista golf scene을
     #                            pedestal down, pedestal down and push in으로 돌려봐줘").
     #                            `orbit_left_pedestal_up` 과 같은 `<주동작>_<부동작>` 표기.

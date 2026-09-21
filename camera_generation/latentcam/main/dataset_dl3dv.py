@@ -583,6 +583,32 @@ class CamDataset(torch.utils.data.Dataset):
             self._scene_cache[i] = c
         return c
 
+    def _prompts_newer_than(self, cache_path):
+        """캐시보다 새로 쓰인 prompts.json 이 있으면 그 경로 하나를 돌려준다 (없으면 None).
+
+        캐시 키에는 **내용이 안 들어간다** — 같은 코퍼스 이름으로 변이를 다시 구우면 옛 인덱스가
+        그대로 재사용된다. 세그먼트 수가 줄거나 늘어도 조용하고, 더 나쁘게는 `_0/_1` 이름이
+        옛 순서 그대로라 캡션↔변이가 어긋난 채 평가가 끝난다.
+
+        비용은 인덱스에 든 scene 당 stat 1회다 (인덱스 **빌드**는 같은 파일을 json 으로 여니
+        1/10 수준). 10k 코퍼스에서도 수 초. `index_cache_mtime_check=False` 로 끌 수 있다.
+        """
+        if not getattr(self.cfg, 'index_cache_mtime_check', True):
+            return None
+        try:
+            ref = osp.getmtime(cache_path)
+        except OSError:
+            return None
+        for sd in self.scene_dir_list:
+            pj = self._prompts_path(sd)
+            try:
+                if osp.getmtime(pj) > ref:
+                    return pj
+            except OSError:
+                # prompts.json 이 사라진 경우도 캐시가 현실과 다르다는 뜻이다.
+                return pj
+        return None
+
     def _load_index(self):
         """Build (samples, scene_dir_list, hw_list) — the lightweight index — reading only
         prompts.json + a per-scene (n,h,w) probe. Persisted to <root>/.latentcam_index/<key>.pt
@@ -623,8 +649,18 @@ class CamDataset(torch.utils.data.Dataset):
                 self.scene_dir_list = [osp.join(self.root, c) for c in idx['scene_chunks']]
             else:
                 self.scene_dir_list = idx['scene_dir_list']
+            newer = self._prompts_newer_than(cache_path)
             if self.scene_dir_list and not osp.isdir(self.scene_dir_list[0]):
                 print(f"[index cache] STALE (scene dirs do not exist under {self.root}) "
+                      f"-> rebuilding: {cache_path}")
+                self.samples = []; self.scene_dir_list = []; self.hw_list = []
+            elif newer is not None:
+                # [new 2026-09-21] 코퍼스를 **같은 이름으로 다시 구운** 경우. 캐시 키는 설정만
+                # 보므로 (meta_csv / num_frames / pose_source ...) 이름이 그대로면 옛 인덱스를
+                # 그대로 물어온다. d229(lady-running)에서 변이 2개 시절 캐시가 3개짜리 코퍼스에
+                # 재사용돼, 세그먼트 이름 `_0/_1` 이 **다른 변이의 캡션**을 달고 나왔다 —
+                # eval 은 rc=0, 릴도 그려져서 n_heldout_segments 말고는 흔적이 없다.
+                print(f"[index cache] STALE (prompts newer than cache: {newer}) "
                       f"-> rebuilding: {cache_path}")
                 self.samples = []; self.scene_dir_list = []; self.hw_list = []
             else:

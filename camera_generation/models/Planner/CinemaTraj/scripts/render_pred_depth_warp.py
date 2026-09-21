@@ -154,6 +154,11 @@ def main(args):
     # `fixed_focal=True` 는 이 릴의 규약이다 (아래 K 일치 assert 가 frame0 K 를 전제한다).
     renderer, recon = open_renderer(args, args.cloud_root, want_recon=args.with_source,
                                     fixed_focal=True)
+    persist = (not args.allow_no_seg if args.temporal_persistence == "auto"
+               else args.temporal_persistence == "on")
+    num_dyn = int((renderer.visible.sum(dim=1) == 1).sum())
+    print(f"{'cloud':<14}points {renderer.points.shape[0]:,}  dynamic {num_dyn:,}  "
+          f"temporal_persistence {persist}", flush=True)
     source = None
     if args.with_source:
         import cv2
@@ -185,7 +190,8 @@ def main(args):
 
         rendered, stats = [], {}
         for label, caption, c2w in columns:
-            picks, frames = render_variant(renderer, c2w, json_h, json_w, args.stride)
+            picks, frames = render_variant(renderer, c2w, json_h, json_w, args.stride,
+                                           temporal_persistence=persist)
             rendered.append((label, caption, frames))
             hole = float(np.mean([(np.all(f == (255, 0, 255), axis=-1)).mean() for f in frames]))
             stats[label] = round(hole, 4)
@@ -240,6 +246,7 @@ def main(args):
         json.dump({"video": args.video, "arms": dict(arms), "entries": index,
                    "order": args.order, "label_mode": args.label_mode,
                    "stride": args.stride, "fps": args.fps,
+                   "temporal_persistence": persist, "num_dynamic_points": num_dyn,
                    "scores_csv": args.scores_csv,
                    "f1_bands": ({"high_ge": args.f1_high, "low_le": args.f1_low, "counts": bands}
                                 if scores else None)}, file, ensure_ascii=False, indent=2)
@@ -289,6 +296,11 @@ def build_parser():
     # 둘 다 기본 off = 기존 릴 비트 동일.
     parser.add_argument("--allow_no_seg", action="store_true", default=False)
     parser.add_argument("--allow_empty_dynamic_mask", action="store_true", default=False)
+    # 시간 누적(TP) 대 그-프레임-점만(NTP). 기본 auto = `--allow_no_seg` 일 때만 NTP.
+    # WHY auto: dynamic 점이 0개인 점군은 전 점이 전 프레임 visible 이라 TP 가 움직이는 피사체를
+    # 49장 겹쳐 그린다 (`render_variant` docstring 실측). 그런 점군에서 TP 는 선택지가 아니라
+    # 버그다. seg 가 있는 기존 릴은 auto 가 TP 로 떨어져 비트 동일.
+    parser.add_argument("--temporal_persistence", choices=["auto", "on", "off"], default="auto")
     # caption F1 band 분리. 없으면 라벨·reel·index 전부 기존과 동일하게 나온다.
     parser.add_argument("--scores_csv", default=None)        # eval 의 preds_scores.csv
     parser.add_argument("--f1_high", type=float, default=0.8)   # 이 이상 -> reel_f1_high.mp4

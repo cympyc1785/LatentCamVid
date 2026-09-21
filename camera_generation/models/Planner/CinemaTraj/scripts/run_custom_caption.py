@@ -15,8 +15,13 @@ fit/emit) — 전부 안 돈다. 저것들은 **pseudo-GT 카메라를 굽기 �
 그래서 SAM3 를 안 탄 recon 이 나온다 → `dynamic_mask` 가 전부 0 이고 seg 인스턴스가
 없다. 그 recon 을 그대로 통과시키려고 하류에 붙인 스위치가 셋이다:
   `load_scene(allow_no_seg=True)` / `--allow_no_seg` / `--allow_empty_dynamic_mask`.
-셋 다 기본 off 라 기존 뱅크·릴 경로는 비트 동일하다. warp 점군은 한 덩어리 rigid
-cloud 가 되므로 **움직이는 물체는 번진다** — 그게 이 경로의 알려진 한계다.
+셋 다 기본 off 라 기존 뱅크·릴 경로는 비트 동일하다.
+
+그 점군은 전 점이 static (동적 점 0개) 이라 **시간 누적(TP) 렌더를 쓰면 안 된다** —
+움직이는 물체가 49프레임 겹쳐 유령 다발이 된다 (my-clip 실측: dynamic 0/44,994,231,
+골퍼가 스윙 전 구간 겹침). 그래서 warp 은 `--temporal_persistence auto` 가
+`--allow_no_seg` 를 보고 NTP(그 프레임 점만)로 떨어진다. 대가는 시간 누적 포기 =
+카메라가 소스에서 멀어질수록 구멍이 커지는 것이고, 겹침은 구조적으로 안 생긴다.
 
 ═══ 모델이 조건으로 읽는 것 (그래서 남은 단계가 이것뿐) ═════════════════════════════
   ① 소스 프레임 49장 + 소스 카메라   ← recon (DA3)
@@ -371,7 +376,8 @@ def stage_warp(args):
     """SOURCE | seed별 pred 한 줄짜리 depth warp 릴. GT 열은 없다 (GT 가 없으므로).
 
     `--allow_no_seg --allow_empty_dynamic_mask`: SAM3 를 안 돌렸으니 인스턴스도 동적
-    마스크도 없다. 점군이 한 덩어리 rigid cloud 라 **움직이는 물체는 번진다** (§모듈 docstring).
+    마스크도 없다. 그 점군은 동적 점이 0개라 `--temporal_persistence auto` 가 NTP 로
+    떨어진다 — 안 그러면 움직이는 물체가 49프레임 겹친다 (§모듈 docstring).
     """
     name = args.name
     out_dir = path.join(tmp_dir(name), "reel")

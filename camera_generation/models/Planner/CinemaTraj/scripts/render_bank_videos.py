@@ -147,7 +147,8 @@ def colorize_depth(depth: np.ndarray, valid: np.ndarray, lo: float, hi: float):
 
 
 def render_variant(renderer, poses: np.ndarray, height: int, width: int, stride: int,
-                   focal=None, depth_mode: bool = False, depth_range=None):
+                   focal=None, depth_mode: bool = False, depth_range=None,
+                   temporal_persistence: bool = True):
     """궤적 전 프레임 렌더 → 구멍 칠한 RGB 리스트. `stride` 로 프레임을 솎을 수 있다.
 
     `focal` (n,) 이 오면 그 프레임의 소스 K 를 `fx,fy` 만 배율해서 넘긴다 — **intrinsic zoom** 은
@@ -157,6 +158,12 @@ def render_variant(renderer, poses: np.ndarray, height: int, width: int, stride:
     `depth_mode` 면 splatting RGB 대신 **렌더 depth** 를 컬러맵으로 낸다. 점군 색(=소스 영상
     픽셀)이 빠지므로 텍스처에 가려 안 보이던 기하 — 구멍의 모양, 표면까지의 거리 변화 — 만
     남는다. 기본 off = 기존 동작.
+
+    `temporal_persistence=False` (NTP) 면 **그 프레임에서 유래한 점만** 그린다. SAM3 를 안 돌려
+    `dynamic_mask` 가 전부 0 인 점군(`--allow_no_seg`)에서 필요하다 — 그런 점군은 전 점이
+    static 이라 TP 렌더가 움직이는 피사체를 49프레임 겹쳐 그린다 (my-clip 실측: dynamic 점
+    0/44,994,231, 골퍼가 프레임마다 유령 다발). NTP 는 시간 누적을 포기하는 대신 그 겹침이
+    구조적으로 안 생긴다. 기본 True = 기존 릴 비트 동일.
     """
     picks = list(range(0, len(poses), max(stride, 1)))
     shots = []
@@ -166,7 +173,8 @@ def render_variant(renderer, poses: np.ndarray, height: int, width: int, stride:
             K = np.array(renderer.K_src[f], dtype=np.float64).copy()
             K[0, 0] *= float(focal[f])
             K[1, 1] *= float(focal[f])
-        shot = renderer.render(poses[f], K=K, frame=int(f), height=height, width=width)
+        shot = renderer.render(poses[f], K=K, frame=int(f), height=height, width=width,
+                               temporal_persistence=temporal_persistence)
         shots.append(shot if depth_mode else paint_holes(shot["rgb"], shot["valid"]))
     if not depth_mode:
         return picks, shots

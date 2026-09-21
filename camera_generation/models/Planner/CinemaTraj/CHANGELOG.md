@@ -7,6 +7,25 @@ Follows [Keep a Changelog](https://keepachangelog.com/).
 
 ## [Unreleased]
 
+### Fixed
+- **동적 점이 0개인 점군에서 depth warp 가 움직이는 물체를 49프레임 겹쳐 그리던 것
+  (2026-09-21).** `--allow_no_seg` 경로(SAM3 미실행)는 `dynamic_mask` 가 전부 0 이라
+  `static_mask = ~dynamic_mask` 로 **전 점이 static** 이 되고, static 점은 `visible` 이
+  전 프레임 True 라 TP 렌더가 프레임마다 49개 사본을 같이 그렸다. my-clip 실측
+  `points 44,994,231 / dynamic(visible.sum==1) 0` — 골퍼가 스윙 전 구간 유령 다발.
+  - `scripts/render_bank_videos.py: render_variant(temporal_persistence=True)` 인자 추가 →
+    `renderer.render` 로 전달. 기본 True 라 기존 호출부 6곳 전부 비트 동일.
+  - `scripts/render_pred_depth_warp.py --temporal_persistence {auto,on,off}` (기본 `auto`).
+    `auto` 는 `--allow_no_seg` 일 때만 NTP 로 떨어진다 — seg 가 있는 기존 릴은 TP 유지.
+    `index.json` 에 `temporal_persistence` / `num_dynamic_points` 를 같이 적는다 (이 값이
+    0 이면 그 릴은 믿으면 안 된다는 뜻이라 사후에 되짚을 수 있어야 한다).
+  - 대가: 시간 누적을 포기하므로 구멍이 커진다. my-clip 실측 `hole_magenta_frac`
+    s42 0.0685 → 0.1223 / s1234 0.0124 → 0.0672 / s2026 0.0 → 0.0073, GT(소스 pose) 0.0005.
+  - 참고 실측 (수정 대상 아님): seg 를 돌린 점군은 정상이다 —
+    `snowboard dynamic 6,478,846/43,812,771 (0.148)`, `golf 39,326,423/44,506,838 (0.884)`.
+    golf 가 0.884 인 것은 SAM3 keyword `"golf"` 가 `box_xyxy [0,0,1279,717]` 로 **화면
+    전체**를 잡았기 때문이다 (`seg_instances/golf/meta.json` id 5). 별건.
+
 ### Changed
 - **`scripts/run_custom_caption.py` 를 추론 전용 최소 경로로 축소 (2026-09-21).**
   사용자 지시 "sam3, vlm 이런거 안돌리고 순수히 우리 카메라 생성 모델만 돌리는거야 …

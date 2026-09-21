@@ -78,8 +78,11 @@ i 의 색과 그 자리를 지나는 선의 색이 어긋나고, 그러면 "색 
 
 ## obb 폴더 — 어느 박스를 띄우나
 
-`node` 드롭다운이 **한 노드만** 남긴다 (`all` 이면 전부). 씬 하나에 노드가 9개씩 있어 전부
-켜면 어느 박스가 지금 보는 subject 인지 고를 수가 없다. 기동 시 고정하려면 `--obb_node dyn_0`.
+`node` 드롭다운이 **한 노드만** 남긴다 (`all` 이면 전부). 기본이 **`dyn_0`** 다 — 씬 하나에
+노드가 6~16개씩 있어 전부 켜면 어느 박스가 지금 보는 subject 인지 고를 수가 없고, 큰 정적
+박스(snow-dog `stat_0 forest` 가 6.36 m)가 작은 subject 박스를 통째로 덮는다. 예전처럼 전부
+켜려면 `--obb_node all`, 다른 노드는 `--obb_node dyn_1`. 그 id 가 그래프에 없으면 `all` 로
+떨어진다 (노드 이름이 씬마다 달라 죽지 않게).
 `labels` 는 **기본 꺼짐** — 노드가 여럿이면 글자가 서로 겹쳐 읽히지도 않으면서 박스를 가린다.
 
 색은 handle 에 바꿔 끼울 수 없어 remove + re-add 다 (`LineSegmentsHandle` 에 `colors` 프로퍼티가
@@ -560,7 +563,11 @@ def main():
     parser.add_argument("--max_dyn_per_frame", default=60_000, type=int)
     # 0 이면 z_med 기준 자동 (0.002·z_med).
     parser.add_argument("--point_size", default=0.0, type=float)
-    parser.add_argument("--cam_stride", default=2, type=int)
+    # 프러스텀을 **몇 프레임마다 만들지**. 표시 간격은 GUI `camera frames`/`camera interval`
+    # 이 따로 고른다 — 동적 점군이 49프레임을 다 올려두고 슬라이더로 가리는 것과 같은 구조다
+    # (만들기를 줄이면 슬라이더가 그보다 촘촘해질 수 없으므로 기본은 1 = 전부 만든다).
+    # 기본이 2 였던 시절의 화면은 `camera interval` 초기값 2 가 그대로 재현한다.
+    parser.add_argument("--cam_stride", default=1, type=int)
     # 프러스텀 세로 화각(도). 카메라 K 와 무관한 고정값이다 (위 상수 주석 참고).
     parser.add_argument("--cam_fov_deg", default=FRUSTUM_FOV_DEG, type=float,
                         help=f"프러스텀 세로 화각 (기본 {FRUSTUM_FOV_DEG:.0f}도, GUI view > camera vfov)")
@@ -643,8 +650,12 @@ def main():
     parser.add_argument("--obb_anim", default="dyn", choices=("dyn", "moving"),
                         help="dyn(기본)=dyn_* 이고 track 있으면 애니메이션 / "
                              "moving=그래프 moving 플래그만 (예전 동작)")
-    parser.add_argument("--obb_node", default="", type=str,
-                        help="이 노드 id 의 OBB 만 띄운다 (예: dyn_0). 기본 = 전부")
+    # 기본이 `dyn_0` 이다 (예전엔 전부). 씬 하나에 노드가 6~16개씩 있어 전부 켜면 어느 박스가
+    # 지금 보는 subject 인지 못 고르고, 큰 정적 박스(snow-dog forest 6.36 m)가 작은 subject
+    # 박스를 통째로 덮는다. `--obb_node all` 로 예전 동작, `--obb_node dyn_1` 로 다른 노드.
+    # 그 id 가 그래프에 없으면 `all` 로 떨어진다 (노드 이름이 씬마다 다르므로 죽지 않게).
+    parser.add_argument("--obb_node", default="dyn_0", type=str,
+                        help="이 노드 id 의 OBB 만 띄운다 (기본 dyn_0, 전부는 `all`)")
     parser.add_argument("--viewer_root", default=VIEWER_ROOT_DEFAULT, type=str)
     args = parser.parse_args()
     require_viser_thickness()          # cloud.npz(1.4 GB) 를 읽기 전에 env 를 가른다
@@ -711,10 +722,13 @@ def main():
                 point_size=point_size, visible=(f == 0)))
 
     src_gl = cam_c2w @ gl2cv  # CV c2w -> add_frustums 가 먹는 GL c2w
-    src_cams = [(h, 1.0) for h in add_frustums(
+    # 세 번째 원소가 **프레임 번호**다. handle 순서만으로는 downsample 때문에 어느 프레임인지
+    # 알 수 없고, 그러면 표시 간격·색 램프를 어긋나게 칠한다. `-1` 은 "현재 프레임" 프러스텀
+    # 처럼 프레임이 고정되지 않은 것 (간격 필터를 통과시킨다).
+    src_cams = [(h, 1.0, f) for h, f in zip(add_frustums(
         server, "/cam_source", src_gl, float(intrinsics[0, 0, 0]),
         float(intrinsics[0, 1, 1]), width, height, src_color, cam_scale,
-        downsample=args.cam_stride)]
+        downsample=args.cam_stride), range(0, num_frames, max(1, int(args.cam_stride))))]
     # "현재 프레임" 1.6배 프러스텀은 기본으로 안 그린다 (`--now_cams` 로 켠다). 프레임을
     # 가리키는 큰 프러스텀이 같은 자리의 일반 프러스텀 위에 겹쳐 앉아, 궤적을 훑을 때
     # 카메라가 두 대인 것처럼 보였다. 빈 리스트로 두면 아래 갱신·색칠이 전부 no-op 이 된다.
@@ -722,7 +736,7 @@ def main():
         server, "/cam_source_now", src_gl[:1], float(intrinsics[0, 0, 0]),
         float(intrinsics[0, 1, 1]), width, height, src_now_color,
         cam_scale * 1.6)) if args.now_cams else []
-    src_cams += [(h, 1.6) for h in src_now]
+    src_cams += [(h, 1.6, -1) for h in src_now]
 
     focal = float(intrinsics[0, 0, 0])
 
@@ -775,16 +789,51 @@ def main():
         for key, handle in lines.items():
             handle.visible = line_vis(key)
 
+    def shown_cam_frames():
+        """프러스텀을 띄울 프레임 집합. 동적 점군/OBB 와 **같은 모양의 손잡이**다.
+
+        `range start`/`range end` 는 OBB 쪽과 **공유**한다 — "지금 보는 구간"은 카메라와 물체에
+        같은 뜻이고, 따로 두면 두 슬라이더를 매번 맞춰야 한다. 간격만 카메라용으로 따로 둔다
+        (프러스텀은 49개가 겹치면 점군보다 먼저 화면을 덮어서 OBB 보다 더 성기게 보는 일이 많다).
+        현재 프레임은 구간 밖이어도 늘 포함한다 (frame 슬라이더를 밀었는데 화면이 비면 슬라이더가
+        고장난 것처럼 보인다).
+        """
+        mode = str(gui_cam_mode.value)
+        frame = int(gui_frame.value)
+        if mode == "current frame":
+            return {frame}
+        step = max(1, int(gui_cam_step.value))
+        lo, hi = (0, num_frames - 1) if mode == "all frames" else \
+            (min(int(gui_span_lo.value), int(gui_span_hi.value)),
+             max(int(gui_span_lo.value), int(gui_span_hi.value)))
+        return {i for i in range(lo, hi + 1) if (i - lo) % step == 0} | {frame}
+
+    def apply_cam_frames():
+        """프러스텀 표시 여부 = (간격 필터) AND (계열 게이트).
+
+        프레임이 `-1` 인 handle("현재 프레임" 1.6배 프러스텀)은 간격을 통과시킨다 — 그건 frame
+        슬라이더가 가리키는 자리를 표시하는 것이라 간격과 무관하다.
+        """
+        frames = shown_cam_frames()
+        for handle, _ratio, frame in src_cams:
+            handle.visible = bool(lw["src"]) and (frame < 0 or frame in frames)
+        pin_cams = [pair for pin in pins.values() for pair in pin["cams"]]
+        for handle, _ratio, frame in state["cams"] + pin_cams:
+            handle.visible = frame < 0 or frame in frames
+
     def apply_src_vis():
         """소스 프러스텀 + 소스 경로선을 한 손잡이로 껐다 켠다 (`--source_on` / GUI 체크박스)."""
-        for handle, _ in src_cams:
-            handle.visible = bool(lw["src"])
+        apply_cam_frames()
         apply_path_vis()
 
     # 소스 카메라 경로도 선으로 — plan 이 떠는지 판단하려면 "원래 소스는 얼마나 떠는가"가
     # 있어야 한다. snowboard 소스는 |jerk| p95 가 plan 의 8배다.
     draw_line("src", "/src_path", path_segments(cam_c2w[:, :3, 3]), src_color, cam_scale * 0.08)
-    apply_src_vis()                      # 기본 꺼짐 — add_frustums 는 visible 인자를 안 받는다
+    # 기본 꺼짐 (`add_frustums` 는 visible 인자를 안 받는다). `apply_cam_frames()` 를 못 쓰는
+    # 이유는 그게 GUI 위젯을 읽는데 위젯이 아직 없기 때문이다 — 간격 필터는 아래 GUI 생성
+    # 뒤에 한 번 더 돈다.
+    for _h, _r, _f in src_cams:
+        _h.visible = bool(lw["src"])
     src_jerk = jerk_px(cam_c2w[:, :3, 3], z_med, focal)
 
     banks = list(args.banks) or ([args.bank] if args.bank else [])
@@ -968,7 +1017,7 @@ def main():
     def apply_cam_scale():
         value = float(gui_cam.value)
         pin_cams = [pair for pin in pins.values() for pair in pin["cams"]]
-        for handle, ratio in src_cams + state["cams"] + pin_cams:
+        for handle, ratio, _f in src_cams + state["cams"] + pin_cams:
             handle.scale = value * ratio
 
     def apply_cam_fov():
@@ -983,7 +1032,7 @@ def main():
             return
         fov = float(np.radians(float(gui_cam_fov.value)))
         pin_cams = [pair for pin in pins.values() for pair in pin["cams"]]
-        for handle, _ in src_cams + state["cams"] + pin_cams:
+        for handle, _r, _f in src_cams + state["cams"] + pin_cams:
             handle.fov = fov
 
     def apply_cam_lw():
@@ -994,7 +1043,7 @@ def main():
         world 0.02 가 0.02 픽셀이 되고, 프러스텀이 통째로 안 보인다."""
         value = float(gui_cam_lw.value)
         pin_cams = [pair for pin in pins.values() for pair in pin["cams"]]
-        for handle, _ in src_cams + state["cams"] + pin_cams:
+        for handle, _r, _f in src_cams + state["cams"] + pin_cams:
             handle.thickness = value
         for probe in probes:
             probe["cam"].thickness = value
@@ -1025,11 +1074,12 @@ def main():
         handle 순서만으로는 어느 프레임인지 알 수 없고, 그러면 램프를 어긋나게 칠한다."""
         return list(range(0, int(count), max(1, int(args.cam_stride))))
 
-    def paint_ramp(handles, ramp):
-        """프러스텀들을 램프 색으로. `add_frustums` 는 색을 하나만 받으므로 만든 뒤 칠한다
-        (`.color` 대입은 갱신되는 프로퍼티라 다시 그릴 필요가 없다 — 경로선과 반대다)."""
-        for handle, frame in zip(handles, stride_frames(len(ramp))):
-            handle.color = tuple(int(c) for c in ramp[min(frame, len(ramp) - 1)])
+    def paint_ramp(pairs, ramp):
+        """`[(handle, frame)]` 을 램프 색으로. `add_frustums` 는 색을 하나만 받으므로 만든 뒤
+        칠한다 (`.color` 대입은 갱신되는 프로퍼티라 다시 그릴 필요가 없다 — 경로선과 반대다).
+        프레임을 handle 과 **같이** 받는 이유: 순서로 되짚으면 downsample 에서 어긋난다."""
+        for handle, frame in pairs:
+            handle.color = tuple(int(c) for c in ramp[min(max(frame, 0), len(ramp) - 1)])
 
     def select(index: int):
         label, plan_c2w, row = motions[int(index)]
@@ -1043,11 +1093,12 @@ def main():
         # 끝까지 안 가거나 잘린다).
         ramp = plan_ramp(len(plan_c2w))
         fx_v, fy_v = cam_fx_fy(row)
-        plan_cams = list(add_frustums(server, "/cam_plan", plan_gl, fx_v, fy_v,
-                                      width, height, color,
-                                      cam_scale, downsample=args.cam_stride))
+        plan_cams = list(zip(add_frustums(server, "/cam_plan", plan_gl, fx_v, fy_v,
+                                          width, height, color,
+                                          cam_scale, downsample=args.cam_stride),
+                             stride_frames(len(plan_c2w))))
         paint_ramp(plan_cams, ramp)
-        handles = list(plan_cams)
+        handles = [h for h, _f in plan_cams]
         # 경로선은 handles 에 안 담는다 — draw_line 이 키 하나로 이전 것을 지우므로, 여기에도
         # 담으면 갈아끼울 때 같은 handle 을 두 번 remove 하게 된다.
         draw_line("plan", "/plan_path", path_segments(plan_c2w[:, :3, 3]),
@@ -1061,11 +1112,12 @@ def main():
             draw_line("track", "/subject_track", path_segments(track), (60, 220, 90),
                       cam_scale * 0.08)
         state.update(handles=handles + now, now=now, c2w=plan_c2w, label=label,
-                     cams=[(h, 1.0) for h in plan_cams] + [(h, 1.6) for h in now])
+                     cams=[(h, 1.0, f) for h, f in plan_cams] + [(h, 1.6, -1) for h in now])
         gui_info.value = motion_report(label, row, plan_c2w, track, z_med, focal, src_jerk)
         apply_cam_scale()
         apply_cam_lw()
         apply_cam_fov()
+        apply_cam_frames()
         refresh()
 
     def pin_node(label: str):
@@ -1096,9 +1148,10 @@ def main():
         pin_seq["n"] += 1
         node, plan_gl = pin_node(label), plan_c2w @ gl2cv
         fx_v, fy_v = cam_fx_fy(row)
-        cams = list(add_frustums(server, node + "/cam", plan_gl, fx_v, fy_v,
-                                 width, height, color,
-                                 cam_scale, downsample=args.cam_stride))
+        cams = list(zip(add_frustums(server, node + "/cam", plan_gl, fx_v, fy_v,
+                                     width, height, color,
+                                     cam_scale, downsample=args.cam_stride),
+                        stride_frames(len(plan_c2w))))
         # 현재 프레임 프러스텀만 1.6배로 크게 — pin 을 여러 대 켜면 선이 엉켜서 "이 변이가 지금
         # 어디를 보고 있나"를 경로만으로는 못 읽는다. 같은 색이라 소속은 유지된다.
         now = list(add_frustums(
@@ -1108,12 +1161,13 @@ def main():
         # 담는다 — 담으면 remove_pin 이 drop_line 과 겹쳐 같은 handle 을 두 번 지운다.
         draw_line(("pin", label), node + "/path", path_segments(plan_c2w[:, :3, 3]), color,
                   cam_scale * 0.10)
-        pins[label] = {"handles": cams + now, "now": now, "c2w": plan_c2w,
-                       "cams": [(h, 1.0) for h in cams] + [(h, 1.6) for h in now],
+        pins[label] = {"handles": [h for h, _f in cams] + now, "now": now, "c2w": plan_c2w,
+                       "cams": [(h, 1.0, f) for h, f in cams] + [(h, 1.6, -1) for h in now],
                        "color": color, "row": row}
         apply_cam_scale()
         apply_cam_lw()
         apply_cam_fov()
+        apply_cam_frames()
 
     def remove_pin(label: str):
         pin = pins.pop(label, None)
@@ -1168,6 +1222,15 @@ def main():
         gui_frame_step = server.gui.add_slider("frame interval (every N)", min=1,
                                                max=max(2, num_frames // 2), step=1,
                                                initial_value=5)
+        # 프러스텀 표시 간격. OBB 와 같은 모양의 손잡이지만 **간격만 따로**다 — 프러스텀은
+        # 49개가 겹치면 점군보다 먼저 화면을 덮어 OBB 보다 성기게 보는 일이 많다.
+        # 초기값 `interval` + 2 는 `--cam_stride 2` 가 기본이던 시절의 화면과 같다.
+        gui_cam_mode = server.gui.add_dropdown(
+            "camera frames", options=["interval", "all frames", "current frame"],
+            initial_value="interval")
+        gui_cam_step = server.gui.add_slider("camera interval (every N)", min=1,
+                                             max=max(2, num_frames // 2), step=1,
+                                             initial_value=2)
         gui_ground = server.gui.add_checkbox("ground grid", initial_value=bool(args.ground_on),
                                              disabled=ground_handle is None)
         gui_size = server.gui.add_slider("point size", min=point_size * 0.25, max=point_size * 4.0,
@@ -1210,7 +1273,7 @@ def main():
         _node_ids = [row[0] for row in graph_rows]
         gui_obb_node = server.gui.add_dropdown(
             "node", options=["all"] + _node_ids,
-            initial_value=args.obb_node if args.obb_node in _node_ids else "all",
+            initial_value=(args.obb_node if args.obb_node in _node_ids else "all"),
             disabled=not _node_ids)
         # 라벨 기본 꺼짐 — 노드가 9개면 글자가 서로 겹쳐 읽히지도 않으면서 박스를 가린다.
         gui_obb_labels = server.gui.add_checkbox("labels", initial_value=False,
@@ -1311,6 +1374,8 @@ def main():
                 obb_show(entry, show_dyn_obb and i in frames)
         if ground_handle is not None:
             ground_handle.visible = bool(gui_ground.value)
+        # 프러스텀도 frame / range 슬라이더를 따른다 (`current frame`·`interval` 모드).
+        apply_cam_frames()
         if src_now:
             src_now[0].wxyz, src_now[0].position = _pose(src_gl[f], gl2cv)
         if state["now"]:
@@ -1380,6 +1445,8 @@ def main():
 
     gui_cam.on_update(lambda _: apply_cam_scale())
     gui_cam_fov.on_update(lambda _: apply_cam_fov())
+    gui_cam_mode.on_update(lambda _: apply_cam_frames())
+    gui_cam_step.on_update(lambda _: apply_cam_frames())
     gui_cam_lw.on_update(lambda _: apply_cam_lw())
 
     @gui_path_lw.on_update
@@ -1399,7 +1466,7 @@ def main():
     def repaint_src(_event=None):
         color = tuple(int(c) for c in gui_src_color.value)
         now_color = tuple(int(c) for c in gui_src_now_color.value)
-        for handle, ratio in src_cams:
+        for handle, ratio, _f in src_cams:
             handle.color = now_color if ratio > 1.0 else color
         draw_line("src", "/src_path", path_segments(cam_c2w[:, :3, 3]), color, cam_scale * 0.08)
 
@@ -1410,8 +1477,8 @@ def main():
         gui_plan_end_color.disabled = not (motions and bool(gui_plan_grad.value))
         count = len(state["c2w"]) if state["c2w"] is not None else num_frames
         ramp = plan_ramp(count)
-        paint_ramp([h for h, ratio in state["cams"] if ratio <= 1.0], ramp)
-        for handle, ratio in state["cams"]:
+        paint_ramp([(h, f) for h, ratio, f in state["cams"] if ratio <= 1.0], ramp)
+        for handle, ratio, _f in state["cams"]:
             if ratio > 1.0:
                 handle.color = now_color
         if state["c2w"] is not None:
@@ -1556,6 +1623,7 @@ def main():
     # 소스 프러스텀은 GUI 보다 **먼저** 만들어지므로 여기서 한 번 덮어야 한다 — motions 가
     # 없는 씬에서는 select() 가 안 돌아 소스만 예전 화각으로 남았다.
     apply_cam_fov()
+    apply_cam_frames()
     if motions:
         select(0)
     else:
@@ -1611,6 +1679,9 @@ def main():
                          f"labels {'on' if gui_obb_labels.value else 'off'}"),
             ("frame set", f"GUI view > dynamic frames = current frame  "
                           f"(interval / all frames + frame interval)"),
+            ("camera frames", f"interval every 2  (만든 것은 stride {max(1, int(args.cam_stride))} "
+                              f"= {len(range(0, num_frames, max(1, int(args.cam_stride))))}개/궤적, "
+                              f"GUI view > camera frames / --cam_stride)"),
             ("paths", f"{'on' if args.paths_on else 'off'}  (GUI view > paths / --paths_on)"),
             ("ground grid", ("없음 (--no_ground_grid 또는 graph 없음)" if ground_handle is None
                              else f"{'on' if args.ground_on else 'off'}  "

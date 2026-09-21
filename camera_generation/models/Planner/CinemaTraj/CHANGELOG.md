@@ -35,6 +35,23 @@ Follows [Keep a Changelog](https://keepachangelog.com/).
     전체**를 잡았기 때문이다 (`seg_instances/golf/meta.json` id 5). 별건.
 
 ### Changed
+- **`viser_cloud.py` 프러스텀 표시 간격을 GUI 로 (2026-09-21).** 예전에는 `--cam_stride` 가
+  **만들 때** 걸러서 띄운 뒤에는 바꿀 수가 없었다. 이제 동적 점군과 같은 구조다 — 전 프레임을
+  만들어 두고(`--cam_stride` 기본 2 -> **1**) 표시만 가린다. 새 GUI `view > camera frames`
+  (`interval` / `all frames` / `current frame`) + `camera interval (every N)`.
+  `range start`/`range end` 는 OBB 와 **공유**한다 ("지금 보는 구간"은 카메라와 물체에 같은
+  뜻이고, 따로 두면 두 슬라이더를 매번 맞춰야 한다). 간격만 카메라용으로 따로 둔 이유:
+  프러스텀 49개가 겹치면 점군보다 먼저 화면을 덮어 OBB 보다 성기게 보는 일이 많다.
+  초기값 `interval` + 2 가 `--cam_stride 2` 시절 화면을 그대로 재현한다. `all frames` 에서도
+  간격이 먹는 것은 기존 `dynamic frames` 드롭다운과 같은 규약이다 (전부 보려면 간격 1).
+  내부적으로 프러스텀 목록이 `(handle, ratio)` -> `(handle, ratio, frame)` 이 됐다 — handle
+  순서만으로는 downsample 에서 프레임을 되짚을 수 없어 간격 필터와 색 램프가 어긋난다.
+  프레임 `-1` 은 "현재 프레임" 1.6배 프러스텀으로, 간격과 무관하게 통과시킨다.
+- **`viser_cloud.py` OBB 기본 노드가 `all` -> `dyn_0` (2026-09-21).** 씬 하나에 노드가
+  6~16개씩 있어 전부 켜면 어느 박스가 지금 보는 subject 인지 고를 수가 없고, 큰 정적 박스가
+  작은 subject 박스를 통째로 덮는다 (snow-dog `stat_0 forest` 6.36 m vs `dyn_1 dog` 0.0103).
+  그 id 가 그래프에 없으면 `all` 로 떨어진다 (노드 이름이 씬마다 달라 죽지 않게).
+  **예전 동작은 `--obb_node all`.**
 - **`viser_cloud.py` 지면 격자가 기본 꺼짐 (2026-09-21).** 격자는 `half` 를 카메라와 노드를
   다 감싸게 잡으므로 씬 전체를 덮는데, 정작 보려는 카메라·OBB 위에 얹혀 화면을 가린다.
   중력축이 틀어졌는지 볼 때만 필요하다. **만들기와 보이기를 다른 손잡이로 갈랐다** —

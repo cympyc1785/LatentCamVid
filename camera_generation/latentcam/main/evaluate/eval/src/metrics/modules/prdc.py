@@ -210,10 +210,16 @@ class ManifoldMetrics(Metric):
                 f"(split 당 최소 {need} 개 필요)"
             )
         if n < need:
-            raise ValueError(
+            # 예전엔 여기서 raise 했는데, 그러면 metrics.json 자체가 안 나와서 **CLaTr/FCD/caption
+            # 까지 같이 날아간다**. "영상 하나 + preset 하나" 요청(D219)은 test 가 1 세그먼트라
+            # 항상 이 경로를 타고, 정작 보려는 건 PRDC 가 아니라 clatr_score/caption fscore 다.
+            # PRDC 만 NaN 으로 비우고 나머지 지표는 살린다 — N>=need 인 기존 arm 은 영향 없다.
+            print(
                 f"[prdc] 샘플이 {n} 개뿐이라 manifold_k={self.manifold_k} 로는 PRDC 를 못 잰다 "
-                f"(최소 {need} 개)."
+                f"(최소 {need} 개) — PRDC 4 개 지표만 NaN 으로 두고 나머지는 계속 잰다."
             )
+            nan = torch.tensor(float("nan"), device=real_all.device)
+            return nan, nan.clone(), nan.clone(), nan.clone()
 
         real_features = real_all.chunk(eff_splits, dim=0)
         fake_features = fake_all.chunk(eff_splits, dim=0)

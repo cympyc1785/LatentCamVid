@@ -104,6 +104,18 @@ class FrechetCLaTrDistance(Metric):
         Calculate FD_CLaTr score based on accumulated extracted features from the two
         distributions.
         """
+        # 샘플이 1 개면 공분산 분모 (N-1) 이 0 이라 cov 가 통째로 NaN 이 되고, 그 NaN 행렬이
+        # `torch.linalg.eigvals` 로 들어가면 **파이썬 예외가 아니라 MKL 이 죽는다**
+        # ("Intel oneMKL ERROR: Parameter 3 was incorrect on entry to DGEBAL" -> rc=-11).
+        # 프로세스가 통째로 날아가서 CLaTr/caption 결과도 같이 잃는다. FCD 는 두 분포를
+        # 비교하는 지표라 N=1 에서는 정의 자체가 없으므로 NaN 으로 비우고 넘어간다.
+        # ("영상 하나 + preset 하나" 요청(D219)이 항상 이 경로다. N>=2 는 기존과 동일.)
+        n = int(min(self.real_features_num_samples, self.fake_features_num_samples))
+        if n < 2:
+            print(f"[fcd] 샘플이 {n} 개뿐이라 공분산을 못 만든다 — FCD 를 NaN 으로 둔다.")
+            return torch.tensor(float("nan"), dtype=self.orig_dtype,
+                                device=self.real_features_sum.device)
+
         mean_real = self.real_features_sum / self.real_features_num_samples
         mean_real = mean_real.unsqueeze(0)
 

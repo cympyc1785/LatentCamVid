@@ -116,6 +116,18 @@ All notable changes to the latentcam sub-project. Follows [Keep a Changelog](htt
   ⚠ bf16 을 고른 arm 은 fp32 on-the-fly 와 **비트 동일하지 않다** (실측 상대오차 3.3e-3).
 
 ### Fixed
+- **test 세그먼트가 1개면 FCD 가 MKL 레벨에서 프로세스를 죽였다 (2026-09-21).**
+  `FrechetCLaTrDistance.compute` 의 공분산 분모가 `N-1` 이라 N=1 이면 cov 가 NaN 이 되고,
+  NaN 행렬이 `torch.linalg.eigvals` 로 들어가면 예외가 아니라 **`Intel oneMKL ERROR:
+  Parameter 3 was incorrect on entry to DGEBAL` + rc=-11 (SIGSEGV)** 로 `src.eval_only`
+  자체가 날아간다 — CLaTr/caption 결과도 같이 잃는다. FCD 는 두 분포 사이 거리라 N=1 에선
+  정의가 없으므로 **NaN 으로 비우고** 넘어간다. N>=2 는 코드 경로가 그대로다.
+- **test 세그먼트가 4개 미만이면 PRDC 가 raise 해서 `metrics.json` 이 통째로 안 나왔다 (2026-09-21).**
+  `ManifoldMetrics.compute` 가 `N < manifold_k+1` 일 때 `ValueError` 를 던졌는데, 이 예외가
+  `src.eval_only` 를 죽여서 **CLaTr(`clatr_score`)·FCD·caption fscore 까지 같이 날아간다**.
+  "영상 하나 + preset 하나" 요청(D219: test 1 세그먼트)은 항상 이 경로를 타고, 정작 보려는
+  지표는 PRDC 가 아니다. 이제 raise 대신 **PRDC 4개 지표만 NaN** 으로 두고 경고를 찍은 뒤
+  나머지 지표를 계속 잰다. `N >= manifold_k+1` 인 기존 arm 은 코드 경로가 그대로라 영향 없다.
 - **`cache_umt5_embeddings.py --source prompts` 가 dynpose 코퍼스에서 0건이었다 (2026-09-19).**
   glob 이 `<root>/*/*/<prompts_file>` 2단계 고정이라 vista4d 레이아웃에만 맞고 dynpose
   (`<root>/dynpose/<scene>/da3/prompts.json`) 는 한 단계 깊어 아무것도 못 찾았다. 그런데 빈

@@ -189,6 +189,26 @@ CORPORA = {
         },
         ref="d234_s11",
     ),
+    # D223 (2026-09-22, 3 entry). lady-running 은 D223 에서 새로 ingest 한 씬이라 d215
+    # keeper 17씬에 없다 — 코퍼스를 따로 둔다. preset 은 track_orbit_right /
+    # track_orbit_left / track_pull_out_arc_right 셋.
+    #   entry 3개라 FCD/PRDC 는 의미가 없다 (분포 지표 인용 금지). 읽을 건
+    #   `clatr/clatr_score` 와 caption 지표뿐이다.
+    "vista_d229": dict(
+        corpus="/data1/cympyc1785/data/Vista4D-Eval-Data/latentcam_d229",
+        split_name="seg_list_d229_test.txt",
+        eval_data="/data1/cympyc1785/data/Vista4D-Eval-Data/eval_data",
+        prefix="vista4d",
+        cloud_root=path.join(HERE, "out"),
+        out=path.join(HERE, "results", "20260922_d223_gendop_d229"),
+        depth_norm="median",
+        ours={
+            "d229_s42":   EVAL_MY + "d229_s42__last",
+            "d229_s1234": EVAL_MY + "d229_s1234__last",
+            "d229_s2026": EVAL_MY + "d229_s2026__last",
+        },
+        ref="d229_s42",
+    ),
 }
 
 # GenDoP arm 2종. text 는 어느 ckpt 를 쓰든 --text_from_eval_dir 로 같은 문장을 받는다.

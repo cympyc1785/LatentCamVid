@@ -8,6 +8,11 @@ Follows [Keep a Changelog](https://keepachangelog.com/).
 ## [Unreleased]
 
 ### Added
+- **`scripts/run_gendop_eval.py` CORPORA `vista_d229` (2026-09-22).** lady-running
+  **3 entry** 코퍼스 (`track_orbit_right` / `track_orbit_left` / `track_pull_out_arc_right`).
+  D223 에서 새로 ingest 한 씬이라 d215 keeper 17씬에 없어 항목을 따로 뒀다. `ours` 는
+  d229 seed 42/1234/2026 의 `__last` eval 폴더. entry 3개라 FCD/PRDC 는 NaN 이니
+  분포 지표를 이 표에서 인용하지 말 것 — 읽을 건 `clatr/clatr_score` 와 caption 지표뿐이다.
 - **`scripts/run_gendop_eval.py` CORPORA `vista_d234` (2026-09-21).** soapbox
   `track_orbit_right` **1 entry** 짜리 코퍼스. d215 의 soapbox 캡션은 anchor 라벨 그대로
   "wheel" 이었는데 d234 에서 `--desc_override` 로 지칭구를 "the blue cart" 로 바꿔 다시

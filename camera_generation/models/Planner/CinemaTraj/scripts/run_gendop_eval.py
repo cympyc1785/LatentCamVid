@@ -230,6 +230,25 @@ CORPORA = {
         },
         ref="d238_s2026",
     ),
+    # D241 (2026-09-22, 1 entry). `vista_d238` 과 **카메라가 같고 문장만 짧다** —
+    # 지칭구를 "the man in a light shirt and dark pants walking up a rocky slope" 에서
+    # "the man walking on a rocky slope" 로 줄인 판본 (`run_forced.py --bank_gen d238`).
+    # 문장 길이가 CLaTr 에 얼마나 먹히는지 보려는 것이라 두 코퍼스를 나란히 둔다.
+    "vista_d241": dict(
+        corpus="/data1/cympyc1785/data/Vista4D-Eval-Data/latentcam_d241",
+        split_name="seg_list_d241_hike1.txt",
+        eval_data="/data1/cympyc1785/data/Vista4D-Eval-Data/eval_data",
+        prefix="vista4d",
+        cloud_root=path.join(HERE, "out"),
+        out=path.join(HERE, "results", "20260922_d241_gendop_hike1"),
+        depth_norm="median",
+        ours={
+            "d241_s42":   EVAL_MY + "d241_s42__last",
+            "d241_s1234": EVAL_MY + "d241_s1234__last",
+            "d241_s2026": EVAL_MY + "d241_s2026__last",
+        },
+        ref="d241_s42",
+    ),
 }
 
 # GenDoP arm 2종. text 는 어느 ckpt 를 쓰든 --text_from_eval_dir 로 같은 문장을 받는다.

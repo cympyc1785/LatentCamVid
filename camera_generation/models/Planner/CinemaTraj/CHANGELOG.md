@@ -8,6 +8,13 @@ Follows [Keep a Changelog](https://keepachangelog.com/).
 ## [Unreleased]
 
 ### Added
+- **`scripts/run_gendop_eval.py` CORPORA `vista_d241` (2026-09-22).** `vista_d238` 과
+  **카메라가 같고 문장만 짧은** 대조군. 지칭구를 "the man in a light shirt and dark pants
+  walking up a rocky slope" → "the man walking on a rocky slope" 로 줄여 캡션만 다시 구운
+  세대(`run_forced.py --bank_gen d238`)라 뱅크 행은 d238 과 비트 동일하다. 문장 길이가
+  CLaTr 에 얼마나 먹히는지 두 코퍼스를 나란히 두고 본다. 세대를 가른 이유는 같은 이름으로
+  재굽기하면 이미 평가를 끝낸 d238 eval 폴더가 조용히 다른 문장을 가리키기 때문.
+  entry 1개라 FCD/PRDC 는 NaN 이니 분포 지표를 이 표에서 인용하지 말 것.
 - **`scripts/run_gendop_eval.py` CORPORA `vista_d238` (2026-09-22).** hike
   `pull_out_arc_left` = `vista4d_hike_1` **1 entry**. split 은 한 줄짜리
   `seg_list_d238_hike1.txt` — d238 test 목록엔 hike 0/1/2 가 다 있지만 대조 대상이 이

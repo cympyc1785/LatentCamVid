@@ -49,6 +49,17 @@ start~end 를 `frame interval (every N)` 간격으로) / `all frames`(전 구간
 정작 보려는 카메라 자세를 덮는다 (경로선은 49프레임 꺾은선, probe 는 gizmo 화살표). 예전처럼
 처음부터 켜려면 `--paths_on` / `--probe_on`.
 
+## obb 폴더 — 어느 박스를 띄우나
+
+`node` 드롭다운이 **한 노드만** 남긴다 (`all` 이면 전부). 씬 하나에 노드가 9개씩 있어 전부
+켜면 어느 박스가 지금 보는 subject 인지 고를 수가 없다. 기동 시 고정하려면 `--obb_node dyn_0`.
+`labels` 는 **기본 꺼짐** — 노드가 여럿이면 글자가 서로 겹쳐 읽히지도 않으면서 박스를 가린다.
+
+색은 handle 에 바꿔 끼울 수 없어 remove + re-add 다 (`LineSegmentsHandle` 에 `colors` 프로퍼티가
+없다). snowboard 는 동적 5노드 × 49프레임 + 정적 4 = 249개라 매번 다 다시 그리면 슬라이더가
+끊긴다. 그래서 `obb_version` 을 찍어 두고 **보이게 되는 순간에만** 밀린 것을 갚는다 —
+`current frame` 모드면 실제로 다시 그리는 건 9개뿐이다.
+
 ## motion 브라우저 (`--banks`)
 
 뱅크 여러 개를 통째로 올려두고 **슬라이더로 motion 을 갈아끼운다**. 이게 필요한 이유는
@@ -64,11 +75,16 @@ start~end 를 `frame interval (every N)` 간격으로) / `all frames`(전 구간
 
 슬라이더는 **한 번에 한 대**라 "A 가 B 보다 더 도나 / 둘이 같은 자리에서 시작하나"를 못 본다 —
 갈아끼우는 순간 비교 대상이 사라지기 때문이다. pin 은 그 motion 을 고정 색으로 남겨서 활성
-motion(주황) 을 계속 바꿔도 화면에 살아 있게 한다. 각 pin 은 경로 선 + 전 프레임 프러스텀 +
-**현재 프레임 프러스텀(1.6배)** 셋을 같은 색으로 그리므로, frame 슬라이더를 밀면 pin 들이
-동시에 움직여 시점 차이가 눈에 보인다. 색은 `PIN_COLORS` 순환이고 `pinned` 패널이 색↔라벨
-대응을 적어 준다. 상한은 `--max_pins` (기본 8) — 프러스텀이 변이당 49/cam_stride 개라
-무제한으로 켜면 브라우저가 느려진다.
+motion(주황) 을 계속 바꿔도 화면에 살아 있게 한다. pin 색은 **pin 하는 순간 `target (pred)`
+피커에 들어있던 색**을 스냅샷으로 뜬다 — 방금 그 색으로 보던 궤적이 pin 하는 순간 팔레트
+색으로 튀면 대조가 끊기기 때문이다. 여러 대를 구분하려면 피커를 바꿔 가며 pin 한다.
+예전 `PIN_COLORS` 순환은 `--pin_palette` 로 남겨 뒀다. `pinned` 패널이 색↔라벨 대응을
+적어 준다. 상한은 `--max_pins` (기본 8) — 프러스텀이 변이당 49/cam_stride 개라 무제한으로
+켜면 브라우저가 느려진다.
+
+"현재 프레임" 을 1.6배 프러스텀으로 따로 그리는 기능은 **기본 꺼짐**(`--now_cams` 로 켠다).
+같은 자리의 일반 프러스텀 위에 큰 것이 겹쳐 앉아, 궤적을 훑을 때 카메라가 두 대인 것처럼
+보였다. 지금 프레임은 frame 슬라이더와 `dynamic frames` 로 읽는다.
 
 같이 그리는 것: 소스 카메라 경로(회색) · plan 경로(주황) · subject track(초록, follow 의
 입력이라 여기가 떨면 카메라도 떤다). GUI 에 preset/gain/smooth/k 와 `jerk p95`(px/frame³,
@@ -370,6 +386,12 @@ def main():
                         help="카메라 경로선을 처음부터 켠다 (기본 꺼짐, GUI view > paths)")
     parser.add_argument("--probe_on", action="store_true",
                         help="probe 카메라(프러스텀+gizmo)를 처음부터 켠다 (기본 꺼짐)")
+    parser.add_argument("--now_cams", action="store_true",
+                        help="'현재 프레임' 1.6배 프러스텀을 그린다 (기본 꺼짐)")
+    parser.add_argument("--pin_palette", action="store_true",
+                        help="pin 색을 PIN_COLORS 순환으로 (기본: target 피커의 현재 색)")
+    parser.add_argument("--obb_node", default="", type=str,
+                        help="이 노드 id 의 OBB 만 띄운다 (예: dyn_0). 기본 = 전부")
     parser.add_argument("--viewer_root", default=VIEWER_ROOT_DEFAULT, type=str)
     args = parser.parse_args()
 
@@ -429,9 +451,13 @@ def main():
         server, "/cam_source", src_gl, float(intrinsics[0, 0, 0]),
         float(intrinsics[0, 1, 1]), width, height, src_color, cam_scale,
         downsample=args.cam_stride)]
-    src_now = add_frustums(server, "/cam_source_now", src_gl[:1], float(intrinsics[0, 0, 0]),
-                           float(intrinsics[0, 1, 1]), width, height, src_now_color,
-                           cam_scale * 1.6)
+    # "현재 프레임" 1.6배 프러스텀은 기본으로 안 그린다 (`--now_cams` 로 켠다). 프레임을
+    # 가리키는 큰 프러스텀이 같은 자리의 일반 프러스텀 위에 겹쳐 앉아, 궤적을 훑을 때
+    # 카메라가 두 대인 것처럼 보였다. 빈 리스트로 두면 아래 갱신·색칠이 전부 no-op 이 된다.
+    src_now = list(add_frustums(
+        server, "/cam_source_now", src_gl[:1], float(intrinsics[0, 0, 0]),
+        float(intrinsics[0, 1, 1]), width, height, src_now_color,
+        cam_scale * 1.6)) if args.now_cams else []
     src_cams += [(h, 1.6) for h in src_now]
 
     focal = float(intrinsics[0, 0, 0])
@@ -564,9 +590,9 @@ def main():
     obb_static, obb_dyn, obb_labels, ground_handle, graph_rows = [], [[] for _ in range(num_frames)], [], None, []
     obb_version = {"n": 0}                    # 색/굵기가 바뀔 때마다 +1
 
-    def obb_entry(name, segments, moving, visible):
-        return {"name": name, "seg": segments, "moving": moving, "handle": None,
-                "version": -1, "visible": bool(visible)}
+    def obb_entry(node_id, name, segments, moving, visible):
+        return {"node": str(node_id), "name": name, "seg": segments, "moving": moving,
+                "handle": None, "version": -1, "visible": bool(visible)}
 
     if args.obb and path.isfile(graph_path):
         with open(graph_path, encoding="utf-8") as file:
@@ -581,21 +607,21 @@ def main():
                 yaws = np.asarray(node["track"]["yaw"], dtype=float)
                 for f in range(min(num_frames, len(centers))):
                     obb_dyn[f].append(obb_entry(
-                        f"/obb/{node['id']}/f{f:03d}",
+                        node["id"], f"/obb/{node['id']}/f{f:03d}",
                         obb_segments_world(centers[f], extent, yaw_to_R(yaws[f]), T_wg),
                         True, f == 0))
                 anchor_g = centers[0]
             else:
                 obb_static.append(obb_entry(
-                    f"/obb/{node['id']}",
+                    node["id"], f"/obb/{node['id']}",
                     obb_segments_world(node["obb"]["center"], extent,
                                        np.asarray(node["obb"]["R"], dtype=float), T_wg),
                     False, True))
                 anchor_g = np.asarray(node["obb"]["center"], dtype=float)
             top = np.asarray(anchor_g, float) + np.array([0.0, 0.0, float(extent[2]) / 2 + 0.01])
-            obb_labels.append(server.scene.add_label(
+            obb_labels.append((str(node["id"]), server.scene.add_label(
                 f"/obb_label/{node['id']}", f"{node['id']} {node.get('label', '')}",
-                position=(top @ T_wg[:3, :3].T + T_wg[:3, 3]).astype(np.float32)))
+                position=(top @ T_wg[:3, :3].T + T_wg[:3, 3]).astype(np.float32))))
             graph_rows.append((node["id"], node.get("label", ""), moving))
         if args.ground_grid:
             cams_g = cam_c2w[:, :3, 3] @ T_gw[:3, :3].T + T_gw[:3, 3]
@@ -619,8 +645,14 @@ def main():
             thickness=cam_scale * float(gui_obb_lw.value), visible=entry["visible"])
         entry["version"] = obb_version["n"]
 
+    def node_on(node_id: str):
+        """`obb > node` 드롭다운이 고른 노드인가. `all` 이면 전부 통과."""
+        pick = str(gui_obb_node.value)
+        return pick == "all" or pick == str(node_id)
+
     def obb_show(entry, visible: bool):
         """보이게 하는 순간에만 stale 을 갚는다 — 249개를 매 드래그마다 다시 그리지 않으려고."""
+        visible = bool(visible) and node_on(entry["node"])
         entry["visible"] = bool(visible)
         if visible and entry["version"] != obb_version["n"]:
             obb_apply(entry)
@@ -682,7 +714,7 @@ def main():
                   cam_scale * 0.10)
         now = list(add_frustums(server, "/cam_plan_now", plan_gl[:1], focal,
                                 float(intrinsics[0, 1, 1]), width, height, now_color,
-                                cam_scale * 1.6))
+                                cam_scale * 1.6)) if args.now_cams else []
         track = tracks.get(str(row.get("anchor_id", "")))
         drop_line("track")
         if track is not None and len(track) > 1:
@@ -705,7 +737,12 @@ def main():
             return
         index = [m[0] for m in motions].index(label)
         _, plan_c2w, row = motions[index]
-        color = PIN_COLORS[pin_seq["n"] % len(PIN_COLORS)]
+        # 기본은 **지금 target 피커에 들어있는 색**이다 (`--pin_palette` 로 예전 순환 팔레트).
+        # 순환은 "여러 대를 구분한다"가 목적이었는데, 실제로는 방금 고른 색으로 보던 궤적이
+        # pin 하는 순간 엉뚱한 색으로 바뀌어 대조가 끊겼다. 스냅샷이라 피커를 바꾼 뒤 다시
+        # pin 하면 그 pin 만 새 색을 갖는다 — 구분은 사용자가 직접 준다.
+        color = (PIN_COLORS[pin_seq["n"] % len(PIN_COLORS)] if args.pin_palette
+                 else plan_colors()[0])
         pin_seq["n"] += 1
         node, plan_gl = pin_node(label), plan_c2w @ gl2cv
         cams = list(add_frustums(server, node + "/cam", plan_gl, focal,
@@ -713,8 +750,9 @@ def main():
                                  cam_scale, downsample=args.cam_stride))
         # 현재 프레임 프러스텀만 1.6배로 크게 — pin 을 여러 대 켜면 선이 엉켜서 "이 변이가 지금
         # 어디를 보고 있나"를 경로만으로는 못 읽는다. 같은 색이라 소속은 유지된다.
-        now = list(add_frustums(server, node + "/now", plan_gl[:1], focal,
-                                float(intrinsics[0, 1, 1]), width, height, color, cam_scale * 1.6))
+        now = list(add_frustums(
+            server, node + "/now", plan_gl[:1], focal, float(intrinsics[0, 1, 1]),
+            width, height, color, cam_scale * 1.6)) if args.now_cams else []
         # 경로선은 `lines` 로 관리한다 (굵기 슬라이더가 여기만 본다). pin["handles"] 에는 안
         # 담는다 — 담으면 remove_pin 이 drop_line 과 겹쳐 같은 handle 을 두 번 지운다.
         draw_line(("pin", label), node + "/path", path_segments(plan_c2w[:, :3, 3]), color,
@@ -806,7 +844,15 @@ def main():
                                                  disabled=not any(obb_dyn))
         gui_obb_stat_on = server.gui.add_checkbox("static OBB", initial_value=True,
                                                   disabled=not obb_static)
-        gui_obb_labels = server.gui.add_checkbox("labels", initial_value=True,
+        # 노드 하나만 보기. 씬 하나에 노드가 9개씩 있어 전부 켜면 어느 박스가 지금 보는
+        # subject 인지 못 고른다. `--obb_node dyn_0` 으로 기동 시 고정할 수도 있다.
+        _node_ids = [row[0] for row in graph_rows]
+        gui_obb_node = server.gui.add_dropdown(
+            "node", options=["all"] + _node_ids,
+            initial_value=args.obb_node if args.obb_node in _node_ids else "all",
+            disabled=not _node_ids)
+        # 라벨 기본 꺼짐 — 노드가 9개면 글자가 서로 겹쳐 읽히지도 않으면서 박스를 가린다.
+        gui_obb_labels = server.gui.add_checkbox("labels", initial_value=False,
                                                  disabled=not obb_labels)
         gui_obb_dyn_color = server.gui.add_rgb("dynamic color", initial_value=obb_dyn_color,
                                                disabled=not any(obb_dyn))
@@ -814,20 +860,22 @@ def main():
                                                 disabled=not obb_static)
         # cam_scale 배율이다 (world 절대값이 아니라) — 씬마다 scale 이 100배 다르다.
         gui_obb_lw = server.gui.add_slider("OBB thickness", min=0.01, max=0.60, step=0.01,
-                                           initial_value=0.06, disabled=not _has_obb)
+                                           initial_value=0.20, disabled=not _has_obb)
 
     with server.gui.add_folder("camera colors"):
         # gt(소스) / pred(활성 target) 두 계열. 기본색이 씬에 따라 안 보일 때가 있어서 손잡이를
         # 둔다 — 회색 소스는 밝은 점군에 묻히고, 주황 target 은 노을·모래 씬에서 배경과 붙는다.
         # 계열마다 피커가 둘인 이유: "현재 프레임" 프러스텀이 크기(1.6배)**와 색**으로 구분되는데,
         # 하나로 합치면 frame 슬라이더를 밀 때 어느 것이 지금인지 다시 못 읽는다.
-        # 초기값은 `--src_color` 등 기동 플래그를 그대로 받는다.
+        # 초기값은 `--src_color` 등 기동 플래그를 그대로 받는다. now 피커는 `--now_cams`
+        # 없이는 가리킬 프러스텀이 없어 비활성이다 (켜 두면 "눌러도 아무 일도 안 난다").
         gui_src_color = server.gui.add_rgb("source (gt)", initial_value=src_color)
-        gui_src_now_color = server.gui.add_rgb("source now", initial_value=src_now_color)
+        gui_src_now_color = server.gui.add_rgb("source now", initial_value=src_now_color,
+                                               disabled=not args.now_cams)
         gui_plan_color = server.gui.add_rgb("target (pred)", initial_value=plan_color,
                                             disabled=not motions)
         gui_plan_now_color = server.gui.add_rgb("target now", initial_value=plan_now_color,
-                                                disabled=not motions)
+                                                disabled=not (motions and args.now_cams))
 
     with server.gui.add_folder("probe camera"):
         # frustum 과 gizmo 를 따로 끈다. 자리를 정하고 나면 화살표가 프러스텀을 가려서
@@ -882,8 +930,8 @@ def main():
         show_obb = bool(gui_obb.value)
         for entry in obb_static:
             obb_show(entry, show_obb and bool(gui_obb_stat_on.value))
-        for handle in obb_labels:
-            handle.visible = show_obb and bool(gui_obb_labels.value)
+        for node_id, handle in obb_labels:
+            handle.visible = (show_obb and bool(gui_obb_labels.value) and node_on(node_id))
         # 동적 OBB 는 점군과 **같은 규칙**으로 켠다 — 박스만 전 프레임 켜두면 박스가 점군보다
         # 앞선 프레임에 있어도 어긋난 걸 못 알아챈다.
         show_dyn_obb = show_obb and bool(gui_obb_dyn_on.value)
@@ -892,12 +940,14 @@ def main():
                 obb_show(entry, show_dyn_obb and i in frames)
         if ground_handle is not None:
             ground_handle.visible = bool(gui_ground.value)
-        src_now[0].wxyz, src_now[0].position = _pose(src_gl[f], gl2cv)
+        if src_now:
+            src_now[0].wxyz, src_now[0].position = _pose(src_gl[f], gl2cv)
         if state["now"]:
             state["now"][0].wxyz, state["now"][0].position = _pose(
                 state["c2w"][f] @ gl2cv, gl2cv)
         for pin in pins.values():
-            pin["now"][0].wxyz, pin["now"][0].position = _pose(pin["c2w"][f] @ gl2cv, gl2cv)
+            if pin["now"]:
+                pin["now"][0].wxyz, pin["now"][0].position = _pose(pin["c2w"][f] @ gl2cv, gl2cv)
 
     guard = {"busy": False}
 
@@ -936,7 +986,7 @@ def main():
     gui_pick.on_update(lambda _: switch([m[0] for m in motions].index(gui_pick.value)))
     for widget in (gui_frame, gui_static, gui_dyn, gui_dyn_mode, gui_span_lo, gui_span_hi,
                    gui_frame_step, gui_obb, gui_obb_dyn_on, gui_obb_stat_on, gui_obb_labels,
-                   gui_ground):
+                   gui_obb_node, gui_ground):
         widget.on_update(lambda _: refresh())
 
     # OBB 색·굵기: version 을 올리고 refresh() 를 부르면 **지금 보이는 것만** 다시 그려진다.
@@ -972,7 +1022,8 @@ def main():
 
     # 색 갈아끼우기. 프러스텀은 `.color` 대입, 경로선은 remove + re-add (draw_line).
     # 계열 안에서 "현재 프레임"인지는 `(handle, ratio)` 의 ratio 로 가른다 — 크기 배율과 색
-    # 구분이 같은 한 곳에서 나와야 둘이 어긋나지 않는다.
+    # 구분이 같은 한 곳에서 나와야 둘이 어긋나지 않는다. `--now_cams` 가 꺼져 있으면
+    # ratio > 1.0 인 handle 이 애초에 없어 now_color 분기가 그냥 안 타는 것뿐이다.
     def repaint_src(_event=None):
         color = tuple(int(c) for c in gui_src_color.value)
         now_color = tuple(int(c) for c in gui_src_now_color.value)
@@ -1151,10 +1202,16 @@ def main():
                            f"(GUI obb / --obb_color_dyn/_static)"),
             ("obb handles", f"{sum(len(e) for e in obb_dyn)} dyn + {len(obb_static)} static  "
                             f"(GUI obb > OBB thickness / dynamic·static color)"),
+            ("obb node", f"{gui_obb_node.value}  (GUI obb > node / --obb_node), "
+                         f"labels {'on' if gui_obb_labels.value else 'off'}"),
             ("frame set", f"GUI view > dynamic frames = current frame  "
                           f"(interval / all frames + frame interval)"),
             ("paths", f"{'on' if args.paths_on else 'off'}  (GUI view > paths / --paths_on)"),
             ("probe", f"{'on' if args.probe_on else 'off'}  (GUI probe camera / --probe_on)"),
+            ("now cams", f"{'on' if args.now_cams else 'off'}  "
+                         f"(현재 프레임 1.6배 프러스텀 / --now_cams)"),
+            ("pin color", "PIN_COLORS 순환 (--pin_palette)" if args.pin_palette
+                          else "target 피커의 현재 색 (pin 시점 스냅샷)"),
             ("url", f"http://localhost:{args.port}")]
     width_key = max(len(k) for k, _ in rows)
     for key, value in rows:

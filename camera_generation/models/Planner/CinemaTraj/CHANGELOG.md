@@ -39,6 +39,19 @@ Follows [Keep a Changelog](https://keepachangelog.com/).
   붙어 있었다. 정적을 같은 하늘색으로 두면 "이 박스가 따라 움직여야 하는가"를 못 가르므로
   청록으로 민다 (snowboard 는 동적 5 / 정적 4 라 두 계열이 늘 같이 떠 있다).
   `--obb_color_dyn` / `--obb_color_static` (`"R,G,B"`) 로 덮는다.
+- **`viser_cloud.py` "현재 프레임" 1.6배 프러스텀이 기본 꺼짐 (2026-09-21).** 소스·target·pin
+  세 계열 모두. 같은 자리의 일반 프러스텀 위에 큰 것이 겹쳐 앉아, frame 슬라이더로 궤적을
+  훑으면 **카메라가 두 대인 것처럼** 보였다 — 지금 프레임은 슬라이더 숫자와 동적 점군으로
+  이미 읽힌다. 켜는 건 `--now_cams`; 꺼져 있으면 `camera colors` 의 `source now` /
+  `target now` 피커도 같이 비활성이다 (가리킬 프러스텀이 없는 위젯을 눌러 보게 두지 않는다).
+- **`viser_cloud.py` pin 색이 `target (pred)` 피커를 따라간다 (2026-09-21).** 예전엔
+  `PIN_COLORS` 순환이었는데, 방금 그 색으로 보던 궤적이 pin 하는 순간 팔레트 색으로 튀어
+  대조가 끊겼다. 이제 **pin 하는 시점의 피커 색을 스냅샷**으로 뜬다 — 여러 대를 구분하려면
+  피커를 바꿔 가며 pin 한다 (구분을 자동으로 주는 대신 사용자가 준다). 예전 동작은
+  `--pin_palette`.
+- **`viser_cloud.py` OBB `labels` 기본 꺼짐 + `OBB thickness` 기본 0.06 -> 0.20 (2026-09-21).**
+  노드가 9개면 라벨 글자가 서로 겹쳐 읽히지도 않으면서 박스를 가린다. 굵기는 0.06 이면
+  점군 위에서 박스 모서리가 거의 안 보였다 (단위는 `cam_scale` 배율).
 
 ### Added
 - **`viser_cloud.py` GUI `obb` 폴더 + `view` 폴더 손잡이 복원 (2026-09-21).** `viser_scene.py`
@@ -52,14 +65,21 @@ Follows [Keep a Changelog](https://keepachangelog.com/).
     (`obb_version`)을 찍고 `obb_show` 가 "보이게 되는 순간"에만 빚을 갚는다. `current frame`
     모드면 매번 9개뿐이라 즉시 돈다 (`all frames` + 드래그만 여전히 무겁고, 그건 코드에
     적어 뒀다). 이전 항목의 "OBB 는 GUI 피커를 안 준다"를 뒤집는다.
-  - **굵기는 다시 그릴 필요가 없다** — `line_width` 는 line/frustum handle 양쪽에서 갱신되는
-    프로퍼티다 (`colors` 만 아니다). 단위가 셋 다 다르다: 프러스텀은 world 절대값, OBB 는
+  - **굵기는 다시 그릴 필요가 없다** — `thickness` 는 line/frustum handle 양쪽에서 갱신되는
+    프로퍼티다 (`colors` 만 아니다). **`line_width` 가 아니다** — 위 Fixed 항목 참고.
+    단위가 셋 다 다르다: 프러스텀은 world 절대값, OBB 는
     `cam_scale` 배율(씬마다 scale 이 100배 다르다), 경로선은 **선별 기준값의 배율**(소스 0.08 /
     plan 0.10 비율이 슬라이더를 밀어도 유지된다).
   - 경로선 배율을 GUI handle 이 아니라 dict(`lw`)로 들고 있는 이유: 소스 경로선은 GUI 를 만들기
     **전에** 그려져서 그 시점에 슬라이더를 읽으면 없다. 콜백이 dict 를 갱신한다.
   - 경로선은 `state["handles"]` / `pin["handles"]` 에 **안 담고** `lines` 로만 관리한다 —
     양쪽에 담으면 `drop_line` 과 일괄 remove 가 같은 handle 을 두 번 지운다.
+- **`viser_cloud.py` GUI `obb > node` 드롭다운 + `--obb_node` (2026-09-21).** 노드 하나만
+  남긴다 (`all` 이면 전부). snowboard 만 해도 동적 5 / 정적 4 라 전부 켜면 **어느 박스가 지금
+  보는 subject 인지** 고를 수가 없다 — 점군 안에서 박스들이 서로 겹쳐 보인다. 기동 시
+  고정하려면 `--obb_node dyn_0`. 배선은 `obb_entry` 에 `node` id 를 싣고 `obb_show` 가
+  `node_on()` 으로 걸러 내는 방식이라, 기존 `dynamic OBB`/`static OBB` 체크박스와 **AND** 로
+  합쳐진다 (둘 다 통과해야 보인다). 라벨도 `(node_id, handle)` 튜플로 바꿔 같은 게이트를 탄다.
 - **`viser_cloud.py` GUI `camera colors` 폴더 + 색 플래그 (2026-09-21).** 지금까지 색을 바꿀 수
   있는 카메라는 probe 뿐이었는데, 정작 대조하는 건 **gt(소스) 와 pred(활성 target)** 다.
   피커 4개 — `source (gt)` / `source now` / `target (pred)` / `target now`. 계열마다 둘인 이유:

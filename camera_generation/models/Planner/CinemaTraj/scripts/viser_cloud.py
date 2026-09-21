@@ -415,6 +415,28 @@ def obb_segments_world(center_g, extent, R_g, T_wg):
                     axis=1).astype(np.float32)
 
 
+def node_animates(node: dict, mode: str) -> bool:
+    """이 노드의 OBB 를 **프레임마다 갈아끼울지**.
+
+    `dyn`(기본) = id/kind 가 `dyn` 이고 track 이 있으면 애니메이션. `moving` = 그래프의
+    `moving` 플래그만 믿는 예전 동작.
+
+    기본을 `dyn` 으로 둔 이유: `moving` 은 **절대 임계**(`--track_min_drift_u` 0.05)로 정해져서
+    작은 물체가 자기 몸 길이의 몇 배를 움직여도 static 으로 떨어진다. snow-dog 의 dog 은
+    track drift 0.0318 u 인데 자기 extent 가 0.0103 이라 **3.09 배**를 움직였는데도
+    `moving=False` 다. 그러면 뷰어가 시간 median OBB 한 개만 그리고, "박스가 개를 따라가는가"
+    를 아예 볼 수 없다 — 그걸 보려고 띄우는 화면인데.
+
+    실측(번들 19 씬): `moving` 노드가 0개인 씬이 5개다 —
+    avocado-slice / camera-lens / hike / mountain-hike / snow-dog.
+    """
+    if not (node.get("track") or {}).get("center_smooth"):
+        return False
+    if mode == "moving":
+        return bool(node.get("moving"))
+    return str(node.get("kind", "")) == "dyn" or str(node.get("id", "")).startswith("dyn")
+
+
 def yaw_to_R(yaw: float):
     """G 의 중력축(+z) 둘레 회전. `scene_graph/obb.py` 와 같은 정의 — 뷰어가 그 파일을 import
     하면 numpy 외의 의존이 딸려오므로 3줄짜리 이 함수만 되풀어 쓴다."""
@@ -605,6 +627,10 @@ def main():
                         help="소스 카메라를 처음부터 켠다 (기본 꺼짐, GUI view > source cameras)")
     parser.add_argument("--pin_palette", action="store_true",
                         help="pin 색을 PIN_COLORS 순환으로 (기본: target 피커의 현재 색)")
+    # 어떤 노드를 프레임마다 갈아끼울지 (위 `node_animates` 주석이 근거다).
+    parser.add_argument("--obb_anim", default="dyn", choices=("dyn", "moving"),
+                        help="dyn(기본)=dyn_* 이고 track 있으면 애니메이션 / "
+                             "moving=그래프 moving 플래그만 (예전 동작)")
     parser.add_argument("--obb_node", default="", type=str,
                         help="이 노드 id 의 OBB 만 띄운다 (예: dyn_0). 기본 = 전부")
     parser.add_argument("--viewer_root", default=VIEWER_ROOT_DEFAULT, type=str)
@@ -843,7 +869,7 @@ def main():
         T_wg = np.asarray(graph["frames"]["T_wg"], dtype=float)
         T_gw = np.asarray(graph["frames"]["T_gw"], dtype=float)
         for node in graph["nodes"]:
-            moving = bool(node.get("moving")) and bool(node.get("track"))
+            moving = node_animates(node, args.obb_anim)
             extent = node["obb"]["extent"]
             if moving:
                 centers = np.asarray(node["track"]["center_smooth"], dtype=float)
@@ -865,7 +891,8 @@ def main():
             obb_labels.append((str(node["id"]), server.scene.add_label(
                 f"/obb_label/{node['id']}", f"{node['id']} {node.get('label', '')}",
                 position=(top @ T_wg[:3, :3].T + T_wg[:3, 3]).astype(np.float32))))
-            graph_rows.append((node["id"], node.get("label", ""), moving))
+            graph_rows.append((node["id"], node.get("label", ""), moving,
+                               float(np.max(np.abs(np.asarray(extent, float))))))
         if args.ground_grid:
             cams_g = cam_c2w[:, :3, 3] @ T_gw[:3, :3].T + T_gw[:3, 3]
             nodes_g = np.asarray([n["obb"]["center"] for n in graph["nodes"]], dtype=float)
@@ -876,6 +903,16 @@ def main():
                 ground_grid_world(float(graph["ground"]["ground_z"]), T_wg,
                                   span.mean(axis=0), half),
                 colors=(110, 120, 140), thickness=cam_scale * 0.03)
+
+    # OBB 가 선 굵기보다 작으면 박스가 아니라 점으로 보인다. snow-dog 의 dog 은 extent
+    # 0.0103 인데 기본 굵기가 0.0110 이라 **자기 크기의 1.07 배** 굵기로 그려졌다 — 그러면
+    # "박스가 안 보인다" 로 읽히고 원인이 데이터(cm 단위 OBB)라는 게 안 드러난다.
+    _obb_lw0 = cam_scale * 0.20
+    _thin = [(nid, ext) for nid, _, _, ext in graph_rows if ext < _obb_lw0]
+    if _thin:
+        print(f"[obb] 선 굵기({_obb_lw0:.4f} world) 보다 작은 OBB {len(_thin)}개 — 박스가 점으로 "
+              f"보인다: " + ", ".join(f"{nid} extent {ext:.4f}" for nid, ext in _thin)
+              + "\n      GUI obb > OBB thickness 를 내리거나 labels 로 위치를 읽는다.")
 
     def obb_apply(entry):
         """entry 를 현재 색·굵기로 (다시) 그린다. 색을 못 갈아끼우니 remove 후 add."""
@@ -1537,8 +1574,11 @@ def main():
             ("bundle", (f"{bundle_root}  (arm 표시순 {'/'.join(BUNDLE_ARMS)})")
                        if bundle_root else "-"),
             ("scene root", scene_root),
-            ("obb nodes", " ".join(f"{i}({'dyn' if m else 'stat'})" for i, _, m in graph_rows)
-             or "-"),
+            ("obb nodes", " ".join(f"{i}({'dyn' if m else 'stat'})"
+                                   for i, _, m, _e in graph_rows) or "-"),
+            ("obb anim", f"{args.obb_anim}  "
+                         f"({sum(1 for r in graph_rows if r[2])}/{len(graph_rows)} 노드 애니메이션, "
+                         f"--obb_anim dyn|moving)"),
             ("motions", len(motions)),
             ("pinned", f"{len(pins)} / {args.max_pins}  (GUI motion > pin current)"),
             ("source jerk p95", f"{src_jerk:.2f} px/f3"),

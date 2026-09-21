@@ -8,6 +8,21 @@ Follows [Keep a Changelog](https://keepachangelog.com/).
 ## [Unreleased]
 
 ### Added
+- **`scripts/run_vista4d_gen.py` — 영상 + 카메라 → Vista4D 생성 영상 (2026-09-21).**
+  사용자 지시 "vista4d 돌리는 것도 영상, 카메라 주면 영상 나오게끔". `run_custom_caption.py`
+  가 끝나는 지점(카메라)에서 이어받는 한 줄짜리 드라이버다.
+  `--stage {recon,cam,gen,out,all}` — recon(DA3 depth/mask/cameras.npz, 이미 있으면 건너뜀)
+  → 카메라 npz 변환 → 공식 `run_eval_gen.sh` (render_eval + inference_eval) → `source|vista4d`
+  가로 concat 릴. 출력은 `results/20260921_vista4d_custom/<name>/<tag>/`.
+  **Vista4D 규약 변환은 새로 쓰지 않고** `bank_to_vista4d_cams.py` 한 군데로 몬다 —
+  두 경로가 갈리면 같은 궤적이 다른 영상이 된다.
+- **`scripts/bank_to_vista4d_cams.py --cams` — 카메라 파일 직접 입력 (2026-09-21).**
+  기존 두 소스(`--variants` 뱅크 / `--preds` 평가 폴더)는 둘 다 **이름 규약**을 요구한다
+  (`<bank_dir>:<variant_id>`, `<eval_dir>/test/<entry>_transforms_*.json`). 번들에 떨어진
+  `cameras/s1234.npz` 나 손으로 만든 `transforms.json` 은 그 규약 밖이라 못 먹였다.
+  `--cams <경로>[=<tag>]` 는 확장자로 갈라 `.npz`(이미 OpenCV recon world) 는 그대로,
+  `.json`(nerfstudio) 은 `load_pred` 와 **같은 식**으로 OpenCV·recon 픽셀 단위로 돌린다.
+  세 옵션 중 정확히 하나를 요구하므로 **기존 호출은 비트 동일**하다.
 - **`scripts/run_custom_caption.py` — 영상 1개 + 캡션 1줄 → 카메라 + depth warp (2026-09-21).**
   사용자 지시 "내가 영상 위치랑 caption text 직접 넣으면 우리 모델 돌려서 카메라 저장하고
   depth warp 영상도 만들어서 저장해주는 pipeline". `--stage {recon,geocalib,graph,corpus,
@@ -139,6 +154,19 @@ Follows [Keep a Changelog](https://keepachangelog.com/).
   `dir(handle)` 에 `thickness` 가 안 보이는 게 함정이다 — 동적 prop 이라 런타임에만 있다.
 
 ### Changed
+- **`viser_cloud.py` 가 `moving` 플래그 대신 `dyn_*` + track 유무로 OBB 를 애니메이션한다
+  (2026-09-21).** `moving` 은 **절대 임계**(`--track_min_drift_u` 0.05)로 정해져서, 작은 물체가
+  자기 몸 길이의 몇 배를 움직여도 static 으로 떨어진다 — snow-dog 의 dog 은 track drift
+  0.0318 u 인데 자기 extent 가 0.0103 이라 **3.09 배**를 움직였는데도 `moving=False` 다.
+  그러면 뷰어가 시간 median OBB 한 개만 그려서 "박스가 개를 따라가는가"를 아예 볼 수 없다 —
+  그걸 보려고 띄우는 화면인데. 번들 19 씬 중 **5 씬이 moving 노드 0개**다
+  (avocado-slice / camera-lens / hike / mountain-hike / snow-dog). snow-dog 은 이 변경으로
+  `0 dyn + 3 static` -> `98 dyn + 1 static` 이 됐다. **예전 동작은 `--obb_anim moving`.**
+- **`viser_cloud.py` 가 선 굵기보다 작은 OBB 를 기동 시 알린다 (2026-09-21).** snow-dog 의
+  `dyn_1`(dog) 은 extent 0.0103 인데 기본 굵기가 `cam_scale x 0.20` = 0.0110 이라 **자기
+  크기의 1.07 배** 굵기로 그려졌다. 박스가 점으로 뭉쳐 "OBB 가 안 보인다"로 읽히고, 원인이
+  데이터(cm 단위 OBB)라는 게 드러나지 않는다. 노드 id 와 extent 를 찍고 `OBB thickness` 를
+  내리거나 `labels` 로 위치를 읽으라고 안내한다.
 - **`scripts/run_gendop_eval.py` 기본값이 `--raw` + `--no_scale_token` (2026-09-21, D222).**
   사용자 지시("gendop 돌릴때 rmax 곱하면 안되고 raw 로 normalized 되어서 나오는 원본 코드
   그대로 나온걸 저장해서 써야해"). 지금까지는 GenDoP 출력에 우리 쪽에서 rmax 를 곱해 미터로

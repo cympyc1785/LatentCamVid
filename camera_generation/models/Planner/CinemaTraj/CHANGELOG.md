@@ -7,6 +7,30 @@ Follows [Keep a Changelog](https://keepachangelog.com/).
 
 ## [Unreleased]
 
+### Changed
+- **`scripts/run_custom_caption.py` 를 추론 전용 최소 경로로 축소 (2026-09-21).**
+  사용자 지시 "sam3, vlm 이런거 안돌리고 순수히 우리 카메라 생성 모델만 돌리는거야 …
+  따로 pipeline 만들어달라고 한건 최소한의 기능만 남긴 inference code였어".
+  - 단계 8 → 7: `geocalib` 삭제, `graph`(`build_scene_graph.py`) → `scale` 로 교체.
+    `scale` 은 `scene_graph.json` **최소본**(`scale`/`cameras` 블록만, `nodes: []`)을
+    직접 쓴다. `format` 을 `planner_scene_graph_minimal_v1` 로 따로 찍어 `load_graph`
+    가 진짜 그래프로 오인하지 못하게 했다 — 뱅크에 먹이면 anchor 0 개로 조용히
+    빈 뱅크가 나온다.
+  - recon 에서 SAM3 를 뺐다: `--seg_keywords` 를 **값 없이** + `--keep_recon_sky`.
+    기본값이 `["_all_"]` 이라 빼먹으면 정반대로 전 픽셀이 dynamic 이 된다.
+  - 캡션에서 지칭구를 정규식으로 뽑던 `guess_target`/`guess_nouns`/`--target`/`--nouns`
+    제거. PE-AV 입력은 **`--molmo2_text` 로 따로** 받는다 (안 주면 캡션 원문).
+    ③ umt5 캡션과 ④ PE-AV 문장은 서로 다른 인코더로 들어간다.
+  - 알려진 한계: seg 가 없어 warp 점군이 한 덩어리 rigid cloud 라 **움직이는 물체는
+    번진다**. 뱅크·릴 경로에는 쓰지 말 것.
+  실측 (golf source, 49f, S 6.9976): hole_magenta_frac s42 0.0685 / s1234 0.0124 /
+  s2026 0.0.
+- **`scene_graph/io.py: load_scene(allow_no_seg=False)` + `lbm/render.py` 전달,
+  `scripts/render_pred_depth_warp.py --allow_no_seg --allow_empty_dynamic_mask`.**
+  SAM3 를 안 돌린 recon 을 통과시키는 스위치 셋. **전부 기본 off** 라 기존 뱅크·릴
+  경로는 비트 동일하다. cloud 캐시 키에도 `allow_no_seg` 를 넣었다 — 안 넣으면 같은
+  씬의 seg 있는/없는 두 호출이 서로의 점군을 받는다.
+
 ### Added
 - **`scripts/run_vista4d_gen.py` — 영상 + 카메라 → Vista4D 생성 영상 (2026-09-21).**
   사용자 지시 "vista4d 돌리는 것도 영상, 카메라 주면 영상 나오게끔". `run_custom_caption.py`

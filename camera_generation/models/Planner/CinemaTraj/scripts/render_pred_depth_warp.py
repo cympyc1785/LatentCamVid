@@ -284,6 +284,11 @@ def build_parser():
     parser.add_argument("--cloud_root", default=path.join(CLOUD_ROOT, "out"))
     add_cloud_source_args(parser)
     parser.add_argument("--eval_data", default="/data1/cympyc1785/data/Vista4D-Eval-Data")
+    # SAM3 를 안 돌린 recon 을 그대로 warp 한다 (`run_custom_caption.py` 의 추론 전용 경로).
+    # 동적/정적 인스턴스가 없으니 점군은 한 덩어리 rigid cloud 가 된다 — 뱅크 릴에는 쓰지 말 것.
+    # 둘 다 기본 off = 기존 릴 비트 동일.
+    parser.add_argument("--allow_no_seg", action="store_true", default=False)
+    parser.add_argument("--allow_empty_dynamic_mask", action="store_true", default=False)
     # caption F1 band 분리. 없으면 라벨·reel·index 전부 기존과 동일하게 나온다.
     parser.add_argument("--scores_csv", default=None)        # eval 의 preds_scores.csv
     parser.add_argument("--f1_high", type=float, default=0.8)   # 이 이상 -> reel_f1_high.mp4

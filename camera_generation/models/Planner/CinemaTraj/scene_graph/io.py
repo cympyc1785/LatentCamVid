@@ -82,8 +82,15 @@ class SegInstances:
 
 
 def load_scene(eval_data: str, video: str, vista4d_root: str,
-               seg_root: str | None = None, seg_static_root: str | None = None):
-    """recon + 동적/정적 seg 를 합쳐 dict 로. 프레임 수·해상도 불일치는 여기서 죽인다."""
+               seg_root: str | None = None, seg_static_root: str | None = None,
+               allow_no_seg: bool = False):
+    """recon + 동적/정적 seg 를 합쳐 dict 로. 프레임 수·해상도 불일치는 여기서 죽인다.
+
+    `allow_no_seg` 는 **SAM3 를 아예 안 돌린 recon** 을 위한 것이다 (`run_custom_caption.py`
+    처럼 카메라 생성만 하고 뱅크를 안 굽는 경로). seg 가 없으면 노드를 못 만들므로 그래프는
+    `nodes: []` 가 되고, 쓸 수 있는 건 `scale`/`cameras`/`gravity` 블록뿐이다 — 뱅크 굽기는
+    못 한다. 기본값 False 라 기존 호출부는 전부 예전처럼 죽는다.
+    """
     vista4d = import_vista4d(vista4d_root)
     recon = vista4d["load_recon_and_seg"](path.join(eval_data, "eval_data", "recon_and_seg", video))
     num_frames, height, width, _ = recon["video"].shape
@@ -114,7 +121,7 @@ def load_scene(eval_data: str, video: str, vista4d_root: str,
         assert (seg.num_frames, seg.height, seg.width) == (num_frames, height, width),\
             f"{kind} seg 가 recon 과 안 맞는다: {(seg.num_frames, seg.height, seg.width)}"
         segs.append(seg)
-    assert segs, f"{video}: seg_instances 가 없다 ({seg_root})"
+    assert segs or allow_no_seg, f"{video}: seg_instances 가 없다 ({seg_root})"
 
     recon["K"] = vista4d["intrinsics_to_K"](recon["intrinsics"]).astype(np.float64)
     recon["cam_c2w"] = recon["cam_c2w"].astype(np.float64)

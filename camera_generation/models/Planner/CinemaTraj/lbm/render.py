@@ -325,7 +325,10 @@ def open_renderer(args, out_root: str, graph: dict = None, want_recon: bool = Tr
             "--eval_data 가 필요하다 (--cloud_source memory 또는 recon 을 쓰는 호출부)")
         return load_scene(args.eval_data, video, vista4d_root,
                           seg_root=getattr(args, "seg_root", None),
-                          seg_static_root=getattr(args, "seg_static_root", None))
+                          seg_static_root=getattr(args, "seg_static_root", None),
+                          # SAM3 를 안 돌린 recon (카메라 생성 전용 경로). 인자가 없으면 False
+                          # 라 기존 호출부는 예전처럼 `assert segs` 에서 죽는다.
+                          allow_no_seg=bool(getattr(args, "allow_no_seg", False)))
 
     if source == "memory" and graph is None:
         with open(path.join(out_root, video, "scene_graph.json"), encoding="utf-8") as file:
@@ -348,6 +351,7 @@ def open_renderer(args, out_root: str, graph: dict = None, want_recon: bool = Tr
                str(getattr(args, "depth_outliers", "gaussian")),
                bool(getattr(args, "ignore_sky_mask", False)),
                bool(getattr(args, "allow_empty_dynamic_mask", False)),
+               bool(getattr(args, "allow_no_seg", False)),
                scale_key)
         hit = _CLOUD_CACHE.get(key)
         if hit is not None and (hit["recon"] is not None or not want_recon):

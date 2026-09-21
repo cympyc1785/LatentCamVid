@@ -209,6 +209,27 @@ CORPORA = {
         },
         ref="d229_s42",
     ),
+    # D238 (2026-09-22, 1 entry). hike `pull_out_arc_left` = `vista4d_hike_1` 하나만 본다.
+    # split 은 그 한 줄짜리 `seg_list_d238_hike1.txt` 다 — d238 코퍼스 test 목록에는 hike
+    # 0/1/2 가 다 있지만 대조 대상이 이 preset 하나라 나머지를 섞으면 표가 안 맞는다.
+    #   `ref` 를 s2026 으로 둔 건 사용자가 그 seed 와 비교해 달라고 했기 때문이다. 캡션은
+    #   seed 셋이 동일하므로 조건 문장은 어느 ref 든 같다.
+    #   entry 1개 → FCD/PRDC 는 NaN. 읽을 건 `clatr/clatr_score` 와 caption 지표뿐이다.
+    "vista_d238": dict(
+        corpus="/data1/cympyc1785/data/Vista4D-Eval-Data/latentcam_d238",
+        split_name="seg_list_d238_hike1.txt",
+        eval_data="/data1/cympyc1785/data/Vista4D-Eval-Data/eval_data",
+        prefix="vista4d",
+        cloud_root=path.join(HERE, "out"),
+        out=path.join(HERE, "results", "20260922_d238_gendop_hike1"),
+        depth_norm="median",
+        ours={
+            "d238_s42":   EVAL_MY + "d238_s42__last",
+            "d238_s1234": EVAL_MY + "d238_s1234__last",
+            "d238_s2026": EVAL_MY + "d238_s2026__last",
+        },
+        ref="d238_s2026",
+    ),
 }
 
 # GenDoP arm 2종. text 는 어느 ckpt 를 쓰든 --text_from_eval_dir 로 같은 문장을 받는다.

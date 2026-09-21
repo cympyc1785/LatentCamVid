@@ -8,6 +8,11 @@ Follows [Keep a Changelog](https://keepachangelog.com/).
 ## [Unreleased]
 
 ### Added
+- **`scripts/run_gendop_eval.py` CORPORA `vista_d238` (2026-09-22).** hike
+  `pull_out_arc_left` = `vista4d_hike_1` **1 entry**. split 은 한 줄짜리
+  `seg_list_d238_hike1.txt` — d238 test 목록엔 hike 0/1/2 가 다 있지만 대조 대상이 이
+  preset 하나라 나머지를 섞으면 표가 안 맞는다. `ref` 는 비교 대상인 `d238_s2026`.
+  entry 1개라 FCD/PRDC 는 NaN 이니 분포 지표를 이 표에서 인용하지 말 것.
 - **`scripts/run_gendop_eval.py` CORPORA `vista_d229` (2026-09-22).** lady-running
   **3 entry** 코퍼스 (`track_orbit_right` / `track_orbit_left` / `track_pull_out_arc_right`).
   D223 에서 새로 ingest 한 씬이라 d215 keeper 17씬에 없어 항목을 따로 뒀다. `ours` 는

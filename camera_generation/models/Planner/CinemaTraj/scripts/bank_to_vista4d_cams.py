@@ -118,6 +118,36 @@ def load_pred(eval_dir: str, entry: str, kind: str, intr_recon: np.ndarray):
     return poses, intr
 
 
+def load_camera_file(file_path: str, intr_recon: np.ndarray):
+    """임의의 카메라 파일 -> (OpenCV c2w (n,4,4), intrinsics (n,4)).
+
+    `--preds` 와 달리 `<eval_dir>/test/<entry>_transforms_*.json` 이름 규약을 안 따르는
+    파일을 그대로 받는다 (번들 `cameras/s1234.npz`, 손으로 만든 궤적 JSON 등). 규약 변환은
+    `load_pred` 와 **같은 식**을 쓴다 — 두 경로가 갈리면 같은 궤적이 다른 영상이 된다.
+
+    * `.npz`  : 이미 Vista4D 규약(`cam_c2w` OpenCV recon world). intrinsics 가 없으면
+                recon 것을 그대로 쓴다.
+    * `.json` : nerfstudio(OpenGL c2w) — `diag(1,-1,-1,1)` 로 OpenCV 로 돌리고 절반
+                해상도 focal 을 recon 픽셀로 되돌린다.
+    """
+    if file_path.endswith(".npz"):
+        with np.load(file_path) as data:
+            poses = np.asarray(data["cam_c2w"], dtype=np.float64)
+            if "intrinsics" in data.files:
+                intr = np.asarray(data["intrinsics"], dtype=np.float64)
+            else:
+                intr = np.repeat(intr_recon[:1], len(poses), axis=0).astype(np.float64)
+        return poses, intr
+    with open(file_path, encoding="utf-8") as file:
+        data = json.load(file)
+    poses = np.array([f["transform_matrix"] for f in data["frames"]], dtype=np.float64) @ GL2CV
+    scale = float(intr_recon[0, 2]) / float(data["cx"])
+    intr = np.repeat(intr_recon[:1], len(poses), axis=0).astype(np.float64)
+    intr[:, 0] = float(data["fl_x"]) * scale
+    intr[:, 1] = float(data["fl_y"]) * scale
+    return poses, intr
+
+
 def main(args):
     out_root = args.output_root or path.join(CINEMATRAJ_ROOT, "out")
     recon = path.join(args.eval_data, "eval_data", "recon_and_seg", args.video)
@@ -132,9 +162,19 @@ def main(args):
 
     banks, rows, table = {}, [], []
     is_pred = bool(args.preds)
-    tol = args.frame0_tol if args.frame0_tol is not None else (0.05 if is_pred else 1e-6)
-    for spec in (args.preds or args.variants):
-        if is_pred:
+    is_file = bool(args.cams)
+    # 파일 직접 입력도 예측과 같은 허용 오차 — 대개 예측 궤적을 파일로 꺼내 온 것이다.
+    tol = args.frame0_tol if args.frame0_tol is not None else (1e-6 if args.variants else 0.05)
+    for spec in (args.cams or args.preds or args.variants):
+        if is_file:
+            spec, _, tag = spec.partition("=")
+            if not path.isfile(spec):
+                raise SystemExit(f"{spec}: 카메라 파일이 없다")
+            poses, intr = load_camera_file(spec, src_intr)
+            label, fixed_focal = "file", True
+            name = path.basename(spec)
+            tag = args.tag_prefix + (tag or path.splitext(name)[0])
+        elif is_pred:
             spec, _, tag = spec.partition("=")
             eval_dir, _, entry = spec.partition(":")
             if not entry:
@@ -216,6 +256,9 @@ if __name__ == "__main__":
                         help="`<bank_dir>:<variant_id>` 들. 뱅크가 달라도 섞을 수 있다")
     parser.add_argument("--preds", nargs="+", default=None,
                         help="`<eval_dir>:<entry>[=<tag>]` 들 (뱅크 대신 평가 JSON 에서 읽는다)")
+    # 이름 규약 없는 카메라 파일을 그대로 (번들 cameras/*.npz, 손으로 만든 transforms.json).
+    parser.add_argument("--cams", nargs="+", default=None,
+                        help="`<npz|json 경로>[=<tag>]` 들 — 카메라 파일을 직접 준다")
     parser.add_argument("--pred_kind", default="pred", choices=["pred", "ref"],
                         help="--preds 에서 pred=모델 예측 / ref=뱅크 GT")
     parser.add_argument("--frame0_tol", type=float, default=None,
@@ -233,6 +276,6 @@ if __name__ == "__main__":
     parser.add_argument("--overwrite", action="store_true", default=False)
     parser.add_argument("--no_overwrite", dest="overwrite", action="store_false")
     parsed = parser.parse_args()
-    if bool(parsed.variants) == bool(parsed.preds):
-        parser.error("--variants 와 --preds 중 정확히 하나")
+    if sum(map(bool, (parsed.variants, parsed.preds, parsed.cams))) != 1:
+        parser.error("--variants / --preds / --cams 중 정확히 하나")
     main(parsed)

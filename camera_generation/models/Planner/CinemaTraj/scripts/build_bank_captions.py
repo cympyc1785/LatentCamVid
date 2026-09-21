@@ -334,6 +334,27 @@ def load_anchor_desc(out_root: str, video: str, enabled: bool = True):
             for node_id, rec in blob["descriptions"].items() if rec.get("description")}
 
 
+def load_desc_override(desc_override: str):
+    """`--desc_override` 경로 → `{video: {node_id: 지칭구}}`. 안 주면 `{}` 로 기존 동작 그대로.
+
+    왜 필요한가: `instance_desc.json` 의 지칭구는 VLM 이 쓴 것이라 **사람이 부르고 싶은 이름과
+    다를 수 있다**. 사용자 지시 2026-09-21 — car-roundabout 은 VLM 이 "the blue car driving on
+    the left side of the road" 라 적었지만 실제로는 회색 차이고, golf 는 "the human in a light
+    blue shirt and dark cap swinging a golf club" 이 길어서 "a man playing a golf" 로 줄인 채
+    같은 카메라를 다시 뽑아 보고 싶다는 요청이다.
+
+    `instance_desc.json` 을 직접 고치지 않는 이유: 그건 VLM 산출물이고 다음 세대에서 다시
+    구워지면 손본 게 조용히 날아간다. 덮어쓰기는 **세대 설정**으로 남겨야 재현된다.
+    """
+    if not desc_override:
+        return {}
+    with open(desc_override, encoding="utf-8") as file:
+        blob = json.load(file)
+    return {video: {str(node): str(text).strip().rstrip(".")
+                    for node, text in table.items()}
+            for video, table in blob.items()}
+
+
 def target_text_of(variant: dict, label_map, desc_map: dict):
     """뱅크 행 → 캡션이 부를 대상 이름. desc 가 있으면 그것, 없으면 예전 라벨 경로."""
     hit = (desc_map or {}).get(str(variant.get("anchor_id")))
@@ -845,6 +866,7 @@ def main(args):
     promoted = promote_targetless(cfg) if args.targetless_promote else []
     events = load_events(args.metadata_csv)
     label_map = load_label_map(args.label_map)
+    desc_override = load_desc_override(args.desc_override)
     external_labels = load_external_labels(args.external_shapes)
     fields = [f.strip() for f in args.prompt_fields.split(",") if f.strip()]
     # 크기 부사는 3-state 다: 안 주면 형식과 무관하게 **끔**(D176, 사용자 지시 2026-09-10 —
@@ -880,6 +902,12 @@ def main(args):
         desc_map = load_anchor_desc(out_root, video, args.anchor_desc)
         if args.anchor_desc and not desc_map:
             no_desc.append(video)
+        # 사람이 지정한 지칭구는 VLM 것보다 우선한다. `--desc_override` 를 안 주면 빈 dict 라
+        # 아래 갱신은 no-op 이고, 준 씬/노드만 바뀐다 (나머지 씬은 비트 동일).
+        if desc_override.get(video):
+            desc_map = {**desc_map, **desc_override[video]}
+            print(f"  [{video}] desc 덮어쓰기 {len(desc_override[video])}개: "
+                  f"{desc_override[video]}")
         # 마찬가지로 composition 열은 D121 이후에 구운 뱅크에만 있다.
         if args.prompt_style == "nl" and not any(
                 "in_frame_ids" in v or "enter_ids" in v for v in bank["variants"][:1]):
@@ -1007,6 +1035,9 @@ if __name__ == "__main__":
     # 앵커 라벨 → 자연어 명사 표. **안 주면 기존 동작 그대로** (Vista 는 라벨이 이미 명사다).
     # TRUMANS 는 라벨이 blend 오브젝트 이름이라 `configs/trumans_labels.json` 이 필요하다.
     parser.add_argument("--label_map", default="", type=str)
+    # 사람이 지정한 anchor 지칭구 `{video: {node_id: text}}`. **안 주면 기존 동작 그대로**
+    # (`instance_desc.json` 의 VLM 문구를 쓴다). §load_desc_override
+    parser.add_argument("--desc_override", default="", type=str)
     # 뱅크를 만들 때 쓴 `datadop_shapes_v1` JSON. `dd_*` (free-moving) 행의 캡션을 라벨에서
     # 합성하는 데 쓴다 — 안 주면 `dd_*` 행에서 assert 로 멈춘다 (조용히 틀린 문장보다 낫다).
     parser.add_argument("--external_shapes", default="", type=str)

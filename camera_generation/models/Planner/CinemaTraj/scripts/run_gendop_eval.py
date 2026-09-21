@@ -365,20 +365,22 @@ def main():
     # 산출물 경로 접미사 (`pred_gendop_rgbd_p49_gdstyle`). --text_dir 를 줄 때 같이 줄 것 —
     # 안 주면 기본 캡션으로 돈 결과를 덮어쓴다.
     ap.add_argument("--text_tag", default=None)
-    # GenDoP 이 낸 크기를 그대로 쓸지(`--raw`), `rmax` 를 GT 것으로 바꿔 심을지(기본).
-    # 기본값은 예전 런과 비트동일하게 두되, 절대 크기에 반응하는 지표는 `--raw` 로 잰다
-    # (2026-09-07 사용자 지시 "앞으로 raw output 그대로 써주고").
-    ap.add_argument("--rescale", dest="rescale", action="store_true", default=True)
+    # GenDoP 이 낸 크기를 그대로 쓸지(기본), `rmax` 를 GT 것으로 바꿔 심을지(`--rescale`).
+    # 2026-09-07 "앞으로 raw output 그대로 써주고" 때는 기본값을 예전 런과 비트동일하게 두고
+    # 플래그만 달아 뒀는데, 같은 지시가 2026-09-21 에 다시 나왔다 — "gendop 돌릴때 rmax
+    # 곱하면 안되고 raw로 normalized 되어서 나오는 원본 코드 그대로 나온걸 저장해서 써야해".
+    # **기본값을 뒤집는다.** 예전 판본은 `--rescale --scale_token` 을 명시하면 재현된다.
+    ap.add_argument("--rescale", dest="rescale", action="store_true", default=False)
     ap.add_argument("--raw", dest="rescale", action="store_false")
     # native pose 수를 49 로 늘리는 방법. index_pick = 예전 런과 비트동일(19 pose 가 두 번
     # 뽑혀 계단), gendop_slerp = GenDoP 원본 `core/utils.sample_from_dense_cameras`
     # (회전 SLERP + 이동 LERP). pose_length=49 면 둘 다 항등이라 차이가 없다.
     ap.add_argument("--resample", choices=["index_pick", "gendop_slerp"],
                     default="index_pick")
-    # scale 토큰(`coords[:,9]`) 적용 여부. `--no_scale_token` 이 **공식 배포 판본**이다 —
-    # 배포 `eval.py` 는 scale 을 궤적 PNG 에만 쓰고 pred JSON 에는 안 넣는다. 기본값 True 는
-    # 예전 런과 비트동일용 (2026-09-07 사용자 지시로 지표는 `--no_scale_token` 으로 잰다).
-    ap.add_argument("--scale_token", dest="scale_token", action="store_true", default=True)
+    # scale 토큰(`coords[:,9]`) 적용 여부. 기본값 False 가 **공식 배포 판본**이다 — 배포
+    # `eval.py` 는 scale 을 궤적 PNG 에만 쓰고 pred JSON 에는 안 넣는다. 위 `--rescale` 과
+    # 같은 이유로 2026-09-21 에 기본값을 뒤집었다 ("원본 코드 그대로 나온걸 저장해서").
+    ap.add_argument("--scale_token", dest="scale_token", action="store_true", default=False)
     ap.add_argument("--no_scale_token", dest="scale_token", action="store_false")
     # score 단계 전용. 우리 파이프라인 밖 베이스라인(E.T./DIRECTOR)의 eval 폴더를 `LABEL=DIR` 로
     # 같은 표에 올린다. 여러 번 줄 수 있다.

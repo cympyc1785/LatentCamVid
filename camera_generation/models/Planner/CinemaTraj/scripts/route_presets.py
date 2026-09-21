@@ -519,6 +519,19 @@ def main(args):
     grid = args.slot_plan == "grid2x2"
     bonus_slots = GRID_TRACK_BONUS_SLOTS if grid else TRACK_BONUS_SLOTS
 
+    # D224. `--force_presets` 검증. 슬롯 표가 아니라 사람이 이름을 직접 적는 경로라
+    # 오타가 조용히 "그 preset 만 빠진 뱅크"가 되는 걸 여기서 막는다.
+    forced_presets = tuple(p.strip() for p in args.force_presets.split(",") if p.strip())
+    unknown = [p for p in forced_presets if p not in PRESET_NAMES]
+    assert not unknown, f"--force_presets 에 없는 preset: {unknown}"
+    assert not (forced_presets and grid), \
+        "--force_presets 는 --slot_plan full 전용이다 (grid2x2 는 슬롯 쌍으로 2개를 고른다)"
+    if forced_presets and args.target_variants < len(forced_presets):
+        # 예산이 모자라면 `plan_variants` 가 앞쪽 몇 개만 뽑아 요청한 preset 이 조용히 빠진다.
+        print(f"--target_variants {args.target_variants} -> {len(forced_presets)} "
+              f"(--force_presets 개수에 맞춘다)", file=sys.stderr)
+        args.target_variants = len(forced_presets)
+
     # anchor 마다 따로 라우팅한다 — away side 도 track 여부도 그 노드의 성질에서 나온다.
     # `--slot_plan full`(기본): `sample_camera_bank` 가 (nodes x presets) 격자를 돌므로 preset 은
     # **합집합**으로 넘긴다. 정지 anchor 에 track_ 이 걸리면 D77 이 알아서 버린다.
@@ -536,6 +549,20 @@ def main(args):
                                   orbit_fallback=args.orbit_fallback,
                                   orbit_min_span=args.orbit_min_span)
         full_first = full_first if full_first is not None else dict(slots)
+        # D224 (사용자 지시 2026-09-21 — mountain-hike "push in / track push in", parkour
+        # "track push in", lady-running "track+orbit right / track+orbit left / track push
+        # out arc right"). `route()` 의 슬롯 표는 슬롯당 preset 을 하나로 못 박아 둬서 이
+        # 요청들이 라우팅으로는 안 나온다: `advance` 는 `dolly_in_look_at` 고정이라 맨
+        # `dolly_in` 이 없고, `arc` 는 `pull_out_arc_*` 고정이라 `push_in_arc_*` 가 없으며,
+        # `orbit` 은 away 쪽 한 방향뿐이라 left/right 를 같이 못 낸다.
+        # **anchor 선택·track 판정·reasons 는 그대로 두고 슬롯 목록만** 갈아끼운다 —
+        # 여기서 갈아야 화이트리스트/rotate/grid 가 뒤이어 걸리지 않는다. 슬롯 이름은
+        # 하류에서 안 쓴다 (`sample_camera_bank.py:904` 가 `preset` 만 읽는다).
+        # 빈 문자열이면 no-op = 옛 동작 비트 동일.
+        if forced_presets:
+            reasons["forced_presets"] = list(forced_presets)
+            reasons["forced_replaced"] = [p for _, p in slots]
+            slots = [(f"forced:{p}", p) for p in forced_presets]
         # D192 (사용자 지시 2026-09-14 "일정 이상 움직이는 subject일 경우 track hold, 많이
         # 안움직이는 subject일 경우 dolly in look at으로만"). 어휘를 두 개로 고정하려면 슬롯을
         # anchor 의 운동량으로 갈라야 한다 — 하나의 화이트리스트로는 못 한다. `advance` 만
@@ -852,6 +879,14 @@ def build_parser():
     # 한 목록으로는 못 하는 이유: `advance` 만 남기면 움직이는 anchor 가
     # `track_dolly_in_look_at`, `static` 만 남기면 정지 anchor 가 `static_look_at` 이 된다.
     parser.add_argument("--slot_whitelist_track", default="", type=str)
+    # D224 (사용자 지시 2026-09-21). 슬롯 표를 건너뛰고 **preset 이름을 직접** 적는다.
+    # `--slot_whitelist` 는 슬롯 표에 있는 조합 중에서 고르는 것이라, 슬롯당 하나로 못 박힌
+    # preset(advance=`dolly_in_look_at`, arc=`pull_out_arc_*`, orbit=away 한 방향)은 못 낸다.
+    # 사용자가 특정 카메라를 지목하는 일회성 요청 전용이고, 코퍼스 굽기에는 쓰지 않는다 —
+    # 방향(left/right)이 씬별 away/toward 가 아니라 고정이라 소스와 같은 쪽으로 도는 변이가
+    # 섞인다(§route 의 away/toward). 빈 문자열 = 끔 = 옛 동작 비트 동일.
+    #   예) --force_presets dolly_in,track_dolly_in
+    parser.add_argument("--force_presets", default="", type=str)
     parser.add_argument("--external_shapes", default=None, type=str)
     # D83: 2 → 4. 모양 뱅크가 12개(6라벨)에서 188개(47라벨)로 늘었는데 영상당 2개만 뽑으면
     # 코퍼스가 그 다양성을 못 본다. 4면 변이의 약 1/3 이 free-moving(실제 촬영 궤적)이 된다.

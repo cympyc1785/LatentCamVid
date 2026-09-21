@@ -1,0 +1,46 @@
+{
+  "_why": "D224 (사용자 지시 2026-09-21) — 사람이 preset 을 **이름으로 지목한** 세 씬을 굽는다. mountain-hike \"push in과 track push in\" + \"push_in_arc_right, track_push_in_arc_left 추가\", parkour \"track push in\", golf \"pedestal down, pedestal down and push in\". d215 와 같은 tau/fit/emit 을 쓰되 route 만 슬롯 표를 건너뛴다.",
+
+  "_왜_d215에_안_얹나": "같은 `hole_bank_d215`/`latentcam_d215` 에 카메라를 더 얹으면 `seg_list_d215_test.txt` 의 행 순서가 밀려, 이미 평가를 끝낸 eval 폴더들이 **조용히** 다른 행을 가리키게 된다. 그래서 뱅크·코퍼스·seg_list 를 전부 d224 로 가른다 (`run_d215.py --generation d224 ...`).",
+
+  "_route가_다른_점": "`--slot_whitelist` 대신 `--force_presets` 다. `route()` 의 슬롯 표는 슬롯당 preset 을 하나로 못 박아 둬서 이 요청들이 라우팅으로는 안 나온다 — `advance` 는 `dolly_in_look_at` 고정이라 맨 `dolly_in` 이 없고, `arc` 는 `pull_out_arc_*` 고정이라 `push_in_arc_*` 가 없으며, `orbit`/`vertical` 은 away 쪽 한 방향뿐이다. **preset 목록은 씬마다 다르므로** config 가 아니라 `--force_presets_map`(tmp/d224/force_presets.json)이 들고 있고, 드라이버가 씬별로 이 config 를 복사해 그 줄만 덧붙인다. anchor 는 d215 것을 그대로 쓰되 golf 만 새로 정한다 (`dyn_1` human — `dyn_0` 은 label 이 'golf' 지만 bbox 가 [0,0,1279,719] 인 코스 전체다).",
+
+  "_tau가_다른_점": "`--no_track_dynamic_only` 를 켜고 `--track_min_drift_u` 를 0 으로 내린다. (`--track_dynamic_only` 는 `default=True` 라 **빼는 것만으로는 안 꺼진다** — 1차 수정에서 인자만 지웠다가 뱅크가 그대로 2대로 나왔다.) 나머지 인자는 d215 를 글자 그대로 옮겨 적은 것이다 (`extends` 가 최상위 키 단위 덮어쓰기라 한 줄을 고치려면 블록을 통째로 다시 써야 한다). 1차 굽기에서 mountain-hike 가 요청한 4개 중 `track_dolly_in`/`track_push_in_arc_left` 둘이 **뱅크에서만 조용히 빠졌다** — route 는 넷 다 냈는데(`preset_route_d224.json`) tau 축 열거가 `follow_gains:[\"0\"]` 로 접혔다. 이 씬의 anchor 는 `dyn_0 human` 이고 `moving:false`, `center_drift_u 0.0254` 라 두 게이트에 다 걸린다. 사용자가 preset 을 이름으로 지목한 세대라 여기서는 게이트가 요청을 덮으면 안 된다 — 코퍼스 굽기에는 이 config 를 쓰지 않는다. (정지 피사체 위의 track 은 궤적이 비-track 과 거의 같아지지만 캡션은 'tracks {target} while pushing in' 으로 갈리므로, 릴에서 보려는 게 바로 그 차이다.)",
+
+  "extends": "d215_vista_objcentric.json",
+  "generation": "d224",
+  "tau_bank_dir": "bank_d224",
+  "bank_dir": "hole_bank_d224",
+
+  "tau": {
+    "args": [
+      "--cloud_source", "memory",
+      "--tau_ladder", "0.10", "0.20", "0.35", "0.60", "1.00",
+      "--variant_pool", "full",
+      "--aim_keyframes", "6", "--keyframe_aim", "auto", "--keyframe_ease", "smooth_kf",
+      "--fixed_focal", "--deroll", "--no_preview", "--skip_on_empty",
+      "--device", "cuda",
+      "--orbit_fixed_sweep", "--min_sweep_deg", "20", "--behind_src_frames", "49",
+      "--tau_ref", "follow",
+      "--no_track_dynamic_only",
+      "--track_min_drift_u", "0.0",
+      "--trackings", "lock", "--preset_tracking",
+      "--behind_min_zcam", "0.02",
+      "--tau_denom", "S",
+      "--min_subject_area", "0.001"
+    ]
+  },
+
+  "route": {
+    "out": "preset_route_d224.json",
+    "args": [
+      "--num_external", "0",
+      "--free_moving", "off",
+      "--anchor_ids_file", "/data1/cympyc1785/LatentCamVid/tmp/d224/anchors.json",
+      "--slot_plan", "full",
+      "--track_mode", "add",
+      "--track_min_drift_u", "0.05",
+      "--skip_if_empty"
+    ]
+  }
+}

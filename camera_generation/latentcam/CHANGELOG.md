@@ -116,6 +116,21 @@ All notable changes to the latentcam sub-project. Follows [Keep a Changelog](htt
   ⚠ bf16 을 고른 arm 은 fp32 on-the-fly 와 **비트 동일하지 않다** (실측 상대오차 3.3e-3).
 
 ### Fixed
+- **변이가 전부 `aim=free` 인 씬에서 molmo2 캐시가 `KeyError` 로 죽었다 (2026-09-21).**
+  `cache_molmo2_embeddings.py` 의 `by_scene` 은 `FREE_PAIR = ('', '')` sentinel 을 **제외하고**
+  만들어진다 — free 변이는 씬을 가리지 않고 0 행 하나로 모이기 때문이다. 그런데 씬 루프는
+  `keys` 전체를 돌면서 `by_scene[sk]` 를 바로 찍어서, look_at 변이가 **하나도 없는** 씬이 오면
+  `KeyError: 'vista4d_golf'` 로 캐시 단계가 통째로 날아갔다 (D224 golf 는 `pedestal_down` /
+  `pedestal_down_dolly_in` 둘 다 free). d215 까지는 씬마다 look_at 변이가 최소 하나 있어서
+  안 드러난 경로다.
+  - `caps = by_scene.get(sk, [])` 로 캡션 루프만 0회로 돌리고, 씬의 **영상** 캐시
+    (`<video_out>/<scene_key>.pt`) 는 그대로 굽는다. `dataset_dl3dv._preload_peav` 는 씬이
+    하나라도 없으면 FileNotFoundError 로 죽고 즉석 계산 경로가 없어서, 캡션 0개인 씬도
+    영상 캐시는 반드시 있어야 한다.
+  - prefix 추출용으로 `PREFIX_PROBE_CAPTION` 더미 문장을 추가했다. prefix 는 `split_prefix`
+    가 캡션 꼬리를 자른 앞부분이라 문장 내용과 무관하고 (씬마다 동일함을 assert 가 확인),
+    이 문장이 들어간 캡션 행은 **저장되지 않는다**.
+  - look_at 변이가 있는 씬은 `caps[0]` 을 그대로 쓰므로 **동작이 비트 동일**하다.
 - **test 세그먼트가 1개면 FCD 가 MKL 레벨에서 프로세스를 죽였다 (2026-09-21).**
   `FrechetCLaTrDistance.compute` 의 공분산 분모가 `N-1` 이라 N=1 이면 cov 가 NaN 이 되고,
   NaN 행렬이 `torch.linalg.eigvals` 로 들어가면 예외가 아니라 **`Intel oneMKL ERROR:

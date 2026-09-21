@@ -1,0 +1,27 @@
+{
+  "_why": "D225 (사용자 지시 2026-09-21) — 카메라는 그대로 두고 **target 지칭구만 사람이 다시 쓴** 재시도. car-roundabout 은 \"The camera tracks the grey car while orbiting to the right around it.\" (VLM 이 'the blue car driving on the left side of the road' 라 적었는데 실제 차는 회색이다), golf 는 pedestal_down 을 유지하되 target 을 'a man playing a golf' 로 줄인다.",
+
+  "_왜_새_세대인가": "바뀌는 건 캡션 한 줄뿐이지만 그 한 줄이 곧 모델 입력이라 예측이 달라진다. d224 코퍼스에 덮어쓰면 이미 낸 d224_s* eval 폴더가 같은 이름으로 다른 텍스트를 가리키게 된다 (`eval-dir-name-must-carry-tag` 와 같은 함정). 그래서 뱅크·코퍼스·seg_list 를 d225 로 가른다.",
+
+  "_지칭구는_어디서_오나": "`build_bank_captions.py --desc_override` 로 준다 (tmp/d225/desc_override.json). `out/<씬>/instance_desc.json` 을 직접 고치지 않는 이유는 그게 VLM 산출물이라 다음 세대에 다시 구워지면 손본 게 조용히 날아가기 때문이다.",
+
+  "_route": "d224 와 같은 `--force_presets` 경로다. car-roundabout 은 `track_orbit_right` 가 슬롯 표에 없고(orbit 슬롯은 left 한 방향뿐) golf 는 `pedestal_down` 이 vertical 슬롯에서 up 으로 고정돼 있다.",
+
+  "extends": "d224_forced.json",
+  "generation": "d225",
+  "tau_bank_dir": "bank_d225",
+  "bank_dir": "hole_bank_d225",
+
+  "route": {
+    "out": "preset_route_d225.json",
+    "args": [
+      "--num_external", "0",
+      "--free_moving", "off",
+      "--anchor_ids_file", "/data1/cympyc1785/LatentCamVid/tmp/d225/anchors.json",
+      "--slot_plan", "full",
+      "--track_mode", "add",
+      "--track_min_drift_u", "0.05",
+      "--skip_if_empty"
+    ]
+  }
+}

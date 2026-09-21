@@ -452,6 +452,11 @@ def pool_video(hid, patch_mask, n_frames, side, pool):
 # False 라 씬마다 따로 둘 이유가 없다 (자세한 근거는 `prepare_items` docstring).
 FREE_PAIR = ('', '')
 
+# 변이가 **전부** free 인 씬(D224 golf)에서 prefix 를 뽑을 때만 쓰는 더미 문장. prefix 는
+# `split_prefix` 가 캡션 꼬리를 잘라낸 앞부분이라 문장 내용과 무관하고, main 의 assert 가
+# 씬마다 같은지 확인한다. 저장되는 캡션 행은 0개이므로 이 문장 자체는 디스크에 안 남는다.
+PREFIX_PROBE_CAPTION = 'Track the subject.'
+
 
 def prepare_items(args):
     """`collect` + `--text_override_json` + free-moving 처리. main 과 merge 가 같은 걸 봐야 한다.
@@ -698,10 +703,19 @@ def main(args):
 
     for n, sk in enumerate(keys):
         chunk, (s, e) = scenes[sk]
-        caps = by_scene[sk]
+        # 변이가 **전부** `aim=free` 인 씬은 `by_scene` 에 아예 안 들어온다 — free 는 씬을 가리지
+        # 않고 `FREE_PAIR` sentinel 한 행으로 모이기 때문이다. 그래도 이 씬의 **영상** 캐시는
+        # 구워야 한다: `dataset_dl3dv._preload_peav` 는 씬이 하나라도 없으면 FileNotFoundError 로
+        # 죽고 즉석 계산 경로가 없다. 그래서 캡션 루프만 0회로 돌린다.
+        # (D224 golf 에서 처음 걸렸다 — pedestal_down / pedestal_down_dolly_in 둘 다 aim=free.
+        #  d215 까지는 씬마다 look_at 변이가 최소 하나 있어서 안 드러났다.)
+        caps = by_scene.get(sk, [])
         video = load_frames(args.root, chunk, int(s), int(e))
-        batch = processor_inputs(proc, video, caps[0], args.fps)
-        prefix_ids, _ = split_prefix(proc, batch, caps[0])
+        # prefix(= 영상 토큰열)는 캡션과 무관하다 — `split_prefix` 가 꼬리를 잘라내고, 아래
+        # assert 가 씬마다 같은지 확인한다. caps 가 비면 아무 문장이나 넣어 prefix 만 얻는다.
+        head = caps[0] if caps else PREFIX_PROBE_CAPTION
+        batch = processor_inputs(proc, video, head, args.fps)
+        prefix_ids, _ = split_prefix(proc, batch, head)
         if prefix_ref is None:
             prefix_ref = prefix_ids.clone()
             npatch = int((prefix_ids == PATCH_ID).sum())

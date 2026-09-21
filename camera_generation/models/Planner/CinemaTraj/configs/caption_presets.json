@@ -174,6 +174,10 @@
    "axis": "orbit",
    "phrase": "orbits to the left around {target} while rising"
   },
+  "pedestal_down_dolly_in": {
+   "axis": "pedestal",
+   "phrase": "drops straight down while pushing in toward {target}"
+  },
   "pan_right_zoom_out": {
    "axis": "pan",
    "phrase": "pans to the right while zooming out",

@@ -8,6 +8,34 @@ Follows [Keep a Changelog](https://keepachangelog.com/).
 ## [Unreleased]
 
 ### Added
+- **`scripts/run_custom_caption.py` — 영상 1개 + 캡션 1줄 → 카메라 + depth warp (2026-09-21).**
+  사용자 지시 "내가 영상 위치랑 caption text 직접 넣으면 우리 모델 돌려서 카메라 저장하고
+  depth warp 영상도 만들어서 저장해주는 pipeline". `--stage {recon,geocalib,graph,corpus,
+  molmo2,eval,warp,bundle,all}` 하나짜리 python 드라이버다. `run_d215.py` 계열과 다른 점은
+  **뱅크가 없다**는 것 — 캡션이 사람 손으로 들어오므로 route/tau/fit/emit/instance_desc 가
+  전부 빠지고, 남는 건 모델이 조건으로 읽는 넷(소스 프레임·소스 카메라·avg_scale·캡션)뿐이다.
+  `target_poses.npz` 에는 소스 궤적을 자리채우기로 넣으므로 **eval 이 찍는 clatr/caption
+  점수는 의미가 없고**, 그래서 `score` 단계가 없다. 산출물은
+  `results/20260921_d221_bundles/<name>/<preset>/{caption,info}.json + warp.mp4 + cameras/`.
+  실측으로 드러난 배선 세 가지를 코드에 못 박았다:
+  ① geocalib 은 전용 env (`envs/geocalib`) — kornia 가 vista4d/latentcam/GenDoP/sam3 넷 다 없다.
+  ② recon 의 `--seg_keywords` 는 **실제 명사**여야 한다. `_all_` 이면 SAM3 를 안 타서
+  (`recon_and_seg_single.py:82`) `--save_seg_instances` 가 조용히 무시되고, 그 다음
+  `scene_graph/io.py:117` 의 `assert segs` 에서 죽는다. 명사는 캡션 지칭구에서 뽑는다
+  (`guess_nouns`: "the white dog" → `["white dog", "dog"]`, `--nouns` 로 덮어쓰기).
+  ③ `--free_mode` 는 변이 수에 맞춘다. 변이가 1개인데 지칭구를 뽑으면 `aim=look_at` 이라
+  `aim=='free'` 변이가 0개가 되고, `zero` 는 그때 assert 로 죽는다
+  (`cache_molmo2_embeddings.py:485`). free 변이가 0개면 `zero` 와 `off` 의 산출물은 같다.
+  molmo2 override 는 D200 학습 분포대로 `Track {지칭구}.` 한 형식이다 (캡션 원문이 아니다).
+- **`scripts/build_bank_captions.py --desc_override` + `configs/bank/d225_desc.json`
+  (2026-09-21, D225).** 카메라는 그대로 두고 **target 지칭구만 사람이 고쳐 쓰는** 재시도용이다.
+  `{"<씬>": {"<node_id>": "<지칭구>"}}` JSON 을 받아 캡션을 굽기 직전에 갈아끼운다.
+  `out/<씬>/instance_desc.json` 을 직접 고치지 않는 이유는 그게 VLM 산출물이라 다음 세대에
+  다시 구워지면 손본 게 조용히 날아가기 때문이다. 실사용: car-roundabout 의 VLM 지칭구가
+  "the blue car ..." 인데 실제 차는 회색이었고, golf 는 target 을 "a man playing a golf" 로
+  줄였다. d224 코퍼스에 덮어쓰지 않고 d225 로 세대를 가른 이유는 캡션 한 줄이 곧 모델
+  입력이라, 같은 이름의 `d224_s*` eval 폴더가 다른 텍스트를 가리키게 되기 때문이다
+  (memory `eval-dir-name-must-carry-tag` 와 같은 함정).
 - **`scripts/route_presets.py --force_presets` — 슬롯 표를 건너뛰고 preset 을 이름으로 지목
   (2026-09-21, D224).** `route()` 의 슬롯 표는 **슬롯당 preset 을 하나로 못 박아** 둬서,
   사람이 이름으로 부르는 요청 중 라우팅으로는 아예 안 나오는 것이 있다 — `advance` 는

@@ -185,6 +185,15 @@ PRESETS = {
     "orbit_left_pedestal_up": (lambda n, c: T.compose(T.true_orbit(c["sweep"], c["radius"], n),
                                                       T.pedestal(c["lateral"], n)),
                                "look_at", False),
+    #   pedestal_down_dolly_in — 하강하면서 전진 (사용자 지시 2026-09-21 "vista golf scene을
+    #                            pedestal down, pedestal down and push in으로 돌려봐줘").
+    #                            `orbit_left_pedestal_up` 과 같은 `<주동작>_<부동작>` 표기.
+    #                            aim 은 두 구성 primitive 와 같은 `free` 다 — pedestal 도
+    #                            dolly_in 도 조준을 안 하므로(조준은 `_look_at` 으로만 표기,
+    #                            D90 비대칭) 여기만 `look_at` 으로 두면 어휘 규칙이 깨진다.
+    "pedestal_down_dolly_in": (lambda n, c: T.compose(T.pedestal(-c["lateral"], n),
+                                                      T.dolly(c["dolly"], n)),
+                               "free", False),
     # ── static (카메라가 안 움직인다). free-moving 이 아니라 `_look_at` 규칙 밖이지만, `hold` 의
     # `rel_local` 회전도 항등이라 D89 까지 `_dont_look` 이 no-op 이었다 (실측 |ΔR| 0.017°).
     # D90 은 이름을 그대로 두고 aim 만 `free` 로 고쳤는데, 그러면 `static_hold` 가 "제자리에서

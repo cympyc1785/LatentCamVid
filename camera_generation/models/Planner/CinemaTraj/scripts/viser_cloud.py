@@ -177,6 +177,13 @@ UP_VECTORS = {"+x": (1, 0, 0), "-x": (-1, 0, 0), "+y": (0, 1, 0), "-y": (0, -1, 
 # 때문이다 — camel 은 vfov 16.4° 라 프러스텀이 바늘처럼 길어져 자리를 가늠할 수가 없다.
 PROBE_FOV_DEG = 60.0
 
+# [2026-09-21] 소스·target 프러스텀의 세로 화각도 **고정값**이다. 카메라 자기 화각을 쓰면 씬마다
+# 프러스텀이 바늘처럼 길어져 "이 카메라가 어디에 있나"를 가늠할 수가 없다 — bmx-bumps 소스는
+# vfov 17.8°(fy 2293 @ 720p), camel 은 16.4° 다. probe 가 이미 같은 이유로 위 상수를 쓰는데,
+# 정작 본편 프러스텀은 소스 K 를 쓰고 있었다. 화각 차이(arm 별 focal)는 info 패널의 `fx` 로
+# 읽는다 — 그림에서 자리를 못 읽는 대가로 얻을 정보가 아니다. 예전 동작은 `--cam_fov_src`.
+FRUSTUM_FOV_DEG = 60.0
+
 # probe 를 여러 대 띄우면 전부 같은 색이라 어느 게 어느 건지 못 고른다. 새로 만들 때마다 이
 # 팔레트를 돌려 쓰고, `color` 피커로 활성 probe 만 따로 바꾼다. 소스(회색)·플랜(주황)·현재
 # 프레임(초록) 과 겹치지 않는 색만 골랐다.
@@ -500,6 +507,11 @@ def main():
     # 0 이면 z_med 기준 자동 (0.002·z_med).
     parser.add_argument("--point_size", default=0.0, type=float)
     parser.add_argument("--cam_stride", default=2, type=int)
+    # 프러스텀 세로 화각(도). 카메라 K 와 무관한 고정값이다 (위 상수 주석 참고).
+    parser.add_argument("--cam_fov_deg", default=FRUSTUM_FOV_DEG, type=float,
+                        help=f"프러스텀 세로 화각 (기본 {FRUSTUM_FOV_DEG:.0f}도, GUI view > camera vfov)")
+    parser.add_argument("--cam_fov_src", action="store_true",
+                        help="프러스텀 화각을 카메라 자기 K 로 (예전 동작, 망원 씬에서 바늘이 된다)")
     # 0 = 0.03·z_med. 슬라이더 초기값일 뿐이고, 띄운 뒤 GUI `view > camera size` 로 바꾼다.
     parser.add_argument("--cam_scale", default=0.0, type=float)
     parser.add_argument("--up", default="-y", choices=sorted(UP_VECTORS))
@@ -882,6 +894,21 @@ def main():
         for handle, ratio in src_cams + state["cams"] + pin_cams:
             handle.scale = value * ratio
 
+    def apply_cam_fov():
+        """프러스텀 화각을 고정값으로 덮는다.
+
+        `add_frustums` 를 고치지 않고 **만든 뒤 `.fov` 를 대입**한다 — 그 함수는 GL↔CV 규약의
+        단일 출처(latentcam 뷰어)라 시그니처를 늘리고 싶지 않고, `fov` 는 갱신되는 프로퍼티라
+        다시 그릴 필요도 없다 (probe 가 이미 같은 방식으로 슬라이더를 먹는다).
+        `--cam_fov_src` 면 아무것도 하지 않아 add_frustums 가 계산한 자기 화각이 남는다.
+        """
+        if args.cam_fov_src:
+            return
+        fov = float(np.radians(float(gui_cam_fov.value)))
+        pin_cams = [pair for pin in pins.values() for pair in pin["cams"]]
+        for handle, _ in src_cams + state["cams"] + pin_cams:
+            handle.fov = fov
+
     def apply_cam_lw():
         """프러스텀 선 굵기. 크기(scale)와 **다른 축**이다 — 작은 프러스텀을 굵게 그려야
         점군에 안 묻히는 씬이 있고, 반대로 큰 프러스텀은 가늘어야 뒤가 보인다.
@@ -961,6 +988,7 @@ def main():
         gui_info.value = motion_report(label, row, plan_c2w, track, z_med, focal, src_jerk)
         apply_cam_scale()
         apply_cam_lw()
+        apply_cam_fov()
         refresh()
 
     def pin_node(label: str):
@@ -1008,6 +1036,7 @@ def main():
                        "color": color, "row": row}
         apply_cam_scale()
         apply_cam_lw()
+        apply_cam_fov()
 
     def remove_pin(label: str):
         pin = pins.pop(label, None)
@@ -1069,6 +1098,11 @@ def main():
         gui_cam = server.gui.add_slider("camera size", min=cam_scale * 0.1, max=cam_scale * 10.0,
                                         step=cam_scale * 0.05, initial_value=cam_scale)
         # 프러스텀 선 굵기(world 단위). viser 기본 0.02 를 초기값으로 둔다.
+        # 화각은 크기(scale)·굵기(thickness)와 **또 다른 축**이다 — 작은 프러스텀도 화각이
+        # 좁으면 바늘이라 자리를 못 읽는다. `--cam_fov_src` 면 카메라 자기 화각을 쓰므로 비활성.
+        gui_cam_fov = server.gui.add_slider("camera vfov (deg)", min=10.0, max=120.0, step=1.0,
+                                            initial_value=float(args.cam_fov_deg),
+                                            disabled=bool(args.cam_fov_src))
         gui_cam_lw = server.gui.add_slider("camera thickness", min=0.002,
                                            max=max(0.05, cam_scale), step=0.002,
                                            initial_value=min(0.02, max(0.05, cam_scale)))
@@ -1268,6 +1302,7 @@ def main():
             handle.point_size = float(gui_size.value)
 
     gui_cam.on_update(lambda _: apply_cam_scale())
+    gui_cam_fov.on_update(lambda _: apply_cam_fov())
     gui_cam_lw.on_update(lambda _: apply_cam_lw())
 
     @gui_path_lw.on_update
@@ -1441,6 +1476,9 @@ def main():
     bind_probe(probe_0)
     refresh_probe_list(probe_0["name"])
 
+    # 소스 프러스텀은 GUI 보다 **먼저** 만들어지므로 여기서 한 번 덮어야 한다 — motions 가
+    # 없는 씬에서는 select() 가 안 돌아 소스만 예전 화각으로 남았다.
+    apply_cam_fov()
     if motions:
         select(0)
     else:
@@ -1463,6 +1501,10 @@ def main():
             ("dynamic/frame", f"{int(np.median(dyn_counts) if dyn_counts else 0):,} (median)"),
             ("z_med frame0", f"{z_med:.4f}"), ("point size", f"{point_size:.5f}"),
             ("camera size", f"{cam_scale:.4f}  (GUI view > camera size 로 조절)"),
+            ("camera vfov", (f"카메라 자기 K  (소스 {src_vfov_deg:.1f} deg, --cam_fov_src)"
+                             if args.cam_fov_src else
+                             f"{float(args.cam_fov_deg):.0f} deg 고정  "
+                             f"(소스 K 는 {src_vfov_deg:.1f} deg, GUI view > camera vfov)")),
             ("probe vfov", f"{PROBE_FOV_DEG:.0f} deg  (소스는 {src_vfov_deg:.1f} deg)"),
             ("up", args.up), ("banks", " ".join(banks) or "-"),
             ("bundle", (f"{bundle_root}  (arm 표시순 {'/'.join(BUNDLE_ARMS)})")

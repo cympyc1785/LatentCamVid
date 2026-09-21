@@ -68,6 +68,14 @@ Follows [Keep a Changelog](https://keepachangelog.com/).
   `dir(handle)` 에 `thickness` 가 안 보이는 게 함정이다 — 동적 prop 이라 런타임에만 있다.
 
 ### Changed
+- **`viser_cloud.py` 프러스텀 화각이 카메라 K 대신 고정 60도 (2026-09-21).** 소스/예측의
+  자기 화각을 쓰면 망원 씬에서 프러스텀이 바늘처럼 길어져 "이 카메라가 어디에 있나"를 가늠할
+  수가 없다 — bmx-bumps 소스 vfov 17.8°(fy 2293 @ 720p), camel 16.4°. `probe camera` 는 이미
+  같은 이유로 `PROBE_FOV_DEG = 60` 을 쓰고 있었는데 정작 본편 프러스텀만 K 를 쓰고 있었다.
+  소스·target·pin 전부에 걸린다. arm 별 focal 차이(s42 2287.88 vs recon 2293.41)는 info
+  패널의 `fx` 로 읽는다 — 그림에서 자리를 못 읽는 대가로 얻을 정보가 아니다.
+  `add_frustums`(GL↔CV 규약의 단일 출처)는 손대지 않고 만든 뒤 `.fov` 를 대입한다.
+  GUI `view > camera vfov (deg)` 슬라이더 + `--cam_fov_deg`, **예전 동작은 `--cam_fov_src`.**
 - **`viser_cloud.py --bundle` — d221 번들을 씬과 같이 본다 (2026-09-21).**
   `results/20260921_d221_bundles/<scene>/` 를 통째로 올려 `<preset>/cameras/{gt,s42,s1234,
   s2026,gendop}.npz` 를 preset x arm 으로 펴서 기존 motion 슬라이더에 꽂는다 (라벨

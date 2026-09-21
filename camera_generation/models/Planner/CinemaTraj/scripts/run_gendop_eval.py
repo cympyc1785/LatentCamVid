@@ -249,6 +249,29 @@ CORPORA = {
         },
         ref="d241_s42",
     ),
+    # D244 (2026-09-22, 2 entry). dynpose #386 (`370548b3`, 터널 보행자) 를
+    # `track_dolly_in` / `track_dolly_in_look_at` 두 preset 으로 지목해 구운 판
+    # (`tmp/d219/run_d219.py --preset`). 우리 arm 은 d241 과 같은 "한 ckpt × seed 3개".
+    #
+    # recon 루트는 `dynpose_d200` 과 같은 `DynPose-100K/eval_data` 다 — d244 코퍼스가
+    # dynpose-100k 씬 하나를 그대로 떼 온 것이라 `DynPose-LBM/eval_data` 에는 없다.
+    # cloud.npz 도 D178 이후 디스크에 없으므로 score 는 `--cloud_source memory`.
+    # depth_norm 은 dynpose median 대역(0.41~20.55) 기준 `median` (d200 과 동일).
+    "dynpose_d244": dict(
+        corpus="/data1/cympyc1785/data/DynPose-LBM/latentcam_d244",
+        split_name="seg_list_d244_test.txt",
+        eval_data="/data1/cympyc1785/data/DynPose-100K/eval_data",
+        prefix="dynpose",
+        cloud_root=path.join(HERE, "out_dynpose"),
+        out=path.join(HERE, "results", "20260922_d244_gendop_386"),
+        depth_norm="median",
+        ours={
+            "d244_s42":   EVAL_MY + "d244_s42__last",
+            "d244_s1234": EVAL_MY + "d244_s1234__last",
+            "d244_s2026": EVAL_MY + "d244_s2026__last",
+        },
+        ref="d244_s42",
+    ),
 }
 
 # GenDoP arm 2종. text 는 어느 ckpt 를 쓰든 --text_from_eval_dir 로 같은 문장을 받는다.

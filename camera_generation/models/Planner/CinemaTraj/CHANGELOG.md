@@ -16,6 +16,13 @@ Follows [Keep a Changelog](https://keepachangelog.com/).
   같은 동작에 이름이 둘 생긴다. `aim="free"`(구성 primitive 둘 다 재조준 없음),
   `PRESET_FOLLOW`/`PRESET_TAU_REF` 는 접두어로 자동 적용되므로 dict 한 줄이 전부다.
   기존 45종 동작은 비트 동일.
+- **`scripts/run_gendop_eval.py` CORPORA `dynpose_d244` (2026-09-22).** dynpose #386
+  (`370548b3`, 터널 보행자)을 `track_dolly_in` / `track_dolly_in_look_at` 두 preset 으로
+  지목해 구운 2-entry 코퍼스의 GenDoP 대조군. 사용자가 "#386 은 gendop 도" 라고 해서
+  추가했다. `eval_data` 는 `DynPose-100K/eval_data` — 이 씬은 dynpose-100k 에서 떼 온
+  것이라 옛 `DynPose-LBM/eval_data` 를 쓰면 recon 을 조용히 못 찾는다. cloud.npz 는
+  D178 이후 디스크에 없으므로 score 는 `--cloud_source memory`. 표 항목 하나라 기존
+  코퍼스 동작은 그대로다. entry 2개라 FCD/PRDC 는 인용하지 말 것.
 - **`scripts/run_gendop_eval.py` CORPORA `vista_d241` (2026-09-22).** `vista_d238` 과
   **카메라가 같고 문장만 짧은** 대조군. 지칭구를 "the man in a light shirt and dark pants
   walking up a rocky slope" → "the man walking on a rocky slope" 로 줄여 캡션만 다시 구운

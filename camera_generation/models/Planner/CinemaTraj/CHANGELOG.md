@@ -35,6 +35,14 @@ Follows [Keep a Changelog](https://keepachangelog.com/).
     전체**를 잡았기 때문이다 (`seg_instances/golf/meta.json` id 5). 별건.
 
 ### Changed
+- **`viser_frame.py` 저장 파일 prefix 를 파일명 -> **부모 폴더 이름** (2026-09-21).**
+  번들 릴은 preset 폴더마다 파일명이 똑같이 `warp.mp4` 라, 파일명으로 저장하면 세 preset 이
+  전부 `warp_f0023.png` 가 되고 `_2`/`_3` 로만 갈려 어느 preset 인지 알 수 없었다 — 구분되는
+  축은 폴더 이름이다. 이제 `crane_up_f0023.png` / `track_orbit_left_f0023.png` /
+  `track_pull_out_arc_right_f0023.png` 로 갈린다 (실측). 같은 폴더의 `warp.mp4` 와
+  `warp_gendop.mp4` 처럼 폴더로도 안 갈리는 경우는 **기동 시 경고**하고
+  `--name_from both`(부모_파일명) 로 갈린다. `--name_from stem` 이 예전 동작이다.
+  info 패널에 `save as <prefix>_f0023.png` 를 미리 띄워 누르기 전에 이름을 확인한다.
 - **`viser_cloud.py` 프러스텀 표시 간격을 GUI 로 (2026-09-21).** 예전에는 `--cam_stride` 가
   **만들 때** 걸러서 띄운 뒤에는 바꿀 수가 없었다. 이제 동적 점군과 같은 구조다 — 전 프레임을
   만들어 두고(`--cam_stride` 기본 2 -> **1**) 표시만 가린다. 새 GUI `view > camera frames`

@@ -24,13 +24,19 @@
 ## 저장
 
 `save frame` 이 지금 보이는 그 배열을 그대로 png 로 쓴다 (다시 디코드하지 않는다 — 화면과
-파일이 다르면 스크립트의 의미가 없다). 이름은 `<영상stem>_f0012.png` 이고, 같은 프레임을 또
-누르면 `_2`, `_3` 이 붙는다 (덮어쓰면 방금 저장한 것이 조용히 사라진다).
+파일이 다르면 스크립트의 의미가 없다). 이름은 **`<부모폴더>_f0012.png`** 다 — 번들 릴은 preset
+폴더마다 파일명이 똑같이 `warp.mp4` 라 파일명으로 저장하면 세 preset 이 전부
+`warp_f0012.png` 가 되고 `_2`/`_3` 로만 갈려 어느 preset 인지 알 수 없다. 구분되는 축은
+폴더 이름(`crane_up`)이다. 같은 폴더의 `warp.mp4` 와 `warp_gendop.mp4` 를 같이 볼 때는 폴더로도
+안 갈리므로 `--name_from both`(부모_파일명) 를 쓴다 — 겹치면 기동 시 경고한다.
+`--name_from stem` 이 예전 동작이다. 같은 프레임을 또 누르면 `_2`, `_3` 이 붙는다
+(덮어쓰면 방금 저장한 것이 조용히 사라진다).
 `save all videos` 는 지금 프레임을 **전 영상에서** 한 장씩 뽑는다 — arm 비교 그림을 만들 때
 드롭다운을 5번 돌리는 것이 실제 병목이었다.
 
 입력  : 영상 파일 경로 하나 이상
-출력  : 브라우저 (`http://localhost:<port>`) + `<--out_dir>/<stem>_f<번호>.png`
+출력  : 브라우저 (`http://localhost:<port>`) + `<--out_dir>/<prefix>_f<번호>.png`
+        (prefix 기본 = 부모 폴더 이름, `--name_from`)
 
 예시 (env vista4d):
     python -u scripts/viser_frame.py --port 8095 \
@@ -61,6 +67,12 @@ class Clip:
     def __init__(self, file_path: str):
         self.path = path.abspath(file_path)
         self.stem = path.splitext(path.basename(self.path))[0]
+        # 저장 파일 prefix. **기본은 부모 폴더 이름**이다 — 번들 릴은 preset 폴더마다 파일명이
+        # 똑같이 `warp.mp4` 라, 파일명으로 저장하면 세 preset 이 전부 `warp_f0023.png` 가 되고
+        # `_2`/`_3` 이 붙어 어느 preset 인지 구분이 안 된다. 폴더 이름(`crane_up`)이 실제로
+        # 구분되는 축이다. 같은 폴더에서 `warp.mp4` 와 `warp_gendop.mp4` 를 같이 볼 때는
+        # 폴더만으로 안 갈리므로 `--name_from both` 를 쓴다.
+        self.parent = path.basename(path.dirname(self.path)) or "root"
         # 라벨은 파일명만으로는 안 된다 — arm 릴이 전부 `warp.mp4` 라 5개가 같은 이름이 된다.
         self.label = f"{path.basename(path.dirname(self.path))}/{path.basename(self.path)}"
         self.cache, self.reader, self.frames = {}, None, None
@@ -78,6 +90,14 @@ class Clip:
         assert self.count > 0, f"프레임이 0개다: {self.path}"
         first = self.frame(0)
         self.height, self.width = int(first.shape[0]), int(first.shape[1])
+
+    def prefix(self, mode: str) -> str:
+        """저장 파일 prefix. `parent`(기본) / `stem` / `both`."""
+        if mode == "stem":
+            return self.stem
+        if mode == "both":
+            return f"{self.parent}_{self.stem}"
+        return self.parent
 
     def frame(self, index: int) -> np.ndarray:
         """(H, W, 3) uint8 RGB. 캐시 적중이면 디코드하지 않는다."""
@@ -116,6 +136,9 @@ def main():
     parser.add_argument("--out_dir", default=OUT_DIR_DEFAULT, type=str)
     # 기동 시 볼 프레임. 릴에서 특정 프레임을 다시 뽑을 때 슬라이더를 끌 필요가 없다.
     parser.add_argument("--frame", default=0, type=int)
+    # 저장 파일 이름의 앞머리. 기본 `parent` — 위 `Clip.parent` 주석이 근거다.
+    parser.add_argument("--name_from", default="parent", choices=("parent", "stem", "both"),
+                        help="저장 파일 prefix: parent(기본, 부모 폴더) / stem(파일명) / both")
     args = parser.parse_args()
 
     clips = [Clip(v) for v in args.video]
@@ -126,6 +149,14 @@ def main():
         if labels.count(label) > 1:
             labels[i] = f"[{i}] {label}"
     by_label = dict(zip(labels, clips))
+
+    # prefix 가 겹치면 저장 파일이 `_2`/`_3` 로만 갈려 어느 영상인지 알 수 없다 — 덮어쓰기는
+    # 안 나지만 구분이 안 되는 건 같은 문제라 여기서 알린다.
+    prefixes = [c.prefix(args.name_from) for c in clips]
+    dup = sorted({x for x in prefixes if prefixes.count(x) > 1})
+    if dup:
+        print(f"[name] prefix 가 겹친다 {dup} — 저장 파일이 `_2`/`_3` 로만 갈려 어느 영상인지"
+              f" 알 수 없다.\n       `--name_from both` (부모_파일명) 를 쓰면 갈린다.")
 
     server = viser.ViserServer(port=args.port)
     state = {"clip": clips[0], "frame": int(np.clip(args.frame, 0, clips[0].count - 1))}
@@ -157,6 +188,8 @@ def main():
             f"decoder     {clip.kind}   캐시 {len(clip.cache)}/{clip.count} 프레임",
             f"path        {clip.path}",
             f"out_dir     {args.out_dir}",
+            f"save as     {clip.prefix(args.name_from)}_f{index:04d}.png  "
+            f"(--name_from {args.name_from})",
         ])
 
     @gui_pick.on_update
@@ -174,7 +207,7 @@ def main():
     @gui_save.on_click
     def _(_event):
         clip, index = state["clip"], int(gui_frame.value)
-        out = save_png(clip.frame(index), args.out_dir, clip.stem, index)
+        out = save_png(clip.frame(index), args.out_dir, clip.prefix(args.name_from), index)
         gui_saved.value = f"{out}\n{gui_saved.value}"[:2000]
         print(f"[save] {out}")
 
@@ -185,7 +218,8 @@ def main():
         for clip in clips:
             if index >= clip.count:        # 길이가 다른 영상은 건너뛴다 (클램프하면 다른
                 continue                   # 프레임을 같은 번호로 저장해 대조가 거짓이 된다)
-            done.append(save_png(clip.frame(index), args.out_dir, clip.stem, index))
+            done.append(save_png(clip.frame(index), args.out_dir,
+                                 clip.prefix(args.name_from), index))
         gui_saved.value = "\n".join(done + [gui_saved.value])[:2000]
         print(f"[save all] {len(done)}장 (frame {index})")
 

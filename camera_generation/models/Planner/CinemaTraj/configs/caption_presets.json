@@ -253,6 +253,10 @@
    "axis": "track",
    "phrase": "tracks {target} while dropping straight down"
   },
+  "track_pedestal_down_dolly_in": {
+   "axis": "track",
+   "phrase": "tracks {target} while dropping straight down and pushing in"
+  },
   "track_push_in_arc_left": {
    "axis": "track",
    "phrase": "tracks {target} while arcing to the left and pushing in toward {it}"

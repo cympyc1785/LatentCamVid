@@ -7,6 +7,17 @@ Follows [Keep a Changelog](https://keepachangelog.com/).
 
 ## [Unreleased]
 
+### Added
+- **`configs/bank/d220_dynpose_objcentric.json` — car_29a9a7d0 "그냥 track" 세대
+  (2026-09-21).** d219(`--slot_whitelist arc` -> `track_pull_out_arc_right`)와 슬롯 하나만
+  다르다: `static` 슬롯은 `route_presets.py:342` 에서 `track_look_at`(추종 가능할 때) /
+  `static_look_at`(아닐 때) 로 갈리므로, 사용자가 말한 "그냥 track" 이 곧 이 슬롯이다.
+  이 씬은 `center_drift_u` 1.5431 로 `--track_min_drift_u` 0.05 를 넘어 `track_look_at`
+  하나가 나왔다. 나머지(d185 상속, anchor 못 박기, `--free_moving off`, `--target_variants 1`)
+  는 d219 와 같다. 이 config 는 드라이버(`tmp/d219/run_d219.py --tag d220 --slot static`)가
+  템플릿에서 생성한 것이다 — 요청마다 config 를 손으로 복사하지 않기 위한 것이고,
+  생성물을 커밋해 두는 이유는 뱅크가 어떤 설정으로 구워졌는지 남기기 위해서다.
+
 ### Fixed
 - **`viser_cloud.py` 프러스텀이 통째로 안 보이던 것 — `line_width` 는 폐기된 별칭이었다
   (2026-09-21).** 바로 앞에 넣은 `apply_cam_lw()` 가 `handle.line_width = 0.02` 로 굵기를

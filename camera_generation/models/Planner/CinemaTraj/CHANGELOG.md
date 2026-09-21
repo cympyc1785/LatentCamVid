@@ -27,6 +27,12 @@ Follows [Keep a Changelog](https://keepachangelog.com/).
     전체**를 잡았기 때문이다 (`seg_instances/golf/meta.json` id 5). 별건.
 
 ### Changed
+- **`viser_cloud.py` 지면 격자가 기본 꺼짐 (2026-09-21).** 격자는 `half` 를 카메라와 노드를
+  다 감싸게 잡으므로 씬 전체를 덮는데, 정작 보려는 카메라·OBB 위에 얹혀 화면을 가린다.
+  중력축이 틀어졌는지 볼 때만 필요하다. **만들기와 보이기를 다른 손잡이로 갈랐다** —
+  `--no_ground_grid` 는 아예 안 만드는 것이고(그러면 GUI 체크박스도 비활성이라 켤 수가 없다),
+  `--ground_on` 은 만든 것을 처음부터 보이게 하는 것이다. 기본은 "만들되 숨김" 이라
+  `view > ground grid` 로 언제든 켤 수 있다.
 - **`scripts/run_custom_caption.py` 를 추론 전용 최소 경로로 축소 (2026-09-21).**
   사용자 지시 "sam3, vlm 이런거 안돌리고 순수히 우리 카메라 생성 모델만 돌리는거야 …
   따로 pipeline 만들어달라고 한건 최소한의 기능만 남긴 inference code였어".

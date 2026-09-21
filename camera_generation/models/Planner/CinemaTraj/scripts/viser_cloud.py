@@ -49,6 +49,12 @@ start~end 를 `frame interval (every N)` 간격으로) / `all frames`(전 구간
 정작 보려는 카메라 자세를 덮는다 (경로선은 49프레임 꺾은선, probe 는 gizmo 화살표). 예전처럼
 처음부터 켜려면 `--paths_on` / `--probe_on`.
 
+**지면 격자도 기본 꺼짐**이다 (`ground grid` / `--ground_on`). 격자는 카메라와 노드를 다 감싸게
+`half` 를 잡으므로 씬 전체를 덮는데, 정작 보려는 카메라·OBB 위에 얹혀 화면을 가린다. 중력축이
+틀어졌는지 확인할 때만 켠다 — 그때는 격자가 실제 바닥과 어긋나 보이는지가 판정 근거다.
+`--no_ground_grid` 는 아예 **만들지 않는** 것이고(그러면 GUI 체크박스도 비활성), `--ground_on`
+은 만든 것을 **처음부터 보이게** 하는 것이다.
+
 **소스 카메라도 기본 꺼짐**이다 (`source cameras` / `--source_on`). 보려는 건 거의 항상 target
 궤적인데 소스 49대가 원점 근처에 뭉쳐 앉아 그걸 덮는다. 이 체크박스는 소스 프러스텀과 소스
 경로선을 **같이** 끈다 — `paths` 하나로만 묶여 있으면 소스를 끈 상태에서 paths 를 켰을 때 "끈
@@ -591,8 +597,14 @@ def main():
     # scene_graph.json 의 OBB / 지면 격자 오버레이. `--no_obb` 를 주면 예전 동작 그대로다.
     parser.add_argument("--obb", dest="obb", action="store_true", default=True)
     parser.add_argument("--no_obb", dest="obb", action="store_false")
+    # 지면 격자는 **만들기**(`--no_ground_grid` 로 끔)와 **처음 보이기**(`--ground_on`)가
+    # 다른 손잡이다. 기본은 "만들되 숨김" — 격자는 씬 전체를 덮는 선 26개라 (`half` 가 카메라
+    # 와 노드를 다 포함하게 잡힌다) 정작 보려는 카메라·OBB 위에 얹혀 화면을 가린다. 중력축이
+    # 틀어졌는지 확인할 때만 켠다. 아예 안 만들면 GUI 체크박스도 비활성이 되므로 기본은 만든다.
     parser.add_argument("--ground_grid", dest="ground_grid", action="store_true", default=True)
     parser.add_argument("--no_ground_grid", dest="ground_grid", action="store_false")
+    parser.add_argument("--ground_on", action="store_true",
+                        help="지면 격자를 처음부터 켠다 (기본 꺼짐, GUI view > ground grid)")
     # 색 (전부 `"R,G,B"` 0~255, 빈 문자열이면 위 상수). 카메라 두 계열은 띄운 뒤 GUI
     # `camera colors` 로도 바꾼다 — 여기 플래그는 **기동 시 기본값**이고 피커가 그 값을 읽는다.
     # OBB 는 GUI 를 안 준다: 동적 박스가 노드×프레임이라 snowboard 만 245개고, viser 1.1.0
@@ -902,7 +914,8 @@ def main():
                 "/ground_grid",
                 ground_grid_world(float(graph["ground"]["ground_z"]), T_wg,
                                   span.mean(axis=0), half),
-                colors=(110, 120, 140), thickness=cam_scale * 0.03)
+                colors=(110, 120, 140), thickness=cam_scale * 0.03,
+                visible=bool(args.ground_on))
 
     # OBB 가 선 굵기보다 작으면 박스가 아니라 점으로 보인다. snow-dog 의 dog 은 extent
     # 0.0103 인데 기본 굵기가 0.0110 이라 **자기 크기의 1.07 배** 굵기로 그려졌다 — 그러면
@@ -1155,7 +1168,7 @@ def main():
         gui_frame_step = server.gui.add_slider("frame interval (every N)", min=1,
                                                max=max(2, num_frames // 2), step=1,
                                                initial_value=5)
-        gui_ground = server.gui.add_checkbox("ground grid", initial_value=True,
+        gui_ground = server.gui.add_checkbox("ground grid", initial_value=bool(args.ground_on),
                                              disabled=ground_handle is None)
         gui_size = server.gui.add_slider("point size", min=point_size * 0.25, max=point_size * 4.0,
                                          step=point_size * 0.05, initial_value=point_size)
@@ -1599,6 +1612,9 @@ def main():
             ("frame set", f"GUI view > dynamic frames = current frame  "
                           f"(interval / all frames + frame interval)"),
             ("paths", f"{'on' if args.paths_on else 'off'}  (GUI view > paths / --paths_on)"),
+            ("ground grid", ("없음 (--no_ground_grid 또는 graph 없음)" if ground_handle is None
+                             else f"{'on' if args.ground_on else 'off'}  "
+                                  f"(GUI view > ground grid / --ground_on)")),
             ("probe", f"{'on' if args.probe_on else 'off'}  (GUI probe camera / --probe_on)"),
             ("now cams", f"{'on' if args.now_cams else 'off'}  "
                          f"(현재 프레임 1.6배 프러스텀 / --now_cams)"),

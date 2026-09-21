@@ -76,6 +76,27 @@ Follows [Keep a Changelog](https://keepachangelog.com/).
   기본값이 `zero` 라 기존 호출(D215/D224/D226/D227)은 비트 동일.
 
 ### Fixed
+- **`scripts/viser_cloud.py --bundle` 가 dynpose 번들에서 "arm 이 0개"로 죽던 것
+  (2026-09-22).** `load_bundle` 이 `cameras/*.npz` 만 읽는데 dynpose 번들에는 그 파일이
+  없다 — `run_d219.py:stage_bundle` 이 Vista4D recon 이 있는 씬에만 npz 를 굽기 때문에
+  예측 JSON(`<arm>_transforms.json`)만 복사된다. `car_5ec7f200` 는 9 preset x 8 arm 이
+  전부 JSON 이라 뷰어가 통째로 `AssertionError` 였다.
+  - `_bundle_arm_files()` 신설 — npz 와 `_transforms.json` 을 같이 모으고 **둘 다 있으면
+    npz 가 이긴다**. vista 번들(parkour 등)은 npz 가 그대로 뽑혀 비트 동일.
+  - `_bundle_arm_poses()` 의 JSON 경로는 `bank_to_vista4d_cams.py:load_pred` 와 **같은 식**
+    이다 (nerfstudio OpenGL c2w 에 `diag(1,-1,-1,1)`, `fl_x` 를 `recon cx / json cx` 배).
+    두 경로가 갈리면 같은 궤적이 뷰어와 렌더에서 다르게 보인다. 실측 교차검증: d258 이
+    같은 eval 폴더로 구운 `ct_d258_track_crane_up_s3407.npz` 와 **maxdiff 0.0**, fx 2636.053.
+  - `_bundle_caption()` 신설 — vista 번들의 `caption.json` 이 없으면 dynpose 번들의
+    `captions.json`(`{"captions": {variant_id: ...}}`)에서 `__<preset>__` 로 그 preset 변이를
+    고른다. 여기서 못 찾으면 `anchor_id` 가 비어 subject track 초록선이 안 그려진다.
+- **`--bundle` 로 띄우면 OBB·subject track·지면 격자가 통째로 안 보이던 것 (2026-09-22).**
+  `scene_root = bundle_root or out/<video>` 를 이미 만들어 놓고도 `graph_path` 만
+  `path.join(args.out, args.video, "scene_graph.json")` 로 따로 조립하고 있었다. `--bundle`
+  만 주면 `--video` 는 기본값이라 없는 경로가 나오고, `path.isfile` 가드에 걸려 **에러 없이**
+  전부 빠진다 (기동 로그가 `obb nodes -` 로만 찍혀서 "그래프에 OBB 가 없나"로 읽힌다).
+  `scene_root` 를 쓰도록 한 줄 고침 — `--bundle` 없이 쓰면 두 값이 같아 예전과 동일.
+  `car_5ec7f200` 실측 `obb nodes dyn_0(dyn) stat_0(stat) stat_1(stat)` / 49 dyn + 2 static.
 - **동적 점이 0개인 점군에서 depth warp 가 움직이는 물체를 49프레임 겹쳐 그리던 것
   (2026-09-21).** `--allow_no_seg` 경로(SAM3 미실행)는 `dynamic_mask` 가 전부 0 이라
   `static_mask = ~dynamic_mask` 로 **전 점이 static** 이 되고, static 점은 `visible` 이

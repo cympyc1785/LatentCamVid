@@ -327,19 +327,86 @@ def load_motions(out_root: str, video: str, banks, variant_filter=()):
 BUNDLE_ARMS = ("gt", "s42", "s1234", "s2026", "gendop")
 
 
-def load_bundle(bundle_root: str, presets=(), arms=(), variant_filter=()):
+def _bundle_caption(preset_dir: str, preset: str):
+    """번들 preset 폴더 -> info 패널용 row 초안.
+
+    두 레이아웃을 받는다. vista 번들(`run_d221.py`)은 변이 하나를 뽑아 둔 `caption.json` 을
+    쓰고, dynpose 번들(`run_d219.py`)은 뱅크 캡션 파일을 통째로 복사한 `captions.json`
+    (`{"captions": {variant_id: {...}}}`)을 쓴다. 후자는 preset 여러 개가 한 파일에 있으므로
+    `__<preset>__` 로 그 preset 의 변이를 고른다 — 변이 키(`dyn_0__track_crane_up__hole0.2`)가
+    `anchor_id` 의 출처라, 여기서 못 찾으면 subject track 초록선이 안 그려진다.
+    """
+    cap_path = path.join(preset_dir, "caption.json")
+    if path.isfile(cap_path):
+        with open(cap_path, encoding="utf-8") as file:
+            return json.load(file)
+    caps_path = path.join(preset_dir, "captions.json")
+    if not path.isfile(caps_path):
+        return {}
+    with open(caps_path, encoding="utf-8") as file:
+        entries = json.load(file).get("captions", {})
+    key = next((k for k in entries if f"__{preset}__" in k), None)
+    if key is None:
+        return {}
+    row = dict(entries[key])
+    row["variant_id"] = key
+    row.setdefault("caption_fields", entries[key])
+    return row
+
+
+def _bundle_arm_files(cam_dir: str):
+    """`cameras/` -> {arm: 파일 경로}. npz 가 있으면 npz 를 쓴다.
+
+    dynpose 번들에는 `cameras/*.npz` 가 없다 — `run_d219.py:stage_bundle` 이 Vista4D recon
+    이 있는 씬에만 npz 를 굽기 때문에 예측 JSON(`<arm>_transforms.json`)만 복사된다. 뷰어가
+    npz 만 읽으면 그 번들은 통째로 "arm 이 0개"로 떨어진다. 둘 다 있으면 npz 가 이긴다 —
+    그게 Vista4D 가 실제로 소비한 파일이라, 규약 변환이 한 번 더 끼는 JSON 경로보다 원본에
+    가깝다.
+    """
+    files = listdir(cam_dir)
+    srcs = {f[:-4]: path.join(cam_dir, f) for f in sorted(files) if f.endswith(".npz")}
+    for f in sorted(files):
+        if f.endswith("_transforms.json"):
+            srcs.setdefault(f[:-len("_transforms.json")], path.join(cam_dir, f))
+    return srcs
+
+
+def _bundle_arm_poses(file_path: str, cx_recon=None):
+    """arm 파일 -> (c2w OpenCV recon world (F,4,4), fx, fy) — fx/fy 는 없으면 None.
+
+    JSON 경로의 변환식은 `bank_to_vista4d_cams.py:load_pred` 와 **같아야 한다**. 거기가
+    nerfstudio(OpenGL c2w)를 `diag(1,-1,-1,1)` 로 OpenCV 로 돌리고, JSON 이 절반 해상도로
+    적혀 있어 `fl_x` 를 `recon cx / json cx` 배 해서 recon 픽셀로 되돌린다. 두 경로가 갈리면
+    같은 궤적이 뷰어에서와 렌더에서 다르게 보인다.
+    """
+    if file_path.endswith(".npz"):
+        data = np.load(file_path)
+        intr = data["intrinsics"] if "intrinsics" in data.files else []
+        fx, fy = ((float(intr[0][0]), float(intr[0][1])) if len(intr) else (None, None))
+        return data["cam_c2w"].astype(np.float64), fx, fy
+    with open(file_path, encoding="utf-8") as file:
+        blob = json.load(file)
+    c2w = (np.array([f["transform_matrix"] for f in blob["frames"]], dtype=np.float64)
+           @ np.diag([1.0, -1.0, -1.0, 1.0]))
+    scale = float(cx_recon) / float(blob["cx"]) if cx_recon else 1.0
+    return c2w, float(blob["fl_x"]) * scale, float(blob["fl_y"]) * scale
+
+
+def load_bundle(bundle_root: str, presets=(), arms=(), variant_filter=(), cx_recon=None):
     """d221 번들 -> `load_motions` 와 **같은 모양** [(label, c2w (F,4,4), row)].
 
     레이아웃: `<bundle>/<preset>/cameras/{gt,s42,s1234,s2026,gendop}.npz`, 라벨은
-    `<preset>/<arm>`.
+    `<preset>/<arm>`. npz 가 없는 dynpose 번들은 `<arm>_transforms.json` 으로 떨어진다
+    (`_bundle_arm_files`).
 
     **좌표 변환이 없다.** `cam_c2w` 는 이미 recon world 의 절대 pose·절대 미터이고, recon
     world 원점이 소스 frame0 카메라다 (bmx-bumps 실측 `meta_cam_c2w[0] == I`, 8.9e-8). 그
     증거로 `gt.npz` 가 뱅크 변이 `hole_bank_d215/dyn_0__crane_up__hole0.2` 와 위치 2.2e-7 로
     일치한다. 앵커를 한 번 더 곱하면 궤적이 그만큼 두 번 옮겨져 점군과 어긋난다
     (`bank_to_vista4d_cams.py` 도 같은 가정으로 굽는다 — 그 파일 docstring 이 단일 출처다).
+    JSON arm 만 규약 변환이 있다 — 그건 nerfstudio 판본이라서다.
 
-    `caption.json` 을 row 에 합친다. 그 파일이 `variant_id`/`tau_max`/`hole_fraction`/
+    캡션을 row 에 합친다. 그 파일이 `variant_id`/`tau_max`/`hole_fraction`/
     `subject_in_frame` 을 들고 있어서 뱅크의 `bank.json` 자리를 그대로 메운다 (info 패널이
     같은 키를 읽는다). `anchor_id` 는 `variant_id` 앞머리(`dyn_0__...`)에서 뽑는다 — 이게
     없으면 follow 의 입력인 subject track 초록선이 안 그려진다.
@@ -353,12 +420,9 @@ def load_bundle(bundle_root: str, presets=(), arms=(), variant_filter=()):
         if want_presets and preset not in want_presets:
             continue
         cam_dir = path.join(bundle_root, preset, "cameras")
-        caption = {}
-        cap_path = path.join(bundle_root, preset, "caption.json")
-        if path.isfile(cap_path):
-            with open(cap_path, encoding="utf-8") as file:
-                caption = json.load(file)
-        found = sorted(f[:-4] for f in listdir(cam_dir) if f.endswith(".npz"))
+        caption = _bundle_caption(path.join(bundle_root, preset), preset)
+        srcs = _bundle_arm_files(cam_dir)
+        found = sorted(srcs)
         order = [a for a in BUNDLE_ARMS if a in found] + [a for a in found
                                                           if a not in BUNDLE_ARMS]
         for arm in order:
@@ -367,15 +431,13 @@ def load_bundle(bundle_root: str, presets=(), arms=(), variant_filter=()):
             label = f"{preset}/{arm}"
             if not all(token in label for token in variant_filter):
                 continue
-            data = np.load(path.join(cam_dir, f"{arm}.npz"))
-            c2w = data["cam_c2w"].astype(np.float64)
+            c2w, fx, fy = _bundle_arm_poses(srcs[arm], cx_recon)
             row = dict(caption)
             row["bundle"], row["preset"], row["arm"] = True, preset, arm
             # 예측은 자기 focal 을 들고 있다 (s42 fx 2287.88 vs recon 2293.41) — 프러스텀을
             # 소스 K 로 통일해 그리면 그 zoom 차이가 화면에서 사라진다.
-            if "intrinsics" in data.files and len(data["intrinsics"]):
-                row["fx"], row["fy"] = (float(data["intrinsics"][0][0]),
-                                        float(data["intrinsics"][0][1]))
+            if fx is not None:
+                row["fx"], row["fy"] = fx, fy
             variant = str(caption.get("variant_id", ""))
             row["anchor_id"] = variant.split("__")[0] if "__" in variant else ""
             row["path_len_u"] = round(float(np.linalg.norm(
@@ -839,10 +901,15 @@ def main():
     banks = list(args.banks) or ([args.bank] if args.bank else [])
     # 번들을 앞에 둔다 — 둘을 같이 올리는 건 "예측이 뱅크 변이와 얼마나 다른가"를 볼 때이고,
     # 그때 슬라이더 0번은 번들 gt 여야 한다.
+    # `cx_recon` 은 JSON arm 전용이다 — 예측 JSON 이 절반 해상도로 적혀 있어 focal 을 recon
+    # 픽셀로 되돌려야 프러스텀 화각이 npz arm 과 같은 눈금에 앉는다.
     motions = load_bundle(bundle_root, args.bundle_presets, args.bundle_arms,
-                          args.variant) if bundle_root else []
+                          args.variant, float(intrinsics[0, 0, 2])) if bundle_root else []
     motions += load_motions(args.out, args.video, banks, args.variant) if banks else []
-    graph_path = path.join(args.out, args.video, "scene_graph.json")
+    # `scene_root` 를 쓴다 (`out/<video>` 를 직접 조립하면 안 된다) — `--bundle` 만 주고 띄우면
+    # `--video` 는 기본값 그대로라 없는 경로가 나오고, OBB·subject track·지면 격자가 전부
+    # 조용히 사라진다. `--bundle` 없이 쓰면 `scene_root == out/<video>` 라 예전과 같다.
+    graph_path = path.join(scene_root, "scene_graph.json")
     tracks = subject_tracks_world(graph_path)
 
     # ---- probe 카메라: 끌어서 옮기는 프러스텀 ----

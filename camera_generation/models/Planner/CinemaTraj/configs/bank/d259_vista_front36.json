@@ -1,0 +1,80 @@
+{
+  "_why": "D259 (사용자 지시 2026-09-22 \"vista 데이터 활용해서 첫 카메라도 trumans처럼 샘플링해서 사용하려고 하는데 우선 scene 마다 dynamic subject 하나만 target으로 삼고 source 첫 카메라를 해당 target subject의 정면에 있다고 가정하고 target 첫 카메라 후보군을 물체 앞쪽, 왼쪽, 오른쪽, 뒤에 ... elevation이 target subject OBB 기준 high, mid, low ... 거리도 ... close, medium, wide ... 총 4x3x3 = 36가지 ... preset은 우선 dolly in look at만\") — 여태 모든 뱅크는 **시작 pose 가 소스 frame 0 카메라**였다(`--start_mode source_frame0`). 여기서는 시작 pose 자체를 피사체 주위 36칸 격자에서 고른다.",
+
+  "_격자_정의": "`lbm/candidates.build_pool_front`. ① **정면**은 OBB yaw 가 아니라 `subject 중심 -> 소스 frame0 카메라`의 수평 방향이다 — OBB yaw 는 180° 대칭이라 앞뒤를 못 가른다(`lbm/candidates.py` 가 스스로 적어둔 한계). 사용자가 \"source 첫 카메라를 정면이라고 가정\"한 것이 이 모호성을 푼다. ② `left = up x fwd` = **피사체 자신의 왼쪽**이고, 소스 화면에서는 오른쪽에 찍힌다 (parkour u=1493 / snowboard u=1056, cx=640 실측). ③ elevation 은 각도가 아니라 OBB 높이의 배수(-0.5/0/+0.5)로 z 를 올린다. 실현 각도는 후보의 `elevation_deg` 에 남는다. ④ 거리는 `coverage ~ fx*fy*A_obb/(d^2*W*H)` 를 d 에 대해 푼 값이다 (A_obb = OBB 큰 두 변의 곱). 0.25/0.10/0.04. **`subject_in_frame` 이 아니다** — 그 지표는 실루엣 centroid 가 중앙 상자 안에 드는 프레임 비율(=중심 유지율)이라 거리 축이 될 수 없고, 크기 지표는 `subject_pixel_coverage` 다. 사각 근사는 실루엣을 ~1.6배 과대평가하므로(parkour dyn_0: 모델 0.113 vs 실측 max_area_frac 0.072) 렌더 coverage 가 아니라 눈금이다. 전부 중력(GeoCalib) 기준 G 프레임에서 만들고 roll 0 으로 실측 확인했다.",
+
+  "_왜_board_인가": "`build_poses(start_mode=\"board\", board=None)` 이 `keyframe.composition` 의 `p_G`/`look_at_G` 를 중력 up 으로 읽는 기존 경로다. 디코더에 새 가지를 안 만든다. `--start_grid off`(기본)면 후보가 `[None]` 하나라 tau/fit/emit 전 단계가 예전 뱅크와 비트 단위로 같다.",
+
+  "_tau_ref_follow_가_필수": "시작 pose 가 소스에서 떨어지면 `tau_ref=source` 에서는 `tau(0) != 0` 이라 **시작 pose 가 τ 예산을 먹는다** — D20 avocado-slice 에서 시작 pose 하나가 0.20 중 0.1549 를 먹고 16 preset 이 전부 saturated 로 죽었다. `--tau_ref follow` 는 τ 원점을 궤적 기준 pose 로 옮겨 `tau_start` 를 항등 0 으로 만든다. d215 에서 이미 켜져 있어 그대로 물려받는다. 실측(parkour dyn_0, target_tau 0.35): 후보 4개 전부 `tau_start 0.0 / saturated False`, tau_max 0.196~0.247.",
+
+  "_거리_clamp를_푼_이유": "`--start_min_ratio/--start_max_ratio` 는 후보 반경을 소스 거리(`d_ref`)의 배수로 가둔다. 기본값 0.3~3.0 이면 17편 중 **6편이 잘린다** (굽기 전 격자 실측: drive-desert close 0.11 / soapbox·avocado close 0.16 / snowboard 0.19 / mountain-hike 0.25 / goat wide 3.38). 잘리면 coverage 목표를 못 지켜 \"close/medium/wide\" 가 씬마다 다른 것을 뜻하게 된다. 그래서 0.1~4.0 = **관측 범위를 다 덮는 안전망**으로만 두고, 실제 기각은 물리 게이트(G1 충돌 / G5 OBB / G6 고도 / G7 시선축)와 `--min_subject_visible 0.6` 에 맡긴다 — 그쪽은 왜 죽었는지가 행에 남는다.",
+
+  "_d215와_다른_점": "① tau 에 `--start_grid front` + `--presets dolly_in_look_at`. ② fit 의 `--fallback_target` 40 -> 200: 36 변이가 예산 조기중단에 안 걸리게. ③ 세대 디렉토리 이름. anchor 는 d215 와 같은 `tmp/d215/anchors.json`(사람이 고른 dynamic subject 1개/씬)을 쓴다 — 사용자의 \"scene 마다 dynamic subject 하나만 target\" 이 정확히 그 파일이다.",
+
+  "_왜_preset_route_override가_아닌가": "route 의 `--emit args` 는 `--slot_plan full` + `--free_moving off` 에서 **`--preset_route` 를 안 붙인다** (`route_presets.py:743` per_anchor 조건이 grid/free/`--emit_route` 셋 다 거짓). 그래서 `--route_preset_override` 는 `args.preset_route` 가 없어 통째로 no-op 이다 — 1차 굽기에서 실제로 그렇게 됐다 (parkour 가 preset 6종 x 36 후보 = 936 변이로 열거됐다). 씬당 anchor 가 하나뿐이라 anchor 별 preset 이 갈릴 일이 없으므로, route 가 내보낸 `--presets` 6종을 **뒤에 오는 `--presets` 하나로 덮는다** (argparse 는 뒤엣것이 이긴다). anchor 집합은 route 의 `--nodes` 가 그대로 정한다.",
+
+  "extends": "d215_vista_objcentric.json",
+  "generation": "d259",
+  "tau_bank_dir": "bank_d259",
+  "bank_dir": "hole_bank_d259",
+
+  "route": {
+    "out": "preset_route_d259.json",
+    "args": [
+      "--num_external", "0",
+      "--free_moving", "off",
+      "--anchor_ids_file", "/data1/cympyc1785/LatentCamVid/tmp/d215/anchors.json",
+      "--slot_plan", "full",
+      "--slot_whitelist", "advance,recede,arc,orbit,vertical,static",
+      "--track_mode", "add",
+      "--track_min_drift_u", "0.05",
+      "--skip_if_empty"
+    ]
+  },
+
+  "tau": {
+    "args": [
+      "--cloud_source", "memory",
+      "--tau_ladder", "0.10", "0.20", "0.35", "0.60", "1.00",
+      "--variant_pool", "full",
+      "--presets", "dolly_in_look_at",
+      "--start_grid", "front",
+      "--start_min_ratio", "0.1", "--start_max_ratio", "4.0",
+      "--aim_keyframes", "6", "--keyframe_aim", "auto", "--keyframe_ease", "smooth_kf",
+      "--fixed_focal", "--deroll", "--no_preview", "--skip_on_empty",
+      "--device", "cuda",
+      "--orbit_fixed_sweep", "--min_sweep_deg", "20", "--behind_src_frames", "49",
+      "--tau_ref", "follow",
+      "--track_dynamic_only", "--track_min_drift_u", "0.05",
+      "--trackings", "lock", "--preset_tracking",
+      "--behind_min_zcam", "0.02",
+      "--tau_denom", "S",
+      "--min_subject_area", "0.001"
+    ]
+  },
+
+  "fit": {
+    "args": [
+      "--cloud_source", "memory",
+      "--hole_ladder", "0.20",
+      "--fallback_ladder", "--fallback_target", "200",
+      "--retry_status", "clamped_low",
+      "--retry_suspect", "aim_target_subject_lost", "hole_over_budget",
+      "motion_preset_no_motion", "static_start_collision",
+      "--suspect_hole", "0.35",
+      "--aim_keyframes", "6", "--keyframe_aim", "auto", "--keyframe_ease", "smooth_kf",
+      "--fixed_focal", "--deroll",
+      "--orbit_fixed_sweep", "--min_sweep_deg", "20", "--behind_src_frames", "49",
+      "--tau_ref", "follow", "--tracking", "lock", "--preset_tracking",
+      "--behind_min_zcam", "0.02", "--behind_clear_src_ratio", "0",
+      "--collision_time_match", "--collision_source", "depth",
+      "--area_timeline", "--composition",
+      "--composition_min_area", "0.004", "--composition_max_nodes", "3",
+      "--device", "cuda",
+      "--tau_denom", "S",
+      "--tau_knob_min", "0.005",
+      "--min_subject_visible", "0.6",
+      "--follow_keyframes", "6", "--follow_kf_interp", "cubic"
+    ]
+  }
+}

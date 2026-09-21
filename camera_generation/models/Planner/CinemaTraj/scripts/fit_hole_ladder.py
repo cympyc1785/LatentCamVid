@@ -289,7 +289,27 @@ def knob_kind(preset: str):
     return "pan_deg" if preset in ROTATION_ONLY_PRESETS else "tau"
 
 
-def decision_at(graph, node, preset: str, knob: float, kind: str, args, mult: float = 1.0):
+def start_cands_for(tau_bank: dict, anchor: str, preset: str) -> list:
+    """이 (anchor, preset) 의 시작 pose 후보 목록 (D259). 격자 없는 뱅크는 `[None]` 하나다.
+
+    후보를 **다시 유도하지 않고 τ 뱅크 행에서 읽는다.** 격자 정의(`build_pool_front`)가
+    바뀌면 같은 `cand_id` 가 다른 pose 를 뜻하게 되는데, 재유도하면 그게 조용히 통과한다.
+    행이 후보 전문을 들고 있으므로 여기서는 중복만 제거하면 된다.
+    """
+    out, ids = [], set()
+    for row in tau_bank["variants"]:
+        if row["anchor_id"] != anchor or row["preset"] != preset:
+            continue
+        cand = row.get("start_cand")
+        key = (cand or {}).get("cand_id")
+        if key not in ids:
+            ids.add(key)
+            out.append(cand)
+    return out or [None]
+
+
+def decision_at(graph, node, preset: str, knob: float, kind: str, args, mult: float = 1.0,
+                start_cand: dict | None = None):
     """손잡이 값 하나 → `lbm_decision_v1`. τ 손잡이면 target_tau, 각도 손잡이면 shape 로 들어간다.
 
     `mult` 는 기본 모양(`DEFAULT_SHAPE`)의 배율이다. 왜 필요한가: τ 를 아무리 올려도
@@ -311,7 +331,11 @@ def decision_at(graph, node, preset: str, knob: float, kind: str, args, mult: fl
                          tau_refine=bool(getattr(args, "tau_refine", False)),
                          # D97. `getattr` 인 이유는 `emit_bank` 가 `SimpleNamespace` 를 만들어
                          # 넘기기 때문이다 — 옛 뱅크에는 이 키가 없고, 그때는 "source" 가 맞다.
-                         tau_ref=str(getattr(args, "tau_ref", "source")))
+                         tau_ref=str(getattr(args, "tau_ref", "source")),
+                         # D259. `None` 이면 `make_decision` 이 예전대로 소스 frame0 구도를
+                         # 쓴다. 후보가 있으면 decision 의 `start_mode` 가 "board" 가 되는데,
+                         # `build_poses` 는 그걸 **인자로** 받으므로 호출부도 같이 바꿔야 한다.
+                         start_cand=start_cand)
 
 
 def behind_over(stats: dict, max_behind: float, max_behind_dyn: float) -> bool:
@@ -960,13 +984,20 @@ def main(args):
             behind["elev_node"] = node          # 이게 있어야 `measure_trajectory` 가 G6 를 잰다
             behind["approach_node"] = node      # 〃 G7
             behind["min_approach"] = (min_approach if approach_on else float("-inf"))
-        for preset in tier_presets:
+        # D259. preset 하나가 시작 pose 후보 수만큼 갈라진다. 중첩을 안 만드는 이유는
+        # 루프 몸통(이분법·게이트·행 쓰기)이 후보를 **하나씩** 다루기 때문 — 짝의 목록으로
+        # 펴 두면 예전 코드가 그대로 돈다. 격자 없는 뱅크는 후보가 `[None]` 하나라 짝 목록이
+        # `tier_presets` 와 같고, 루프 횟수·순서가 비트 단위로 예전과 같다.
+        tier_pairs = [(p, c) for p in tier_presets for c in start_cands_for(tau_bank, anchor, p)]
+        for preset, start_cand in tier_pairs:
             if fallback_on and len(usable_variants) >= int(args.fallback_target):
                 break
             tier = tier_of.get((anchor, preset), 0)
             kind = knob_kind(preset)
+            cand_id = (start_cand or {}).get("cand_id")
             seen = [r for r in tau_bank["variants"]
-                    if r["anchor_id"] == anchor and r["preset"] == preset]
+                    if r["anchor_id"] == anchor and r["preset"] == preset
+                    and (r.get("start_cand") or {}).get("cand_id") == cand_id]
             if not seen:
                 continue                 # τ 뱅크에서 saturated 로 빠진 조합 (D41)
             points = bracket_from_bank(seen, kind)
@@ -983,7 +1014,10 @@ def main(args):
 
             def probe(knob, force_render=False, _preset=preset, _node=node, _kind=kind,
                       _cache=cache, _span=span_frac, _subject=subject_points,
-                      _max_elev=max_elev, _min_ground=min_ground, _min_approach=min_approach):
+                      _max_elev=max_elev, _min_ground=min_ground, _min_approach=min_approach,
+                      # D259. 후보가 있으면 시작 pose 가 소스 frame0 이 아니다.
+                      _cand=start_cand,
+                      _smode=("board" if start_cand else args.start_mode)):
                 """손잡이 → (hole, stats, near_depth, standoff, obb, |elev|max, ground,
                 approach, subject 가시비율, subject 화면중앙 프레임비율).
 
@@ -1010,10 +1044,11 @@ def main(args):
                 if knob not in _cache:
                     mult = 1.0
                     for attempt in range(args.shape_doublings + 1):
-                        decision = decision_at(graph, _node, _preset, knob, _kind, args, mult)
+                        decision = decision_at(graph, _node, _preset, knob, _kind, args, mult,
+                                               start_cand=_cand)
                         poses, extra = build_poses(
                             decision, graph, board=None, num_frames=num_frames,
-                            orbit_span_frac=_span, start_mode=args.start_mode,
+                            orbit_span_frac=_span, start_mode=_smode,
                             aim_anchor=args.aim_anchor, aim_ramp_frames=args.aim_ramp_frames,
                             traj_basis=args.traj_basis, aim_keyframes=args.aim_keyframes,
                             keyframe_aim=args.keyframe_aim, keyframe_ease=args.keyframe_ease,
@@ -1175,8 +1210,14 @@ def main(args):
                 rows.append({
                     # 이름은 **Δ** 로 매긴다 — excess 모드에서 `target_hole` 은 anchor 마다
                     # 달라지므로 이름에 쓰면 씬 간 같은 단이 다른 이름이 된다.
-                    "variant_id": f"{anchor}__{preset}__hole{delta:g}",
+                    # D259. 시작 pose 후보는 **뒤**에 붙인다 (`split("__")[0]` 로 anchor 를 읽는
+                    # 하류 5곳이 안 깨진다). 격자를 끄면 접미사가 없어 예전 이름 그대로다.
+                    "variant_id": (f"{anchor}__{preset}__hole{delta:g}"
+                                   + (f"__{cand_id}" if cand_id else "")),
                     "anchor_id": anchor, "anchor_label": node["label"], "preset": preset,
+                    # D259. 후보 전문을 그대로 옮겨 싣는다 — `emit_bank` 가 이 값으로 같은
+                    # 카메라를 되만든다. 격자를 끄면 키 자체가 없다 (예전 뱅크와 같은 JSON).
+                    **({"start_cand": start_cand} if start_cand else {}),
                     "target_hole": round(float(target), 5), "hole_delta": delta,
                     "hole_static": round(hole_static, 4),
                     "knob_floor": (round(float(lo_override), 5) if lo_override is not None

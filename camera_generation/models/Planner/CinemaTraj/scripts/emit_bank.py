@@ -147,7 +147,12 @@ def decision_from_variant(graph: dict, node: dict, variant: dict, fixed: dict):
                          # 값이라 재현용이 아니다 — `build_poses` 가 preset 을 보고 다시
                          # resolve 하므로 둘을 겹쳐 넣으면 preset 별칭이 섞였을 때 갈린다).
                          # 키가 없는 예전 뱅크는 `FIXED_FALLBACK` = `"source"` = D97 이전 동작.
-                         tau_ref=str(fixed.get("tau_ref", FIXED_FALLBACK["tau_ref"])))
+                         tau_ref=str(fixed.get("tau_ref", FIXED_FALLBACK["tau_ref"])),
+                         # D259. 시작 pose 후보. **행에 적힌 전문을 그대로 넘긴다** — 격자
+                         # 정의(`build_pool_front`)에서 다시 유도하면 정의가 바뀌었을 때
+                         # 같은 `cand_id` 가 조용히 다른 pose 로 디코드된다. 키가 없는 뱅크는
+                         # `None` = 소스 frame0 구도 = 예전 동작.
+                         start_cand=variant.get("start_cand"))
 
 
 def span_frac_for(node: dict, fixed: dict):
@@ -360,7 +365,11 @@ def main(args):
             decision = decision_from_variant(graph, _node, v, fixed)
             poses, extra = build_poses(
                 decision, graph, board=None, num_frames=num_frames,
-                orbit_span_frac=span_frac_for(_node, fixed), start_mode=fixed["start_mode"],
+                orbit_span_frac=span_frac_for(_node, fixed),
+                # D259. 행이 시작 pose 후보를 들고 있으면 그 구도를 쓰라는 뜻이라
+                # `"board"` 다 (board.json 은 없고 `decision` 의 composition 이 쓰인다).
+                # 키가 없는 뱅크는 `fixed` 값 그대로 = 예전과 비트 동일.
+                start_mode=("board" if v.get("start_cand") else fixed["start_mode"]),
                 aim_anchor=fixed["aim_anchor"],
                 aim_ramp_frames=int(fixed.get("aim_ramp_frames",
                                               FIXED_FALLBACK["aim_ramp_frames"])),

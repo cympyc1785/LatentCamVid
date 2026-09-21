@@ -8,6 +8,43 @@ Follows [Keep a Changelog](https://keepachangelog.com/).
 ## [Unreleased]
 
 ### Added
+- **시작 pose 격자 `--start_grid front` (D259, 2026-09-22).** 여태 모든 뱅크는 시작 pose 가
+  **소스 frame 0 카메라**였다 (`--start_mode source_frame0`). 사용자가 "vista 데이터 활용해서
+  첫 카메라도 trumans처럼 샘플링해서 사용" 을 요청해, 시작 pose 자체를 피사체 주위 격자에서
+  고르는 경로를 넣었다. `lbm/candidates.build_pool_front` 가 **방위 4**(front/left/right/back)
+  × **elevation 3**(OBB 높이의 -0.5/0/+0.5 배) × **거리 3**(close/medium/wide) = **36 후보**를
+  중력(GeoCalib) G 프레임에서 만든다. 정면은 OBB yaw 가 아니라 `피사체 중심 -> 소스 frame0
+  카메라` 방향이다 — OBB yaw 는 180° 대칭이라 앞뒤를 못 가르고, 사용자의 "source 첫 카메라를
+  정면이라고 가정"이 그 모호성을 푼다. 거리 축은 **`subject_in_frame` 이 아니라
+  `subject_pixel_coverage`** 로 풀었다: 그 지표는 실루엣 centroid 가 중앙 상자에 드는 프레임
+  비율(=중심 유지율)이라 거리 게이지가 될 수 없다. `coverage ~ fx*fy*A_obb/(d^2*W*H)` 를 d 에
+  대해 푼 0.25/0.10/0.04 이고, 사각 근사라 실루엣을 ~1.6배 과대평가한다 (parkour dyn_0: 모델
+  0.113 vs 실측 `max_area_frac` 0.072) — 렌더 coverage 가 아니라 눈금이다.
+  배선은 `sample_camera_bank` -> `fit_hole_ladder` -> `emit_bank` 로, **격자를 어디서도 다시
+  유도하지 않고** 후보 dict 전문을 뱅크 행(`start_cand`)에 실어 읽는다 — 재유도하면
+  `build_pool_front` 정의가 바뀌었을 때 같은 `cand_id` 가 조용히 다른 pose 로 디코드된다.
+  디코더에는 새 가지를 안 만들었다: `build_poses(start_mode="board", board=None)` 이
+  `keyframe.composition` 의 `p_G`/`look_at_G` 를 중력 up 으로 읽는 **기존** 경로다.
+  `variant_id` 는 접미사로 붙인다 (`..__front_mid_close`) — 하류 5곳이 `split("__")[0]` 으로
+  anchor 를 읽으므로 앞에 붙이면 깨진다. `--start_grid off`(기본)면 후보가 `[None]` 하나라
+  tau/fit/emit 전 단계가 예전 뱅크와 비트 동일하다 (접미사 없음, `start_cand` 키 없음,
+  `axes` 키 없음).
+  `--tau_ref follow` 가 **필수**다: 시작 pose 가 소스에서 떨어지면 `tau_ref=source` 에서
+  `tau(0) != 0` 이라 시작 pose 가 τ 예산을 먹는다 (D20 avocado-slice 에서 0.20 중 0.1549 를
+  먹고 16 preset 이 전부 saturated).
+- **`configs/bank/d259_vista_front36.json` + `tmp/d259/run_d259.py` (2026-09-22).**
+  vista keeper 17편을 `dolly_in_look_at` 하나로, 시작 pose 36 후보로 굽는 설정.
+  드라이버는 `--stage grid|bake|table` (굽기 전 격자 점검 / GPU 1~3 3샤드 굽기 / 결과 표).
+  두 가지를 실측으로 고쳤다. ① 거리 clamp `--start_min_ratio/--start_max_ratio` 기본
+  0.3~3.0 은 17편 중 **6편을 자른다** (drive-desert close 0.11 / soapbox·avocado 0.16 /
+  snowboard 0.19 / mountain-hike 0.25 / goat wide 3.38) — 잘리면 "close/medium/wide" 가
+  씬마다 다른 것을 뜻하므로 0.1~4.0 안전망으로 넓히고 기각은 물리 게이트에 맡겼다.
+  ② `--route_preset_override` 는 **통째로 no-op** 이었다: route 의 `--emit args` 가
+  `--slot_plan full` + `--free_moving off` 에서 `--preset_route` 를 안 붙이고
+  (`route_presets.py:743` per_anchor 조건), override 는 그 값에 gate 돼 있다. 1차 굽기에서
+  parkour 가 preset 6종 × 36 후보 = 936 변이로 열거되며 드러났다. 씬당 anchor 가 하나뿐이라
+  route 가 내보낸 `--presets` 를 뒤에 오는 `--presets dolly_in_look_at` 로 덮는다 (argparse
+  last-wins).
 - **preset `track_pedestal_down_dolly_in` (2026-09-22).** 비-track 짝
   `pedestal_down_dolly_in`(하강+전진)의 track 판. 사용자가 dynpose #588 을
   "track dolly in / track pedestal down / track dolly in pedestal down" 세 개로 돌려

@@ -42,6 +42,107 @@ def subject_frame(node: dict, frame: int = 0):
     return center, np.stack([fwd, left, up], axis=1)
 
 
+# ── D259: 소스 카메라를 "정면"으로 못 박은 4x3x3 첫 카메라 격자 ─────────────────────────
+# 방위 4 (앞/왼/오른/뒤) x 고도 3 (OBB 높이 기준) x 거리 3 (화면 점유율 기준).
+FRONT_AZIMUTHS = ((0.0, "front"), (90.0, "left"), (-90.0, "right"), (180.0, "back"))
+# OBB **높이의 배수**로 준 카메라 z 오프셋. low = OBB 바닥, mid = 중심, high = 머리 위.
+# 각도가 아니라 높이인 이유: 같은 각도라도 거리가 3배 다르면 프레임 안의 위치가 달라진다.
+FRONT_ELEVATIONS = (("low", -0.5), ("mid", 0.0), ("high", 0.5))
+# **절대** 화면 점유율 목표 (OBB 직사각 근사 기준). 씬 상대(`distance_ratio`)로 하면
+# close/medium/wide 가 `DISTANCE_RATIOS` 와 같은 것이 되어 버린다 — 절대값으로 잡아야
+# 작은 피사체엔 가까이, 큰 피사체엔 멀리 서서 코퍼스 전체의 프레이밍이 한 눈금에 놓인다.
+FRONT_COVERAGES = (("close", 0.25), ("medium", 0.10), ("wide", 0.04))
+
+
+def source_front_frame(node: dict, cam_centers_g, frame: int = 0):
+    """`subject_frame` 과 **같은 규약**(열 = [fwd | left | up])이되 정면을 소스 카메라로 잡는다.
+
+    `subject_frame` 은 OBB yaw 로 fwd 를 세우는데, 그 yaw 는 180° 대칭이라 "정면"을 못 정한다
+    (이 모듈 위쪽 주석 참조). 사용자 지시(D259) "소스 첫 카메라를 해당 target subject 의 정면에
+    있다고 가정" 이 그 자유도를 없앤다: fwd = subject 중심에서 **소스 frame0 카메라**를 향하는
+    수평 방향이다. G 원점이 곧 frame0 카메라라 (`scene_graph/lift.py:graph_frame`) 거의 항상
+    `-center` 이지만, 원점 규약에 기대지 않도록 `cam_centers_g[frame]` 을 실제로 읽는다.
+
+    `left = up x fwd` — subject 가 카메라를 마주보고 있으므로 이건 **subject 자신의 왼쪽**이다
+    (화면 기준으로는 오른쪽에 보인다). azimuth +90° 가 "left" 라는 뜻이 여기서 정해진다.
+    """
+    center = np.asarray(node["track"]["center_smooth"], dtype=float)[frame]
+    fwd = np.asarray(cam_centers_g, dtype=float)[frame] - center
+    fwd[2] = 0.0
+    norm = float(np.linalg.norm(fwd))
+    assert norm > 1e-6, ("소스 카메라가 subject 바로 위/아래라 정면을 못 정한다 "
+                         f"(수평거리 {norm:.2e} u)")
+    fwd = fwd / norm
+    up = np.array([0.0, 0.0, 1.0])
+    return center, np.stack([fwd, np.cross(up, fwd), up], axis=1)
+
+
+def obb_rect_area_u(node: dict) -> float:
+    """실루엣 면적의 상계 — OBB 세 변 중 **큰 둘**의 곱 (u^2). 가장 큰 면을 정면으로 본 값이다.
+
+    진짜 실루엣보다 크다 (parkour dyn_0: 이 근사로 0.113 인 소스 프레이밍의 실측
+    `max_area_frac` 이 0.072). 그래서 `FRONT_COVERAGES` 는 **이 근사 위의 눈금**이지 렌더
+    점유율이 아니다 — 실측치는 뱅크의 `subject_*` 열이 따로 남긴다.
+    """
+    extent = sorted(float(e) for e in node["obb"]["extent"])
+    return extent[-1] * extent[-2]
+
+
+def distance_for_coverage(node: dict, K, width: int, height: int, coverage: float) -> float:
+    """목표 화면 점유율 -> subject 까지의 **수평** 거리 (u). `coverage = fx*fy*A / (d^2*W*H)`."""
+    fx, fy = float(np.asarray(K, dtype=float)[0, 0]), float(np.asarray(K, dtype=float)[1, 1])
+    return float(np.sqrt(fx * fy * obb_rect_area_u(node)
+                         / max(coverage * width * height, 1e-12)))
+
+
+def build_pool_front(node: dict, cam_centers_g, K, width: int, height: int,
+                     azimuths=FRONT_AZIMUTHS, elevations=FRONT_ELEVATIONS,
+                     coverages=FRONT_COVERAGES, look_at_bias: float = 0.0,
+                     frame: int = 0, min_ratio: float = 0.0, max_ratio: float = 0.0):
+    """D259 격자. 후보 하나 = `(az_label, el_label, cov_label)` 로 이름이 붙은 시작 pose.
+
+    `min_ratio`/`max_ratio` (0 이면 끔) 는 `radius_u / d_ref` 상·하한이다 — 절대 점유율로
+    거리를 풀면 OBB 가 얇은 노드에서 카메라가 씬 밖까지 물러난다. 걸린 후보는 **버리지 않고**
+    `clamped` 로 표시한 뒤 반경만 자른다 (거리축의 한 칸이 통째로 비면 격자가 아니게 된다).
+
+    고도는 각도가 아니라 **OBB 높이 배수의 z 오프셋**이라, 실현 고도각은 거리에 따라 달라진다.
+    그 각도는 `elevation_deg` 로 같이 남긴다 (요청값이 아니라 실현값이다).
+    """
+    center, R_j = source_front_frame(node, cam_centers_g, frame)
+    height_u = float(node["obb"]["extent"][2])
+    d_ref = float(node["viewing_distance"]["d_ref"])
+    look_at = center + look_at_bias * height_u * np.array([0.0, 0.0, 1.0])
+
+    pool = []
+    for azimuth, az_label in azimuths:
+        for el_label, el_frac in elevations:
+            for cov_label, coverage in coverages:
+                dist = distance_for_coverage(node, K, width, height, coverage)
+                dz = el_frac * height_u
+                radius = float(np.hypot(dist, dz))
+                clamped = ""
+                ratio = radius / max(d_ref, 1e-9)
+                if max_ratio > 0 and ratio > max_ratio:
+                    dist, dz, clamped = (dist * max_ratio / ratio, dz * max_ratio / ratio, "far")
+                elif min_ratio > 0 and ratio < min_ratio:
+                    dist, dz, clamped = (dist * min_ratio / ratio, dz * min_ratio / ratio, "near")
+                radius = float(np.hypot(dist, dz))
+                phi = np.radians(azimuth)
+                offset = np.array([dist * np.cos(phi), dist * np.sin(phi), dz])
+                pool.append({
+                    "cand_id": f"{az_label}_{el_label}_{cov_label}",
+                    "azimuth_deg": float(azimuth), "az_label": az_label,
+                    "elevation_deg": round(float(np.degrees(np.arctan2(dz, dist))), 2),
+                    "el_label": el_label, "el_frac": float(el_frac),
+                    "cov_label": cov_label, "cov_target": float(coverage),
+                    "distance_ratio": round(radius / max(d_ref, 1e-9), 4),
+                    "radius_u": round(radius, 5), "clamped": clamped,
+                    "p_g": (center + R_j @ offset).tolist(),
+                    "look_at_g": look_at.tolist(),
+                })
+    return pool
+
+
 def build_pool(node: dict, azimuths_deg=AZIMUTHS_DEG, elevations_deg=ELEVATIONS_DEG,
                distance_ratios=DISTANCE_RATIOS, look_at_bias: float = 0.0,
                az_margin_deg: float = 180.0, frame: int = 0):

@@ -73,6 +73,7 @@ from decode.build_poses import build_poses                                      
 from lbm.cloud import EVAL_DATA_DEFAULT, VISTA4D_ROOT_DEFAULT                   # noqa: E402
 from lbm.cloud import CINEMATRAJ_ROOT as CLOUD_ROOT                             # noqa: E402
 from lbm.cloud import subject_point_mask                                        # noqa: E402
+from lbm.candidates import FRONT_COVERAGES, build_pool_front                    # noqa: E402
 from lbm.gates import (approach_profile, behind_profile, elevation_profile,     # noqa: E402
                        obb_clearance)
 from lbm.mesh_collision import (MeshClearance, mesh_behind_profile,             # noqa: E402
@@ -289,7 +290,7 @@ def rung_shape(preset: str, target_tau: float, ladder, pan_deg_at_max: float,
 def make_decision(graph: dict, node: dict, preset: str, target_tau: float, speed: str,
                   tracking: str, look_at_bias: float, start_mode: str, shape: dict | None = None,
                   tau_refine: bool = False, aim: str | None = None,
-                  tau_ref: str = "source"):
+                  tau_ref: str = "source", start_cand: dict | None = None):
     """`lbm_decision_v1` 한 건. `source` 는 `sampler` — VLM 도 fallback 도 아니다.
 
     `tau_refine` (D53) 은 `fit_tau` 이분법의 첫 눈금(0.0156) 아래를 한 번 더 훑으라는 뜻이다.
@@ -305,21 +306,36 @@ def make_decision(graph: dict, node: dict, preset: str, target_tau: float, speed
     `resolve_aim` 이 옛 이름·옛 aim 을 **그때 나오던 카메라**로 되돌린다. 새로 굽는 쪽은 안
     넘기므로 `None` → preset 의 현재 기본값이고 JSON 도 그대로다 (`decision_fingerprint` 는
     `aim` 을 안 보므로 지문도 안 바뀐다).
+
+    `start_cand` (D259) 는 **시작 pose 를 소스 frame0 에서 떼어낸다**. 주면 `start_mode` 를
+    `"board"` 로 덮고 composition 에 후보의 `p_G`/`look_at_G` 를 싣는다 — `build_poses` 는
+    `board=None` 일 때 그 두 값으로 `look_at_c2w(..., up=중력축)` 를 세우므로 (build_poses.py:750)
+    **board.json 도 새 디코더 경로도 필요 없다**. `azimuth_deg`/`elevation_deg`/`distance_ratio`
+    슬롯은 원래부터 비어 있던 자리라 여기에 후보 좌표가 그대로 들어간다.
+    안 주면 `None` → 아래 세 줄이 통째로 안 돌아 예전 JSON 과 한 글자도 안 다르다.
     """
     p_g = np.asarray(graph["cameras"]["cam_centers_g"], dtype=float)[0]
     look_at_g = np.asarray(node["track"]["center_smooth"], dtype=float)[0]
+    composition = {"azimuth_deg": None, "elevation_deg": None,
+                   "d_azimuth_deg": 0.0, "d_elevation_deg": 0.0,
+                   "distance_ratio": 1.0, "thirds_anchor": None,
+                   "p_G": p_g.tolist(), "look_at_G": look_at_g.tolist(),
+                   "focal_scale": 1.0}
+    if start_cand is not None:
+        start_mode = "board"
+        composition.update(azimuth_deg=start_cand["azimuth_deg"],
+                           elevation_deg=start_cand["elevation_deg"],
+                           distance_ratio=start_cand["distance_ratio"],
+                           p_G=list(start_cand["p_g"]), look_at_G=list(start_cand["look_at_g"]))
     return {
         "format": "lbm_decision_v1", "video": graph["video"], "subject_id": node["id"],
         "source": "sampler", "model": None, "start_mode": start_mode,
         "keyframes": [{
             "t": 0, "target": node["id"],
-            "composition": {"azimuth_deg": None, "elevation_deg": None,
-                            "d_azimuth_deg": 0.0, "d_elevation_deg": 0.0,
-                            "distance_ratio": 1.0, "thirds_anchor": None,
-                            "p_G": p_g.tolist(), "look_at_G": look_at_g.tolist(),
-                            "focal_scale": 1.0},
+            "composition": composition,
             "visibility": None, "relation": None, "motion_preference": None,
-            "candidate_id": None, "micro_ops": []}],
+            # board 가 없으므로 `build_poses` 의 board 조회 가지는 어차피 안 탄다 (추적용).
+            "candidate_id": (start_cand["cand_id"] if start_cand else None), "micro_ops": []}],
         "trajectory": {"preset": preset, "params": {}, "speed": speed, "tracking": tracking,
                        "look_at_bias": look_at_bias, "target_tau": target_tau,
                        # None 이면 `shape_context` 가 `DEFAULT_SHAPE` 를 그대로 쓴다.
@@ -1009,6 +1025,15 @@ def main(args):
         renderer.set_subject(subject_points)
         span = max(float(node["obs_az_span_deg"]), 1e-6)
         span_frac = max(args.orbit_span_frac, args.min_sweep_deg / span)
+        # D259. 첫 카메라 격자. `off` 면 `[None]` 이라 루프가 한 번만 돌고 예전과 비트 동일하다.
+        start_pool = ([None] if args.start_grid == "off" else
+                      build_pool_front(node, graph["cameras"]["cam_centers_g"],
+                                       np.asarray(graph["cameras"]["K"], dtype=float)[0],
+                                       int(graph["width"]), int(graph["height"]),
+                                       coverages=tuple(zip([l for l, _ in FRONT_COVERAGES],
+                                                           args.start_coverages)),
+                                       min_ratio=args.start_min_ratio,
+                                       max_ratio=args.start_max_ratio))
 
         for preset in node_presets:
             # D77. `track_*` 의 유일한 차이는 `PRESET_FOLLOW` 가 켜는 follow_gain 1.0 —
@@ -1052,113 +1077,127 @@ def main(args):
                             if str(follow) == "0" and smooth != args.follow_smooths[0]:
                                 continue
                             for keyframes in args.aim_keyframes:
-                             decision = make_decision(graph, node, preset, target_tau, speed,
+                             for cand in start_pool:
+                              # D259. `cand` 가 있으면 시작 pose 가 소스 frame0 이 아니므로
+                              # `build_poses` 에도 `board` 를 줘야 한다 (start_mode 는 함수 인자로
+                              # 들어가지 decision 에서 읽히지 않는다 — build_poses.py:744).
+                              start_mode = "board" if cand else args.start_mode
+                              decision = make_decision(graph, node, preset, target_tau, speed,
                                                       tracking, bias, args.start_mode,
                                                       shape=rung_shape(preset, target_tau, ladder,
                                                                        args.pan_deg_at_max,
                                                                        args.sweep_deg,
                                                                        args.pan_deg,
                                                                        args.fit_tau),
-                                                      tau_ref=args.tau_ref)
-                             poses, extra = build_poses(
-                                 decision, graph, board=None, num_frames=num_frames,
-                                 orbit_span_frac=span_frac, start_mode=args.start_mode,
-                                 aim_anchor=args.aim_anchor, aim_ramp_frames=args.aim_ramp_frames,
-                                 traj_basis=args.traj_basis, aim_keyframes=keyframes,
-                                 keyframe_aim=args.keyframe_aim, keyframe_ease=args.keyframe_ease,
-                                 follow_gain=follow, follow_smooth=smooth,
-                                 use_fit_tau=args.fit_tau,
-                                 preset_tracking=args.preset_tracking, deroll=args.deroll,
-                                 orbit_fixed_sweep=args.orbit_fixed_sweep,
-                                 tau_denom=args.tau_denom)
-                             info = extra["info"]
-                             # 시작 pose 만으로 예산을 다 쓴 단 — `fit_tau` 가 움직임을 0 으로 눌러서
-                             # 나오는 건 `static_hold` 의 복제본이다. 세어만 두고 뱅크에서 뺀다.
-                             # 정지 preset 자신은 예외다 — 거기서는 identity 가 원래 의도한 결과다.
-                             if (info["tau"]["tau_saturated"] and args.drop_saturated
-                                     and preset not in STATIC_PRESETS):
-                                 # follow 를 같이 남긴다 — 안 그러면 "몇 개가 왜 죽었나" 가
-                                 # gain 별로 안 갈려서 진단이 안 된다 (D72).
-                                 saturated.append((node["id"], preset, target_tau,
-                                                   info["tau"]["tau_start"],
-                                                   info["follow"]["gain"]))
-                                 continue
-                             stats, middle = measure_trajectory(
-                                 renderer, poses, num_frames, args.measure_frames,
-                                 args.tile_height, args.tile_width, args.center_box,
-                                 behind=behind, focal=extra["focal_scale"],
-                                 subject_points=subject_points if args.subject_visible else None)
-                             # follow 를 안 쓰면 변이 이름을 예전 그대로 둔다 (이미 만든 뱅크와
-                             # variant_id 로 맞대조할 수 있게).
-                             # D93. `track_*` 은 `PRESET_TRACKING` 이 조준을 lock 으로 푼다 —
-                             # 이름과 행에 **실제 쓴 값**을 써야 뱅크로 되만들 때 일치한다.
-                             tracking_used = info["tracking"]
-                             variant = (f"{node['id']}__{preset}__tau{target_tau:g}"
-                                        f"__{speed}__{tracking_used}__b{bias:g}"
-                                        + (f"__f{follow}" if str(follow) != "0" else "")
-                                        # follow 를 안 쓰면 창 크기는 궤적에 영향이 없다 — 이름에
-                                        # 넣으면 없는 축으로 변이가 갈라진다 (D73).
-                                        + (f"__s{smooth}" if str(follow) != "0" else "")
-                                        + (f"__k{keyframes}" if int(keyframes) else ""))
-                             rows.append({
-                                 "variant_id": variant, "anchor_id": node["id"],
-                                 "anchor_label": node["label"], "preset": preset,
-                                 # D168 ②. 0 = 라우팅이 준 본 슬롯, 1/2/3 = fallback 예비.
-                                 # `--variant_pool budget` 이면 전부 0 이라 예전과 같은 뜻이다.
-                                 "plan_tier": plan_tiers.get((node["id"], preset), 0),
-                                 "target_tau": target_tau, "speed": speed,
-                                 "tracking": tracking_used,
-                                 "tracking_requested": tracking,
-                                 "look_at_bias": bias, "aim": info["aim"],
-                                 # D72. `follow_gain` 은 요청값이 아니라 **실제 쓴 값**이다
-                                 # ("auto" 면 여기서 풀린 값). kind 는 CameraBench 갈래.
-                                 "follow_gain": info["follow"]["gain"],
-                                 "follow_kind": info["follow"].get("kind", "none"),
-                                 # D73. follow 위치 채널 저역통과 창 (1 = 끔).
-                                 "follow_smooth": int(smooth),
-                                 # D71. 조준 keyframe 축. 0 이면 나머지 두 열은 없다 (조준이
-                                 # 매 프레임이거나 아예 없다) — 뱅크를 열별로 거를 수 있게 남긴다.
-                                 "aim_keyframes": int(keyframes),
-                                 "keyframe_turn_deg": ((info["aim_keyframes"] or {})
-                                                       .get("turn_deg", 0.0)),
-                                 "keyframe_aim_err_deg": ((info["aim_keyframes"] or {})
-                                                          .get("aim_err_max_deg", 0.0)),
-                                 "tau_scale": info["tau"]["scale"],
-                                 "tau_start": info["tau"]["tau_start"],
-                                 "tau_saturated": info["tau"]["tau_saturated"],
-                                 # D97. `tau_max` 는 **언제나 소스 기준** 시차다 (hole 예산과
-                                 # 같은 눈금이라 게이트·verify 가 이걸 읽는다). 이분법이 실제로
-                                 # 맞춘 값은 `tau_ref` 가 가리키는 기준 위의 `tau_ref_max` 다 —
-                                 # `tau_ref="source"` 면 둘이 같고, `"follow"` 면 후자만
-                                 # `target_tau` 와 맞는다. 두 열을 안 나누면 "target 0.35 인데
-                                 # tau_max 0.9" 가 버그로 보인다.
-                                 "tau_ref": info["tau"]["tau_ref"],
-                                 "tau_ref_max": info["tau"]["tau_max"],
-                                 "tau_max": info["tau"]["tau_max_final"],
-                                 "path_len_u": info["path_len_u"],
-                                 "view_angle_max_deg": info["view_angle_max_deg"],
-                                 "radius_u": info["radius_u"],
-                                 "sweep_deg": info["shape_context"]["sweep"],
-                                 # 실제로 나간 회전각 (`fit_tau` 의 scale 이 곱해진 뒤).
-                                 "pan_deg": round(info["shape_context"]["pan"]
-                                                  * info["tau"]["scale"], 3),
-                                 "tracking_ignored": info["tracking_ignored"],
-                                 # 이동이 없어 τ 가 안 움직이는 preset. 사다리를 각도로 타거나(회전 전용)
-                                 # 아예 안 탄다(정지) — τ 단별 요약 평균에서 빼야 흐려지지 않는다.
-                                 "tau_invariant": (preset in STATIC_PRESETS
-                                                   or preset in ROTATION_ONLY_PRESETS),
-                                 # 마지막 프레임 focal 배율 (1.0 = zoom 없음). `fit_tau` 와 무관.
-                                 "focal_end": info["zoom"]["focal_end"],
-                                 "fit_tau": info["tau"]["fit_tau"], **stats})
-                             poses_all.append(poses)
-                             focal_all.append(extra["focal_scale"])
-                             previews.append((variant, middle))
-                             print(f"{variant:<52}{target_tau:>6.2f}"
-                                   f"{info['tau']['tau_max_final']:>9.4f}{info['path_len_u']:>8.4f}"
-                                   f"{info['view_angle_max_deg']:>7.1f}"
-                                   f"{stats['hole_fraction']:>7.3f}"
-                                   f"{stats['subject_area_med']:>7.3f}"
-                                   f"{stats['subject_in_frame']:>6.2f}")
+                                                      tau_ref=args.tau_ref, start_cand=cand)
+                              poses, extra = build_poses(
+                                  decision, graph, board=None, num_frames=num_frames,
+                                  orbit_span_frac=span_frac, start_mode=start_mode,
+                                  aim_anchor=args.aim_anchor, aim_ramp_frames=args.aim_ramp_frames,
+                                  traj_basis=args.traj_basis, aim_keyframes=keyframes,
+                                  keyframe_aim=args.keyframe_aim, keyframe_ease=args.keyframe_ease,
+                                  follow_gain=follow, follow_smooth=smooth,
+                                  use_fit_tau=args.fit_tau,
+                                  preset_tracking=args.preset_tracking, deroll=args.deroll,
+                                  orbit_fixed_sweep=args.orbit_fixed_sweep,
+                                  tau_denom=args.tau_denom)
+                              info = extra["info"]
+                              # 시작 pose 만으로 예산을 다 쓴 단 — `fit_tau` 가 움직임을 0 으로 눌러서
+                              # 나오는 건 `static_hold` 의 복제본이다. 세어만 두고 뱅크에서 뺀다.
+                              # 정지 preset 자신은 예외다 — 거기서는 identity 가 원래 의도한 결과다.
+                              if (info["tau"]["tau_saturated"] and args.drop_saturated
+                                      and preset not in STATIC_PRESETS):
+                                  # follow 를 같이 남긴다 — 안 그러면 "몇 개가 왜 죽었나" 가
+                                  # gain 별로 안 갈려서 진단이 안 된다 (D72).
+                                  saturated.append((node["id"], preset, target_tau,
+                                                    info["tau"]["tau_start"],
+                                                    info["follow"]["gain"]))
+                                  continue
+                              stats, middle = measure_trajectory(
+                                  renderer, poses, num_frames, args.measure_frames,
+                                  args.tile_height, args.tile_width, args.center_box,
+                                  behind=behind, focal=extra["focal_scale"],
+                                  subject_points=subject_points if args.subject_visible else None)
+                              # follow 를 안 쓰면 변이 이름을 예전 그대로 둔다 (이미 만든 뱅크와
+                              # variant_id 로 맞대조할 수 있게).
+                              # D93. `track_*` 은 `PRESET_TRACKING` 이 조준을 lock 으로 푼다 —
+                              # 이름과 행에 **실제 쓴 값**을 써야 뱅크로 되만들 때 일치한다.
+                              tracking_used = info["tracking"]
+                              variant = (f"{node['id']}__{preset}__tau{target_tau:g}"
+                                         f"__{speed}__{tracking_used}__b{bias:g}"
+                                         + (f"__f{follow}" if str(follow) != "0" else "")
+                                         # follow 를 안 쓰면 창 크기는 궤적에 영향이 없다 — 이름에
+                                         # 넣으면 없는 축으로 변이가 갈라진다 (D73).
+                                         + (f"__s{smooth}" if str(follow) != "0" else "")
+                                         + (f"__k{keyframes}" if int(keyframes) else "")
+                                         # D259. 격자를 끄면 접미사가 없어 예전 이름 그대로다.
+                                         # **뒤**에 붙인다 — `variant_id.split("__")[0]` 로
+                                         # anchor 를 읽는 하류 5곳이 안 깨진다.
+                                         + (f"__{cand['cand_id']}" if cand else ""))
+                              rows.append({
+                                  "variant_id": variant, "anchor_id": node["id"],
+                                  "anchor_label": node["label"], "preset": preset,
+                                  # D259. 시작 pose 후보 전문. `fit_hole_ladder`/`emit_bank` 가
+                                  # 이 값을 그대로 다시 `make_decision(start_cand=...)` 에 넣어
+                                  # 같은 카메라를 되만든다 — 재유도하면 격자 정의가 바뀌었을 때
+                                  # 조용히 다른 pose 가 나온다. 격자를 끄면 키 자체가 없다.
+                                  **({"start_cand": cand} if cand else {}),
+                                  # D168 ②. 0 = 라우팅이 준 본 슬롯, 1/2/3 = fallback 예비.
+                                  # `--variant_pool budget` 이면 전부 0 이라 예전과 같은 뜻이다.
+                                  "plan_tier": plan_tiers.get((node["id"], preset), 0),
+                                  "target_tau": target_tau, "speed": speed,
+                                  "tracking": tracking_used,
+                                  "tracking_requested": tracking,
+                                  "look_at_bias": bias, "aim": info["aim"],
+                                  # D72. `follow_gain` 은 요청값이 아니라 **실제 쓴 값**이다
+                                  # ("auto" 면 여기서 풀린 값). kind 는 CameraBench 갈래.
+                                  "follow_gain": info["follow"]["gain"],
+                                  "follow_kind": info["follow"].get("kind", "none"),
+                                  # D73. follow 위치 채널 저역통과 창 (1 = 끔).
+                                  "follow_smooth": int(smooth),
+                                  # D71. 조준 keyframe 축. 0 이면 나머지 두 열은 없다 (조준이
+                                  # 매 프레임이거나 아예 없다) — 뱅크를 열별로 거를 수 있게 남긴다.
+                                  "aim_keyframes": int(keyframes),
+                                  "keyframe_turn_deg": ((info["aim_keyframes"] or {})
+                                                        .get("turn_deg", 0.0)),
+                                  "keyframe_aim_err_deg": ((info["aim_keyframes"] or {})
+                                                           .get("aim_err_max_deg", 0.0)),
+                                  "tau_scale": info["tau"]["scale"],
+                                  "tau_start": info["tau"]["tau_start"],
+                                  "tau_saturated": info["tau"]["tau_saturated"],
+                                  # D97. `tau_max` 는 **언제나 소스 기준** 시차다 (hole 예산과
+                                  # 같은 눈금이라 게이트·verify 가 이걸 읽는다). 이분법이 실제로
+                                  # 맞춘 값은 `tau_ref` 가 가리키는 기준 위의 `tau_ref_max` 다 —
+                                  # `tau_ref="source"` 면 둘이 같고, `"follow"` 면 후자만
+                                  # `target_tau` 와 맞는다. 두 열을 안 나누면 "target 0.35 인데
+                                  # tau_max 0.9" 가 버그로 보인다.
+                                  "tau_ref": info["tau"]["tau_ref"],
+                                  "tau_ref_max": info["tau"]["tau_max"],
+                                  "tau_max": info["tau"]["tau_max_final"],
+                                  "path_len_u": info["path_len_u"],
+                                  "view_angle_max_deg": info["view_angle_max_deg"],
+                                  "radius_u": info["radius_u"],
+                                  "sweep_deg": info["shape_context"]["sweep"],
+                                  # 실제로 나간 회전각 (`fit_tau` 의 scale 이 곱해진 뒤).
+                                  "pan_deg": round(info["shape_context"]["pan"]
+                                                   * info["tau"]["scale"], 3),
+                                  "tracking_ignored": info["tracking_ignored"],
+                                  # 이동이 없어 τ 가 안 움직이는 preset. 사다리를 각도로 타거나(회전 전용)
+                                  # 아예 안 탄다(정지) — τ 단별 요약 평균에서 빼야 흐려지지 않는다.
+                                  "tau_invariant": (preset in STATIC_PRESETS
+                                                    or preset in ROTATION_ONLY_PRESETS),
+                                  # 마지막 프레임 focal 배율 (1.0 = zoom 없음). `fit_tau` 와 무관.
+                                  "focal_end": info["zoom"]["focal_end"],
+                                  "fit_tau": info["tau"]["fit_tau"], **stats})
+                              poses_all.append(poses)
+                              focal_all.append(extra["focal_scale"])
+                              previews.append((variant, middle))
+                              print(f"{variant:<52}{target_tau:>6.2f}"
+                                    f"{info['tau']['tau_max_final']:>9.4f}{info['path_len_u']:>8.4f}"
+                                    f"{info['view_angle_max_deg']:>7.1f}"
+                                    f"{stats['hole_fraction']:>7.3f}"
+                                    f"{stats['subject_area_med']:>7.3f}"
+                                    f"{stats['subject_in_frame']:>6.2f}")
 
             timing.append({"anchor_id": node["id"], "preset": preset, "rungs": len(rungs),
                            "variants": len(rows) - _rows0,
@@ -1211,7 +1250,11 @@ def main(args):
                      "look_at_biases": args.look_at_biases,
                      "follow_gains": list(args.follow_gains),
                      "follow_smooths": list(args.follow_smooths),
-                     "aim_keyframes": list(args.aim_keyframes)},
+                     "aim_keyframes": list(args.aim_keyframes),
+                     # D259. `"off"` 면 아래 두 키가 없다 (예전 뱅크와 같은 JSON).
+                     **({"start_grid": args.start_grid,
+                         "start_coverages": list(args.start_coverages)}
+                        if args.start_grid != "off" else {})},
             "traj_basis": args.traj_basis,
             # D168 ②. `"full"` 이면 예산 밖 preset 까지 변이로 깔아 뒀다는 뜻이고, 그때만
             # `fit_hole_ladder.py --fallback_ladder` 가 층을 나눠 돌 수 있다. `"budget"` 이면
@@ -1512,6 +1555,22 @@ def build_parser():
 
     # ── 궤적 모양
     parser.add_argument("--start_mode", default="source_frame0", type=str)   # source_frame0|board
+    # D259 (사용자 지시 2026-09-22). `front` 면 변이마다 **시작 카메라를 바꿔 가며** 굽는다:
+    # 방위 4 (앞/왼/오른/뒤, 정면 = 소스 카메라 방향) x 고도 3 (OBB 높이) x 거리 3 (화면 점유율).
+    # 격자는 `lbm.candidates.build_pool_front` 가 만들고, 후보 전문이 행의 `start_cand` 로 간다.
+    # `off`(기본) 면 루프가 `[None]` 한 번이라 예전 뱅크와 비트 동일하다.
+    #
+    # **`--tau_ref follow` 와 같이 쓸 것.** 기본 `source` 는 τ 를 소스 카메라 기준으로 재는데,
+    # 시작 pose 가 소스에서 떨어져 있으면 `tau_start` 만으로 예산을 다 써 `drop_saturated` 가
+    # 격자를 통째로 버린다 (D20 의 avocado-slice 와 같은 사고). `follow` 는 기준이 시작 pose
+    # 자신이라 `tau_start` 가 항상 0 이다 (build_poses.py:845).
+    parser.add_argument("--start_grid", default="off", choices=("off", "front"), type=str)
+    parser.add_argument("--start_coverages", nargs=3, type=float,
+                        default=[c for _, c in FRONT_COVERAGES])   # close medium wide
+    # `radius_u / d_ref` 상·하한 (0 = 끔). 절대 점유율로 거리를 풀면 OBB 가 얇은 노드에서
+    # 카메라가 씬 밖까지 물러난다 — 걸린 후보는 버리지 않고 반경만 자른다 (`clamped` 로 표시).
+    parser.add_argument("--start_min_ratio", default=0.3, type=float)
+    parser.add_argument("--start_max_ratio", default=3.0, type=float)
     parser.add_argument("--aim_anchor", default="subject", type=str)
     parser.add_argument("--aim_ramp_frames", default=12, type=int)
     # source|subject (D69) | auto (D99: look_at -> subject, free -> source. §presets 참조).

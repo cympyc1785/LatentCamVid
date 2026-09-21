@@ -31,6 +31,22 @@ Follows [Keep a Changelog](https://keepachangelog.com/).
   `dir(handle)` 에 `thickness` 가 안 보이는 게 함정이다 — 동적 prop 이라 런타임에만 있다.
 
 ### Changed
+- **`viser_cloud.py` target 궤적이 시간 gradation (frame 0 빨강 -> 마지막 파랑), 소스 카메라는
+  기본 꺼짐 (2026-09-21).** 단색이면 프러스텀 49대(stride 2 면 25대)가 전부 같은 색이라
+  시작과 끝이 구분되지 않아서, 궤적을 눈으로 보고도 어느 쪽으로 흐르는지(dolly_in / dolly_out)
+  판정이 안 됐다. 프러스텀과 경로선이 **같은 램프**를 쓴다 — 따로 계산하면 `--cam_stride`
+  downsample 탓에 프러스텀 i 의 색과 그 자리를 지나는 선의 색이 어긋나 "색 = 시간" 약속이
+  깨진다. 경로선은 viser 의 per-point `colors` (N,2,3) 로 꺾은선 하나에 gradation 을 얹었다
+  (선을 프레임별로 쪼개지 않는다). 새 GUI: `camera colors > target gradation` 체크박스 +
+  `target start` / `target end` 피커 (`target (pred)` 를 대체). 기동 플래그는
+  `--plan_color_start` / `--plan_color_end`.
+  **pin 은 gradation 을 안 받는다** — gradation 은 "궤적의 어디쯤"(시간), pin 색은 "어느
+  변이"(정체) 라 축이 다르고, pin 까지 램프로 칠하면 여러 대를 구분한다는 pin 의 존재
+  이유가 사라진다. pin 색은 `target start` 피커의 스냅샷이다.
+  소스 카메라는 보려는 게 거의 항상 target 인데 49대가 원점 근처에 뭉쳐 앉아 그걸 덮어서
+  껐다. 새 체크박스 `view > source cameras` 가 소스 **프러스텀과 경로선을 같이** 끈다 —
+  `paths` 하나로만 묶여 있으면 소스를 끈 상태에서 paths 를 켰을 때 "끈 카메라의 궤적"만
+  화면에 남는다. **예전 동작은 `--source_on --no_plan_gradient --plan_color 255,140,40`.**
 - **`viser_cloud.py` 경로선과 probe 카메라가 기본 꺼짐 (2026-09-21).** 둘 다 프러스텀보다 눈에
   먼저 들어와 정작 보려는 카메라 자세를 덮는다 — 경로선은 49프레임 꺾은선 3~4개,
   probe 는 gizmo 화살표가 원점 근처 소스 프러스텀을 가린다. GUI `view > paths` 체크박스가

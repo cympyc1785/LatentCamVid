@@ -49,6 +49,27 @@ start~end 를 `frame interval (every N)` 간격으로) / `all frames`(전 구간
 정작 보려는 카메라 자세를 덮는다 (경로선은 49프레임 꺾은선, probe 는 gizmo 화살표). 예전처럼
 처음부터 켜려면 `--paths_on` / `--probe_on`.
 
+**소스 카메라도 기본 꺼짐**이다 (`source cameras` / `--source_on`). 보려는 건 거의 항상 target
+궤적인데 소스 49대가 원점 근처에 뭉쳐 앉아 그걸 덮는다. 이 체크박스는 소스 프러스텀과 소스
+경로선을 **같이** 끈다 — `paths` 하나로만 묶여 있으면 소스를 끈 상태에서 paths 를 켰을 때 "끈
+카메라의 궤적"만 화면에 남는다. 비교 기준선으로 소스가 필요할 때(떨림 판정)만 켠다.
+
+## target 색은 시간축이다 (`camera colors` 폴더)
+
+target 프러스텀·경로선이 **frame 0 빨강 -> 마지막 프레임 파랑** 으로 섞인다. 단색이면 49대가
+전부 같은 색이라 시작과 끝이 구분되지 않아서, 궤적을 눈으로 보고도 dolly_in 인지 dolly_out
+인지(= 어느 쪽으로 흐르는지)를 판정할 수가 없었다. `target start`/`target end` 피커로 두 끝
+색을 바꾸고, `target gradation` 을 끄면 start 하나만 단색으로 쓰인다 — 그때 초기값은
+`--plan_color`(예전 주황) 라 `--no_plan_gradient` 로 띄우면 예전 화면이 그대로 재현된다.
+기동 시 지정은 `--plan_color_start` / `--plan_color_end`.
+
+프러스텀과 경로선이 **같은 램프**를 쓴다. 따로 계산하면 `--cam_stride` downsample 탓에 프러스텀
+i 의 색과 그 자리를 지나는 선의 색이 어긋나고, 그러면 "색 = 시간" 이라는 약속이 깨진다.
+
+**pin 은 gradation 을 안 받는다.** 색의 두 쓰임이 다른 축이기 때문이다 — gradation 은 "궤적의
+어디쯤"(시간), pin 색은 "어느 변이"(정체) 다. pin 까지 램프로 칠하면 여러 대를 구분한다는 pin
+의 존재 이유가 사라진다.
+
 ## obb 폴더 — 어느 박스를 띄우나
 
 `node` 드롭다운이 **한 노드만** 남긴다 (`all` 이면 전부). 씬 하나에 노드가 9개씩 있어 전부
@@ -95,7 +116,9 @@ motion(주황) 을 계속 바꿔도 화면에 살아 있게 한다. pin 색은 *
 출력  : 브라우저 (`http://localhost:<port>`)
 
 예시 (env vista4d, screen viser1~4 에서):
-    python scripts/viser_cloud.py --video snowboard --port 8084
+    python -u scripts/viser_cloud.py --video snowboard --port 8084
+    python -u scripts/viser_cloud.py --video snowboard --port 8084 \
+        --source_on --no_plan_gradient --plan_color 255,140,40     # 예전 동작 그대로
     python scripts/viser_cloud.py --video snowboard --port 8084 --no_cloud \
         --banks follow_smooth_bank notrack_bank worldaim_bank
     python scripts/viser_cloud.py --video snowboard --port 8084 \
@@ -143,8 +166,15 @@ PIN_COLORS = [(60, 200, 255), (255, 60, 220), (255, 230, 60), (150, 255, 120),
 #   pred = 활성 motion 의 target 카메라 (뱅크가 낸 궤적)
 SRC_COLOR = (140, 140, 140)          # 소스 프러스텀 + 경로선
 SRC_NOW_COLOR = (60, 200, 90)        # 소스의 **현재 프레임** 프러스텀 (1.6배)
-PLAN_COLOR = (255, 140, 40)          # 활성 target 프러스텀 + 경로선
+PLAN_COLOR = (255, 140, 40)          # 활성 target 단색 (gradation 을 끌 때만)
 PLAN_NOW_COLOR = (255, 80, 0)        # target 의 현재 프레임 프러스텀 (1.6배)
+
+# [2026-09-21] target 궤적의 **시간 gradation**. 단색이면 "이 프러스텀이 궤적의 어디쯤인가"를
+# 읽을 수가 없다 — 49대가 전부 같은 주황이라 시작과 끝이 구분되지 않아서, 궤적을 보고도
+# dolly_in 인지 dolly_out 인지(= 어느 쪽으로 흐르는지) 판정이 안 됐다. frame 0 = 빨강 ->
+# frame F-1 = 파랑 으로 섞어 시간축을 색에 얹는다. 예전 단색은 `--no_plan_gradient`.
+PLAN_COLOR_START = (255, 40, 40)     # frame 0
+PLAN_COLOR_END = (40, 80, 255)       # frame F-1
 
 # scene graph OBB. **동적이 하늘색**이다 — 보는 대상이 거의 항상 동적 subject 라서, 눈이 먼저
 # 가야 하는 쪽에 원래 쓰던 색을 준다. 정적은 겹치지 않게 청록으로 민다 (둘 다 하늘색이면
@@ -284,6 +314,29 @@ def ground_grid_world(ground_z: float, T_wg, center_xy, half: float, lines: int 
     return (pts.reshape(-1, 3) @ T_wg[:3, :3].T + T_wg[:3, 3]).reshape(-1, 2, 3).astype(np.float32)
 
 
+def color_ramp(start, end, count: int):
+    """start -> end 선형 보간 (count, 3) uint8.
+
+    프러스텀과 경로선이 **같은 램프**를 써야 한다 — 따로 계산하면 downsample(cam_stride) 탓에
+    프러스텀 i 의 색과 그 자리를 지나는 선의 색이 어긋나고, 그러면 색이 시간축을 가리킨다는
+    약속 자체가 깨진다.
+    """
+    if count <= 1:
+        return np.asarray([start], dtype=np.uint8)
+    t = np.linspace(0.0, 1.0, int(count))[:, None]
+    mix = np.asarray(start, float)[None] * (1.0 - t) + np.asarray(end, float)[None] * t
+    return np.clip(np.rint(mix), 0, 255).astype(np.uint8)
+
+
+def ramp_segments(ramp: np.ndarray):
+    """(F,3) 램프 -> `add_line_segments(colors=...)` 가 먹는 (F-1, 2, 3) per-point 색.
+
+    viser 1.1.0 의 `colors` 는 (N,2,3) 을 받아 선분 양 끝을 각각 칠한다 — 그래서 꺾은선
+    하나로 gradation 이 나온다 (선을 프레임별로 쪼갤 필요가 없다).
+    """
+    return np.stack([ramp[:-1], ramp[1:]], axis=1)
+
+
 def path_segments(positions: np.ndarray):
     """(F,3) 궤적 -> `add_line_segments` 가 먹는 (F-1, 2, 3). 스플라인이 아니라 생꺾은선이다."""
     points = np.asarray(positions, dtype=np.float32)
@@ -376,8 +429,17 @@ def main():
     # 선 handle 은 색을 바꿔 끼울 수가 없어 드래그 한 번에 245개를 다시 그려야 한다.
     parser.add_argument("--src_color", default="", type=str)
     parser.add_argument("--src_now_color", default="", type=str)
-    parser.add_argument("--plan_color", default="", type=str)
+    parser.add_argument("--plan_color", default="", type=str,
+                        help="target 단색 (gradation 을 끈 경우에만 쓰인다)")
     parser.add_argument("--plan_now_color", default="", type=str)
+    # target 궤적 gradation (기본 켬). 색이 시간축을 가리키므로 `target start` 가 frame 0,
+    # `target end` 가 마지막 프레임이다. 예전 단색 동작은 `--no_plan_gradient` + `--plan_color`.
+    parser.add_argument("--plan_gradient", dest="plan_gradient", action="store_true", default=True)
+    parser.add_argument("--no_plan_gradient", dest="plan_gradient", action="store_false")
+    parser.add_argument("--plan_color_start", default="", type=str,
+                        help="target gradation 의 frame 0 색 (기본 빨강)")
+    parser.add_argument("--plan_color_end", default="", type=str,
+                        help="target gradation 의 마지막 프레임 색 (기본 파랑)")
     parser.add_argument("--obb_color_dyn", default="", type=str)
     parser.add_argument("--obb_color_static", default="", type=str)
     # 경로선·probe 는 기본 꺼짐이다. 둘 다 프러스텀보다 눈에 먼저 들어와서, 정작 보려는
@@ -388,6 +450,11 @@ def main():
                         help="probe 카메라(프러스텀+gizmo)를 처음부터 켠다 (기본 꺼짐)")
     parser.add_argument("--now_cams", action="store_true",
                         help="'현재 프레임' 1.6배 프러스텀을 그린다 (기본 꺼짐)")
+    # 소스 카메라(프러스텀 + 경로선)는 **기본 꺼짐**. 보려는 건 거의 항상 target 궤적인데,
+    # 소스 49대가 원점 근처에 뭉쳐 앉아 target 프러스텀을 덮는다. 예전처럼 처음부터 켜려면
+    # `--source_on` (띄운 뒤에는 GUI view > source cameras).
+    parser.add_argument("--source_on", action="store_true",
+                        help="소스 카메라를 처음부터 켠다 (기본 꺼짐, GUI view > source cameras)")
     parser.add_argument("--pin_palette", action="store_true",
                         help="pin 색을 PIN_COLORS 순환으로 (기본: target 피커의 현재 색)")
     parser.add_argument("--obb_node", default="", type=str,
@@ -399,6 +466,8 @@ def main():
     src_now_color = parse_rgb(args.src_now_color, SRC_NOW_COLOR)
     plan_color = parse_rgb(args.plan_color, PLAN_COLOR)
     plan_now_color = parse_rgb(args.plan_now_color, PLAN_NOW_COLOR)
+    plan_start = parse_rgb(args.plan_color_start, PLAN_COLOR_START)
+    plan_end = parse_rgb(args.plan_color_end, PLAN_COLOR_END)
     obb_dyn_color = parse_rgb(args.obb_color_dyn, OBB_DYN_COLOR)
     obb_static_color = parse_rgb(args.obb_color_static, OBB_STATIC_COLOR)
 
@@ -474,14 +543,16 @@ def main():
     # **전에** 그려지는데, 그때 위젯을 읽으려 하면 아직 없다. 위젯 콜백이 이 값을 갱신한다.
     # `show` 기본이 False 인 이유: 49프레임 경로선 3~4개가 프러스텀보다 굵게 화면을 덮어
     # 정작 봐야 할 카메라 자세가 안 보인다. `--paths_on` 이나 GUI 체크박스로 켠다.
-    lw = {"path": 1.0, "show": bool(args.paths_on)}
+    # `src` 는 소스 카메라 계열 전체(프러스텀 + 경로선)의 게이트다. 경로선을 `show` 하나로만
+    # 묶으면 소스 카메라를 끈 상태에서 `paths` 를 켰을 때 **끈 카메라의 궤적**만 화면에 남는다.
+    lw = {"path": 1.0, "show": bool(args.paths_on), "src": bool(args.source_on)}
 
     def draw_line(key, name, segments, color, thickness):
         drop_line(key)
         line_base[key] = float(thickness)
         lines[key] = server.scene.add_line_segments(
             name, segments, colors=color, thickness=float(thickness) * path_lw(),
-            visible=bool(lw["show"]))
+            visible=line_vis(key))
         return lines[key]
 
     def drop_line(key):
@@ -493,6 +564,10 @@ def main():
     def path_lw():
         return float(lw["path"])
 
+    def line_vis(key):
+        """경로선 하나의 표시 여부 = `paths` 체크박스 AND 그 계열 게이트."""
+        return bool(lw["show"]) and (bool(lw["src"]) if key == "src" else True)
+
     # `handle.line_width = v` 를 쓰면 안 된다 — viser 1.1.0 에서 그건 `thickness` 의 **폐기된
     # 별칭**이고, 대입하는 순간 `thickness_units` 를 `"screen"` 으로 못 박는다 (예전 line_width
     # 가 픽셀이었으니 그 뜻을 지키려고). world 0.02 로 만든 선에 0.02 를 넣으면 0.02 **픽셀**이
@@ -502,12 +577,19 @@ def main():
             handle.thickness = line_base[key] * path_lw()
 
     def apply_path_vis():
-        for handle in lines.values():
-            handle.visible = bool(lw["show"])
+        for key, handle in lines.items():
+            handle.visible = line_vis(key)
+
+    def apply_src_vis():
+        """소스 프러스텀 + 소스 경로선을 한 손잡이로 껐다 켠다 (`--source_on` / GUI 체크박스)."""
+        for handle, _ in src_cams:
+            handle.visible = bool(lw["src"])
+        apply_path_vis()
 
     # 소스 카메라 경로도 선으로 — plan 이 떠는지 판단하려면 "원래 소스는 얼마나 떠는가"가
     # 있어야 한다. snowboard 소스는 |jerk| p95 가 plan 의 8배다.
     draw_line("src", "/src_path", path_segments(cam_c2w[:, :3, 3]), src_color, cam_scale * 0.08)
+    apply_src_vis()                      # 기본 꺼짐 — add_frustums 는 visible 인자를 안 받는다
     src_jerk = jerk_px(cam_c2w[:, :3, 3], z_med, focal)
 
     banks = list(args.banks) or ([args.bank] if args.bank else [])
@@ -692,9 +774,31 @@ def main():
             probe["cam"].thickness = value
 
     def plan_colors():
-        """(전 프레임, 현재 프레임) target 색. 피커가 단일 출처다."""
+        """(frame 0 색, 현재 프레임 색) target 색. 피커가 단일 출처다.
+
+        gradation 이 꺼져 있으면 첫 값이 **단색**으로 쓰인다 — 그래서 `--no_plan_gradient` 로
+        띄우면 `target start` 피커가 예전 `target (pred)` 와 정확히 같은 역할을 한다.
+        """
         return (tuple(int(c) for c in gui_plan_color.value),
                 tuple(int(c) for c in gui_plan_now_color.value))
+
+    def plan_ramp(count: int):
+        """target 프레임 수만큼의 색 (count, 3). gradation 이 꺼지면 start 색 단색."""
+        start = plan_colors()[0]
+        if not bool(gui_plan_grad.value):
+            return np.repeat(np.asarray([start], np.uint8), max(int(count), 1), axis=0)
+        return color_ramp(start, tuple(int(c) for c in gui_plan_end_color.value), count)
+
+    def stride_frames(count: int):
+        """add_frustums 가 실제로 만든 프러스텀의 **프레임 번호**. downsample 탓에 0,2,4,... 라
+        handle 순서만으로는 어느 프레임인지 알 수 없고, 그러면 램프를 어긋나게 칠한다."""
+        return list(range(0, int(count), max(1, int(args.cam_stride))))
+
+    def paint_ramp(handles, ramp):
+        """프러스텀들을 램프 색으로. `add_frustums` 는 색을 하나만 받으므로 만든 뒤 칠한다
+        (`.color` 대입은 갱신되는 프로퍼티라 다시 그릴 필요가 없다 — 경로선과 반대다)."""
+        for handle, frame in zip(handles, stride_frames(len(ramp))):
+            handle.color = tuple(int(c) for c in ramp[min(frame, len(ramp) - 1)])
 
     def select(index: int):
         label, plan_c2w, row = motions[int(index)]
@@ -704,14 +808,18 @@ def main():
         # 색은 상수가 아니라 **피커의 현재 값**을 읽는다 — 안 그러면 motion 을 갈아끼우는 순간
         # 사용자가 고른 색이 기본색으로 되돌아간다.
         color, now_color = plan_colors()
+        # 램프는 **변이의 프레임 수**로 만든다 (num_frames 로 굳히면 F 가 다른 뱅크에서 색이
+        # 끝까지 안 가거나 잘린다).
+        ramp = plan_ramp(len(plan_c2w))
         plan_cams = list(add_frustums(server, "/cam_plan", plan_gl, focal,
                                       float(intrinsics[0, 1, 1]), width, height, color,
                                       cam_scale, downsample=args.cam_stride))
+        paint_ramp(plan_cams, ramp)
         handles = list(plan_cams)
         # 경로선은 handles 에 안 담는다 — draw_line 이 키 하나로 이전 것을 지우므로, 여기에도
         # 담으면 갈아끼울 때 같은 handle 을 두 번 remove 하게 된다.
-        draw_line("plan", "/plan_path", path_segments(plan_c2w[:, :3, 3]), color,
-                  cam_scale * 0.10)
+        draw_line("plan", "/plan_path", path_segments(plan_c2w[:, :3, 3]),
+                  ramp_segments(ramp), cam_scale * 0.10)
         now = list(add_frustums(server, "/cam_plan_now", plan_gl[:1], focal,
                                 float(intrinsics[0, 1, 1]), width, height, now_color,
                                 cam_scale * 1.6)) if args.now_cams else []
@@ -737,7 +845,10 @@ def main():
             return
         index = [m[0] for m in motions].index(label)
         _, plan_c2w, row = motions[index]
-        # 기본은 **지금 target 피커에 들어있는 색**이다 (`--pin_palette` 로 예전 순환 팔레트).
+        # pin 은 **단색으로 남긴다** — gradation 은 "궤적의 어디쯤"(시간)을 가리키는 축이고
+        # pin 색은 "어느 변이"(정체)를 가리키는 축이다. pin 까지 램프로 칠하면 여러 대를
+        # 구분한다는 pin 의 존재 이유가 사라진다 (전부 빨강->파랑으로 똑같이 보인다).
+        # 기본은 **지금 target start 피커에 들어있는 색**이다 (`--pin_palette` 로 순환 팔레트).
         # 순환은 "여러 대를 구분한다"가 목적이었는데, 실제로는 방금 고른 색으로 보던 궤적이
         # pin 하는 순간 엉뚱한 색으로 바뀌어 대조가 끊겼다. 스냅샷이라 피커를 바꾼 뒤 다시
         # pin 하면 그 pin 만 새 색을 갖는다 — 구분은 사용자가 직접 준다.
@@ -829,6 +940,10 @@ def main():
         # 경로선 굵기 **배율**. 소스 0.08 / plan 0.10 처럼 원래 다른 값을 쓰던 비율을 유지한다.
         # 경로선 전체(소스·target·pin·subject track). 기본 꺼짐 — 49프레임 꺾은선이
         # 프러스텀보다 굵어 카메라 자세를 덮는다. 굵기 슬라이더는 켠 상태에서만 의미가 있다.
+        # 소스 카메라 계열(프러스텀 + 경로선) 전체 게이트. 기본 꺼짐 — 소스 49대가 원점
+        # 근처에 뭉쳐 앉아 정작 보려는 target 궤적을 덮는다 (`--source_on` 으로 예전 동작).
+        gui_src_on = server.gui.add_checkbox("source cameras",
+                                             initial_value=bool(args.source_on))
         gui_path = server.gui.add_checkbox("paths", initial_value=bool(args.paths_on))
         gui_path_lw = server.gui.add_slider("path thickness x", min=0.2, max=5.0, step=0.1,
                                             initial_value=1.0)
@@ -872,8 +987,18 @@ def main():
         gui_src_color = server.gui.add_rgb("source (gt)", initial_value=src_color)
         gui_src_now_color = server.gui.add_rgb("source now", initial_value=src_now_color,
                                                disabled=not args.now_cams)
-        gui_plan_color = server.gui.add_rgb("target (pred)", initial_value=plan_color,
-                                            disabled=not motions)
+        # target 은 피커가 둘이다 — 색이 **시간축**을 가리키기 때문이다 (start = frame 0,
+        # end = 마지막 프레임). `target gradation` 을 끄면 start 하나만 단색으로 쓰이고,
+        # 그때 초기값은 `--plan_color` (예전 주황) 라 예전 화면이 그대로 재현된다.
+        gui_plan_grad = server.gui.add_checkbox("target gradation",
+                                                initial_value=bool(args.plan_gradient),
+                                                disabled=not motions)
+        gui_plan_color = server.gui.add_rgb(
+            "target start", initial_value=(plan_start if args.plan_gradient else plan_color),
+            disabled=not motions)
+        gui_plan_end_color = server.gui.add_rgb(
+            "target end", initial_value=plan_end,
+            disabled=not (motions and args.plan_gradient))
         gui_plan_now_color = server.gui.add_rgb("target now", initial_value=plan_now_color,
                                                 disabled=not (motions and args.now_cams))
 
@@ -1032,17 +1157,31 @@ def main():
         draw_line("src", "/src_path", path_segments(cam_c2w[:, :3, 3]), color, cam_scale * 0.08)
 
     def repaint_plan(_event=None):
-        color, now_color = plan_colors()
+        now_color = plan_colors()[1]
+        # end 피커는 gradation 이 켜져 있을 때만 의미가 있다 — 켜 두면 "눌러도 아무 일도
+        # 안 난다" 가 되고, 그게 색이 안 먹는 버그처럼 읽힌다.
+        gui_plan_end_color.disabled = not (motions and bool(gui_plan_grad.value))
+        count = len(state["c2w"]) if state["c2w"] is not None else num_frames
+        ramp = plan_ramp(count)
+        paint_ramp([h for h, ratio in state["cams"] if ratio <= 1.0], ramp)
         for handle, ratio in state["cams"]:
-            handle.color = now_color if ratio > 1.0 else color
+            if ratio > 1.0:
+                handle.color = now_color
         if state["c2w"] is not None:
-            draw_line("plan", "/plan_path", path_segments(state["c2w"][:, :3, 3]), color,
-                      cam_scale * 0.10)
+            draw_line("plan", "/plan_path", path_segments(state["c2w"][:, :3, 3]),
+                      ramp_segments(ramp), cam_scale * 0.10)
 
     gui_src_color.on_update(repaint_src)
     gui_src_now_color.on_update(repaint_src)
     gui_plan_color.on_update(repaint_plan)
+    gui_plan_end_color.on_update(repaint_plan)
+    gui_plan_grad.on_update(repaint_plan)
     gui_plan_now_color.on_update(repaint_plan)
+
+    @gui_src_on.on_update
+    def _(_event):
+        lw["src"] = bool(gui_src_on.value)
+        apply_src_vis()
 
     def active_probe():
         """드롭다운이 가리키는 probe. 지워진 이름이 남아 있을 수 있으니 없으면 마지막 것."""
@@ -1196,8 +1335,14 @@ def main():
             ("motions", len(motions)),
             ("pinned", f"{len(pins)} / {args.max_pins}  (GUI motion > pin current)"),
             ("source jerk p95", f"{src_jerk:.2f} px/f3"),
+            ("source cams", f"{'on' if args.source_on else 'off'}  "
+                            f"(GUI view > source cameras / --source_on)"),
             ("colors", f"gt {src_color}/now {src_now_color}  "
-                       f"pred {plan_color}/now {plan_now_color}  (GUI camera colors)"),
+                       f"pred now {plan_now_color}  (GUI camera colors)"),
+            ("target color", (f"gradation {plan_start} -> {plan_end}  "
+                              f"(frame 0 -> {num_frames - 1}, --plan_color_start/_end)")
+                             if args.plan_gradient
+                             else f"단색 {plan_color}  (--no_plan_gradient)"),
             ("obb colors", f"dyn {obb_dyn_color}  static {obb_static_color}  "
                            f"(GUI obb / --obb_color_dyn/_static)"),
             ("obb handles", f"{sum(len(e) for e in obb_dyn)} dyn + {len(obb_static)} static  "
@@ -1211,7 +1356,7 @@ def main():
             ("now cams", f"{'on' if args.now_cams else 'off'}  "
                          f"(현재 프레임 1.6배 프러스텀 / --now_cams)"),
             ("pin color", "PIN_COLORS 순환 (--pin_palette)" if args.pin_palette
-                          else "target 피커의 현재 색 (pin 시점 스냅샷)"),
+                          else "target start 피커의 현재 색 (pin 시점 스냅샷, gradation 없음)"),
             ("url", f"http://localhost:{args.port}")]
     width_key = max(len(k) for k, _ in rows)
     for key, value in rows:

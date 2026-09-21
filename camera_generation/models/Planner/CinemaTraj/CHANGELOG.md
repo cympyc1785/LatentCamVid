@@ -54,6 +54,16 @@ Follows [Keep a Changelog](https://keepachangelog.com/).
   점군 위에서 박스 모서리가 거의 안 보였다 (단위는 `cam_scale` 배율).
 
 ### Added
+- **`configs/bank/d219_dynpose_objcentric.json` — "영상 하나 + preset 하나" 요청용 세대
+  (2026-09-21).** 사용자가 릴에서 영상을 집어 "이 영상으로 `track+arc right` 로 돌려줘" 라고
+  할 때 쓴다. `d185_dynpose100k_grid5` (= D200 학습 분포) 를 그대로 물려받고 **route 만**
+  좁힌다: `--anchor_ids_file` 로 피사체 못 박기 + `--slot_whitelist <슬롯 하나>` +
+  `--slot_plan full` + `--free_moving off` + `--target_variants 1`. dynpose 판 d215 다.
+  재굽기가 필요한 이유는 게이트가 아니라 **예산**이다 — 요청받은 슬롯이 d185 라우팅의
+  `backfill` 에 있으면 씬당 카메라 5대 안에 못 들어와 뱅크에 아예 없다 (car 씬 실측: arc 가
+  backfill, 구워진 6대는 dolly_out/track_orbit_left/pan_left/crane_up/stat_0×2).
+  좌우(`*_arc_right` vs `_left`)를 인자로 강제하는 자리는 없다 — route 의 `source_lateral`
+  에서 나오는 `away_side` 가 정한다.
 - **`viser_cloud.py` GUI `obb` 폴더 + `view` 폴더 손잡이 복원 (2026-09-21).** `viser_scene.py`
   에만 있던 것들을 옮겨 왔다 — `viser_cloud.py` 에서 **지워진 적은 없다**(그 파일 전체 이력이
   7커밋이고 전부 추가다). 새로 생긴 것:

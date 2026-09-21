@@ -1,0 +1,31 @@
+{
+  "_why": "D219 — 사용자가 **영상 하나와 preset 하나를 집어서** \"돌려줘\" 라고 할 때 쓰는 세대 (2026-09-21 \"car_29a9a7d0 이 영상으로 track+arc right로 seed 3개 돌려줘봐\"). d185(= D200 학습 분포) 를 그대로 물려받고 route 만 좁힌다: anchor 를 사람이 못 박고, 슬롯 하나만 남긴다. dynpose 판 d215 다 — 다른 점은 상속 뿌리(d185_dynpose100k_grid5)와 `output_root: out_dynpose` 뿐이다.",
+
+  "_왜_재굽기가_필요한가": "요청받은 `track_pull_out_arc_right` 는 이 씬의 d185 뱅크에 **없다**. `preset_route_d185.json` 에서 arc 는 `backfill` 에 있었고 실제로 구워진 6대는 dolly_out / track_orbit_left / pan_left / stat_0 두 개 / crane_up 이다 (`target_count` 5 를 recede+orbit 씨앗 쌍이 먼저 채웠다). 즉 슬롯이 예산에 밀렸을 뿐 게이트에 걸린 게 아니라서, 슬롯을 arc 하나로 고정하면 그대로 나온다.",
+
+  "_route가_다른_점": "① `--anchor_ids_file` 로 anchor 못 박기 (사용자가 릴에서 고른 피사체 = `dyn_0`, car). ② `--slot_whitelist` 를 **한 슬롯**으로. ③ `--free_moving off` — target 없는 변이가 끼면 씬당 카메라가 2대가 된다. ④ `--slot_plan full` (grid2x2 는 슬롯을 2개씩 짝지으므로 1슬롯 요청과 맞지 않는다). ⑤ `--target_variants 1`.",
+
+  "_track은_어디서_갈리나": "`--track_mode add` + `--track_min_drift_u 0.05`. `arc` 는 `TRACK_KEEP_SLOTS` 에 있으므로 anchor 이동량이 문턱을 넘으면 자동으로 `track_` 접두가 붙는다 — 사용자가 말한 \"track+arc right\" 가 곧 `track_pull_out_arc_right` 다. 이 씬 `center_drift_u` = 1.5431 로 문턱의 30배. 문턱은 tau 단계(d185 상속)와 **같은 값**이어야 한다 (D166).",
+
+  "_좌우는_route가_정한다": "`arc` 슬롯의 좌우는 `--slot_whitelist` 가 아니라 route 의 `source_lateral`/`away_side` 가 고른다 (이 씬: source_lateral 0.8205 -> away_side left -> `*_arc_right`). 즉 \"arc right\" 를 인자로 강제하는 자리는 없고, 라우팅이 이미 right 를 고르고 있어서 요청과 일치한다. 다른 씬에서 반대쪽이 나오면 그건 소스 운동이 반대라는 뜻이다.",
+
+  "extends": "d185_dynpose100k_grid5.json",
+  "generation": "d219",
+  "tau_bank_dir": "bank_d219",
+  "bank_dir": "hole_bank_d219",
+  "require_markers": [".graph_d182"],
+  "route": {
+    "out": "preset_route_d219.json",
+    "args": [
+      "--num_external", "0",
+      "--free_moving", "off",
+      "--anchor_ids_file", "/data1/cympyc1785/LatentCamVid/tmp/d219/anchors.json",
+      "--slot_plan", "full",
+      "--slot_whitelist", "arc",
+      "--track_mode", "add",
+      "--track_min_drift_u", "0.05",
+      "--target_variants", "1",
+      "--skip_if_empty"
+    ]
+  }
+}

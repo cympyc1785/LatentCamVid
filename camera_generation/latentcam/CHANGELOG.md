@@ -16,6 +16,11 @@ All notable changes to the latentcam sub-project. Follows [Keep a Changelog](htt
   - 분할을 **가로지르지 않는다** (제거만) — CLaTr 게이지가 새 test 를 미리 본 적이 없다.
   - 인덱스 캐시는 seg_list 를 키에 안 쓴다 (`dataset_dl3dv._load_index`) — D200 캐시 재사용.
   - ⚠ 대조군과 **test 집합이 다르다** (5,144 vs 2,685). 수치를 나란히 놓을 때 명시할 것.
+  - **DynPose-100K 전량 10,381 편 판정표** (`tmp/d264/d264_dynpose_all_scenes.csv`, 2026-09-22).
+    d200 코퍼스(10,169)에 없는 212 편은 `images_4/` 가 없어 `recon_and_seg/<uuid>/video.mp4`
+    를 640x360 으로 풀어 같은 눈금으로 봤다 (frame0 절대차 0.31/255). 통과 5,170 (49.8%),
+    탈락 G1 4,344 / G2 330 / G3 986. 라벨 closeup 1,438 / ego 1,373 / selfie 1,533 / third 6,037.
+    통과 씬은 **전부 `label=third`** (예외 0); third 인데 떨어진 867 편은 G2/G3 탈락이다.
 - **geo CA 를 소스 카메라 궤적으로 교체하는 ablation (`srccam_cond`, D262, 2026-09-22).**
   사용자 지시 "D200으로 DA3가 진짜 필요한지 학습으로 판단해보자. Molmo2_l21만 쓰고 DA3
   들어갈 부분에는 source camera (49frame)을 plucker나 mlp 태워서 condition으로 들어가도록

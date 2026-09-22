@@ -127,6 +127,72 @@ PATCH_ID = 151938        # config.json image_patch_id — vision feature 가 더
 PROBE = 'Describe the camera trajectory implied by this instruction for the video above.'
 
 
+# ------------------------------------------------------------------ 계측 (--timing)
+
+# off(기본) 이면 `_tick` 이 아무것도 안 하고 `_tok` 도 안 불린다 — 기존 경로·속도 그대로다.
+# 재는 단계는 Molmo2 **자체**의 것이지 우리 diffusion 모델이 아니다:
+#   vit        : 씬당 1회. ViT 로 영상 패치를 태워 prefix `inputs_embeds` 를 만든다.
+#                **prefill latent 를 얻으려면 이게 선행되어야 한다** (prefill forward 의 입력).
+#   prefix_fwd : 씬당 1회. prefix 만 태워 patch 위치 hidden 을 얻는 forward — `--video_out`
+#                (video 토큰 캐시) 전용이다. prefill latent 에는 필요 없다.
+#   prefill    : 캡션 배치당 1회. prefix+꼬리를 한 번에 태워 KV 캐시를 채우는 forward.
+#                = decode_hidden 의 첫 forward. 여기서 나온 꼬리 위치 hidden 이 prefill latent.
+#   decode     : 생성 토큰 1개당 forward 1회 (KV 캐시 재사용, seq_len=1) 의 합.
+# => prefill latent 1캡션 비용 = vit/씬 (배치로 분할상환) + prefill/캡션.
+TIMING = None
+
+
+class _Tick:
+    """`with _tick('prefill', n_items):` 누적기. TIMING 이 None 이면 no-op."""
+
+    def __init__(self, key, n=0, toks=0, count=True):
+        self.key, self.n, self.toks, self.count = key, n, toks, count
+
+    def __enter__(self):
+        if TIMING is not None:
+            torch.cuda.synchronize()
+            self.t = time.time()
+        return self
+
+    def __exit__(self, *a):
+        if TIMING is None:
+            return False
+        torch.cuda.synchronize()
+        d = TIMING.setdefault(self.key, {'sec': 0.0, 'calls': 0, 'items': 0, 'tokens': 0})
+        d['sec'] += time.time() - self.t
+        d['calls'] += int(self.count)
+        d['items'] += self.n
+        d['tokens'] += self.toks
+        return False
+
+
+def _tick(key, n=0, toks=0, count=True):
+    return _Tick(key, n, toks, count)
+
+
+def _bump(key, toks):
+    """이미 계측된 항목의 토큰 수만 사후에 더한다 (decode 는 조기 종료로 길이가 가변)."""
+    if TIMING is not None:
+        TIMING[key]['tokens'] += toks
+
+
+def _timing_report(path=None):
+    if not TIMING:
+        return
+    print('\n[timing] Molmo2 자체 추론 (cuda.synchronize 삽입)')
+    print(f"{'stage':<12}{'calls':>7}{'items':>8}{'tokens':>10}{'total_s':>10}"
+          f"{'ms/call':>10}{'ms/item':>10}{'ms/token':>10}")
+    for k, d in TIMING.items():
+        print(f"{k:<12}{d['calls']:>7}{d['items']:>8}{d['tokens']:>10}{d['sec']:>10.2f}"
+              f"{1e3 * d['sec'] / max(d['calls'], 1):>10.2f}"
+              f"{1e3 * d['sec'] / max(d['items'], 1):>10.2f}"
+              f"{1e3 * d['sec'] / max(d['tokens'], 1):>10.3f}")
+    if path:
+        with open(path, 'w') as f:
+            json.dump(TIMING, f, indent=2)
+        print(f'[timing] -> {path}')
+
+
 # ------------------------------------------------------------------ 입력 조립
 
 def load_frames(root, chunk, s, e):
@@ -206,16 +272,20 @@ def scene_prefix(model, batch, prefix_ids, device, dtype, tap=None):
     `tap` 을 주면 (마지막 층, 중간 층) 두 개를 돌려준다. 중간 층은 `ln_f` 이전 값이다.
     """
     core = model.model
-    images, pooling = core.merge_visual_inputs(
-        input_ids=prefix_ids[None].to(device),
-        pixel_values=None, image_token_pooling=None, image_grids=None, image_num_crops=None,
-        pixel_values_videos=batch['pixel_values_videos'].to(device, dtype),
-        video_token_pooling=batch['video_token_pooling'].to(device),
-        video_grids=batch['video_grids'].to(device))
-    emb, _ = core.build_input_embeddings(prefix_ids[None].to(device), images, pooling)
-    out = core(inputs_embeds=emb,
-               attention_mask=torch.ones(1, emb.shape[1], dtype=torch.long, device=device),
-               use_cache=False)
+    # ViT: prefill latent 를 얻는 데 **필요한** 부분 (prefill forward 의 입력 임베딩).
+    with _tick('vit', 1, len(prefix_ids)):
+        images, pooling = core.merge_visual_inputs(
+            input_ids=prefix_ids[None].to(device),
+            pixel_values=None, image_token_pooling=None, image_grids=None, image_num_crops=None,
+            pixel_values_videos=batch['pixel_values_videos'].to(device, dtype),
+            video_token_pooling=batch['video_token_pooling'].to(device),
+            video_grids=batch['video_grids'].to(device))
+        emb, _ = core.build_input_embeddings(prefix_ids[None].to(device), images, pooling)
+    # prefix forward: patch 위치 hidden = `--video_out` 전용. prefill latent 에는 안 쓰인다.
+    with _tick('prefix_fwd', 1, len(prefix_ids)):
+        out = core(inputs_embeds=emb,
+                   attention_mask=torch.ones(1, emb.shape[1], dtype=torch.long, device=device),
+                   use_cache=False)
     extra = None
     if tap is not None:
         assert tap.h is not None, 'LayerTap 이 안 걸렸다 — hook 대상 블록이 안 불렸다'
@@ -307,9 +377,11 @@ def decode_hidden(model, prefix_emb, tails, text_len, n_new, device, eos_ids, ta
     emb = torch.cat([prefix_emb.expand(B, -1, -1), tail_emb], 1)
     am = torch.cat([torch.ones(B, P, dtype=torch.long), msk], 1).to(device)
     pos = pos.to(device)
-    out = core(inputs_embeds=emb, attention_mask=am, position_ids=pos, use_cache=True)
-    cache = out.past_key_values
-    nxt = model.lm_head(out.last_hidden_state[:, -1]).argmax(-1)      # y_0 (prefill hidden 은 버린다)
+    # prefill 단계: prefix(영상 토큰) + 꼬리(캡션) 를 한 번에 태워 KV 캐시를 채운다.
+    with _tick('prefill', B, B * (P + L)):
+        out = core(inputs_embeds=emb, attention_mask=am, position_ids=pos, use_cache=True)
+        cache = out.past_key_values
+        nxt = model.lm_head(out.last_hidden_state[:, -1]).argmax(-1)  # y_0 (prefill hidden 은 버린다)
     pre = None
     if pre_len:
         # `--joint`: 버리는 대신 챙긴다. mid padding 을 right padding 으로 되돌려 `tail_hidden`
@@ -329,12 +401,15 @@ def decode_hidden(model, prefix_emb, tails, text_len, n_new, device, eos_ids, ta
     hs, hx, used = [], [], n_new
     for t in range(n_new):
         gen[:, t] = nxt.cpu()
-        e, _ = core.build_input_embeddings(nxt[:, None])
-        am = torch.cat([am, alive[:, None].long()], 1)
-        o = core(inputs_embeds=e, attention_mask=am,
-                 position_ids=last_pos + (t + 1),
-                 past_key_values=cache, use_cache=True,
-                 cache_position=torch.tensor([P + L + t], device=device))
+        # decode 단계: KV 캐시를 쓰는 seq_len=1 forward. hidden 을 CPU 로 내리는 것은
+        # 캐시 굽기 부대비용이라 계측에서 뺀다 (`hs.append` 는 with 바깥).
+        with _tick('decode', B, B):
+            e, _ = core.build_input_embeddings(nxt[:, None])
+            am = torch.cat([am, alive[:, None].long()], 1)
+            o = core(inputs_embeds=e, attention_mask=am,
+                     position_ids=last_pos + (t + 1),
+                     past_key_values=cache, use_cache=True,
+                     cache_position=torch.tensor([P + L + t], device=device))
         hs.append(o.last_hidden_state[:, 0].float().half().cpu())
         if tap is not None:
             hx.append(tap.h[:, 0].float().half().cpu())
@@ -344,7 +419,8 @@ def decode_hidden(model, prefix_emb, tails, text_len, n_new, device, eos_ids, ta
         if not bool(alive.any()):
             used = t + 1
             break
-        nxt = model.lm_head(o.last_hidden_state[:, 0]).argmax(-1)
+        with _tick('decode', count=False):          # lm_head 도 decode 스텝의 일부다
+            nxt = model.lm_head(o.last_hidden_state[:, 0]).argmax(-1)
         del o
 
     om = torch.arange(text_len)[None] <= done.cpu()[:, None]
@@ -588,8 +664,10 @@ def merge_shards(args):
 
 def main(args):
     from transformers import AutoProcessor, AutoModelForImageTextToText
-    global PROBE
+    global PROBE, TIMING
     PROBE = args.probe   # 기본값은 모듈 상수 그대로 — 안 주면 D124 와 비트 동일
+    if args.timing:
+        TIMING = {}
     device = torch.device('cuda' if torch.cuda.is_available() else 'cpu')
     dtype = torch.bfloat16
     t0 = time.time()
@@ -851,6 +929,7 @@ def main(args):
     print(f'{"text emb":14s} {embs.numel() * 2 / 1e9:8.2f}  GB fp16')
     print('-' * 62)
     print(f'total {time.time() - t0:.0f}s')
+    _timing_report(args.timing_out)
 
 
 @torch.inference_mode()
@@ -1009,6 +1088,10 @@ if __name__ == '__main__':
     p.add_argument('--num_shards', type=int, default=1)               # 씬을 i%n 으로 분할
     p.add_argument('--shard_id', type=int, default=0)
     p.add_argument('--merge_shards', action='store_true')             # 샤드 text 합치기 (GPU 불필요)
+    # Molmo2 **자체**의 prefill/decode 지연 계측. cuda.synchronize 를 끼우므로 대량 굽기에는
+    # 켜지 않는다 (--limit_scenes 몇 편으로 재는 용도). 기본 off 면 코드 경로가 그대로다.
+    p.add_argument('--timing', action='store_true')
+    p.add_argument('--timing_out', default=None)                      # json 경로 (선택)
     _a = p.parse_args()
     assert 0 <= _a.shard_id < _a.num_shards, f'shard_id {_a.shard_id} / num_shards {_a.num_shards}'
     if _a.joint:

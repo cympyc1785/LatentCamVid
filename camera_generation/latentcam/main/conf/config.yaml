@@ -608,6 +608,21 @@ aim_loss_max_t: 250
 # look_at 은 GT 각 중앙값 2.21~2.29°, >20° 가 0% — 손실이 이미 있는 규약을 강화한다.
 # aim=free 는 GT 각이 27~32° 라 손실이 GT 와 싸운다.) 'all' = valid track 이 있는 전 표본.
 aim_loss_gate: look_at
+
+# ─── [new 2026-09-22, D261] start pose prediction ────────────────────────────────────────
+# 데이터셋의 `cam_param` 은 `E @ inv(E[0])` 로 정규화돼 **frame0 이 항상 항등**이다.
+# 즉 "타깃 궤적의 첫 카메라가 소스 카메라 대비 어디에 있는가"는 궤적 어디에도 안 남는다.
+# 이 옵션을 켜면 dataset 이 `start_pose` (9,) = [rot6d, t/avg_scale] 를 따로 내고,
+# DiT 는 시퀀스 끝에 토큰 1 개(T -> T+1)를 붙여 그 값을 회귀한다.
+# false (기본) = 키도 안 생기고 토큰도 안 붙어 기존 arm 과 **비트 동일**.
+start_pose_pred: false
+start_pose_dim: 9             # rot6d(6) + trans(3). intr 은 이 코퍼스에서 상수라 뺐다.
+start_pose_w: 0.0            # 회귀 손실 가중치. start_pose_pred=true 인데 0 이면 assert.
+# teacher forcing: 학습 중 확률 p 로 GT start pose 를 토큰에 **더해서** 넣는다.
+# 드롭은 element-wise 가 아니라 **표본 단위**(torch.rand(B,1,1)) — 드롭된 가지는
+# 추론 경로(query 단독)와 비트 동일해야 하기 때문.
+start_pose_tf_p: 0.0
+start_pose_noise: 0.0         # 주입 전 GT 에 더하는 gaussian std (정규화 게이지 단위)
 geo_inseg_span: null          # in-seg sampling span override (null = full segment)
 geo_covis_radius: 2.0         # covisibility retrieval: ball radius
 geo_covis_theta0: 10.0        # covisibility retrieval: min view-angle separation (deg)

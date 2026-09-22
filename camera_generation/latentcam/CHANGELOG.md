@@ -5,6 +5,53 @@ All notable changes to the latentcam sub-project. Follows [Keep a Changelog](htt
 ## [Unreleased]
 
 ### Added
+- **시작 pose 예측 (`start_pose_pred`, D261, 2026-09-22).** 사용자 지시 "첫 카메라는 따로
+  source 첫 카메라 기준 상대 pose로 값을 마련해둬서 학습하도록해줘". 기본 `false` 라
+  키도 안 생기고 토큰도 안 붙으므로 **기존 arm 은 비트 동일**이다.
+  - **왜 필요한가**: `utils/data_utils.normalize_camera_extrinsics_and_points` 가
+    `E @ inv(E[0])` 라서 VAE 로 들어가는 `cam_param[0]` 은 **항상 항등**이다. 즉 "소스
+    카메라 대비 어디서 출발하는가"는 궤적 어디에도 안 남는다. d260 뱅크는 첫 카메라를
+    36 후보에서 뽑아 이 성분이 살아 있다 (코퍼스 612 변이 실측: `|t|/S` median 0.5560 /
+    p90 1.3268 / max 2.2377, 회전 median 90.07° / p90 175.50°).
+  - `main/dataset_dl3dv.py` — `_start_pose(scene_idx, s, w2c_t0, norm_scale)` 가
+    `rel0 = E_target[0] @ inv(E_src[s])` 를 `[rot6d, t/avg_scale]` **9-d** 로 낸다.
+    `__getitem__` 이 `cfg.start_pose_pred` 일 때만 `out['start_pose']` 로 넣는다.
+    11-d(= `cam_param` 폭)가 아닌 이유: intr 2 채널은 `intr_norm: rel` + scene 내 상수라
+    이 코퍼스에서 항상 `[1,1]` 이다 (실측 fx/W = 1.952716, 자기 frame0 대비 편차 0.0e+00).
+  - `models/camera_diffusion_model_latent.py` — ctor 에 `start_pose_dim` /
+    `start_pose_tf_p` / `start_pose_noise`. 시퀀스 끝에 학습가능한 `start_query` 토큰을
+    붙여 T -> T+1 로 만들고, self-attn 뒤 그 자리 hidden 을 `start_out` 으로 읽어
+    `self.start_pred` 에 남긴다 (forward 반환형은 `(B,T,cam_dim)` 그대로).
+    `cam_in` 채널축 concat 을 안 쓴 이유 둘: 입력 폭이 바뀌어 base arm 과 state_dict
+    호환이 깨지고, T 토큰 전부에 답이 방송돼 head 가 자명해진다.
+  - **teacher forcing**: `start_in = Linear(9 -> hidden)` 이 노이즈 섞인 GT 를 토큰으로
+    만들어 `start_query` 에 **더한다**. 드롭은 element-wise 가 아니라 **표본 단위**
+    (`torch.rand(B,1,1) < p`) — 드롭된 가지가 추론 경로(query 단독)와 비트 동일해야 하기
+    때문. `self.training` 게이트가 있어 val/sample 은 항상 주입 없는 경로를 탄다.
+  - `main/train_latent_cam_dm.py` — `start_pose_loss()` 가 MSE + 진단 두 개
+    (`trans_err_u`, `rot_err_deg`; 6D->R 은 Zhou et al. Gram-Schmidt). 학습 손실에
+    `start_pose_w` 로 더하고 `train/start_{mse,trans_u,rot_deg}` /
+    `val/start_{mse,trans_u,rot_deg}` 를 wandb 에 남긴다. `start_pose_pred=true` 인데
+    `start_pose_w=0` 이면 모델 구성 시점에 assert (head 가 학습되지 않는다).
+  - `main/conf/config.yaml` 에 기본값 5 개(`start_pose_pred/dim/w/tf_p/noise`).
+  - arm 둘: `vista_d261_molmo2_l21_da3_startpose`(tf 없음) /
+    `..._startpose_tf`(`tf_p 0.5`, `noise 0.1`). 코퍼스는
+    `Vista4D-Eval-Data/latentcam_d261` (d260 + d260t 뱅크, 612 변이, 씬 단위 holdout 3 편).
+- **추론 지연 계측 두 벌 — 우리 diffusion 모델 / Molmo2 자체 (2026-09-22).** 사용자 지시
+  "prefill과 decode시간 측정해줘" + "내가 말한건 Molmo2 자체의 prefill 단계, decode 단계의
+  추론 시간인데". 둘은 **다른 모델**이라 계측 지점도 따로 둔다. 기본 off 라 기존 경로는
+  비트 동일하다.
+  - `scripts/eval_testset.py --timing [--timing-warmup N]` — 우리 모델. 단계별
+    `torch.cuda.synchronize()` 로 감싼 누적기: `prefill/{geo,text,track,video}`,
+    `decode/{denoise,vae}`, `post/{to_world,clatr_feats,io}`, `data`. denoise 스텝 수를
+    세려고 `main/train_latent_cam_dm.py:sample()` 에 **선택 인자 `step_cb`** 를 더했다
+    (기본 None = 기존과 비트 동일).
+  - `main/cache_molmo2_embeddings.py --timing [--timing_out <json>]` — Molmo2 자체.
+    단계를 4개로 가른다: `vit`(씬당 ViT→prefix inputs_embeds, **prefill latent 에 필요**),
+    `prefix_fwd`(씬당 prefix forward, `--video_out` 전용이라 prefill latent 엔 불필요),
+    `prefill`(캡션 배치당 prefix+꼬리 1 forward = KV 캐시 채우기 = prefill latent 가
+    나오는 자리), `decode`(생성 토큰당 seq_len=1 forward). `--limit_scenes` 로 몇 편만
+    재는 용도이며 대량 굽기에는 켜지 않는다 (synchronize 삽입).
 - **`scripts/eval/clatr_score_dir.py` — 임의의 eval 폴더에 CLaTr 지표를 매기는 드라이버
   (2026-09-21).** `eval_testset.py` 는 자기가 방금 만든 `--out` 폴더에만 CLaTr 을 돌린다.
   베이스라인 예측(GenDoP / E.T.)은 `run_gendop_eval.py --stage evaldir` 이 만든

@@ -155,6 +155,9 @@ class CameraDiffusionModel(nn.Module):
         peav_readout_queries=49,
         peav_readout_aux_dim=0,
         video_text_fuse="token",
+        start_pose_dim=0,
+        start_pose_tf_p=0.0,
+        start_pose_noise=0.0,
     ):
         super().__init__()
 
@@ -282,6 +285,37 @@ class CameraDiffusionModel(nn.Module):
                                         aux_dim=int(peav_readout_aux_dim))
                             if self.peav_readout_layers > 0 else None)
 
+        # [new 2026-09-22 / D261] 시작 pose 를 궤적과 **같이** 예측한다.
+        #
+        # 왜 별도 토큰인가: 데이터셋이 궤적을 자기 frame0 으로 상대화하므로(`E @ inv(E[0])`)
+        # `cam_param[0]` 은 항상 항등이고, "소스 대비 어디서 출발하는가" 는 x_t 어디에도 없다.
+        # `dataset_dl3dv._start_pose` 가 그걸 9-d (6D 회전 + trans/norm_scale) 로 따로 낸다.
+        # **11-d 가 아니다** — 시작 카메라는 소스와 같은 물리 카메라라 intr 2채널이 `intr_norm:
+        # rel` 아래서 상수 [1,1] 이다 (d261 뱅크 실측 상대편차 0.0e+00). 넣으면 죽은 채널이다.
+        #
+        # 배치 방식: 시퀀스 뒤에 query 토큰 1개를 붙여 T -> T+1 로 만든다. self-attn 이 양방향
+        # 이라 이 토큰은 궤적 전체를 보고, 궤적 토큰도 이 토큰을 본다. `cam_in` 채널에 concat
+        # 하는 대안은 (a) 입력 폭이 바뀌어 기존 ckpt 와 state_dict 가 안 맞고 (b) 정답을 T개
+        # 토큰 전부에 뿌려 head 가 자명해진다.
+        #
+        # teacher forcing(`start_pose_tf_p>0`): GT 에 노이즈를 얹어 `start_in` 으로 hidden 에
+        # 올린 뒤 query 에 **더한다**. drop 은 element-wise 가 아니라 **샘플 단위**다 — drop 된
+        # 쪽이 추론 경로(query 단독)와 비트 단위로 같아야 train/test 불일치가 안 생긴다.
+        #
+        # `start_pose_dim=0` (기본) 이면 아래 셋 다 안 만들어져 state_dict·동작이 기존과 동일.
+        self.start_pose_dim = int(start_pose_dim)
+        self.start_pose_tf_p = float(start_pose_tf_p)
+        self.start_pose_noise = float(start_pose_noise)
+        if self.start_pose_dim > 0:
+            self.start_query = nn.Parameter(torch.zeros(1, 1, hidden_dim))
+            nn.init.normal_(self.start_query, std=0.02)
+            self.start_out = nn.Linear(hidden_dim, self.start_pose_dim)
+            self.start_in = (nn.Linear(self.start_pose_dim, hidden_dim)
+                             if self.start_pose_tf_p > 0 else None)
+        # 이번 forward 의 시작 pose 예측. readout_aux_pred 와 같은 stash 방식이라 반환 타입이
+        # 안 바뀐다 (샘플러/계측 호출이 전부 (B,T,cam_dim) 하나를 기대한다).
+        self.start_pred = None
+
         self.out = nn.Linear(hidden_dim, cam_dim)
         self.text_cross_attn_weight = None
         self.geo_cross_attn_weight = None
@@ -352,7 +386,8 @@ class CameraDiffusionModel(nn.Module):
         return vt, (None if video_mask is None else ~video_mask)
 
     def forward(self, x_t, t, text_emb, text_mask, geo_emb=None, geo_mask=None, cond=None,
-                video_emb=None, video_mask=None, video_text_emb=None, video_text_mask=None):
+                video_emb=None, video_mask=None, video_text_emb=None, video_text_mask=None,
+                start_pose=None):
         self.text_cross_attn_weight = None
         # [new 2026-09-03] video CA. `video_latent_dim==0` 이거나 video_emb 가 없으면 이 스트림은
         # 통째로 건너뛴다 = 기존 경로와 동일.
@@ -361,6 +396,7 @@ class CameraDiffusionModel(nn.Module):
             self.video_cross_attn_weight = None
         # 직전 step 의 예측을 학습 루프가 잘못 집어 가지 않도록 매 forward 에서 비운다.
         self.readout_aux_pred = None
+        self.start_pred = None
         # geo latent is provided externally (on-the-fly frozen geo_encoder in the
         # training loop); condition on it whenever geo_emb is given.
         has_geo_latent = geo_emb is not None
@@ -387,6 +423,25 @@ class CameraDiffusionModel(nn.Module):
         t_embed = self.time_mlp(t)              # (B,D) or (B,T,D)
         t_embed = self.time_proj(t_embed)       # (B,hidden) or (B,T,hidden)
         per_token = (t_embed.dim() == 3)        # per-token FiLM vs broadcast
+
+        # [new 2026-09-22 / D261] 시작 pose query 를 시퀀스 뒤에 1개 붙인다 (T -> T+1).
+        # pos_emb 는 안 더한다 — 이 토큰은 궤적의 t번째가 아니라 별도 슬롯이고, 자리를 구분하는
+        # 건 `start_query` 파라미터 자체다. `start_pose_dim==0` 이면 이 블록이 통째로 no-op.
+        has_start = self.start_pose_dim > 0
+        if has_start:
+            q = self.start_query.to(h.dtype).expand(B, -1, -1)
+            if self.start_in is not None and start_pose is not None and self.training:
+                # teacher forcing. drop 은 **샘플 단위** — 남는 쪽이 추론 경로(query 단독)와
+                # 비트 동일해야 train/test 불일치가 안 생긴다.
+                sp = start_pose.to(h.dtype)
+                if self.start_pose_noise > 0:
+                    sp = sp + self.start_pose_noise * torch.randn_like(sp)
+                keep = (torch.rand(B, 1, 1, device=device) < self.start_pose_tf_p).to(h.dtype)
+                q = q + keep * self.start_in(sp).unsqueeze(1)
+            h = torch.cat([h, q], dim=1)
+            if per_token:
+                # 시작 pose 는 frame0 과 같은 noise level 을 쓴다 (궤적의 첫 칸에 붙는 pose).
+                t_embed = torch.cat([t_embed, t_embed[:, :1]], dim=1)
 
         text_tok = self.text_proj(self.text_ln(text_emb))
         text_tok = text_tok + positional_encoding(text_tok.shape[-2], text_tok.shape[-1], device=device).unsqueeze(0).expand(B, -1, -1)
@@ -468,6 +523,10 @@ class CameraDiffusionModel(nn.Module):
             if has_video:
                 self.video_cross_attn_weight /= len(self.layers)
 
+        # [new 2026-09-22 / D261] 시작 pose 예측을 stash 하고 시퀀스를 원래 길이로 되돌린다.
+        # 반환 타입이 안 바뀌어야 샘플러/계측 호출이 그대로 돈다 (readout_aux_pred 와 같은 방식).
+        if has_start:
+            self.start_pred = self.start_out(h[:, T:T + 1, :]).squeeze(1)   # (B, 9)
         h = h[:, :T, :]
         return self.out(h)# (B, T, 9)
 

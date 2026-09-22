@@ -29,6 +29,7 @@ eval_meta.json, test/ (per-sample caption + ref/pred transforms = the inputs), s
 (CLaTr text feats), preds.npy, metrics.json, preds_scores.csv, losses.json.
 """
 import argparse
+import contextlib
 import datetime
 import json
 import os
@@ -73,6 +74,47 @@ def build_cfg(run_dir, overrides):
     ns['t5_dtype'] = getattr(torch, d['t5_dtype']) if isinstance(d['t5_dtype'], str) else d['t5_dtype']
     from types import SimpleNamespace
     return SimpleNamespace(**ns), d
+
+
+class Phases:
+    """`--timing` 전용 단계별 누적기. off 면 `with t('x')` 가 아무것도 안 한다.
+
+    GPU 호출은 비동기라 sync 없이 재면 앞 단계 시간이 뒤 단계로 밀려 들어간다(= prefill 이
+    공짜로 보이고 decode 가 전부 먹는다). 그래서 on 일 때만 구간 양끝에 synchronize 를 넣는다.
+    """
+
+    def __init__(self, enabled):
+        self.on = bool(enabled)
+        self.acc = {}
+        self.order = []
+        self.batches = 0
+
+    @contextlib.contextmanager
+    def __call__(self, key):
+        if not self.on:
+            yield
+            return
+        import torch
+        torch.cuda.synchronize()
+        t0 = time.time()
+        try:
+            yield
+        finally:
+            torch.cuda.synchronize()
+            if key not in self.acc:
+                self.order.append(key)
+            self.acc[key] = self.acc.get(key, 0.0) + (time.time() - t0)
+
+    def add(self, key, sec):
+        if not self.on:
+            return
+        if key not in self.acc:
+            self.order.append(key)
+        self.acc[key] = self.acc.get(key, 0.0) + float(sec)
+
+    def reset(self):
+        """워밍업 배치를 버린다 — 첫 배치는 cudnn autotune·페이지 캐시 때문에 몇 배 비싸다."""
+        self.acc, self.order, self.batches = {}, [], 0
 
 
 def main():
@@ -126,6 +168,16 @@ def main():
     # 이 플래그만 켜고 끄면 "video 스트림이 최종 궤적을 얼마나 바꾸나"가 짝지은 비교로 나온다.
     ap.add_argument('--drop-video', action='store_true',
                     help='video CA 조건을 빼고 추론 (video_latent_dim=0 arm 과 같은 forward 경로)')
+    # [new 2026-09-22] sampling_sec 를 prefill / decode / post 로 쪼갠다. 이 모델은 LLM 이
+    # 아니라 DDIM 확산 샘플러(is_ar=false)라 KV 캐시식 prefill/decode 가 없다. 대응되는 경계는
+    #   prefill = 배치당 **1회**만 돌고 50 스텝 내내 재사용되는 조건 인코딩(T5 / geo / video / track)
+    #   decode  = cfg.diffusion_inference_step 회 도는 denoising 루프 + VAE decode
+    # 기본 off. 켜면 phase 마다 cuda.synchronize 가 끼므로 **총 시간이 늘어난다** — 이 모드의
+    # 절대 sampling_sec 를 평상시 run 과 비교하면 안 되고, 내부 비율만 읽는다.
+    ap.add_argument('--timing', action='store_true',
+                    help='단계별 벽시계 분해를 timing.json 에 기록 (cuda.synchronize 삽입)')
+    ap.add_argument('--timing-warmup', type=int, default=1,
+                    help='집계에서 버릴 앞 배치 수 (첫 배치는 cudnn/캐시 워밍업이라 과대)')
     args = ap.parse_args()
 
     if args.gpu is not None:
@@ -334,11 +386,19 @@ def main():
                                         for k, v in _vk.items() if torch.is_tensor(v)}
                 print(f"[probe] xscene seed = {_s} (첫 씬 {_sc0} 의 대조 표본)")
                 break
+    ph = Phases(args.timing)
+    step_times = []                     # --timing: denoising 스텝 1회 벽시계 (워밍업 제외분만)
     t0 = time.time()
+    _t_data = time.time()
     with torch.no_grad():
         for step, data in enumerate(tqdm(valid_dataloader, total=args.max_batches or len(valid_dataloader))):
             if args.max_batches is not None and step >= args.max_batches:
                 break
+            # dataloader 대기. prefill/decode 어디에도 안 들어가지만 sampling_sec 에는 들어간다.
+            ph.add('data', time.time() - _t_data)
+            if args.timing and step == args.timing_warmup:
+                ph.reset()
+                step_times.clear()
             data_name = data['data_name']
             text_prompt = data['text_prompt']
             traj = data['cam_param'].to(device)
@@ -356,18 +416,20 @@ def main():
                               else [0] * B)
 
             pc_embeds, pc_masks = None, None
-            if 'geo_raw' in data:   # [new 2026-08-29] pre-ln DA3 캐시 (ln/proj 는 ckpt 에서 온다)
-                pc_embeds, pc_masks = T.geo_emb_from_raw_cache(geo_encoder, data, device)
-            elif 'geo_emb' in data:
-                pc_embeds, pc_masks = T.geo_emb_from_cache(data, device)
-            elif geo_encoder is not None and 'images' in data:
-                pc_embeds, pc_masks = T.geo_encode(geo_encoder, data, device)
-            if pc_embeds is not None:
-                pc_embeds = T.attach_geo_cam(pc_embeds, data, device)
+            with ph('prefill/geo'):
+                if 'geo_raw' in data:   # [new 2026-08-29] pre-ln DA3 캐시 (ln/proj 는 ckpt 에서 온다)
+                    pc_embeds, pc_masks = T.geo_emb_from_raw_cache(geo_encoder, data, device)
+                elif 'geo_emb' in data:
+                    pc_embeds, pc_masks = T.geo_emb_from_cache(data, device)
+                elif geo_encoder is not None and 'images' in data:
+                    pc_embeds, pc_masks = T.geo_encode(geo_encoder, data, device)
+                if pc_embeds is not None:
+                    pc_embeds = T.attach_geo_cam(pc_embeds, data, device)
 
-            text_embeds, text_masks = text_encoder(text_prompt, device)
-            text_embeds = text_embeds.float()
-            text_masks = text_masks.bool()
+            with ph('prefill/text'):
+                text_embeds, text_masks = text_encoder(text_prompt, device)
+                text_embeds = text_embeds.float()
+                text_masks = text_masks.bool()
             traj_latents = camera_vae.encode(traj) / cfg.vae_latent_scale if cfg.use_vae else traj
 
             if getattr(cfg, 'is_ar', False):
@@ -384,15 +446,32 @@ def main():
                 # [new 2026-08-28] --drop-track 이면 cond=None -> 모델이 전 채널 0 (null) 을
                 # 채운다 (camera_diffusion_model_latent.forward:171). 학습 때
                 # target_track_dropout 이 남겨 둔 그 조건이라 미학습 입력이 아니다.
-                _cond = None if args.drop_track else T.build_track_cond(data, traj_len, device)
+                with ph('prefill/track'):
+                    _cond = None if args.drop_track else T.build_track_cond(data, traj_len, device)
                 # [FIX 2026-09-05] video CA 조건이 여기서 빠져 있었다. run_validation
                 # (train_latent_cam_dm.py:770) 은 build_video_cond 를 부르는데 이 스크립트는
                 # 안 불러서, D124(molmo2) 처럼 video_latent_dim>0 인 arm 을 이걸로 평가하면
                 # forward 가 has_video=False 로 떨어져 **video CA 스트림을 통째로 건너뛴
                 # 다른 모델**이 평가됐다. video_latent_dim=0 인 arm 은 빈 dict 라 무영향.
-                _vkw = {} if args.drop_video else T.build_video_cond(data, device)
-                out = T.sample(model, noise_scheduler, traj_len, text_embeds, text_masks,
-                               pc_embeds, pc_masks, generator=_g, cond=_cond, video_kw=_vkw)
+                with ph('prefill/video'):
+                    _vkw = {} if args.drop_video else T.build_video_cond(data, device)
+                # step_cb 는 --timing 일 때만 넘긴다 (None 이면 sample() 이 부르지도 않는다).
+                _sc = None
+                if args.timing:
+                    _st = [time.time()]
+
+                    def _sc(_i, _st=_st):
+                        torch.cuda.synchronize()
+                        now = time.time()
+                        step_times.append(now - _st[0])
+                        _st[0] = now
+                with ph('decode/denoise'):
+                    if args.timing:
+                        torch.cuda.synchronize()
+                        _st[0] = time.time()
+                    out = T.sample(model, noise_scheduler, traj_len, text_embeds, text_masks,
+                                   pc_embeds, pc_masks, generator=_g, cond=_cond, video_kw=_vkw,
+                                   step_cb=_sc)
                 if args.probe_video_ca and probe_fh is not None:
                     _pvkw = T.build_video_cond(data, device)
                     # [new] 배치는 seg 순서라 probe 안의 roll(1) 짝이 거의 항상 같은 scene 이다.
@@ -414,29 +493,33 @@ def main():
                     probe_fh.flush()
 
             tot_lat += F.mse_loss(out, traj_latents, reduction='mean').item() * B
-            traj_pred = camera_vae.decode(out * cfg.vae_latent_scale) if cfg.use_vae else out
+            with ph('decode/vae'):
+                traj_pred = camera_vae.decode(out * cfg.vae_latent_scale) if cfg.use_vae else out
             tot_traj += F.mse_loss(traj_pred, traj, reduction='mean').item() * B
             n_seen += B
 
-            ref_intrinsics = make_intrinsics(traj[:, :, -2:], width, height, intrinsics).cpu().tolist()
-            pred_intrinsics = make_intrinsics(traj_pred[:, :, -2:], width, height, intrinsics).cpu().tolist()
-            width = width.cpu().tolist()
-            height = height.tolist()
+            with ph('post/to_world'):
+                ref_intrinsics = make_intrinsics(traj[:, :, -2:], width, height, intrinsics).cpu().tolist()
+                pred_intrinsics = make_intrinsics(traj_pred[:, :, -2:], width, height, intrinsics).cpu().tolist()
+                width = width.cpu().tolist()
+                height = height.tolist()
 
-            traj = out_to_trajectory(traj, scale, E0, device)
-            traj_pred = out_to_trajectory(traj_pred, scale, E0, device)
-            m_ref = inverse_camera_matrix(traj)
-            m_pred = inverse_camera_matrix(traj_pred)
-            m_ref[:, :, :3, 1:3] *= -1
-            m_pred[:, :, :3, 1:3] *= -1
-            m_ref = m_ref.cpu().tolist()
-            m_pred = m_pred.cpu().tolist()
+                traj = out_to_trajectory(traj, scale, E0, device)
+                traj_pred = out_to_trajectory(traj_pred, scale, E0, device)
+                m_ref = inverse_camera_matrix(traj)
+                m_pred = inverse_camera_matrix(traj_pred)
+                m_ref[:, :, :3, 1:3] *= -1
+                m_pred[:, :, :3, 1:3] *= -1
+                m_ref = m_ref.cpu().tolist()
+                m_pred = m_pred.cpu().tolist()
 
             if clip_model is not None:
-                seq_embeds, tok_embeds = T.encode_text(text_prompt, clip_model, max_token_length=None,
-                                                       device=device)
-                T.save_feats_custom(seq_embeds, data_name, Path(osp.join(out_dir, 'seq')))
-                T.save_feats_custom(tok_embeds, data_name, Path(osp.join(out_dir, 'token')))
+                with ph('post/clatr_feats'):
+                    seq_embeds, tok_embeds = T.encode_text(text_prompt, clip_model, max_token_length=None,
+                                                           device=device)
+                    T.save_feats_custom(seq_embeds, data_name, Path(osp.join(out_dir, 'seq')))
+                    T.save_feats_custom(tok_embeds, data_name, Path(osp.join(out_dir, 'token')))
+            _t_io = time.time()
             for i in range(len(data_name)):
                 def _tj(mats, intr):
                     return {"w": width[i][0], "h": height[i][0],
@@ -463,7 +546,10 @@ def main():
                                    "geo_swapped": geo_swapped_np[i],
                                    "norm_scale": float(scale[i]),
                                    "c2w": g.tolist()}, f)
+            ph.add('post/io', time.time() - _t_io)
             names += data_name
+            ph.batches += 1
+            _t_data = time.time()
 
     if probe_fh is not None:
         probe_fh.close()
@@ -474,6 +560,39 @@ def main():
     with open(osp.join(out_dir, 'losses.json'), 'w') as f:
         json.dump(losses, f, indent=2)
     print(f"[losses] {losses}")
+
+    if args.timing and ph.batches:
+        nb, ns = ph.batches, ph.batches * cfg.batch_size
+        # prefill = 배치당 1회 도는 조건 인코딩, decode = diffusion_inference_step 회 도는 루프.
+        group = {'prefill': sum(v for k, v in ph.acc.items() if k.startswith('prefill/')),
+                 'decode': sum(v for k, v in ph.acc.items() if k.startswith('decode/')),
+                 'post': sum(v for k, v in ph.acc.items() if k.startswith('post/')),
+                 'data': ph.acc.get('data', 0.0)}
+        tim = {'batches': nb, 'samples': ns, 'batch_size': cfg.batch_size,
+               'warmup_batches_dropped': args.timing_warmup,
+               'diffusion_inference_step': cfg.diffusion_inference_step,
+               'num_cam': cfg.num_cam, 'text_len': cfg.text_len,
+               'gpu': os.environ.get('CUDA_VISIBLE_DEVICES'),
+               'phase_sec_total': {k: round(ph.acc[k], 3) for k in ph.order},
+               'phase_ms_per_sample': {k: round(ph.acc[k] / ns * 1e3, 3) for k in ph.order},
+               'group_ms_per_sample': {k: round(v / ns * 1e3, 3) for k, v in group.items()},
+               'denoise_step_ms_mean': round(sum(step_times) / max(len(step_times), 1) * 1e3, 4),
+               'denoise_steps_timed': len(step_times)}
+        with open(osp.join(out_dir, 'timing.json'), 'w') as f:
+            json.dump(tim, f, indent=2)
+        print(f"\n[timing] {nb} batch x B={cfg.batch_size} = {ns} sample "
+              f"(앞 {args.timing_warmup} 배치는 워밍업이라 제외)")
+        for k in ph.order:
+            print(f"  {k:<20}{ph.acc[k]:>9.2f}s{ph.acc[k] / ns * 1e3:>11.2f} ms/sample"
+                  f"{ph.acc[k] / sum(ph.acc.values()) * 100:>8.1f}%")
+        print(f"  {'-' * 52}")
+        for k, v in group.items():
+            print(f"  {k:<20}{v:>9.2f}s{v / ns * 1e3:>11.2f} ms/sample"
+                  f"{v / sum(ph.acc.values()) * 100:>8.1f}%")
+        print(f"  denoise 1 step = {tim['denoise_step_ms_mean']:.2f} ms/batch "
+              f"({tim['denoise_step_ms_mean'] / cfg.batch_size:.2f} ms/sample) "
+              f"x {cfg.diffusion_inference_step} step")
+        print(f"[timing] -> {osp.join(out_dir, 'timing.json')}")
 
     with open(osp.join(out_dir, 'test_valid.txt'), 'w', encoding='utf-8') as f:
         for nm in sorted(set(names)):

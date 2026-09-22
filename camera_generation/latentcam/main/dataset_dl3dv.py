@@ -1387,6 +1387,35 @@ class CamDataset(torch.utils.data.Dataset):
                             K[:, 1, 1] / (K[:, 1, 2] * 2)], dim=-1)       # (V,2) raw
         return torch.cat([rel[:, :3, 0], rel[:, :3, 1], trans, intr], dim=-1).float()
 
+    def _start_pose(self, scene_idx, s, w2c_t0, norm_scale):
+        """[new 2026-09-22 / D261] 소스 frame s 카메라 기준 **target 첫 카메라**의 상대 pose (9,).
+
+        `_target_out` 은 궤적을 자기 frame0 으로 상대화하므로(`normalize_camera_extrinsics_
+        and_points`: `E @ inv(E[0])`) `cam_param[0]` 은 항상 항등이다. 즉 "소스 대비 어디서
+        출발하는가" 는 cam_param 어디에도 안 남는다. D260 뱅크처럼 첫 카메라가 자유로운
+        코퍼스에서는 그게 정보의 절반이라 **별도 GT** 로 내보낸다.
+
+          rel0 = E_target[0] @ inv(w2c_src[s])   # 소스 frame s 카메라 -> target frame0 카메라
+          out  = [rel0[:3,0], rel0[:3,1], rel0[:3,3]/norm_scale]                    # (9,)
+
+        규약은 `_geo_cam_param` (context view) 과 **같은 형태**다 — 6D 회전(앞 두 열) +
+        trans/norm_scale. 분모가 cam_param 과 같아야 시작 pose 와 궤적이 한 단위에서 논다.
+        intrinsics 채널은 없다: 시작 pose 는 소스와 같은 카메라라 FoV 가 그대로다.
+
+        추론 시 필요한 건 `w2c_src[s]` 와 `norm_scale` 둘뿐이고 **둘 다 소스에서 나온다** —
+        그래서 scale_mode 는 소스만으로 계산되는 것(avg_scale 계열)이어야 한다.
+
+        target_pose_source 가 꺼져 있으면 `w2c_t0 == w2c_src[s]` 라 항등+0 이 나온다
+        (예측할 것이 없다는 뜻이고 손실도 0 으로 수렴한다).
+        """
+        w2c_s = self.extrinsics_list[scene_idx][s].float()
+        rel = w2c_t0.float() @ torch.linalg.inv(w2c_s)
+        t = rel[:3, 3] / norm_scale
+        # cam_param 과 같은 translation 표현을 쓴다 (기본 'w2c' 에서는 _geo_cam_param 과 동일).
+        if str(getattr(self.cfg, 'trans_repr', 'w2c')) == 'c2w':
+            t = -(rel[:3, :3].transpose(0, 1) @ t)
+        return torch.cat([rel[:3, 0], rel[:3, 1], t]).float()
+
     def _geo_patch_grid(self):
         """[new] the (Gh, Gw) VGGT patch grid the geo encoder produces for self.geo_hw images.
 
@@ -1753,6 +1782,14 @@ class CamDataset(torch.utils.data.Dataset):
         if _aim_w > 0 and str(getattr(self.cfg, 'aim_loss_gate', 'look_at')) == 'look_at':
             out['aim_look_at'] = torch.tensor(
                 self._aim_look_at(scene_idx, data_name.split('_')[-1]), dtype=torch.float32)
+
+        # [new 2026-09-22 / D261] 소스 frame s 대비 target 첫 카메라의 상대 pose (9,).
+        # `cam_param[0]` 은 `E @ inv(E[0])` 때문에 **항상 항등**이라 시작 pose 가 궤적 어디에도
+        # 안 남는다 (`_start_pose` docstring). 켜지 않으면 키 자체가 안 생기고 모델의 start
+        # 가지도 안 켜지므로 기존 arm 은 비트 동일이다. `extrinsics` 는 위에서 이미 target
+        # 궤적으로 교체된 뒤라 `extrinsics[0]` = 그 변이의 frame0 w2c.
+        if bool(getattr(self.cfg, 'start_pose_pred', False)):
+            out['start_pose'] = self._start_pose(scene_idx, s, extrinsics[0], norm_scale)
 
         # [new 2026-09-03] PE-AV video/text 토큰 (D117 video CA). geo 캐시 분기가 아래에서 곧장
         # return 하므로 **그 앞에서** 붙여야 한다. 켜지 않으면 키 자체가 안 생긴다.

@@ -1,0 +1,102 @@
+# @package _global_
+# D261 — d260/d260t 뱅크(**첫 카메라 36 후보**) 코퍼스 위에서 궤적과 **시작 pose 를 같이**
+# 예측하는 arm. 모델 베이스는 사용자 지시대로 `da3 + molmo2_l21` (geo CA = DA3,
+# video/text CA = Molmo2 prefill hidden `blocks[21]`).
+#
+# ═══ 왜 시작 pose 를 따로 예측하나 ════════════════════════════════════════════════════════
+# `utils/data_utils.normalize_camera_extrinsics_and_points` 가 `E @ inv(E[0])` 라서
+# VAE 로 들어가는 `cam_param[0]` 은 **항상 항등**이다. 즉 "소스 카메라 대비 어디서
+# 출발하는가"는 궤적 어디에도 안 남는다. 지금까지의 arm 은 전부 소스 frame0 에서 출발한다고
+# 암묵 가정했고, 뱅크도 frame0 을 소스와 공유해 왔다.
+# d260 은 그 가정을 깬 첫 세대다 — `out/camel/hole_bank_d260/poses.npz:cam_c2w` 36 변이의
+# frame0 이 **고유 36/36**, 소스 frame0 과의 거리 중앙값 5.64 u.
+#
+# 실측(코퍼스 612 변이, 분모 = avg_scale_context_first_cam):
+#   |t|/S   median 0.5560  mean 0.6512  p90 1.3268  max 2.2377
+#   회전    median 90.07°  mean 93.00°  p90 175.50° max 180.00°
+# 반구 샘플링이라 피사체 반대편까지 가므로 회전이 크다. 이만한 자유도를 궤적 밖에 두면
+# 모델이 절대 못 맞히는 성분이라, `start_pose` 9-d 를 별도 토큰 하나로 회귀시킨다.
+#
+# ═══ 9-d 인 이유 (11 이 아니라) ═══════════════════════════════════════════════════════════
+# `cam_param` 은 11 ch = rot6d(6) + trans(3) + intr(2, fx/W·fy/H). 그런데 `intr_norm: rel`
+# 이라 intr 두 채널은 frame0 대비로 나뉘고, 이 코퍼스는 scene 안에서 intrinsics 가 상수다
+# (d261 bank 실측: fx/W = 1.952716, min == max, 자기 frame0 대비 상대편차 0.0e+00).
+# 그래서 start pose 에 intr 을 붙이면 상수 채널 2 개가 죽은 채로 늘 뿐이다 -> rot6d + trans.
+#
+# ═══ 모델 쪽 배선 ═════════════════════════════════════════════════════════════════════════
+# `camera_diffusion_model_latent` 가 시퀀스 끝에 학습가능한 `start_query` 토큰 1 개를 붙여
+# T -> T+1 로 만들고, self-attn 뒤 그 자리 hidden 을 `start_out` 으로 읽어 9-d 를 낸다.
+# `cam_in` 채널축에 concat 하지 않은 이유 둘: (1) 입력 폭이 바뀌어 base arm 과 state_dict
+# 호환이 깨진다, (2) T 토큰 전부에 답을 방송해 head 가 자명해진다.
+# 이 arm 은 teacher forcing 을 **쓰지 않는다** (`start_pose_tf_p: 0.0`) — 쓰는 쪽은
+# `vista_d261_molmo2_l21_da3_startpose_tf`.
+#
+# ═══ 코퍼스 ═══════════════════════════════════════════════════════════════════════════════
+# 17 편 x (d260 dolly + d260t track) -> dedup·`clamped_low` 제외 후 612 변이.
+# 씬 단위 holdout 3 편(camel / avocado-slice / bmx-bumps) = test 125 seg, train 487 seg.
+# 분모는 `avg_scale_context_first_cam` — 지금 `scene_graph.json` 의 `scale.mode` 가
+# `points_first_cam` 이라 사용자가 고른 "context 점군 전체 vs context 첫 카메라" 정의와
+# **같은 자**다 (`tmp/d261/run_d261.py --stage avgscale` 로 확인: 최대 상대오차 0.0141,
+# stride 1 vs 2 차이만 남았다). 옛 frame0-ray 정의는 `scene_graph_pre_d115.json` 에 있다.
+exp_name: vista_d261_molmo2_l21_da3_startpose
+dl3dv_root: /data1/cympyc1785/data/Vista4D-Eval-Data/latentcam_d261
+meta_csv: meta_d261.csv
+train_seg_list: /data1/cympyc1785/data/Vista4D-Eval-Data/latentcam_d261/seg_list_d261_train.txt
+test_seg_list: /data1/cympyc1785/data/Vista4D-Eval-Data/latentcam_d261/seg_list_d261_test.txt
+val_max_batches: 16   # x batch_size 8 = 128 >= test 125 seg -> val 이 test 전량이다
+coverage_blacklist_path: null
+
+text_len: 128   # umt5 text CA. d121/d128 vista arm 과 동일.
+
+pose_source: da3
+target_pose_source: da3_target_poses
+scale_mode: avg_scale
+avg_scale_ref: context_first_cam
+intr_norm: rel
+cam_dim: 64
+
+# ─── [new D261] 시작 pose 예측 ────────────────────────────────────────────────────────────
+start_pose_pred: true
+start_pose_dim: 9
+# 손실 규모: pred=0 일 때 MSE ~= (rot6d 제곱합 2 + |t|^2 0.43)/9 ~= 0.27 이라
+# diffusion MSE(~1.0) 와 같은 자리수다. 1.0 이면 둘이 대등하게 섞인다.
+start_pose_w: 1.0
+start_pose_tf_p: 0.0
+start_pose_noise: 0.0
+
+# ─── geo (da3) 스트림 ─────────────────────────────────────────────────────────────────────
+geo_encoder: da3
+geo_cam_embed: null
+geo_latent_cache_dir: null
+geo_posed: true
+geo_shuffle_order: false
+da3_geo_model: da3nested-giant-large
+da3_geo_input_hw: [252, 448]
+da3_geo_layers: last
+geo_view_sampling: context_uniform
+geo_num_views: 6
+geo_first_view_target_s: true
+# 소스 프레임은 d121/d128 과 같은 52 편 Vista4D 영상이라 geo raw 캐시를 그대로 재사용한다
+# (캐시 키가 scene/frame 이고 코퍼스 판본과 무관하다. 17 편 전부 이 안에 있다).
+geo_raw_cache_dir: /data1/cympyc1785/data/Vista4D-Eval-Data/latentcam_da3/geo_raw_cache_da3
+da3_cam_token_per_sample: true
+
+anchor_pred_frame0: true
+
+# ─── Molmo2 CA (기존 PE-AV 슬롯을 그대로 재사용한다) ───────────────────────────────────────
+# 캐시는 `tmp/d261/run_d261.py --stage molmo2` 가 D200 과 **같은 인자**로 굽는다
+# (`--joint --free_mode zero --free_aim free --decode_tokens 900 --decode_keep points
+#   --decode_points 49 --fps 2.0 --extra_layer 21`). fps 가 다르면 prefix 토큰열이 달라져
+# arm 이 학습 때와 어긋난다.
+peav_video_cache_dir: /data1/cympyc1785/data/Vista4D-Eval-Data/latentcam_d261/molmo2_cache/video
+peav_text_cache: /data1/cympyc1785/data/Vista4D-Eval-Data/latentcam_d261/molmo2_cache/prefill.pt
+peav_layer: 21             # blocks[21] raw 출력. null 이면 마지막 층(ln_f 이후).
+video_latent_dim: 2560     # Molmo2 LM hidden — video part (3136 tok)
+video_text_in_stream: true
+video_text_dim: 2560       # 같은 LM hidden — text part (128 tok). 기본 1024 는 PE-AV 값이다.
+peav_in_ln: true           # proj 앞 LayerNorm. FIX-D117 참조 (없으면 CA logit 포화)
+video_gate: true           # 0 초기화 residual gate. FIX-D117 참조 (없으면 loss ~1.0 정체)
+
+batch_size: 8
+epochs: 50           # 실제 집행자는 conf/config.yaml 의 `epoch_cap: 50`.
+ckpt_at_epochs: [25, 50]

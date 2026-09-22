@@ -1,0 +1,27 @@
+# @package _global_
+# D261-tf — `vista_d261_molmo2_l21_da3_startpose` 와 **세 줄만 다른** 사본:
+# 시작 pose 토큰에 teacher forcing 을 건다 (사용자 지시 2026-09-22:
+# "teacher forcing으로 dropout 0.5로 start pose에 noise 끼얹어서 주는 방식도 학습 돌려놔줘").
+#
+# ═══ 무엇이 주입되나 ══════════════════════════════════════════════════════════════════════
+# `start_in = Linear(9 -> hidden)` 이 노이즈 섞인 GT start pose 를 토큰 하나로 만들어
+# 학습가능한 `start_query` 에 **더한다** (concat 아님, 시퀀스 길이는 그대로 T+1).
+#   q = start_query + keep * start_in(gt + noise * eps)
+#
+# ═══ dropout 0.5 는 표본 단위다 ═══════════════════════════════════════════════════════════
+# `keep = (torch.rand(B,1,1) < p)` — element-wise 가 아니다. element-wise 로 떨어뜨리면
+# 드롭된 표본이 "GT 절반이 든 토큰"을 보게 돼 추론 때와 다른 입력 분포가 된다.
+# 표본 단위면 드롭된 가지는 `start_query` 단독이라 **추론 경로와 비트 동일**이다.
+# 또 `self.training` 게이트가 걸려 있어 val/sample 은 항상 주입 없는 경로를 탄다 —
+# 그래서 `val/start_*` 지표가 base arm 과 같은 자로 비교된다.
+#
+# ═══ noise std 0.1 의 근거 ════════════════════════════════════════════════════════════════
+# 코퍼스 612 변이 실측에서 |t|/S median 0.5560, rot6d 성분은 단위벡터 둘이라 |성분| ~ 0.5.
+# std 0.1 이면 두 블록 모두 ~18~20% 교란 — GT 를 그대로 베끼는 shortcut 은 막고
+# 방향 정보는 남는다.
+defaults:
+  - vista_d261_molmo2_l21_da3_startpose
+
+exp_name: vista_d261_molmo2_l21_da3_startpose_tf
+start_pose_tf_p: 0.5
+start_pose_noise: 0.1

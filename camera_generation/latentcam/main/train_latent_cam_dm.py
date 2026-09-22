@@ -304,6 +304,43 @@ def readout_aux_loss(raw_model, data, device):
     return ((pred - tgt).pow(2) * valid).sum() / (valid.sum().clamp(min=1.0) * pred.shape[-1])
 
 
+def start_pose_loss(raw_model, data, device):
+    """[new 2026-09-22 / D261] 시작 pose 회귀 손실. 반환 (loss, trans_err_u, rot_err_deg).
+
+    타깃은 `dataset_dl3dv._start_pose` 의 (B,9) = 소스 frame s 카메라 기준 target frame0 의
+    6D 회전(w2c R 앞 두 열) + trans/norm_scale. `cam_param` 과 같은 분모라 궤적과 한 눈금이다.
+    회전과 이동을 한 MSE 로 묶는 이유: 6D 회전 채널은 단위벡터 두 개라 크기가 O(1) 이고,
+    trans 도 norm_scale 로 나눠 O(1) 이라 이미 같은 눈금이다 (별도 가중치를 두면 arm 간
+    비교축이 하나 더 는다).
+
+    로깅용 두 값은 손실이 아니라 **읽기용**이다: trans_err 는 u 단위 L2, rot_err 는 6D 를
+    Gram-Schmidt 로 되돌린 R 사이의 측지 각(도). 손실이 내려가는데 rot_err 가 안 내려가면
+    이동만 맞히고 있다는 뜻이라 그 둘을 갈라 둔다.
+
+    head 가 꺼져 있거나 코퍼스에 start_pose 가 없으면 None → 손실이 기존 arm 과 비트 동일.
+    """
+    pred = getattr(raw_model, 'start_pred', None)
+    tgt = data.get('start_pose')
+    if pred is None or tgt is None:
+        return None
+    tgt = tgt.to(device).float()                                    # (B,9)
+    pred = pred.float()
+    loss = F.mse_loss(pred, tgt)
+    with torch.no_grad():
+        trans_err = (pred[:, 6:9] - tgt[:, 6:9]).norm(dim=-1).mean()
+
+        def _r(v):                          # 6D -> R (Zhou et al. Gram-Schmidt)
+            a, b = v[:, 0:3], v[:, 3:6]
+            e1 = F.normalize(a, dim=-1)
+            e2 = F.normalize(b - (e1 * b).sum(-1, keepdim=True) * e1, dim=-1)
+            return torch.stack([e1, e2, torch.cross(e1, e2, dim=-1)], dim=-1)
+
+        rel = _r(pred).transpose(1, 2) @ _r(tgt)
+        cos = ((rel[:, 0, 0] + rel[:, 1, 1] + rel[:, 2, 2]) - 1.0) / 2.0
+        rot_err = torch.rad2deg(torch.acos(cos.clamp(-1 + 1e-6, 1 - 1e-6))).mean()
+    return loss, trans_err, rot_err
+
+
 def aim_loss(cfg, camera_vae, noise_scheduler, noisy_x, noise_pred, timesteps, data, device):
     """[new 2026-09-20, D206] 카메라 forward 와 (카메라중심→subject) 사이 각을 좁히는 보조 손실.
 
@@ -406,8 +443,11 @@ def build_video_cond(data, device):
 
 @torch.no_grad()
 def sample(model, scheduler, traj_len, text_emb, text_masks, point_emb, point_mask, generator=None,
-           cond=None, video_kw=None):
+           cond=None, video_kw=None, step_cb=None):
     """generator: x_T 추첨용 **CPU** torch.Generator. None 이면 전역 RNG (기존 동작).
+
+    step_cb: denoising 스텝 1회가 끝날 때마다 `step_cb(i)` 를 부른다 (계측용). 기본 None 이면
+    호출 자체가 없어 기존 동작·속도 그대로다 (eval_testset.py --timing 만 채운다).
 
     이걸 넘기면 sampling 이 완전히 결정적이 된다 — cfg.sampling_type='ddim' 의 DDIMScheduler
     는 eta=0 이라 step() 이 노이즈를 안 뽑으므로 확률적 요소가 x_T 하나뿐이기 때문이다.
@@ -419,7 +459,7 @@ def sample(model, scheduler, traj_len, text_emb, text_masks, point_emb, point_ma
     x_t = torch.randn(B, traj_len, cfg.cam_dim, generator=generator).to(device)
 
     scheduler.set_timesteps(num_inference_steps=cfg.diffusion_inference_step, device=device)
-    for t in scheduler.timesteps:
+    for _i, t in enumerate(scheduler.timesteps):
         timesteps = torch.full(
             (B,),
             t,
@@ -428,6 +468,8 @@ def sample(model, scheduler, traj_len, text_emb, text_masks, point_emb, point_ma
         noise_pred = model(x_t, timesteps.float(), text_emb, text_masks, point_emb, point_mask,
                            cond=cond, **(video_kw or {}))
         x_t = scheduler.step(noise_pred, t, x_t).prev_sample
+        if step_cb is not None:
+            step_cb(_i)
     return x_t
 
 
@@ -692,11 +734,25 @@ def train():
         _geo_kw['text_in_ln'] = bool(getattr(cfg, 'peav_in_ln', True))
         print(f"(model) text_encoder=PEAV: text_proj 입력 = 1024 (umt5 미사용) "
               f"in_ln={_geo_kw['text_in_ln']}")
+    # [new 2026-09-22 / D261] 시작 pose head. `start_pose_pred=false` (기본) 이면 아래 dict 가
+    # 비어 있어 모델이 예전과 state_dict·동작 비트 동일이다.
+    _sp_kw = {}
+    if bool(getattr(cfg, 'start_pose_pred', False)):
+        _sp_kw = dict(start_pose_dim=int(getattr(cfg, 'start_pose_dim', 9)),
+                      start_pose_tf_p=float(getattr(cfg, 'start_pose_tf_p', 0.0) or 0.0),
+                      start_pose_noise=float(getattr(cfg, 'start_pose_noise', 0.0) or 0.0))
+        assert float(getattr(cfg, 'start_pose_w', 0.0) or 0.0) > 0, \
+            "start_pose_pred=true 인데 start_pose_w=0 이면 head 가 학습되지 않는다"
+        print(f"(model) start pose: dim={_sp_kw['start_pose_dim']} "
+              f"w={getattr(cfg, 'start_pose_w')} tf_p={_sp_kw['start_pose_tf_p']} "
+              f"noise={_sp_kw['start_pose_noise']} — 시퀀스 뒤 query 토큰 1개 (T -> T+1). "
+              f"tf_p=0 이면 GT 를 안 넣는다(= 순수 예측 arm)")
     if cfg.point_encoder != 'custom':
-        model = CameraDiffusionModel(cam_dim=cfg.cam_dim, cond_dim=_track_dim, **_geo_kw, **_vid_kw)
+        model = CameraDiffusionModel(cam_dim=cfg.cam_dim, cond_dim=_track_dim,
+                                     **_geo_kw, **_vid_kw, **_sp_kw)
     else:
         model = CameraDiffusionModel(cam_dim=cfg.cam_dim, cond_dim=_track_dim,
-                                     pc_encoder=pc_encoder, **_geo_kw, **_vid_kw)
+                                     pc_encoder=pc_encoder, **_geo_kw, **_vid_kw, **_sp_kw)
     
     # Load weights from the (peeked) resume checkpoint. Optimizer/step/epoch are
     # restored after accelerator.prepare() below (full resume only).
@@ -844,6 +900,11 @@ def train():
             total_loss_latent = torch.tensor(0.0, device=accelerator.device)
             total_loss_traj = torch.tensor(0.0, device=accelerator.device)
             total_samples = torch.tensor(0, device=accelerator.device)
+            # [new 2026-09-22 / D261] 시작 pose val. sample() 의 **마지막** denoise step 이
+            # 남긴 start_pred 를 읽는다 — 그 forward 는 GT 를 안 받으므로(teacher forcing 은
+            # self.training 게이트) 추론과 같은 조건이다. head 가 없으면 n=0 으로 안 찍힌다.
+            sp_sum = torch.zeros(3, device=accelerator.device)
+            sp_cnt = torch.tensor(0, device=accelerator.device)
             data_name_list = []
             _pt = getattr(cfg, 'per_token_noise', False)   # Diffusion-Forcing val monitoring
             tau_bin_sum = torch.zeros(10, device=accelerator.device)
@@ -974,6 +1035,11 @@ def train():
                     out = sample(model, noise_scheduler, traj_len, text_embeds, text_masks,
                                  pc_embeds, pc_masks, generator=_g, cond=_cond, video_kw=_vkw)
 
+                _spv = start_pose_loss(accelerator.unwrap_model(model), data, device)
+                if _spv is not None:
+                    sp_sum += torch.stack([v.detach() for v in _spv]) * B
+                    sp_cnt += B
+
                 val_loss_latent = F.mse_loss(out, traj_latents, reduction='mean')
                 total_loss_latent += val_loss_latent * B
 
@@ -1087,6 +1153,15 @@ def train():
                 "val/loss_traj": val_loss_traj_mean},
                 step=global_step,
             )
+            # [new 2026-09-22 / D261] 시작 pose val. head 가 꺼진 arm 은 cnt=0 이라 안 찍힌다.
+            _spc = accelerator.reduce(sp_cnt, reduction='sum')
+            if _spc.item() > 0:
+                _sps = accelerator.reduce(sp_sum, reduction='sum') / _spc
+                accelerator.log({"val/start_mse": _sps[0].item(),
+                                 "val/start_trans_u": _sps[1].item(),
+                                 "val/start_rot_deg": _sps[2].item()}, step=global_step)
+                print(f"(val) start pose: mse {_sps[0].item():.5f} "
+                      f"trans {_sps[1].item():.4f}u rot {_sps[2].item():.2f}deg")
             if _pt:   # tau-bin + pattern val loss (Diffusion-Forcing monitoring)
                 tbs = accelerator.reduce(tau_bin_sum, 'sum'); tbc = accelerator.reduce(tau_bin_cnt, 'sum')
                 ps = accelerator.reduce(pat_sum, 'sum'); pc = accelerator.reduce(pat_cnt, 'sum')
@@ -1289,6 +1364,7 @@ def train():
             ).long()
             _aux = None                                  # readout 보조 손실 (없으면 None)
             _aim = None                                  # [D206] aim 보조 손실 (없으면 None)
+            _sp = None                                   # [D261] 시작 pose 손실 (없으면 None)
             if getattr(cfg, 'is_ar', False):
                 # chunk-wise AR: teacher-forced causal self-attn over past clean latents
                 _raw = accelerator.unwrap_model(model)
@@ -1303,9 +1379,18 @@ def train():
                 # target_track_dim=0 이면 _cond=None -> 기존 호출과 동일.
                 _cond = build_track_cond(data, traj_latents.shape[1], device,
                                          dropout_p=float(getattr(cfg, 'target_track_dropout', 0.1)))
+                # [new 2026-09-22 / D261] teacher forcing 입력. 모델 쪽이 dropout 을 걸고,
+                # start_pose_tf_p=0 인 arm 은 `start_in` 자체가 없어 이 인자를 무시한다.
+                _spin = (data.get('start_pose').to(device)
+                         if (_sp_kw and data.get('start_pose') is not None) else None)
                 noise_pred = model(noisy_x, timesteps.float(), text_embeds, text_masks,
-                                   pc_embeds, pc_masks, cond=_cond, **_vkw)
+                                   pc_embeds, pc_masks, cond=_cond, start_pose=_spin, **_vkw)
                 loss = F.mse_loss(noise_pred, noise)
+                # [new 2026-09-22 / D261] 시작 pose 회귀. start_pose_pred=false 면 None 이라
+                # loss 가 예전과 비트 동일하다.
+                _sp = start_pose_loss(accelerator.unwrap_model(model), data, device)
+                if _sp is not None:
+                    loss = loss + float(getattr(cfg, 'start_pose_w', 0.0) or 0.0) * _sp[0]
                 # [new 2026-09-15] readout 보조 손실. readout/aux 가 꺼져 있거나 코퍼스에
                 # target_track 이 없으면 None 이라 loss 가 예전과 비트 동일하다.
                 _aux = readout_aux_loss(accelerator.unwrap_model(model), data, device)
@@ -1339,8 +1424,17 @@ def train():
                 _log["train/aim_loss"] = _aim[0].item()
                 _log["train/aim_deg"] = _aim[1].item()
                 _log["train/aim_n"] = _aim[2].item()
+            if _sp is not None:
+                # start_mse 는 가중치 곱하기 전 원 손실. trans/rot 은 읽기용 분해다 —
+                # mse 가 내려가는데 rot 이 안 내려가면 이동만 맞히고 있다는 뜻.
+                _log["train/start_mse"] = _sp[0].item()
+                _log["train/start_trans_u"] = _sp[1].item()
+                _log["train/start_rot_deg"] = _sp[2].item()
             accelerator.log(_log, step=global_step)
             _desc = f"Epoch {epoch} | Loss {loss.item():.4f}"
+            if _sp is not None:
+                _desc += (f" | start {_log['train/start_trans_u']:.3f}u "
+                          f"{_log['train/start_rot_deg']:.1f}deg")
             if _aim is not None:
                 # wandb 없이 돌리는 smoke / screen 로그에서도 게이트가 보여야 한다
                 # (aim_n=0 이 계속되면 look_at·t·valid 중 하나가 배치를 통째로 걸러낸 것).

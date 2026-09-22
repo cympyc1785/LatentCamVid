@@ -1,0 +1,35 @@
+# @package _global_
+# D264 — `dynpose_d200_molmo2_l21_da3` 와 **seg_list 두 줄만** 다른 사본.
+# 코퍼스·캐시·게이지·하이퍼파라미터 전부 그대로고, 학습/평가에 쓰는 세그먼트만 줄인다.
+#
+# ═══ 무엇을 걸렀나 (tmp/d264/run_d264.py, EXPERIMENTS.log D264-f) ════════════════════════
+# 씬 10,169 편을 3 게이트로 통과 5,069 (49.8%).
+#   G1 시점    Qwen3-VL-30B-A3B 에 24프레임(4x6) 몽타주 1장 + 질문 4개를 한 번 물어
+#              라벨이 third/none 이 아니면 탈락 (ego / selfie / closeup).
+#              closeup 은 보이는 신체·물체 부위 <= 3 으로 승격 — 얼굴만 꽉 찬 컷 제거.
+#              탈락 4,259 (closeup 1398 / ego 1335 / selfie 1526).
+#   G2 컷      인접 프레임 HSV 2D 히스토그램 Bhattacharyya 최대 >= 0.45. 탈락 321.
+#   G3 오버레이 정지 엣지 비율 >= 0.02 (시간축 sd < 2.0 & 평균영상 Sobel > 40).
+#              자막·워터마크·레터박스. 단 `sd_med < 8.0` (정지 카메라) 는 면제 —
+#              화면 전체가 정적이면 이 지표가 자막과 벽을 못 가른다. 탈락 951.
+#
+# ═══ 분할은 **가로지르지 않는다** ════════════════════════════════════════════════════════
+# s91 목록에서 제거만 한다 (train 46278 -> 23989 / test 5144 -> 2685).
+# 씬이 train<->test 로 이동하지 않으므로 CLaTr 게이지(`clatr_dynpose_d200_s91_real_epoch149`)
+# 가 새 test 를 미리 본 적이 없다 — 메모리 §clatr-gauge-must-match-train-split 는 **재분할**을
+# 금하는 것이고 부분집합은 해당하지 않는다. 그래서 게이지 줄은 부모 것을 그대로 쓴다.
+#
+# ⚠ 대조군은 `dynpose_d200_molmo2_l21_da3` 이지만 **test 집합이 다르다** (5144 vs 2685).
+#   수치를 나란히 놓을 때 이 점을 같이 적을 것.
+#
+# 인덱스 캐시는 seg_list 를 키에 안 쓴다 (`dataset_dl3dv._load_index`) — 분할은 인덱스를
+# 다 지은 뒤 `base.py` 가 거르는 단계라, 목록만 바꾸면 D200 캐시가 그대로 재사용된다.
+defaults:
+  - dynpose_d200_molmo2_l21_da3
+
+exp_name: dynpose_d264_molmo2_l21_da3
+train_seg_list: /data1/cympyc1785/data/DynPose-LBM/latentcam_dynpose_d200/seg_list_dynpose_s91_d264_train.txt
+test_seg_list: /data1/cympyc1785/data/DynPose-LBM/latentcam_dynpose_d200/seg_list_dynpose_s91_d264_test.txt
+# 부모는 64 x batch 8 = 512 대 = 코퍼스(51,422 seg)의 1%. 걸러낸 코퍼스가 26,674 seg 라
+# 같은 1% 비율이면 267 대 -> 34 배치. val 은 test 목록의 앞부분이다 (메모리 §val-is-front-of-test-list).
+val_max_batches: 34

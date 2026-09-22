@@ -5,6 +5,17 @@ All notable changes to the latentcam sub-project. Follows [Keep a Changelog](htt
 ## [Unreleased]
 
 ### Added
+- **D264 시점/컷/오버레이 필터를 건 D200 arm (`dynpose_d264_molmo2_l21_da3`, 2026-09-22).**
+  `dynpose_d200_molmo2_l21_da3` 와 **seg_list 두 줄 + `val_max_batches` 만** 다른 사본이라
+  기존 arm 은 한 글자도 안 바뀐다. 코퍼스 디렉토리·캐시·CLaTr 게이지 전부 공유.
+  - 새 목록: `latentcam_dynpose_d200/seg_list_dynpose_s91_d264_{train,test}.txt`
+    (train 46,278 -> 23,989 / test 5,144 -> 2,685). **원본 s91 목록은 그대로 둔다.**
+  - 게이트 3종 (씬 10,169 -> 5,069, 49.8%): G1 시점 VLM(third/none 만, closeup 은 보이는
+    부위 <= 3) 탈락 4,259 / G2 컷 HSV Bhattacharyya >= 0.45 탈락 321 / G3 오버레이 정지엣지
+    >= 0.02 (정지 카메라 `sd_med < 8.0` 면제) 탈락 951. 상세는 `EXPERIMENTS.log` D264-f.
+  - 분할을 **가로지르지 않는다** (제거만) — CLaTr 게이지가 새 test 를 미리 본 적이 없다.
+  - 인덱스 캐시는 seg_list 를 키에 안 쓴다 (`dataset_dl3dv._load_index`) — D200 캐시 재사용.
+  - ⚠ 대조군과 **test 집합이 다르다** (5,144 vs 2,685). 수치를 나란히 놓을 때 명시할 것.
 - **geo CA 를 소스 카메라 궤적으로 교체하는 ablation (`srccam_cond`, D262, 2026-09-22).**
   사용자 지시 "D200으로 DA3가 진짜 필요한지 학습으로 판단해보자. Molmo2_l21만 쓰고 DA3
   들어갈 부분에는 source camera (49frame)을 plucker나 mlp 태워서 condition으로 들어가도록

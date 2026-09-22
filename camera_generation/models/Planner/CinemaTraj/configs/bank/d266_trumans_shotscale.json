@@ -1,0 +1,80 @@
+{
+  "_why": "D266 — TRUMANS 파일럿. 사용자 지시(2026-09-23): \"trumans를 collision gate, occlusion을 ray cast로 바꿔주고 hole gate는 안쓰고 subject의 shot scale을 기준으로 pilot 돌려줘봐\". d207 과 **fit 인자만** 다르다 — route/tau/emit 은 글자 단위로 같다. `extends` 가 최상위 키 단위 덮어쓰기라 fit 블록은 통째로 다시 적는다.",
+
+  "_왜_바꾸나": "d207 뱅크 829행 실측에서 binding 이 collision 371 (44.8%) / hole 216 / approach 51 / occlusion 40 / obb 37 로, **depth shell 충돌이 TRUMANS 크기의 절반을 혼자 정하고 있다**. 그런데 TRUMANS 는 씬이 `.blend` 로 있어 mesh 로 직접 raycast 할 수 있는 유일한 코퍼스다 — depth shell 은 소스 카메라가 본 표면만 아는 근사고, raycast 는 벽·옆방·가구를 전부 안다. 그래서 충돌과 가림 판정을 뱅크에서 빼고 `bank_to_blender_poses.py --raycast` 로 옮긴다.",
+
+  "_사다리_눈금": "hole 을 빼면 크기를 정하는 축이 비므로 **subject 의 shot scale** 로 갈아끼운다 (`--ladder_metric shot_scale`). Δ 는 정지(손잡이 0) 대비 subject 화면면적 **배율의 로그 절대값**이다 — 0.2/0.4/0.7 ≈ ×1.22/×1.49/×2.0. 로그 비율인 이유: ① push_in(면적↑)과 pull_out(면적↓) 양쪽에서 0 부터 단조증가라 이분법이 성립한다 (생면적 목표는 방향마다 부등호가 뒤집힌다), ② anchor 크기에 불변이라 사람 하나와 방 하나가 같은 Δ 를 같은 뜻으로 쓴다. 면적은 이분법용 싼 렌더(`render_metrics`)가 이미 돌려주므로 **렌더가 안 늘어난다**.",
+
+  "_무엇을_껐나": "`--max_behind_frac -1` (G1 depth shell 충돌), `--no_obb_gate` / `--no_ground_gate` / `--no_approach_gate` (부피·바닥·접근 — raycast 의 `min_clearance` / `min_floor_drop` / `min_subject_dist` 가 같은 것을 mesh 로 본다), `--min_subject_visible 0` (G3 가림 — raycast 의 `clear_frac` / `min_los_frac`). **elev 는 남긴다** — 이건 충돌이 아니라 '피사체 바로 위/아래에서 찍지 마라'는 구도 규칙이라 raycast 가 안 본다. 열은 전부 그대로 측정된다 (게이트만 끈 것이다).",
+
+  "_프레이밍_하한": "`--min_subject_in_frame 0.6`. 충돌·가림 게이트를 다 빼면 손잡이를 위에서 막는 게 shot scale 예산 하나뿐이라, subject 가 화면 밖으로 나가는 크기가 통과한다 — d207 실측 `subject_area_end` p10 = 0.0000 (끝 프레임에 subject 가 아예 없다). 이 하한은 subject 중심이 중앙 박스 안이던 프레임 비율이고, 렌더가 안 늘어난다.",
+
+  "_손잡이_상한": "`--tau_knob_max 1.2`. shot scale 이 안 변하는 preset (orbit/truck/pan) 은 예산에 영원히 안 닿아 `unreached` 로 기본 상한 3.0 까지 벌어진다. 그 크기는 raycast 가 어차피 전량 기각하므로 굽는 시간만 버린다. 1.2 는 d207 tau 사다리 꼭대기(1.00)의 바로 위다.",
+
+  "generation": "d266T",
+  "output_root": "out_trumans",
+  "eval_data": "/data1/cympyc1785/data/TRUMANS-Lite",
+  "exec": "inproc",
+  "tau_bank_dir": "bank_d266T",
+  "bank_dir": "hole_bank_d266T",
+  "stages": ["route", "tau", "fit", "emit"],
+  "require_markers": [".graph_s115", ".cloud_s115"],
+  "route": {
+    "out": "preset_route_d266T.json",
+    "args": [
+      "--num_external", "0",
+      "--max_dynamic_anchors", "1", "--max_static_anchors", "0", "--max_anchors", "1",
+      "--min_anchor_sep", "2.0",
+      "--slot_plan", "grid2x2",
+      "--slot_pair_fill", "substitute",
+      "--free_moving", "rotate",
+      "--track_min_drift_u", "0.05",
+      "--target_variants", "3",
+      "--skip_if_empty"
+    ]
+  },
+  "tau": {
+    "args": [
+      "--cloud_source", "npz",
+      "--tau_ladder", "0.10", "0.20", "0.35", "0.60", "1.00",
+      "--variant_pool", "full",
+      "--aim_keyframes", "6", "--keyframe_aim", "auto", "--keyframe_ease", "smooth_kf",
+      "--fixed_focal", "--deroll", "--no_preview", "--skip_on_empty", "--device", "cuda",
+      "--orbit_fixed_sweep", "--min_sweep_deg", "20", "--behind_src_frames", "49",
+      "--tau_ref", "follow",
+      "--track_dynamic_only", "--track_min_drift_u", "0.05",
+      "--trackings", "lock", "--preset_tracking",
+      "--behind_min_zcam", "0.02",
+      "--tau_denom", "S"
+    ]
+  },
+  "fit": {
+    "args": [
+      "--cloud_source", "npz",
+      "--ladder_metric", "shot_scale",
+      "--hole_ladder", "0.2", "0.4", "0.7",
+      "--min_subject_in_frame", "0.6",
+      "--tau_knob_max", "1.2",
+      "--max_behind_frac", "-1",
+      "--no_obb_gate", "--no_ground_gate", "--no_approach_gate",
+      "--min_subject_visible", "0",
+      "--fallback_ladder", "--fallback_target", "3",
+      "--retry_status", "clamped_low",
+      "--retry_suspect", "aim_target_subject_lost",
+      "motion_preset_no_motion", "static_start_collision",
+      "--suspect_hole", "0.35",
+      "--aim_keyframes", "6", "--keyframe_aim", "auto", "--keyframe_ease", "smooth_kf",
+      "--fixed_focal", "--deroll",
+      "--orbit_fixed_sweep", "--min_sweep_deg", "20", "--behind_src_frames", "49",
+      "--tau_ref", "follow", "--tracking", "lock", "--preset_tracking",
+      "--behind_min_zcam", "0.02", "--behind_clear_src_ratio", "0",
+      "--collision_time_match", "--collision_source", "both",
+      "--mesh_margin_autoclamp", "0.9",
+      "--area_timeline", "--composition",
+      "--composition_min_area", "0.004", "--composition_max_nodes", "3",
+      "--device", "cuda", "--tau_denom", "S", "--tau_knob_min", "0.005",
+      "--follow_keyframes", "6", "--follow_kf_interp", "cubic"
+    ]
+  },
+  "emit": {"args": []}
+}

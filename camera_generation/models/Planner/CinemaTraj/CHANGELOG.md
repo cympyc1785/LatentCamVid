@@ -8,6 +8,33 @@ Follows [Keep a Changelog](https://keepachangelog.com/).
 ## [Unreleased]
 
 ### Added
+- **shot scale 사다리 `--ladder_metric shot_scale` + 프레이밍 게이트 `--min_subject_in_frame`
+  (D266, 2026-09-23).** 사용자 지시 "trumans를 collision gate, occlusion을 ray cast로 바꿔주고
+  hole gate는 안쓰고 subject의 shot scale을 기준으로 pilot 돌려줘봐". TRUMANS 는 씬이 `.blend`
+  로 있어 mesh raycast 가 가능한 유일한 코퍼스인데, d207 뱅크 829행에서 binding 이
+  `collision 371 (44.8%)` 로 **depth shell 근사가 카메라 크기의 절반을 혼자 정하고 있었다**.
+  충돌·가림 판정을 뱅크에서 빼고 `bank_to_blender_poses.py --raycast` 로 옮기면 사다리의 크기
+  축이 비므로, `solve_knob` 의 예산 수량을 hole 대신 **subject 화면면적 배율의 로그 절대값**
+  `|log(subject_area_med / area_static)|` 로 갈아끼운다 (Δ 0.2/0.4/0.7 ≈ ×1.22/×1.49/×2.0).
+  - 로그 비율인 이유: ① push_in(면적↑)·pull_out(면적↓) 양쪽에서 손잡이에 대해 0 부터
+    단조증가라 이분법이 성립한다 (생면적 목표는 방향마다 부등호가 뒤집힌다), ② anchor 크기에
+    불변이라 사람 하나와 방 하나가 같은 Δ 를 같은 뜻으로 쓴다.
+  - **렌더가 안 는다.** 면적은 이분법용 싼 경로(`render_metrics`, `metric_only=True`)가 이미
+    돌려준다 — `set_subject` 는 무조건 불린다. 비싼 2-pass 실루엣이 필요한 건 가림
+    (`subject_visible_frac`) 뿐이라 `--min_subject_visible 0` 으로 가림 게이트를 꺼도 shot
+    scale 측정은 살아 있다.
+  - `--min_subject_in_frame` 은 **예산 앞**에 놓인 프레이밍 하한이다 (가림이 아니다). 충돌·
+    가림을 다 빼면 손잡이를 위에서 막는 게 예산 하나뿐이라 subject 가 화면 밖으로 나가는
+    크기가 통과한다 — d207 실측 `subject_area_end` p10 = 0.0000.
+  - `--tau_knob_max` 로 손잡이 상한을 낮출 수 있다 (기본 0 = 안 건드림). shot scale 이 안
+    변하는 preset(orbit/truck/pan)이 예산에 영원히 안 닿아 `unreached` 로 기본 3.0 까지
+    벌어지는 것을 막는다.
+  - `binding` 토큰은 `hole` 로 **유지**한다 — `emit_bank` / `route_presets` /
+    `probe_tau_divisor` 가 그 문자열을 읽는다. 대신 `ladder_metric` / `area_static` /
+    `shot_dev` 열과 `bank.json` 키가 새로 붙고, `variant_id` 가 `__shot0.4` 접미사를 쓴다.
+  - 세 플래그 전부 기본값이 기존 동작과 **비트 단위로 같다** (`hole` / `0.0` / `0.0`).
+  - 설정: `configs/bank/d266_trumans_shotscale.json` (d207 과 **fit 블록만** 다르다).
+
 - **시작 pose 격자 `--start_grid front` (D259, 2026-09-22).** 여태 모든 뱅크는 시작 pose 가
   **소스 frame 0 카메라**였다 (`--start_mode source_frame0`). 사용자가 "vista 데이터 활용해서
   첫 카메라도 trumans처럼 샘플링해서 사용" 을 요청해, 시작 pose 자체를 피사체 주위 격자에서

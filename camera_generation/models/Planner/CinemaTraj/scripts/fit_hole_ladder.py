@@ -188,6 +188,7 @@ env: `vista4d` (렌더러가 GPU 를 쓴다)
 import json
 import sys
 from argparse import ArgumentParser
+from math import log
 from os import makedirs, path
 from time import perf_counter
 
@@ -577,7 +578,8 @@ def solve_knob(probe, target_hole: float, points: list, kind: str, iterations: i
                max_behind: float, min_obb: float,
                max_elev: float = float("inf"), min_ground: float = float("-inf"),
                lo_override: float | None = None, min_approach: float = float("-inf"),
-               min_seen: float = float("-inf"), max_behind_dyn: float | None = None):
+               min_seen: float = float("-inf"), max_behind_dyn: float | None = None,
+               metric_fn=None, min_in_frame: float = float("-inf")):
     """"예산 안의 최대 크기"를 이분법으로 푼다. (k, status, binding, 실측 횟수).
 
     `max_behind < 0` 이면 예산은 hole 하나다 (기존 동작 그대로). `>= 0` 이면 **충돌 예산 두 개**가
@@ -629,6 +631,17 @@ def solve_knob(probe, target_hole: float, points: list, kind: str, iterations: i
                     음수 하나로 통일한다). 켜면 이분법이 **렌더를 2배**로 쓴다 — subject 만 그린
                     실루엣이 분모라 두 번 그려야 한다 (`measure_trajectory` docstring).
 
+    D266. `metric_fn` 을 주면 **사다리 예산의 양 자체가 바뀐다** — `hole >= target_hole` 자리에
+    `metric_fn(stats) >= target_hole` 이 들어간다 (`binding` 이름은 `hole` 그대로 둔다: 하류
+    `emit_bank`/`route_presets`/`probe_tau_divisor` 가 이 토큰으로 "예산이 상한을 정했다"를
+    읽는다). 안 주면 `None` 이라 예전 식이 그대로 돌아 비트 단위로 같다. 호출자가 shot scale
+    (`|log(subject_area_med / area_static)|`) 을 넣는 데 쓴다 — hole 을 안 보는 뱅크용이다.
+
+    `min_in_frame` 은 subject 중심이 중앙 박스 안에 있던 프레임 비율(`subject_in_frame`)의
+    하한이다. **가림이 아니라 프레이밍**이다 — 가림은 raycast 로 옮겼고(D266), 이건 손잡이를
+    키우다 subject 가 화면 밖으로 나가는 것만 막는다 (d207 실측 `subject_area_end` p10 =
+    0.0000 = 끝 프레임에 subject 가 아예 없다). 끄는 값은 `-inf` 다.
+
     `lo_override` 는 손잡이 하한을 올린다 (D53 ①: τ 는 `tau_start` 아래로는 도달 자체가 안 되고,
     거기로 밀면 `fit_tau` 가 궤적을 0 으로 만든다). 하한을 올리면 τ 뱅크에서 온 bracket 점 중
     그 아래 것들은 **재현 불가능**하므로 같이 버린다 — 안 버리면 이분법이 도달 못 하는 구간을
@@ -664,7 +677,12 @@ def solve_knob(probe, target_hole: float, points: list, kind: str, iterations: i
             # 물릴 때 `binding` 귀속이 예전 뱅크와 달라진다.
             elif approach == approach and approach < min_approach:
                 verdicts[knob] = (True, "approach")
-            elif hole >= target_hole:
+            # D266. 프레이밍은 예산(hole/shot) **앞**에 둔다 — subject 가 화면을 벗어난 크기는
+            # shot scale 이 얼마든 못 쓰는 카메라다. 끄면 `-inf` 라 조건이 영원히 거짓이다.
+            elif (lambda f: f == f and f < min_in_frame)(
+                    geo.get("subject_in_frame", float("nan"))):
+                verdicts[knob] = (True, "framing")
+            elif (metric_fn(geo) if metric_fn is not None else hole) >= target_hole:
                 verdicts[knob] = (True, "hole")
             # D112. hole **뒤**. 여기 오면 hole 은 이미 예산 안이므로, 기존 뱅크에서 `(False,
             # "hole")` 이던 자리만 갈라진다 — `min_seen = -inf` 면 조건이 영원히 거짓이라
@@ -685,7 +703,7 @@ def solve_knob(probe, target_hole: float, points: list, kind: str, iterations: i
         if is_over:
             return lo, "clamped_low", binding, calls
     elif (max_behind >= 0.0 or max_elev < float("inf") or min_ground > float("-inf")
-          or min_seen > float("-inf")):
+          or min_seen > float("-inf") or min_in_frame > float("-inf")):
         is_over, why = over(lo)
         if is_over:                      # 사다리는 hole 만 봤다 — 충돌/G6 기준으로는 여기도 크다
             hi, binding = lo, why
@@ -834,10 +852,22 @@ def main(args):
     # 달라진다. 사다리 값(Δ)은 그대로 `hole_delta` 로 남고 `variant_id` 도 Δ 로 매긴다 —
     # 그래야 씬이 달라져도 같은 이름의 단이 같은 뜻이다.
     excess = args.hole_mode == "excess"
+    # D266. 사다리가 재는 양. `hole` 이 기본이고 그 경로는 비트 단위로 예전과 같다.
+    # `shot_scale` 은 hole 을 **아예 안 본다** — 예산이 |log(면적/바닥면적)| 로 바뀐다.
+    # TRUMANS 파일럿용: 충돌·가림은 depth shell 이 아니라 raycast(`bank_to_blender_poses.py
+    # --raycast`)가 보고, 뱅크는 크기 사다리만 만든다 (사용자 지시 2026-09-23).
+    shot_ladder = args.ladder_metric == "shot_scale"
+    # 프레이밍 하한. 가림 게이트와 **다른 양**이다 — 이건 subject 중심이 중앙 박스 안이었나다.
+    min_in_frame = (float(args.min_subject_in_frame) if args.min_subject_in_frame > 0.0
+                    else float("-inf"))
     # F5. τ 손잡이 하한을 여기서 **한 번만** 갈아끼운다. 아래 전부가 `KNOB_RANGE` 를 읽으므로
     # (탐색 경계 `solve_knob:554` / `lo_override` / `knob_floor` 열 / `bank.json`) 값의 출처가
     # 하나로 남는다. 기본값이면 튜플이 그대로라 예전 뱅크와 비트 동일이다.
-    KNOB_RANGE["tau"] = (float(args.tau_knob_min), KNOB_RANGE["tau"][1])
+    # D266. 상한도 같이 뺀다. hole/충돌 게이트를 다 끄면 손잡이를 위에서 막는 게 사다리
+    # 예산뿐인데, shot scale 이 안 변하는 preset(orbit/truck/pan)은 예산에 영원히 안 닿아
+    # `unreached` 로 상한까지 벌어진다. 기본값은 지금 값 그대로라 안 주면 비트 동일이다.
+    KNOB_RANGE["tau"] = (float(args.tau_knob_min),
+                         float(args.tau_knob_max or KNOB_RANGE["tau"][1]))
     tau_floor_on = bool(args.tau_floor_src)
     # D53 ①-b. 하한을 `tau_start` 바로 위로 올리면 필요한 배율이 `fit_tau` 이분법의 첫 눈금
     # (max_scale/2^8 = 0.0156)보다 작아져서 `lo` 가 0 에 남는다 — 하한을 고쳐도 궤적이 여전히
@@ -1119,13 +1149,31 @@ def main(args):
             # 가지를 그대로 타서 **시작 pose 에 얼린** 궤적을 준다 — 그게 정지 hole 이고, 같은
             # 호출에서 `tau_start`(씬 상수, 소스 자신의 시차)도 나온다. 렌더 1회.
             hole_static, tau_start_src = 0.0, float("nan")
-            if excess or tau_floor_on:
+            # D266. shot scale 사다리의 바닥. `hole_static` 과 **같은 probe 한 번**에서 나온다 —
+            # `render_metrics` 가 이분법용 싼 경로에서도 `subject_area` 를 돌려주므로
+            # (`lbm/render.py:196`) 면적 측정에 렌더가 추가로 들지 않는다. 가림(2-pass)만
+            # 비싼 것이고 면적은 공짜다. 그래서 `--min_subject_visible 0` 으로 가림 게이트를
+            # 꺼도 shot scale 은 그대로 측정된다.
+            area_static = float("nan")
+            if excess or tau_floor_on or shot_ladder:
                 # D113. `force_render` — 이 hole 은 사다리 목표(`hole_static + Δ`)를 정하는
                 # 값이라 게이트에 걸려도 반드시 재야 한다. 손잡이 0 은 시작 pose 에 얼린
                 # 궤적이라 보통 게이트를 다 통과하지만, 시작 pose 자체가 지면 아래거나
                 # anchor 를 지나쳐 있으면 걸린다 (그러면 사다리 전 단이 nan 이 된다).
-                hole_static = float(probe(0.0, force_render=True)[0])
+                _p0 = probe(0.0, force_render=True)
+                hole_static = float(_p0[0])
+                area_static = float(_p0[1].get("subject_area_med", float("nan")))
                 tau_start_src = float(cache[0.0][2]["tau"]["tau_start"])
+            # |log(면적 / 바닥면적)|. **비율의 로그**인 이유 둘. ① 손잡이에 대해 단조다 —
+            # push_in 은 면적이 커지고 pull_out 은 작아지는데 로그 절대값은 양쪽 다 0 에서
+            # 단조증가라 이분법이 성립한다 (생면적 목표는 방향마다 부등호가 뒤집혀 안 된다).
+            # ② anchor 크기에 불변이다 — 사람 하나와 방 하나가 같은 Δ 를 같은 뜻으로 쓴다.
+            # Δ 0.2/0.4/0.7/1.1 ≈ 배율 ×1.22/×1.49/×2.0/×3.0.
+            def shot_dev(stats, _base=area_static):
+                area = float(stats.get("subject_area_med", float("nan")))
+                if not (area == area and _base == _base) or area <= 0.0 or _base <= 0.0:
+                    return float("nan")      # nan 은 `>=` 가 거짓이라 "예산 안"으로 떨어진다
+                return abs(log(area / _base))
             # τ 하한을 소스 시차 위로 올린다. pan 은 손잡이가 각도라 이 병이 없다 (τ 가 스케일에
             # 불변이라 애초에 `fit_tau` 를 안 탄다, D40).
             lo_override = (tau_start_src + KNOB_RANGE["tau"][0]
@@ -1139,7 +1187,9 @@ def main(args):
             # 되만든다 (pose 대조 assert 가 이 일치를 검사한다).
             rungs = [ladder[0]] if kind is None else ladder
             for delta in rungs:
-                target = hole_static + delta if excess else delta
+                # shot 사다리에서 Δ 는 **바닥 대비 배율의 로그**라 이미 상대량이다 —
+                # `excess` 처럼 바닥을 더하면 이중으로 상대화된다. 그래서 그대로 쓴다.
+                target = delta if shot_ladder else (hole_static + delta if excess else delta)
                 if kind is None:
                     knob, status, binding, calls = float(seen[0]["target_tau"]), "static", "", 0
                     probed = probe(knob)         # 캐시에 poses/info 를 채운다 (렌더 1회)
@@ -1166,14 +1216,25 @@ def main(args):
                                                min_ground, min_approach, max_behind_dyn)
                         if why is None and _seen_frac == _seen_frac and _seen_frac < min_seen:
                             why = "occlusion"
+                        # D266. 프레이밍도 같은 판정에 넣는다 — `over()` 와 같은 식이다.
+                        _inf = probed[1].get("subject_in_frame", float("nan"))
+                        if why is None and _inf == _inf and _inf < min_in_frame:
+                            why = "framing"
                         if why is not None:
                             status, binding = f"{why}_blocked", why
                 else:
-                    knob, status, binding, calls = solve_knob(probe, target, points, kind,
+                    # D266. shot 사다리에서는 bracket 을 **안 쓴다** — `points` 는 τ 뱅크가 hole
+                    # 로 매긴 (손잡이, hole) 쌍이라 shot scale 의 bracket 이 아니다. 빈 리스트를
+                    # 주면 범위 양끝을 재고 이분법으로 들어간다 (probe 2회 추가).
+                    knob, status, binding, calls = solve_knob(probe, target,
+                                                              [] if shot_ladder else points, kind,
                                                               args.iterations, max_behind, min_obb,
                                                               max_elev, min_ground, lo_override,
                                                               min_approach, min_seen,
-                                                              max_behind_dyn)
+                                                              max_behind_dyn,
+                                                              metric_fn=(shot_dev if shot_ladder
+                                                                         else None),
+                                                              min_in_frame=min_in_frame)
                 calls_total += calls
                 _, poses, info, mult, hold_from = cache[knob]
                 # 모양을 최대치까지 키우고도 max_scale 에 붙어 있으면 knob 이 아니라 **모양이 천장**이다.
@@ -1182,7 +1243,8 @@ def main(args):
                 # 판정은 더 촘촘히 다시 잰다 — 이분법용 5프레임은 사다리를 고르는 데만 쓴다.
                 # 충돌이 상한을 정했으면 status 로 남긴다 — hole 만 보면 "덜 큰 이유"가 안 보인다.
                 if status == "solved" and binding in ("collision", "clearance", "obb",
-                                                      "elev", "ground", "approach", "occlusion"):
+                                                      "elev", "ground", "approach", "occlusion",
+                                                      "framing"):
                     status = f"{binding}_limited"
                 # D53 ①. 올린 하한에 닿았으면 그렇게 찍는다 — 예전엔 이게 `clamped_low` 로만
                 # 나와서 "작지만 정상"과 "손잡이가 도달 불가능한 구간에 있다"가 구분이 안 됐다.
@@ -1212,7 +1274,12 @@ def main(args):
                     # 달라지므로 이름에 쓰면 씬 간 같은 단이 다른 이름이 된다.
                     # D259. 시작 pose 후보는 **뒤**에 붙인다 (`split("__")[0]` 로 anchor 를 읽는
                     # 하류 5곳이 안 깨진다). 격자를 끄면 접미사가 없어 예전 이름 그대로다.
-                    "variant_id": (f"{anchor}__{preset}__hole{delta:g}"
+                    # D266. shot 사다리는 접두를 `shot` 으로 바꾼다 — 같은 `hole0.2` 이름이
+                    # 두 가지 눈금을 뜻하면 세대 간 대조가 조용히 어긋난다. 하류가 단을 읽는
+                    # 정식 경로는 `hole_delta` **열**이고(`emit_bank.rung_of`), 그 열은 그대로
+                    # 채운다 — 이름을 파싱하는 곳은 릴 도구 하나뿐이다
+                    # (`render_target_swap_warp.py:40`, 못 읽으면 inf 로 뒤로 민다).
+                    "variant_id": (f"{anchor}__{preset}__{'shot' if shot_ladder else 'hole'}{delta:g}"
                                    + (f"__{cand_id}" if cand_id else "")),
                     "anchor_id": anchor, "anchor_label": node["label"], "preset": preset,
                     # D259. 후보 전문을 그대로 옮겨 싣는다 — `emit_bank` 가 이 값으로 같은
@@ -1220,6 +1287,12 @@ def main(args):
                     **({"start_cand": start_cand} if start_cand else {}),
                     "target_hole": round(float(target), 5), "hole_delta": delta,
                     "hole_static": round(hole_static, 4),
+                    # D266. 사다리가 무엇을 재고 있나 + shot 모드의 바닥 면적. `hole` 이면
+                    # 두 열이 비어 예전 뱅크와 같은 스키마다.
+                    **({"ladder_metric": "shot_scale",
+                        "area_static": round(area_static, 5),
+                        "shot_dev": (lambda d: round(d, 4) if d == d else "")(shot_dev(stats))}
+                       if shot_ladder else {}),
                     "knob_floor": (round(float(lo_override), 5) if lo_override is not None
                                    else KNOB_RANGE[kind][0] if kind else 0.0),
                     # D78. 정지 preset 은 `"none"` 으로 찍는다 — None 이면 CSV 에 "None" 으로
@@ -1418,6 +1491,10 @@ def main(args):
             "knob_range": KNOB_RANGE, "iterations": args.iterations,
             # D53. 사다리 눈금의 뜻과 손잡이 하한의 출처. `excess` 면 `hole_ladder` 는 Δ 고
             # 실제 목표는 행의 `target_hole`(= `hole_static` + Δ)이다.
+            # D266. 사다리 눈금(`hole`/`shot_scale`)과 프레이밍 하한. 되만들기에 필요하다.
+            "ladder_metric": args.ladder_metric,
+            "min_subject_in_frame": (float(args.min_subject_in_frame)
+                                     if min_in_frame > float("-inf") else None),
             "ladder_base": {"hole_mode": args.hole_mode,
                             "tau_floor_src": tau_floor_on,
                             "tau_floor_rule": (f"tau_start + {KNOB_RANGE['tau'][0]:g}"
@@ -1596,6 +1673,8 @@ def main(args):
                "approach_gap", "approach_frames", "past_frames", "src_approach", "min_approach",
                # D112. 판정으로 쓴 가림 하한 (빈 칸이면 측정만 한 예전 뱅크).
                "min_subject_visible",
+               # D266. 사다리 눈금. 빈 칸 = hole 사다리 (예전 뱅크 전부).
+               "ladder_metric", "area_static", "shot_dev",
                # D168 ②. 이 변이가 온 층 (0 = 본 슬롯, 1/2/3 = retry 로 열린 예비).
                "plan_tier",
                # D188 ③. 씬당 예산이 고른 행 (`--pick_budget`). 빈 칸 = 안 골랐거나 탈락.
@@ -1796,6 +1875,13 @@ def build_parser():
     # D53 ②. `excess` 면 사다리 값이 anchor 정지 hole 위에 얹는 **초과분**이다. avocado `stat_1`
     # 은 정지만으로 hole 0.5895 라 absolute 사다리(0.10~0.50)는 4단 전부 도달 불가능했다.
     parser.add_argument("--hole_mode", default="excess", choices=("absolute", "excess"))
+    # D266. 사다리 눈금의 정체. 기본 `hole` = 예전 동작 그대로.
+    #   `shot_scale` — Δ 는 **정지(손잡이 0) 대비 subject 화면면적 배율의 로그 절대값**이다.
+    #                  Δ 0.2/0.4/0.7/1.1 ≈ ×1.22/×1.49/×2.0/×3.0. hole 은 열로만 남는다.
+    parser.add_argument("--ladder_metric", default="hole", choices=("hole", "shot_scale"))
+    # D266. subject 중심이 중앙 박스(`--center_box`) 안이던 프레임 비율의 하한. 0 = 끔(기본,
+    # 예전과 비트 동일). 가림(`--min_subject_visible`)과 달리 렌더가 안 늘어난다.
+    parser.add_argument("--min_subject_in_frame", default=0.0, type=float)
     # D53 ①. τ 손잡이 하한을 `tau_start`(소스 자신의 시차, 씬 상수) 위로 올린다. 끄면 하한이
     # 0.02 로 고정돼 avocado(tau_start 0.1286)에서 궤적이 통째로 0 이 되던 예전 동작이다.
     parser.add_argument("--tau_floor_src", action="store_true", default=True)
@@ -2059,6 +2145,8 @@ def build_parser():
     # 못 고치는 것: woman-phone 형(48행 전량)은 `src_ground_clear = -0.0082` 로 **소스 카메라
     # 자체가 추정 지면 아래**라 지면 게이트 기준선이 음수다. τ 하한으로는 안 풀린다.
     parser.add_argument("--tau_knob_min", default=TAU_KNOB_MIN_DEFAULT, type=float)
+    # D266. 0 = 안 건드림 (기본, 예전 상한 3.0 그대로).
+    parser.add_argument("--tau_knob_max", default=0.0, type=float)
     # D99. 중력 기준 roll 보정 — 광축은 그대로 두고 지평선만 세운다. 두 층 구조는 위와 같다
     # (`SHAPE_DEFAULTS["deroll"]` 는 영원히 False — 키가 없는 예전 뱅크의 재현 폴백).
     # D105. **굽는 기본값을 True 로 뒤집었다.** off 로 구운 d98 뱅크는 `tilt_*` 가 roll 163.88°,

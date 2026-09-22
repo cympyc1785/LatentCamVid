@@ -5,6 +5,18 @@ All notable changes to the latentcam sub-project. Follows [Keep a Changelog](htt
 ## [Unreleased]
 
 ### Added
+- **D264 필터의 DynamicVerse 입력 경로 `--source dv` (2026-09-23).** 사용자 지시
+  "DATA/worldtraj/dynamicverse/dynpose-100k 분류해달라고 한거야" — 대상은
+  `DATA/DynPose-100K` 가 아니라 **`DATA/worldtraj/dynamicverse` 트리 전체**
+  (10 코퍼스 + `eval_index`, **47,338 씬**, 전부 fps 10). 레이아웃이
+  `<corpus>/<scene>/video_input.mp4` 라 프레임 디렉토리를 전제하던 기존 경로가 못 읽는다.
+  새 분기는 mp4 를 메모리에서 디코드한다 (`frames_of`).
+  - **게이지 정합**: 640x360 으로 리사이즈하고 **앞 49 프레임만** 쓴다. G3 의 Sobel 임계 40 은
+    해상도 의존이고 49 프레임(=4.9 s)이 DynPose 쪽 게이지라, 둘을 안 맞추면 같은 임계가 다른
+    뜻이 된다.
+  - 도구는 `tmp/d264/run_d264.py` 에 있고 `tmp/` 는 gitignore 대상이라 **이 항목이 유일한
+    기록이다.**
+
 - **D264 시점/컷/오버레이 필터를 건 D200 arm (`dynpose_d264_molmo2_l21_da3`, 2026-09-22).**
   `dynpose_d200_molmo2_l21_da3` 와 **seg_list 두 줄 + `val_max_batches` 만** 다른 사본이라
   기존 arm 은 한 글자도 안 바뀐다. 코퍼스 디렉토리·캐시·CLaTr 게이지 전부 공유.

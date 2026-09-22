@@ -663,6 +663,18 @@ def train():
                        geo_cam_embed_dim=getattr(cfg, 'geo_cam_embed_dim', 128))
         print(f"(model) geo_cam_embed={cfg.geo_cam_embed}: geo_proj input = "
               f"{_geo_kw['geo_latent_dim']} + {_geo_kw['geo_cam_embed_dim']}")
+    # [new 2026-09-22 / D262] cfg.srccam_cond: geo CA 의 key/value 를 DA3 대신 소스 카메라
+    # 궤적 49 프레임으로 채운다 (dataset_dl3dv._srccam_tokens). 인코더가 없으므로
+    # geo_latent_dim 은 그 raw 차원 그대로이고, raw 기하량이라 2-layer MLP + 시간 PE 를 붙인다.
+    if getattr(cfg, 'srccam_cond', None):
+        assert not getattr(cfg, 'geo_encoder', None), \
+            "srccam_cond 는 geo CA 자리를 쓴다 — geo_encoder: null 이어야 한다"
+        assert not getattr(cfg, 'geo_cam_embed', None), \
+            "srccam_cond 와 geo_cam_embed 는 같이 못 쓴다 (둘 다 geo_proj 입력을 정한다)"
+        _srd = 54 if str(cfg.srccam_cond) == 'plucker' else 11
+        _geo_kw = dict(geo_latent_dim=_srd, geo_in_mlp=True, geo_pe=True)
+        print(f"(model) srccam_cond={cfg.srccam_cond}: geo CA = 소스 카메라 49 토큰 x {_srd}-d "
+              f"-> MLP -> hidden (+sinusoidal PE). DA3 스트림 없음.")
     # [new 2026-08-27] cfg.target_track_dim>0: subject OBB track 을 x_t 채널에 concat.
     # 0 (기본) 이면 cond_dim=0 -> cam_in 이 기존과 동일 (state_dict/동작 비트 동일).
     _track_dim = int(getattr(cfg, 'target_track_dim', 0) or 0)

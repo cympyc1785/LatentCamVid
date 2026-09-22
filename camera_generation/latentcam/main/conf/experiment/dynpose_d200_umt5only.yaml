@@ -1,0 +1,40 @@
+# @package _global_
+# D263 — **텍스트(umt5) 조건 하나만** 주는 arm (사용자 지시 2026-09-22:
+# "그리고 text condition (UMT5)만 주고 생성하는 것도 하나 학습 돌려놔줘").
+#
+# D200 세대의 바닥선이다. defaults 로 `dynpose_d200_molmo2_l21_da3` 를 물려받아
+# **코퍼스·분할·CLaTr 게이지·umt5 캐시가 전부 같은 자**이고, 지운 것은 조건 스트림 둘뿐이다:
+#   geo CA (DA3)          -> 제거
+#   video CA (Molmo2 l21) -> 제거
+# 남는 cross-attention 은 text CA (umt5, 128 슬롯) 하나.
+#
+# ═══ 이걸로 무엇을 읽나 ═══════════════════════════════════════════════════════════════════
+# 캡션만으로 도달 가능한 지점을 고정한다. da3 / molmo2_l21 / srccam arm 의 개선분은 전부
+# 이 선 위에서 재야 한다 — 특히 caption F1 은 "캡션→궤적" 사상이라 텍스트만으로도 상당히
+# 올라간다 (`caption-fscore-read-against-chance`). 반대로 소스 영상을 못 보는 arm 이라
+# 소스 카메라 운동에 얹히는 preset (track_*) 은 여기서 무너지는 게 정상이다.
+#
+# ═══ 모델 구조 ════════════════════════════════════════════════════════════════════════════
+# `video_latent_dim: 0` 이면 train_latent_cam_dm 의 `_vid_kw` 가 비어 video CA 모듈 자체가
+# 생성되지 않고, `geo_encoder: null` + `srccam_cond: null` 이면 forward 의 `has_geo_latent`
+# 가 False 라 geo CA 가 매 층 건너뛰어진다. geo_proj 는 만들어지지만 한 번도 안 불린다.
+defaults:
+  - dynpose_d200_molmo2_l21_da3
+
+exp_name: dynpose_d200_umt5only
+
+# ─── geo 스트림 제거 ──────────────────────────────────────────────────────────────────────
+geo_encoder: null
+srccam_cond: null
+geo_raw_cache_dir: null
+geo_latent_cache_dir: null
+geo_posed: false
+geo_cam_embed: null
+
+# ─── video(Molmo2) 스트림 제거 ────────────────────────────────────────────────────────────
+video_latent_dim: 0          # 0 -> _vid_kw 가 비어 video CA 모듈이 생성되지 않는다
+video_text_in_stream: false
+video_text_dim: 0
+peav_video_cache_dir: null   # 305 GB 캐시를 안 읽는다
+peav_text_cache: null
+peav_layer: null

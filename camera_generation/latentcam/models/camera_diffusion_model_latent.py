@@ -158,6 +158,8 @@ class CameraDiffusionModel(nn.Module):
         start_pose_dim=0,
         start_pose_tf_p=0.0,
         start_pose_noise=0.0,
+        geo_in_mlp=False,
+        geo_pe=False,
     ):
         super().__init__()
 
@@ -199,6 +201,18 @@ class CameraDiffusionModel(nn.Module):
             self.geo_proj = nn.Linear(geo_latent_dim + geo_cam_embed_dim, hidden_dim)
         else:
             self.geo_proj = nn.Linear(geo_latent_dim, hidden_dim)
+        # [new 2026-09-22 / D262] geo CA 입력이 frozen backbone feature 가 아니라 **raw 기하량**
+        # (소스 카메라 Plücker/pose, cfg.srccam_cond) 일 때 두 가지가 달라진다:
+        #   geo_in_mlp: 11~54 차원을 bare Linear 로 hidden 까지 올리면 표현력이 사실상 affine
+        #               하나다. 2-layer MLP 로 올린다. DA3 3072-d 에는 불필요하다.
+        #   geo_pe    : DA3 토큰은 무순서 view x patch 라 PE 를 안 붙였지만(cam_token 이 pose 를
+        #               들고 있다), 소스 카메라 토큰은 **시간순 49개**라 순서가 정보다.
+        # 둘 다 기본 off -> 기존 arm 은 state_dict·동작이 비트 동일.
+        if bool(geo_in_mlp):
+            _gi = self.geo_proj.in_features
+            self.geo_proj = nn.Sequential(
+                nn.Linear(_gi, hidden_dim), nn.SiLU(), nn.Linear(hidden_dim, hidden_dim))
+        self.geo_pe = bool(geo_pe)
 
         self.layers = nn.ModuleList([
             nn.ModuleList([
@@ -448,6 +462,9 @@ class CameraDiffusionModel(nn.Module):
 
         if has_geo_latent:
             geo_tok = self.geo_proj(self._lift_geo_cam(geo_emb))
+            if self.geo_pe:     # [D262] srccam: 시간순 토큰이라 순서가 정보다
+                geo_tok = geo_tok + positional_encoding(
+                    geo_tok.shape[-2], geo_tok.shape[-1], device=device).unsqueeze(0).expand(B, -1, -1)
             geo_tok = geo_tok * geo_mask.unsqueeze(-1)
 
         if has_video:

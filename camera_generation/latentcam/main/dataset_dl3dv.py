@@ -1479,6 +1479,53 @@ class CamDataset(torch.utils.data.Dataset):
         m = torch.cross(o[:, None, :].expand_as(d), d, dim=-1)            # (V,P,3) moment
         return torch.cat([d, m], dim=-1).float()                          # (V,P,6)
 
+    def _srccam_tokens(self, scene_idx, s, e, w2c_s, norm_scale, hw_orig):
+        """[new 2026-09-22 / D262] `srccam_cond`: DA3 geo 스트림을 **소스 카메라 궤적 49 프레임**
+        으로 갈아끼우는 ablation 의 데이터 쪽. geo cross-attention 의 key/value 자리에 들어갈
+        (T, D) 토큰을 낸다 — 이미지도 인코더도 안 쓴다.
+
+        프레임은 `_target_frame_idxs(s, e)` = 생성 대상과 **같은 49 프레임의 소스 카메라**다.
+        기준계·단위는 geo 스트림(`_geo_cam_param` / `_geo_cam_plucker`)과 글자 그대로 같다:
+
+          rel_v = w2c_src[v] @ inv(w2c_s)     # w2c_s = extrinsics[0] = target frame0
+          t     = rel_v[:3,3] / norm_scale    # 궤적 cam_param 과 같은 분모
+
+        표현 둘 (`srccam_cond` 값):
+          'param'   (T, 11)  rot6d(6) + trans(3) + intr(2, fx/2cx·fy/2cy raw)
+          'plucker' (T, 54)  3x3 격자 위 Plücker ray 9개 x 6 (direction, moment) flatten.
+                             pose 와 FoV 가 같이 들어가고 회전 표현 선택이 안 남는다.
+
+        DA3 토큰(4662개, 무순서 view)과 달리 이건 **시간순 49 토큰**이라 모델 쪽에서
+        sinusoidal PE 를 붙인다 (`geo_pe`, camera_diffusion_model_latent).
+        """
+        idxs = self._target_frame_idxs(s, e)
+        mode = str(getattr(self.cfg, 'srccam_cond', 'plucker') or 'plucker')
+        if mode == 'param':
+            return self._geo_cam_param(scene_idx, idxs, w2c_s, norm_scale)      # (T,11)
+        if mode != 'plucker':
+            raise ValueError(f"srccam_cond 는 'param' 또는 'plucker' — got {mode!r}")
+
+        H0, W0 = float(hw_orig[0]), float(hw_orig[1])
+        w2c_v = self.extrinsics_list[scene_idx][list(idxs)].float()      # (T,4,4)
+        K = self.intrinsics_list[scene_idx][list(idxs)].float()          # (T,3,3) original px
+        rel = w2c_v @ torch.linalg.inv(w2c_s.float()).unsqueeze(0)       # (T,4,4)
+        Rt = rel[:, :3, :3].transpose(1, 2)                              # (T,3,3) c2w rotation
+        t = rel[:, :3, 3] / norm_scale                                   # (T,3)
+        o = -torch.einsum('vij,vj->vi', Rt, t)                           # (T,3) camera center
+
+        # 3x3 격자의 정규화 좌표 -> 원본 픽셀 (_geo_cam_plucker 와 같은 규약, row-major)
+        g = (torch.arange(3, dtype=torch.float32) + 0.5) / 3.0
+        yy, xx = torch.meshgrid(g * H0, g * W0, indexing='ij')
+        xx, yy = xx.reshape(-1), yy.reshape(-1)                          # (9,)
+        fx, fy, cx, cy = K[:, 0, 0], K[:, 1, 1], K[:, 0, 2], K[:, 1, 2]
+        d_cam = torch.stack([(xx.unsqueeze(0) - cx[:, None]) / fx[:, None],
+                             (yy.unsqueeze(0) - cy[:, None]) / fy[:, None],
+                             torch.ones(K.shape[0], xx.numel())], dim=-1)    # (T,9,3)
+        d = torch.einsum('vij,vpj->vpi', Rt, d_cam)
+        d = d / d.norm(dim=-1, keepdim=True).clamp(min=1e-8)
+        m = torch.cross(o[:, None, :].expand_as(d), d, dim=-1)               # (T,9,3)
+        return torch.cat([d, m], dim=-1).reshape(len(idxs), -1).float()      # (T,54)
+
     def _geo_pixel_plucker(self, scene_idx, geo_idxs, w2c_s, norm_scale, hw_orig):
         """[new 2026-08-07] geo_encoder='custom': (V, 6, Hc, Wc) Plücker ray per **PIXEL** of the
         encoder's input grid (self.geo_hw), in the SAME frame and units as the trajectory being
@@ -1790,6 +1837,15 @@ class CamDataset(torch.utils.data.Dataset):
         # 궤적으로 교체된 뒤라 `extrinsics[0]` = 그 변이의 frame0 w2c.
         if bool(getattr(self.cfg, 'start_pose_pred', False)):
             out['start_pose'] = self._start_pose(scene_idx, s, extrinsics[0], norm_scale)
+
+        # [new 2026-09-22 / D262] `srccam_cond`: geo CA 의 key/value 를 DA3 대신 **소스 카메라
+        # 궤적 49 프레임**으로 채우는 ablation. `geo_emb` 키를 쓰므로 학습 루프의
+        # `elif 'geo_emb' in data:` 분기(geo_emb_from_cache)가 그대로 받는다 — 인코더도
+        # 이미지도 없다. `geo_encoder: null` 이라 아래 geo 블록 셋은 전부 건너뛴다.
+        if getattr(self.cfg, 'srccam_cond', None):
+            assert not self.geo_enabled, \
+                "srccam_cond 와 geo_encoder 는 같은 CA 자리를 쓴다 — geo_encoder: null 로 둘 것"
+            out['geo_emb'] = self._srccam_tokens(scene_idx, s, e, extrinsics[0], norm_scale, (h, w))
 
         # [new 2026-09-03] PE-AV video/text 토큰 (D117 video CA). geo 캐시 분기가 아래에서 곧장
         # return 하므로 **그 앞에서** 붙여야 한다. 켜지 않으면 키 자체가 안 생긴다.

@@ -5,6 +5,33 @@ All notable changes to the latentcam sub-project. Follows [Keep a Changelog](htt
 ## [Unreleased]
 
 ### Added
+- **geo CA 를 소스 카메라 궤적으로 교체하는 ablation (`srccam_cond`, D262, 2026-09-22).**
+  사용자 지시 "D200으로 DA3가 진짜 필요한지 학습으로 판단해보자. Molmo2_l21만 쓰고 DA3
+  들어갈 부분에는 source camera (49frame)을 plucker나 mlp 태워서 condition으로 들어가도록
+  대체해서 학습하나 돌려줘". 기본 `null` 이라 **기존 arm 은 state_dict·동작 비트 동일**
+  (단위검증: `geo_in_mlp=False, geo_pe=False` 와 미지정이 state_dict 전량 `torch.equal`,
+  forward 도 `torch.equal`).
+  - **무엇이 바뀌나**: geo cross-attention 의 key/value 가 DA3 patch 토큰
+    `6 view x 777 = 4662개 x 3072-d` 에서 **소스 카메라 49 프레임 x 54-d** 로 바뀐다.
+    이미지 I/O 도 DA3 forward 도 없다 (`geo_encoder: null`).
+  - **`dataset_dl3dv._srccam_tokens`**: 프레임은 `_target_frame_idxs(s, e)` = 생성 대상과
+    같은 49 프레임의 소스 카메라. 기준계·단위는 geo 스트림과 글자 그대로 같다 —
+    `rel_v = w2c_src[v] @ inv(extrinsics[0])`, `t = rel_v[:3,3] / norm_scale`.
+    - `'plucker'` (T,54): 3x3 격자 위 Plücker ray 9개 x (direction 3 + moment 3).
+      pose 와 FoV 가 같이 들어가고 회전 파라미터화 선택이 안 남는다.
+    - `'param'` (T,11): rot6d(6) + trans(3) + intr(2). `_geo_cam_param` 재사용.
+    - 출력 키가 `geo_emb` 라 학습 루프의 `elif 'geo_emb' in data:` 분기가 그대로 받는다.
+  - **모델 쪽 자동 분기 둘** (`camera_diffusion_model_latent`):
+    `geo_in_mlp` = `geo_proj` 가 `Linear(54,512)` 대신 `Linear->SiLU->Linear` (54-d raw
+    기하량을 bare Linear 로 올리면 표현력이 affine 하나다);
+    `geo_pe` = geo 토큰에 sinusoidal PE. DA3 토큰은 무순서 view x patch 라 PE 가 없었지만
+    (pose 는 DA3 자신의 `cam_token` 이 들고 있다) 소스 카메라 토큰은 **시간순 49개**라
+    순서 자체가 정보다.
+  - **양쪽 assert**: `srccam_cond` 와 `geo_encoder`/`geo_cam_embed` 는 같은 `geo_proj`
+    입력을 정하므로 동시 활성이 dataset·train 양쪽에서 막힌다.
+  - arm 둘: `dynpose_d200_molmo2_l21_srccam` (D262), `dynpose_d200_umt5only` (D263,
+    geo·video CA 둘 다 제거한 umt5 단독 바닥선). 둘 다 `dynpose_d200_molmo2_l21_da3` 를
+    `defaults` 로 물려받아 코퍼스·분할·CLaTr 게이지가 같은 자다.
 - **시작 pose 예측 (`start_pose_pred`, D261, 2026-09-22).** 사용자 지시 "첫 카메라는 따로
   source 첫 카메라 기준 상대 pose로 값을 마련해둬서 학습하도록해줘". 기본 `false` 라
   키도 안 생기고 토큰도 안 붙으므로 **기존 arm 은 비트 동일**이다.

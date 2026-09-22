@@ -458,6 +458,16 @@ geo_return_idxs: false
 #   FoV reaches the model. ('plucker' sidesteps this -- K enters through the ray directions.)
 geo_cam_embed: null
 geo_cam_embed_dim: 128        # width of the trainable MLP that lifts the raw dims (11 relfirst / 6 plucker)
+# ─── [new 2026-09-22, D262] srccam_cond: geo CA 를 DA3 대신 소스 카메라 궤적으로 ─────────────
+# "DA3 가 정말 필요한가"를 학습으로 가르는 ablation (사용자 지시 2026-09-22). geo cross-attention
+# 의 key/value 를 DA3 patch 토큰 4662개 대신 **소스 카메라 49 프레임**으로 채운다. 기준계·단위는
+# geo 스트림과 같다 (target frame0 기준, trans / norm_scale — dataset_dl3dv._srccam_tokens).
+#   null      OFF. 기존 arm 전부 비트 동일.
+#   'plucker' (T,54) 3x3 격자 Plücker ray 9개 x 6. pose 와 FoV 가 같이 들어간다.
+#   'param'   (T,11) rot6d(6) + trans(3) + intr(2).
+# 켜면 `geo_encoder: null` 이어야 한다 (같은 CA 자리를 쓴다 — 양쪽에 assert). raw 기하량이라
+# geo_proj 가 2-layer MLP 가 되고 시간순 토큰이므로 sinusoidal PE 가 붙는다 (둘 다 자동).
+srccam_cond: null
 # [new] precomputed frozen geo-latent cache (built by main/cache_geo_embeddings.py). null = OFF,
 # i.e. the original behaviour: load context images and run LagerNVS every step. When set, the
 # dataset loads <dir>/<first_cam_included|first_cam_not_included>/<iK>/<data_name>.pt instead and

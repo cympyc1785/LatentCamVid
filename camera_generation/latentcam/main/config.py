@@ -277,7 +277,11 @@ class Config:
     # raw by the dataset and lifted by a trainable MLP inside the model. See conf/config.yaml.
     geo_cam_embed = None
     geo_cam_embed_dim = 128
-    geo_inseg_span = None       # (hybrid) frames from anchor to spread in-segment over (None -> num_frames//8)
+    # [new 2026-09-22, D262] geo CA 의 key/value 를 DA3 대신 소스 카메라 궤적 49 프레임으로
+    # 갈아끼우는 ablation. None = OFF. 'plucker' (T,54) / 'param' (T,11). geo_encoder 는 null.
+    # 상세는 conf/config.yaml 의 같은 키 주석.
+    srccam_cond = None
+    geo_inseg_span = None     # (hybrid) frames from anchor to spread in-segment over (None -> num_frames//8)
     geo_covis_radius = 2.0      # (hybrid) candidate center within R * segment-scale of anchor
     geo_covis_theta0 = 10.0     # (hybrid) preferred triangulation angle (deg) for covis score
     geo_covis_max_axis_deg = 80.0  # (hybrid) reject candidates whose optical axis differs > this

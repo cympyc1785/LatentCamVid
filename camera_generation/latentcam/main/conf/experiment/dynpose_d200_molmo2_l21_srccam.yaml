@@ -1,0 +1,47 @@
+# @package _global_
+# D262 — "DA3 가 정말 필요한가"를 학습으로 가르는 ablation (사용자 지시 2026-09-22:
+# "우선 D200으로 DA3가 진짜 필요한지 학습으로 판단해보자. Molmo2_l21만 쓰고 DA3들어갈 부분에는
+#  source camera (49frame)을 plucker나 mlp 태워서 condition으로 들어가도록 대체해서 학습").
+#
+# 대조군은 `dynpose_d200_molmo2_l21_da3` 다. defaults 로 그 파일을 통째로 물려받으므로
+# **코퍼스·분할·CLaTr 게이지·umt5 캐시·molmo2 캐시가 전부 같은 자**이고, 움직인 축은 아래
+# geo 블록 하나뿐이다.
+#
+# ═══ 무엇이 바뀌나 ════════════════════════════════════════════════════════════════════════
+# geo cross-attention 의 key/value 가
+#   before: DA3 patch 토큰 6 view x 777 = 4662개 x 3072-d  (frozen ViT + 학습 LayerNorm)
+#   after : 소스 카메라 49 프레임 x 54-d                     (인코더 없음, 순수 기하량)
+# 로 바뀐다. `dataset_dl3dv._srccam_tokens` 가 `geo_emb` 키에 직접 써 넣고, 학습 루프의
+# `elif 'geo_emb' in data:` 분기가 그대로 받는다. 이미지 I/O 도 DA3 forward 도 없다.
+#
+# ═══ 54-d 는 무엇인가 (srccam_cond: plucker) ══════════════════════════════════════════════
+# 각 프레임에서 3x3 격자 위 Plücker ray 9개 x (direction 3 + moment 3) = 54.
+#   rel_v = w2c_src[v] @ inv(extrinsics[0])   # 기준계 = target frame0 (geo 스트림과 동일)
+#   t     = rel_v[:3,3] / norm_scale          # 분모도 궤적 cam_param 과 동일
+#   d     = normalize(R^T K^-1 [x,y,1]),  m = o x d
+# pose 와 FoV 가 같이 들어가고 회전 파라미터화 선택(rot6d vs quat)이 안 남는다.
+# 'param' (rot6d+trans+intr, 11-d) 도 코드에 있으나 이 arm 은 plucker 를 쓴다.
+#
+# ═══ 모델 쪽 자동 분기 두 개 ══════════════════════════════════════════════════════════════
+#   geo_in_mlp : geo_proj 가 Linear(54->512) 대신 Linear->SiLU->Linear. 54-d raw 기하량을
+#                bare Linear 로 올리면 표현력이 affine 하나다 (DA3 3072-d 에는 불필요).
+#   geo_pe     : geo 토큰에 sinusoidal PE. DA3 토큰은 무순서 view x patch 라 PE 가 없었지만
+#                (pose 는 DA3 자신의 cam_token 이 들고 있다) 소스 카메라 토큰은 시간순
+#                49개라 **순서 자체가 정보**다.
+# 둘 다 `srccam_cond` 가 켜질 때만 붙는다 — 기존 arm 은 state_dict·동작 비트 동일.
+#
+# ═══ 읽는 법 ══════════════════════════════════════════════════════════════════════════════
+# 이 arm 이 da3 arm 과 대등하면 DA3 가 주던 건 "scene 기하"가 아니라 **소스 카메라 운동**
+# 뿐이었다는 뜻이다. 떨어지면 그 차이가 DA3 가 실제로 기여하던 양이다.
+defaults:
+  - dynpose_d200_molmo2_l21_da3
+
+exp_name: dynpose_d200_molmo2_l21_srccam
+
+# ─── geo CA 교체 ──────────────────────────────────────────────────────────────────────────
+srccam_cond: plucker
+geo_encoder: null            # DA3 제거. 켜져 있으면 dataset/train 양쪽 assert 에 걸린다.
+geo_raw_cache_dir: null      # 202 GB bf16 캐시를 안 읽는다 (인코더가 없다)
+geo_latent_cache_dir: null
+geo_posed: false             # geo_c2w/geo_fxfycxcy 는 DA3 cam_token 용이라 쓸 곳이 없다
+geo_cam_embed: null

@@ -1,0 +1,52 @@
+{
+  "_why": "D260t (사용자 지시 2026-09-22 \"gpu 4~7 사용해서 D260에 track look at도 추가해줘\") — D260 은 36칸 시작 pose 격자 위에 `dolly_in_look_at` 한 종류만 구웠다. 여기에 `track_look_at` 을 더한다. 게이트 설정은 D260 그대로(depth shell 게이트 G1 collision / G3 occlusion off)라 두 preset 이 같은 판정 아래 놓인다.",
+
+  "_왜_별도_뱅크_폴더인가": "`fit_hole_ladder.py:1568` 이 `<bank_dir>/bank.json` 을 `\"w\"` 로 연다 — 같은 `hole_bank_d260` 에 preset 을 하나 더 구우면 기존 dolly 576행이 **덮인다**. 그래서 `hole_bank_d260t` 로 분리하고, D260 코퍼스는 두 폴더의 합집합으로 읽는다 (`tmp/d259/run_d259.py --gen d260t`, 표는 `--gen d260,d260t` 로 합쳐 본다). dolly 쪽을 재굽기하지 않으므로 CHANGELOG 에 적힌 D260 수치(moving 262/576)가 그대로 검증 가능한 채 남는다.",
+
+  "_τ_뱅크는_새로_굽는다": "`bank_d259` 는 `--presets dolly_in_look_at` 로 열거된 τ 뱅크라 `track_look_at` 행이 아예 없다. D260 이 fit/emit 만 돌릴 수 있었던 건 preset 집합이 같아서였고, preset 을 바꾸면 tau 부터다. 새 τ 폴더 `bank_d260t` 에 굽는다 — `bank_d259` 를 건드리면 d259/d260 fit 의 입력이 바뀐다.",
+
+  "_route를_stages에_넣어야_한다": "1차 굽기에서 `stages: [tau,fit,emit]` 로 뒀다가 **앵커가 전부 틀렸다**. `run_bank.py:250` 이 `route_args = []` 로 시작해 route 가 stages 에 있을 때만 채우므로(:287), route 를 빼면 tau 가 `--nodes`/`--preset_route` 를 못 받고 **기본 앵커 선택**(dyn 3 + stat 3)이 돈다 — `anchors.json` 의 '씬당 dynamic subject 하나'가 통째로 무시된다. 실측: car-roundabout `(dyn_1:car)` -> `dyn_0:vehicle, dyn_1:car, dyn_2:vehicle + 건물 3`, drive-desert 는 dyn_0 이 `min_area_frac` 에 탈락해 정적 덤불만 남아 track 변이 0 이 됐다. D260 이 무사했던 건 `fit` 부터라 **이미 앵커가 고정된 τ 뱅크**를 읽어서고, tau 부터 도는 세대는 route 가 필수다. route 출력은 `preset_route_d260t.json` 으로 따로 둔다 — d259 것을 덮으면 d259/d260 재현 근거가 사라진다.",
+
+  "_track_look_at_의_모양": "`lbm/presets.py:233` — shape 은 `hold(I)` 고 움직임 전량이 `PRESET_FOLLOW` (subject 변위 gain 1.0) 에서 나온다. aim 이 `look_at` 이라 `PRESET_TRACKING` 이 `lock` 으로 덮고, `PRESET_TAU_REF` 가 `follow` 라 `--tau_ref follow` 와 일치한다 (추종 변위가 τ 예산을 먹지 않는다). `--track_dynamic_only --track_min_drift_u 0.05` 는 그대로 둔다 — subject 가 scene scale 대비 0.05 미만으로만 움직이는 씬에서는 track 이 정의상 정지 카메라라 빠지는 게 맞다.",
+
+  "extends": "d260_vista_front36_shellgates_off.json",
+  "generation": "d260t",
+  "tau_bank_dir": "bank_d260t",
+  "bank_dir": "hole_bank_d260t",
+  "stages": ["route", "tau", "fit", "emit"],
+
+  "route": {
+    "out": "preset_route_d260t.json",
+    "args": [
+      "--num_external", "0",
+      "--free_moving", "off",
+      "--anchor_ids_file", "/data1/cympyc1785/LatentCamVid/tmp/d215/anchors.json",
+      "--slot_plan", "full",
+      "--slot_whitelist", "advance,recede,arc,orbit,vertical,static",
+      "--track_mode", "add",
+      "--track_min_drift_u", "0.05",
+      "--skip_if_empty"
+    ]
+  },
+
+  "tau": {
+    "args": [
+      "--cloud_source", "memory",
+      "--tau_ladder", "0.10", "0.20", "0.35", "0.60", "1.00",
+      "--variant_pool", "full",
+      "--presets", "track_look_at",
+      "--start_grid", "front",
+      "--start_min_ratio", "0.1", "--start_max_ratio", "4.0",
+      "--aim_keyframes", "6", "--keyframe_aim", "auto", "--keyframe_ease", "smooth_kf",
+      "--fixed_focal", "--deroll", "--no_preview", "--skip_on_empty",
+      "--device", "cuda",
+      "--orbit_fixed_sweep", "--min_sweep_deg", "20", "--behind_src_frames", "49",
+      "--tau_ref", "follow",
+      "--track_dynamic_only", "--track_min_drift_u", "0.05",
+      "--trackings", "lock", "--preset_tracking",
+      "--behind_min_zcam", "0.02",
+      "--tau_denom", "S",
+      "--min_subject_area", "0.001"
+    ]
+  }
+}

@@ -66,6 +66,30 @@ Follows [Keep a Changelog](https://keepachangelog.com/).
   moving **141 -> 262** (24.5% -> 45.5%), `clamped_low` **389 -> 252**, 방위 분포
   `front 49/right 44/left 37/back 11` -> `front 70/right 68/back 63/left 61`.
   남은 clamp 의 binding 은 `obb 156 / ground 59 / approach 37`.
+- **`configs/bank/d260t_vista_front36_track_look_at.json` (2026-09-22).** 사용자 지시
+  "gpu 4~7 사용해서 D260에 track look at도 추가해줘". D260 의 36칸 시작 pose 격자 위에
+  preset `track_look_at` 을 더한다 — 게이트 설정(depth shell G1/G3 off)은 D260 그대로라
+  두 preset 이 같은 판정 아래 놓인다. **별도 폴더**(`bank_d260t` / `hole_bank_d260t`)인 이유:
+  `fit_hole_ladder.py:1568` 이 `bank.json` 을 `"w"` 로 열어 같은 폴더에 preset 을 더 구우면
+  기존 dolly 576행이 덮인다. D260 코퍼스는 두 폴더의 합집합이다.
+  preset 이 바뀌면 τ 뱅크부터라 `stages` 가 `route,tau,fit,emit` 이다 — **route 를 빼면 안 된다**:
+  `run_bank.py:250` 이 `route_args = []` 로 시작해 route 가 stages 에 있을 때만 채우므로,
+  tau 부터 도는 세대에서 route 를 빼면 `--anchor_ids_file` 이 무시되고 기본 앵커 선택(dyn 3 +
+  stat 3)이 돈다. 1차 굽기가 정확히 그 사고였다 (car-roundabout `(dyn_1:car)` ->
+  `dyn_0:vehicle, dyn_1:car, dyn_2:vehicle + 건물 3`; drive-desert 는 dyn_0 이 `min_area_frac`
+  에 탈락해 정적 덤불만 남아 track 변이 0). D260 이 무사했던 건 `fit` 부터라 **이미 앵커가
+  고정된 τ 뱅크**를 읽어서다. 코드 변경 0, config 만.
+  결과(GPU 4~7 4샤드, `BANK_GPU_ALLOW=4567`): **8편 288행, moving 288/288, `clamped_low` 0**,
+  방위 `front 72 / left 72 / right 72 / back 72` (격자 전 칸 생존).
+  나머지 9편은 tau 에서 빠졌고 원인이 둘로 갈린다 — magnifying-glass 는 anchor
+  `subject_area 0.0`(`--min_subject_area`), 나머지 8편은 `--track_min_drift_u 0.05` 미달이다
+  (실측 `center_drift_u`: breakdance 0.0403 / rhino 0.0373 / snow-dog 0.0318 / hike 0.0310 /
+  mountain-hike 0.0254 / goat 0.0217 / camera-lens 0.0194 / avocado-slice 0.0082. 통과한 쪽은
+  car-roundabout 1.3485 ~ camel 0.0554). 그 8편은 D260 dolly 뱅크에 남아 있어 합집합 손실은 없다.
+  읽을 때 주의: `track_look_at` 은 shape 이 `hold(I)` 라 이동 전량이 `PRESET_FOLLOW`(subject 변위
+  gain 1.0)에서 나온다 — 손잡이와 무관하게 움직이므로 `moving 288/288` 은 **게이트 통과**를 뜻하지
+  dolly 의 `moving` 과 같은 눈금이 아니다. `subject_visible_frac` 도 G3 를 껐으므로 판정이 아니라
+  기록일 뿐이다 (car-roundabout 0.00 / bmx-bumps 0.20 — depth shell artifact 그대로).
 - **preset `track_pedestal_down_dolly_in` (2026-09-22).** 비-track 짝
   `pedestal_down_dolly_in`(하강+전진)의 track 판. 사용자가 dynpose #588 을
   "track dolly in / track pedestal down / track dolly in pedestal down" 세 개로 돌려

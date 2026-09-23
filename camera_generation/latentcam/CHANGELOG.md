@@ -5,6 +5,30 @@ All notable changes to the latentcam sub-project. Follows [Keep a Changelog](htt
 ## [Unreleased]
 
 ### Added
+- **`pipeline.md` 신설 — latentcam 모델 구조 문서 (2026-09-23, R10).** 이 트리에는 모델
+  구조를 한 장에 놓은 문서가 없었다 (`docs/` 는 ablation 메모 4장, `CHANGELOG.md` 는 45만 자).
+  Part A 모델 본체 / Part B 변형 축(arm) / Part C 모듈별 + 부록 지뢰 표.
+  - **인용한 `file:line` 91개를 전부 열어 확인했다** — 파일 존재 + 그 줄의 내용이 주장과
+    일치하는지 스크립트로 대조. 미해결 3건은 산출물 파일명(`last.pth`,
+    `vae_20260302_300.pth`)과 아직 안 쓴 `train.md`(R11) 뿐이다.
+  - 문서를 쓰면서 **조사 중 바로잡은 것 넷**:
+    ① DiT 의 입출력 폭은 11 이 아니라 **64** (`conf/config.yaml:150 cam_dim`) — VAE latent 를
+    디노이즈한다. `__init__` 기본값 `cam_dim=11`
+    (`models/camera_diffusion_model_latent.py:137`) 과 `:548` 의 꼬리 주석 `# (B, T, 9)` 가
+    둘 다 낡아서 생긴 오독이다.
+    ② `cfg.val_ratio` 는 **없는 키**다. seg-list 를 주면 val = `test_seg_list` 앞부분
+    (`val_max_batches × batch_size`), 안 주면 `train_frac: 0.9` 무작위 분할
+    (`main/base.py:84-114`).
+    ③ geo backend 는 3개가 아니라 **4개** — `lagernvs`/`scenetok`/`custom`/`da3`
+    (`models/geo_encoder.py:339/343/347/355`). `scenetok` 은 stub 이라 쓰인 적이 없다.
+    ④ "죽은 코드 = `grep -l core_pkg`" 는 틀렸다. `main/base.py` 는 **주석**에만 있고
+    `train_latent_cam_dm.py` 는 **함수 안**(`:651`, CLIP 분기)에 있다. 판별은 AST 로
+    **모듈 레벨** import 만 봐야 하며, 그 기준으로 죽은 파일은 14개 + 파싱 실패 1개
+    (`run_cam_dm.py:133`).
+  - arm 축은 서술이 아니라 **`conf/experiment/*.yaml` 158장을 기계적으로 집계**해서 넣었다.
+    hydra `defaults:` 상속 때문에 자식 yaml 은 한 줄만 적으므로 grep 분류는 못 쓴다는 것도
+    같이 적었다.
+
 - **D264 필터의 DynamicVerse 입력 경로 `--source dv` (2026-09-23).** 사용자 지시
   "DATA/worldtraj/dynamicverse/dynpose-100k 분류해달라고 한거야" — 대상은
   `DATA/DynPose-100K` 가 아니라 **`DATA/worldtraj/dynamicverse` 트리 전체**

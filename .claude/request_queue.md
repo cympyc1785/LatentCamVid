@@ -14,9 +14,6 @@
 
 ## Request
 
-### R11. `camera_generation/latentcam/train.md`
-학습 방법·구조, 평가 방법·metric, 주의사항.
-
 ### R12. Vista4D `USAGE.md`
 해당 모델을 어떻게 돌렸는지.
 
@@ -33,8 +30,8 @@
 
 ## Working
 
-### R10. `camera_generation/latentcam/pipeline.md`
-모델 전체 구조도, 변형 구조들, 모듈별 설명.
+### R11. `camera_generation/latentcam/train.md`
+학습 방법·구조, 평가 방법·metric, 주의사항.
 
 ---
 
@@ -45,6 +42,22 @@ _(비어 있음)_
 ---
 
 ## Done
+
+### R10. `camera_generation/latentcam/pipeline.md` 신설 — 완료 (2026-09-23)
+이 트리에 모델 구조 문서가 **없었다** (`docs/` 는 ablation 메모 4장, `CHANGELOG.md` 45만 자).
+Part A 모델 본체 / Part B 변형 축(arm) / Part C 모듈별 + 부록 지뢰 10행으로 새로 썼다.
+- **인용한 `file:line` 91개 전량을 스크립트로 대조**했다 (파일 존재 + 그 줄 내용이 주장과
+  일치). 미해결 3건은 산출물 파일명 2개와 아직 안 쓴 `train.md`(R11) 뿐이다.
+- **조사 중 바로잡은 것 넷** — ① DiT 폭은 11 이 아니라 **64** (`conf/config.yaml:150`,
+  VAE latent). `__init__` 기본 `cam_dim=11` 과 `:548` 주석 `# (B, T, 9)` 가 둘 다 낡았다.
+  ② `cfg.val_ratio` 는 **없는 키** (seg-list 면 test 앞부분, null 이면 `train_frac: 0.9`).
+  ③ geo backend 는 3개가 아니라 **4개** (`scenetok` 은 stub). ④ 죽은 코드 판별을
+  `grep -l core_pkg` 로 하면 틀린다 — `base.py` 는 주석, `train_latent_cam_dm.py:651` 은
+  함수 안이다. AST 로 **모듈 레벨**만 봐야 하고 그 기준 죽은 파일 14개 + 파싱 실패 1개.
+- arm 축은 서술이 아니라 `conf/experiment/*.yaml` **158장 기계 집계**로 넣었다.
+  hydra `defaults:` 상속 때문에 grep 분류는 못 쓴다는 것도 문서에 적었다.
+- 세 subagent 보고서는 **근거로만 쓰고 주장은 전부 재측정**했다 — 위 ①②③ 이 전부
+  보고서를 그대로 믿었으면 문서에 들어갔을 오류다.
 
 ### R9. `camera_generation/dataset/` `pipeline.md` 재작성 + `USAGE.md` 신설 — 완료 (2026-09-23)
 옛 `pipeline.md` 446줄의 **파일 참조 40건 중 36건이 죽은 경로**였다 (R6 재분류 + R7 이동).

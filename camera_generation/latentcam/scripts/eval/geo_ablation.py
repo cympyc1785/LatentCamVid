@@ -180,7 +180,9 @@ def main():
             text_embeds = text_embeds.float()
             text_masks = text_masks.bool()
 
-            if 'geo_emb' in data:
+            if 'geo_raw' in data:   # [new 2026-08-29] pre-ln DA3 캐시
+                geo_emb, geo_mask = T.geo_emb_from_raw_cache(geo_encoder, data, device)
+            elif 'geo_emb' in data:
                 geo_emb, geo_mask = T.geo_emb_from_cache(data, device)
             else:
                 geo_emb, geo_mask = T.geo_encode(geo_encoder, data, device)

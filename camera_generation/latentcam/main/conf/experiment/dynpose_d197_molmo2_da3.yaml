@@ -1,0 +1,71 @@
+# @package _global_
+# D197 — 같은 d197 코퍼스 위에서 **da3 geo + Molmo2 를 같이** 쓰는 arm.
+# 레이어 순서 text CA(umt5) -> geo CA(da3) -> molmo2 CA.
+#
+# ═══ 이 세대의 3-arm 구성 (사용자 지시 2026-09-15) ═════════════════════════════════════════
+#   dynpose_d197_da3            geo only            (`dynpose_d197_da3.yaml`)
+#   dynpose_d197_molmo2_da3     geo + molmo2        (이 파일)
+#   dynpose_d197_molmo2_l21_da3 geo + molmo2(21층)  (이 파일 + `peav_layer: 21`)
+# D194 세대의 molmo2 arm 은 **nogeo** 였다 — 이번엔 셋 다 da3 를 켠 채로 molmo2 유무/층만 가른다.
+# 코퍼스·필터·캡션 설명은 `dynpose_d197_da3.yaml` 머리말 참조. 셋 다 같은 코퍼스 파일을 읽고
+# umt5 캡션도 바이트 단위로 같다 — 움직인 축은 molmo2 스트림 하나뿐이다.
+#
+# ═══ molmo2 가 읽는 문장은 umt5 와 다르다 (D191 에서 정한 그대로, D194 도 동일) ════════════
+# 디스크 위 `prompts.json` 의 concise 캡션은 한 바이트도 안 건드린다 — umt5 는 그걸 읽는다.
+# molmo2 에는 `--text_override_json` 으로 `Track {target_text}.` 만 넣는다. molmo2 스트림의
+# 역할은 "카메라를 어떻게 움직이나"가 아니라 **"화면의 어느 물체 얘기인가"** 이고, 그 지칭구가
+# `instance_desc.json` 에서 온다.
+#
+# ═══ 캐시 ════════════════════════════════════════════════════════════════════════════════
+# `molmo2_cache/{video/*.pt, text.pt}`. video 쪽은 **소스 영상만** 보므로 target 뱅크·캡션과
+# 무관하다 — d194 와 겹치는 씬은 그쪽 `.pt` 를 심볼릭 링크로 재사용한다 (frame_idx 와
+# `images_4/*.png` md5 가 같은 것을 확인했다). text 쪽은 오버라이드 문장에 딸린 것이라 반드시
+# 이 코퍼스 전용으로 굽는다.
+# 캐시는 `--extra_layer 21` 로 구워 **층 두 개**를 같은 파일에 들고 있다. 이 arm 은
+# `peav_layer: null` = 마지막 층(`ln_f` 이후)을 먹고, 21층 arm 은 이 파일을 상속해 한 줄만 바꾼다.
+exp_name: dynpose_d197_molmo2_da3
+dl3dv_root: /data1/cympyc1785/data/DynPose-LBM/latentcam_dynpose_d197
+meta_csv: meta_dynpose.csv
+train_seg_list: /data1/cympyc1785/data/DynPose-LBM/latentcam_dynpose_d197/seg_list_dynpose_train.txt
+test_seg_list: /data1/cympyc1785/data/DynPose-LBM/latentcam_dynpose_d197/seg_list_dynpose_test.txt
+coverage_blacklist_path: null
+
+text_len: 128   # D197 da3 arm 과 동일.
+
+pose_source: da3
+target_pose_source: da3_target_poses
+scale_mode: avg_scale
+avg_scale_ref: context_first_cam
+intr_norm: rel
+cam_dim: 64
+
+# ─── geo (da3) 스트림 — `dynpose_d197_da3.yaml` 에서 글자 그대로 복사 ──────────────────────
+geo_encoder: da3
+geo_cam_embed: null
+geo_latent_cache_dir: null
+geo_posed: true
+geo_shuffle_order: false
+da3_geo_model: da3nested-giant-large
+da3_geo_input_hw: [252, 448]
+da3_geo_layers: last
+geo_view_sampling: context_uniform
+geo_num_views: 6
+geo_first_view_target_s: true
+geo_raw_cache_dir: /data1/cympyc1785/data/DynPose-LBM/latentcam_dynpose_d197/geo_raw_cache_da3
+da3_cam_token_per_sample: true
+
+anchor_pred_frame0: true
+
+# ─── Molmo2 CA (기존 PE-AV 슬롯을 그대로 재사용한다) ───────────────────────────────────────
+peav_video_cache_dir: /data1/cympyc1785/data/DynPose-LBM/latentcam_dynpose_d197/molmo2_cache/video
+peav_text_cache: /data1/cympyc1785/data/DynPose-LBM/latentcam_dynpose_d197/molmo2_cache/text.pt
+peav_layer: null           # null = 마지막 층(ln_f 이후). 21 로 바꾸면 blocks[21] raw 출력.
+video_latent_dim: 2560     # Molmo2 LM hidden — video part (3136 tok)
+video_text_in_stream: true
+video_text_dim: 2560       # 같은 LM hidden — text part (128 tok). 기본 1024 는 PE-AV 값이다.
+peav_in_ln: true           # proj 앞 LayerNorm. FIX-D117 참조 (없으면 CA logit 포화)
+video_gate: true           # 0 초기화 residual gate. FIX-D117 참조 (없으면 loss ~1.0 정체)
+
+batch_size: 8
+epochs: 100          # 실제 집행자는 conf/config.yaml 의 `epoch_cap: 100`.
+ckpt_at_epochs: [50, 100]

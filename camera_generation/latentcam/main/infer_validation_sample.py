@@ -87,7 +87,14 @@ def main():
     width = data['width'].to(DEVICE); height = data['height'].to(DEVICE); intrinsics = data['intrinsics'].to(DEVICE)
     text = data['text_prompt']
 
-    geo_emb, geo_mask = (geo_encode(geo_encoder, data) if geo_encoder is not None else (None, None))
+    # [new 2026-08-29] 'geo_raw' = pre-ln DA3 캐시 (cfg.geo_raw_cache_dir). 이 경로에서는 dataset
+    # 이 images 를 아예 안 싣는다 -> geo_encode 를 부르면 KeyError 다.
+    if geo_encoder is None:
+        geo_emb, geo_mask = None, None
+    elif 'geo_raw' in data:
+        geo_emb, geo_mask = geo_encoder.from_raw(data['geo_raw'].to(DEVICE).float())
+    else:
+        geo_emb, geo_mask = geo_encode(geo_encoder, data)
     text_emb, text_mask = text_encoder(text, DEVICE); text_emb = text_emb.float(); text_mask = text_mask.bool()
 
     with torch.no_grad():

@@ -1,0 +1,70 @@
+# @package _global_
+# da3_7k_da3geo_frontanchor.yaml 에서 **분모(avg_scale_ref) 하나만** 바꾼 arm.
+#   control : front_first_anchor  -> [0,s) 의 da3 point cloud 를 frame s 카메라에서 잰 mean 거리
+#   여기    : da3latent_cover     -> M * sigma  (retrieved recon <-> full recon umeyama scale)
+#
+# 무엇을 고치려는 arm인가 — **게이지 불일치 하나.**
+#   target cam_param 은 full-recon 미터(scene 전체 pose.npz)로 정규화되는데, geo 토큰은 DA3 가
+#   retrieved k view 만 보고 만든 자기 게이지(view0 재고정 + per-sample median camera distance M)
+#   에 있다. 이 둘의 배율차 sigma 는 sample 마다 다르고(200 표본 dry-run: med 2.72) 상수가 아니라
+#   모델이 흡수할 수 없다. da3latent_cover 는 target 을 **geo 토큰과 같은 게이지**로 정규화한다.
+#
+# 분모 정의 (scripts/data/make_avg_scale_da3_latent.py:167-180):
+#   c_fed  = full recon(pose_source=da3) 카메라 중심을 view0 기준 재고정 후 M 으로 나눈 것
+#            (M = build_cam_token 이 쓰는 그 per-sample median 과 **같은 값**)
+#   c_pred = enc.predict_cameras(images, cam_token=tok) — retrieved k view 만 본 cam_dec 출력
+#   sigma  = umeyama_scale(c_pred, c_fed)   ->  저장값 = M * sigma  (latent 단위 -> full-recon 미터)
+#   cam_dec 의 translation 은 echo 경로가 없어 항상 예측값이다 (cam_dec.py:35) -> sigma != 1.
+#   추론 시에도 retrieved view 만으로 재현 가능하므로 leakage 가 아니다.
+#
+# !! view 집합 의존성. M 도 sigma 도 "어떤 view 를 줬는지"에 통째로 의존한다.
+#    - avg_scale_da3latent        <- front_uniform 6 view 로 만든 값 (avg_scale_ref='da3latent')
+#      -> 옛 arm da3_7k_da3geo_latentscale (wandb voy5slba, 100 epoch) 이 이걸 썼다.
+#    - avg_scale_da3latent_cover  <- **이 파일의 frustum_cover 설정**으로 만든 값
+#    dataset_cfg.py 가 sampler 가 어긋나면 raise 한다. 섞어 쓰지 말 것.
+#
+# control 과 paired 인가 — 예. AVG_SCALE_MIN_FRONT['da3latent_cover'] = 1 로
+# front_first_anchor 와 같고, da3_7k 는 s in {0,49,98,...} 이라 둘 다 s==0 만 뺀다
+# (29414 train / 3263 val 유지). 인덱스 캐시 키에 as<ref> 가 들어가 파일은 새로 빌드되지만
+# **집합은 같다**.
+#
+# 분모가 얼마나 움직이나 (200 세그먼트 균등표본 dry-run, /tmp/dry_da3latent_cover.log):
+#   sigma med 2.72238 | resid med 0.00736 (거의 순수 스칼라 불일치)
+#   M*sigma med 3.26031  vs  front_first_anchor med 3.81465
+#   ratio(이것/control) med 0.87966 p05 0.41889 p95 1.12623, log10 std 0.1726 dex,
+#   |ratio-1|<0.1 인 비율 0.375 -> no-op 이 아니다.
+#
+# !! vae_latent_scale 은 control 과 같은 0.96032625 를 그대로 둔다 (이 arm 에 맞춰 잰 값이 아님).
+#    loss_traj / loss_latent 를 control 과 같은 축에서 보려는 것.
+#
+# 아래는 da3_7k_da3geo_frontanchor.yaml 과 **avg_scale_ref 한 줄 빼고 전부 동일**하다.
+exp_name: da3_7k_da3geo_frontanchor_latentscale
+pose_source: da3
+avg_scale_ref: da3latent_cover   # <- control 대비 유일한 변경점
+batch_size: 8
+epochs: 100
+ckpt_at_epochs: [50]
+
+geo_encoder: da3
+geo_cam_embed: null
+geo_latent_cache_dir: null
+geo_posed: true
+geo_shuffle_order: false
+da3_geo_model: da3nested-giant-large
+da3_geo_input_hw: [252, 448]
+da3_geo_layers: last
+
+geo_view_sampling: frustum_cover
+geo_cover_out_of_seg: true
+geo_cover_before_only: true
+geo_cover_centered_at_s: true
+geo_first_view_target_s: true
+geo_cover_subtract_first: false
+
+scale_mode: avg_scale
+intr_norm: rel
+cam_dim: 64
+meta_csv: meta_da3_7k.csv
+train_seg_list: /data1/cympyc1785/data/DL3DV/scenes/latentcam_da3_7k_train_seg_list.txt
+test_seg_list: /data1/cympyc1785/data/DL3DV/scenes/latentcam_da3_7k_test_seg_list.txt
+coverage_blacklist_path: /data1/cympyc1785/LatentCamVid/camera_generation/latentcam/data/seg_blacklist_jump_da3_7k.csv

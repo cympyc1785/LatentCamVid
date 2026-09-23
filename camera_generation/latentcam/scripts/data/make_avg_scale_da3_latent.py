@@ -51,6 +51,10 @@ import torch
 
 from hydra_cfg import load_cfg
 
+# 기본값 = front_uniform 짝 (avg_scale_ref='da3latent'). `--out-dir` 로 바꿔서 다른 view
+# sampler 짝을 만든다 — 값이 view 집합에 통째로 의존하므로 sampler 마다 디렉토리가 달라야 한다.
+#   front_uniform  -> avg_scale_da3latent        (avg_scale_ref='da3latent')
+#   frustum_cover  -> avg_scale_da3latent_cover  (avg_scale_ref='da3latent_cover')
 OUT_DIR = 'avg_scale_da3latent'
 
 
@@ -113,7 +117,12 @@ def main():
     ap.add_argument('--dry-run', action='store_true', help='파일을 쓰지 않고 통계만')
     ap.add_argument('--overwrite', action='store_true',
                     help='기본은 이미 있는 json 을 건너뛴다 (중단 후 이어 돌리기). 이 플래그면 다시 계산')
+    ap.add_argument('--out-dir', default=OUT_DIR,
+                    help=f"<scene>/da3/<이것>/<seg>.json 으로 쓴다 (기본 {OUT_DIR!r} = front_uniform "
+                         f"짝). frustum_cover 짝은 'avg_scale_da3latent_cover'. view 집합이 바뀌면 "
+                         f"M 도 sigma 도 바뀌므로 절대 같은 디렉토리에 섞어 쓰지 말 것.")
     args, _ = ap.parse_known_args()
+    out_dir = args.out_dir
 
     cfg, _ = load_cfg('config')
     if str(getattr(cfg, 'geo_encoder', None)) != 'da3':
@@ -138,7 +147,7 @@ def main():
     from depth_anything_3.utils.geometry import affine_inverse
     print(f"[cfg] view_sampling={getattr(cfg, 'geo_view_sampling', None)} "
           f"V={getattr(cfg, 'geo_num_views', None)} input_hw={cfg.da3_geo_input_hw} "
-          f"avg_scale_ref={cfg.avg_scale_ref} -> writing '{OUT_DIR}'", flush=True)
+          f"avg_scale_ref={cfg.avg_scale_ref} -> writing '{out_dir}'", flush=True)
 
     vals, sigmas, resids, n_written, n_bad = [], [], [], 0, 0
     for split in args.splits:
@@ -149,7 +158,7 @@ def main():
         keep = list(range(len(wrapped)))
         if not args.overwrite and not args.dry_run:
             keep = [i for i, (sc, _s, _e, _c, dn) in enumerate(ds.samples)
-                    if not osp.isfile(osp.join(ds.scene_dir_list[sc], 'da3', OUT_DIR,
+                    if not osp.isfile(osp.join(ds.scene_dir_list[sc], 'da3', out_dir,
                                                f"{str(dn).split('_')[-1]}.json"))]
             print(f"[{split}] {len(ds.samples) - len(keep)} 개는 이미 있어 건너뛴다", flush=True)
         if args.limit:
@@ -187,7 +196,7 @@ def main():
                     continue
                 sigmas.append(sig); resids.append(res); vals.append(v)
                 if not args.dry_run:
-                    d = osp.join(ds.scene_dir_list[scene_idxs[b]], 'da3', OUT_DIR)
+                    d = osp.join(ds.scene_dir_list[scene_idxs[b]], 'da3', out_dir)
                     os.makedirs(d, exist_ok=True)
                     with open(osp.join(d, f"{data_names[b].split('_')[-1]}.json"), 'w') as f:
                         json.dump(v, f)

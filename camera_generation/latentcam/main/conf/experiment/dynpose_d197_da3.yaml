@@ -1,0 +1,59 @@
+# @package _global_
+# D197 — d185 뱅크(grid5)를 **anchor당 1대 제한 없이** 전량 캡션한 코퍼스 위의 da3 geo arm.
+#
+# ═══ D194 와 뭐가 다른가 ═══════════════════════════════════════════════════════════════════
+# 코퍼스 하나만 다르다. 모델축(스트림 구성·하이퍼)은 `dynpose_d194_da3.yaml` 에서 글자 그대로
+# 가져왔다 — 그래야 두 세대 차이가 "씬당 카메라 수" 하나로 읽힌다.
+#   d194  hole_bank_d192 (어휘 2종, anchor당 1대)  7,801 씬 / 7,801 대
+#   d197  hole_bank_d185 (grid5, anchor당 상한 없음) 씬당 최대 5대
+# 거른 것: `--drop_status clamped_low` + suspect 5종
+# (aim_free_subject_lost / static_start_collision / motion_preset_no_motion /
+#  aim_target_subject_lost / hole_over_budget). 남은 카메라는 전부 쓴다 (`--picked_only` 미사용).
+# 같은 anchor 를 여러 대가 공유하므로 **씬 단위 holdout** 이 필수인데, export 가 쓰는
+# `md5(scene) % 20 == 0` 이 그대로 씬 단위다 — 같은 씬의 카메라가 train/test 로 갈리지 않는다.
+#
+# ═══ 캡션 ═════════════════════════════════════════════════════════════════════════════════
+# `captions_d197.json` = D194 와 같은 스타일(`--prompt_style nl --no_magnitude`, framing 절 끔).
+# D196 의 정도부사+framing 판본은 사용자가 "오히려 별로야"로 중단시켰으므로 따라가지 않는다.
+# 지칭구는 `instance_desc.json` (D193 + 이번에 VLM 으로 1,209편 추가 merge).
+#
+# ═══ geo raw 캐시 ══════════════════════════════════════════════════════════════════════════
+# 경로만 잡아 둔다. 굽지 않으면 전부 miss -> on-the-fly DA3 로 떨어진다 (D194 도 같은 상태로
+# 완주했다). 나중에 굽고 싶으면 이 경로 그대로 채우면 된다.
+exp_name: dynpose_d197_da3
+dl3dv_root: /data1/cympyc1785/data/DynPose-LBM/latentcam_dynpose_d197
+meta_csv: meta_dynpose.csv
+train_seg_list: /data1/cympyc1785/data/DynPose-LBM/latentcam_dynpose_d197/seg_list_dynpose_train.txt
+test_seg_list: /data1/cympyc1785/data/DynPose-LBM/latentcam_dynpose_d197/seg_list_dynpose_test.txt
+coverage_blacklist_path: null
+
+text_len: 128   # D194 와 동일.
+
+pose_source: da3
+target_pose_source: da3_target_poses
+scale_mode: avg_scale
+avg_scale_ref: context_first_cam
+intr_norm: rel
+cam_dim: 64
+
+geo_encoder: da3
+geo_cam_embed: null
+geo_latent_cache_dir: null
+geo_posed: true
+geo_shuffle_order: false
+da3_geo_model: da3nested-giant-large
+da3_geo_input_hw: [252, 448]
+da3_geo_layers: last
+geo_view_sampling: context_uniform
+geo_num_views: 6                    # _even_indices(49,6) = [0,10,19,29,38,48]
+geo_first_view_target_s: true
+geo_raw_cache_dir: /data1/cympyc1785/data/DynPose-LBM/latentcam_dynpose_d197/geo_raw_cache_da3
+da3_cam_token_per_sample: true   # 캐시는 B=1 로 구워진다 — 켜야 on-the-fly 폴백과 일치
+
+anchor_pred_frame0: true
+
+video_latent_dim: 0   # molmo2/PE-AV 스트림 없음
+
+batch_size: 8
+epochs: 100          # 실제 집행자는 conf/config.yaml 의 `epoch_cap: 100`.
+ckpt_at_epochs: [50, 100]

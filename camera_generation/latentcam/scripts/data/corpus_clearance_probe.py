@@ -173,6 +173,9 @@ def main():
               'depth_min': describe(dmin), 'fails': fails}
         stats[name] = st
         cm = st['clearance_min']
+        if cm is None:      # 전량 실패 (da3 depth 가 없는 코퍼스 등) — 죽지 말고 표에 남긴다
+            print(f"[{name}] 유효 표본 0개 (fails={fails}) -> 통계 없음", flush=True)
+            continue
         print(f"[{name}] n={cm['n']} clearance_min: p01={cm['p01']:.4f} p05={cm['p05']:.4f} "
               f"med={cm['med']:.4f} p95={cm['p95']:.4f}  fails={fails}", flush=True)
 

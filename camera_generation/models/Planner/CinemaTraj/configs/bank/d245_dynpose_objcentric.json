@@ -1,0 +1,34 @@
+{
+  "_why": "d245 — 사용자가 영상 하나(7886da91, anchor dyn_0)와 preset 하나(slot `advance` -> dolly_in_look_at 계열)를 집어서 돌려달라고 한 요청. d185(= D200 학습 분포)를 물려받고 route 만 좁힌다: anchor 못 박기 + 슬롯 하나. 생성: run_d219.py --tag d245.",
+  "extends": "d185_dynpose100k_grid5.json",
+  "generation": "d245",
+  "tau_bank_dir": "bank_d245",
+  "bank_dir": "hole_bank_d245",
+  "require_markers": [
+    ".graph_d182"
+  ],
+  "route": {
+    "out": "preset_route_d245.json",
+    "args": [
+      "--num_external",
+      "0",
+      "--free_moving",
+      "off",
+      "--anchor_ids_file",
+      "/data1/cympyc1785/LatentCamVid/tmp/d245/anchors.json",
+      "--slot_plan",
+      "full",
+      "--slot_whitelist",
+      "",
+      "--track_mode",
+      "add",
+      "--track_min_drift_u",
+      "0.05",
+      "--target_variants",
+      "1",
+      "--skip_if_empty",
+      "--force_presets",
+      "track_dolly_in,track_pedestal_down,track_pedestal_down_dolly_in"
+    ]
+  }
+}

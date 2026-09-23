@@ -17,7 +17,6 @@
 > 공통 배경 (2026-09-23): "DA3, Molmo2 를 encoder 로 쓰는 게 진짜 필요한지" 검증 실험. 학습 3건은 GPU 0~2.
 
 ### R19. d200 dynpose — condition = text + SigLIP2 feature(Molmo2 visual) + camera embedding 학습 → Working
-### R20. d200 dynpose — condition = text + camera embedding 만 학습 → Working
 ### R27. TRUMANS: 충돌·occlusion·거리·프레이밍 gate 를 fitting **중에** Blender GT mesh raycast 로 — 가능한지 실험
   1차 (2026-09-24): mesh_grid EDT 로 벡터판 `mesh_ray_profile` — 194 ms/궤적, Blender 판정과 20씬 175 rung
   **88.0% 일치** (grid 만 탈락 19 / Blender 만 탈락 2). 원인: 시선 10(5 cm 격자가 얇은 물체 부풂),
@@ -37,7 +36,6 @@ source video 는 `trumans_to_recon.py` 가 이미 Blender 합성 (follow + slow 
 
 ### R19~R22 — 전부 기동됨, 장시간 실행 감시 중 (2026-09-23) · 커밋 `bd78ac5`
 - R19 `dynpose_d200_siglip2_srccam` — SigLIP2 캐시 10169 완료 → smoke 통과 → **GPU 0 train2**.
-- R20 `dynpose_d200_umt5_srccam` — **GPU 1 train1** (~6 분/epoch).
 - R22 **재계획 (사용자 정정 2026-09-23)**: 요청은 "sweep66 후보 시작 카메라로 **source video 를 새로 만드는**
   계획" 이었다 — 옛 737 clip(자체 probe 격자 시작점) 에 뱅크를 돌린 것은 오해였다. 그 뱅크는
   **Ctrl+C 로 중단** (310/737 완료분은 보존). 승인된 새 계획: board 807 chunk x **K=3** = 2,421 clip,
@@ -53,6 +51,10 @@ _(비어 있음)_
 ---
 
 ## Done
+
+### R20. text + camera embedding 학습 — 완료 (2026-09-24)
+`dynpose_d200_umt5_srccam` wandb bsqhncd4, epoch_cap 50 완주. 수치는 `.claude/EXPERIMENTS.log` (원본 그대로).
+testset eval 은 srccam 계열 eval 수리(tasks.md A3) 뒤.
 
 ### R23~R26. TRUMANS 라우팅·preset (D273) — 완료 (2026-09-24) · 커밋 `733c0a7`
 - R23 `--anchor_labels person`. R25 `--slot_plan pool` (70개 풀, track_ 은 drift>0.05 만,

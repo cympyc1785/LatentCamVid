@@ -29,14 +29,6 @@ main session 은 컨텍스트가 압축되거나 세션이 끝나면 **자기가
 
 ## 지금 돌고 있는 것
 
-### R20 학습 dynpose_d200_umt5_srccam (D268)
-- screen  : train1        pid: 4095610        GPU: 1
-- 로그    : <repo>/tmp/r19_r21/train_r20.log
-- 살아있나: pid 존재 + GPU 1 점유 > 10 GiB
-- 나아가나: tqdm `Epoch N` 증가 (epoch 당 ~15분, 5784 it)
-- 끝났나  : epoch_cap 50 완주 → results/*_dynpose_d200_umt5_srccam/ckpts/last.pth
-- 이상신호: Traceback / CUDA out of memory / nan / 30분간 it 정지
-
 ### R19 학습 dynpose_d200_siglip2_srccam (D269)
 - screen  : train2        pid: 96579        GPU: 0
 - 로그    : <repo>/tmp/r19_r21/train_r19.log
@@ -46,7 +38,7 @@ main session 은 컨텍스트가 압축되거나 세션이 끝나면 **자기가
 - 이상신호: Traceback / CUDA out of memory / nan / 30분간 it 정지
 
 ### R22 TRUMANS board source video 2x2 (D272, 807 chunk)
-- screen  : r22b_render   pid: 237498   GPU: 2, 3 (worker 4 x 2, Cycles 32spp)
+- screen  : r22b_render   pid: 236162   GPU: 2, 3 (worker 4 x 2, Cycles 32spp)
 - 로그    : <repo>/tmp/r22b/render_full.out (clip 별 tmp/r22b/log/, chunk 상태 tmp/r22b/status/)
 - 살아있나: pid 존재 + GPU 2/3 에 blender 프로세스
 - 나아가나: status/*.json 개수 증가 (pilot 6 에서 시작, 파일럿 속도 ~6 chunk/h @4 worker)

@@ -1,11 +1,15 @@
 # Preset / option 표
 
-`lbm/presets.py` 의 `PRESETS` **40종** 전량과, 그것을 코퍼스로 바꾸는 스크립트들의 손잡이.
+`lbm/presets.py` 의 `PRESETS` **46종** 전량과, 그것을 코퍼스로 바꾸는 스크립트들의 손잡이.
 D84(`out_dynpose/*/hole_bank_d84/bank.json`, 266편 / 변이 12,193) 실측값을 같이 붙였다.
+
+⚠ **D84 두 열은 2026-08 스냅샷이다.** 그 뒤에 늘어난 preset 6종(41~46번)은 D84 뱅크에
+아예 없으므로 `—` 로 뒀다 — `0` 이 아니라 "안 재봤다" 는 뜻이다. 나머지 열(aim/fol/zoom/
+tgtless)은 2026-09-23 에 `lbm/presets.py` · `configs/caption_presets.json` 으로 재실측했다.
 
 ---
 
-## 1. Preset 표 (가능한 40종 전량)
+## 1. Preset 표 (가능한 46종 전량)
 
 - **slot** — `route_presets.py` 가 이 preset 을 불러 주는 칸. `—` 면 라우터가 부르지 않아
   `--presets` 로 직접 지정하지 않는 한 코퍼스에 못 들어온다.
@@ -51,15 +55,28 @@ D84(`out_dynpose/*/hole_bank_d84/bank.json`, 266편 / 변이 12,193) 실측값�
 | 32 | `track_push_in_arc_left` | — | look_at | 1.0 | — | — | track | 0 | 0 |
 | 33 | `track_push_in_arc_right` | — | look_at | 1.0 | — | — | track | 0 | 0 |
 | 34 | `orbit_left_pedestal_up` | — | look_at | — | — | — | orbit | 0 | 0 |
-| 35 | `dolly_in_dont_look` | — | traj | — | — | — | dolly | 0 | 0 |
-| 36 | `dolly_out_dont_look` | — | traj | — | — | — | dolly | 0 | 0 |
+| 35 | `dolly_in_look_at` | advance | look_at | — | — | — | dolly | 0 | 0 |
+| 36 | `dolly_out_look_at_legacy` | — | look_at | — | — | — | dolly | 0 | 0 |
 | 37 | `static_hold` | — | free | — | — | — | static | 0 | 0 |
 | 38 | `track_hold` | — | free | 1.0 | — | — | track | 0 | 0 |
 | 39 | `static_zoom_in` | — | traj | — | **Y** | — | static | 0 | 0 |
 | 40 | `pan_right_zoom_out` | — | traj | — | **Y** | **Y** | pan | 0 | 0 |
+| 41 | `tilt_up` | — | free | — | — | **Y** | tilt | — | — |
+| 42 | `tilt_down` | — | free | — | — | **Y** | tilt | — | — |
+| 43 | `orbit_left_pedestal_down` | — | look_at | — | — | — | orbit | — | — |
+| 44 | `pedestal_down_dolly_in` | — | free | — | — | — | pedestal | — | — |
+| 45 | `track_dolly_in_look_at` | — | look_at | 1.0 | — | — | track | — | — |
+| 46 | `track_pedestal_down_dolly_in` | — | free | 1.0 | — | — | track | — | — |
 
-집계: 구현 **40** / caption 있음 **40** / 라우터 도달 **23** (+`--vertical_fallback` 시 **25**) /
-D84 실현 **19**. `--presets` 기본값(`usable_presets`)은 `--allow_zoom` 없이 **38**, 있으면 **40**.
+집계(2026-09-23 재실측): 구현 **46** / caption 있음 **46**
+(`configs/caption_presets.json` `presets` 와 `PRESETS` 가 양방향 1:1 — 불일치 0) /
+`--presets` 기본값(`sample_camera_bank.usable_presets`)은 `--allow_zoom` 없이 **43**,
+있으면 **45** (zoom 전용 2종 `static_zoom_in` · `pan_right_zoom_out`).
+**라우터 도달 23 / D84 실현 19 는 D84 기준 그대로다** — 그 뒤 `route_presets.py` 가
+바뀌었으므로 재측정 전에는 인용하지 말 것.
+
+⚠ **`usable_presets` 는 `lbm/presets.py` 가 아니라 `fit/bank/sample_camera_bank.py:127` 에 있다.**
+같은 파일 105행의 `ROTATION_ONLY_PRESETS` 도 마찬가지다 (아래 §"이름 규칙" 참고).
 별칭 `PRESET_ALIASES` 38개는 위 이름으로 접힌다.
 
 > **D94 — 14번/37번, 25번/38번은 이름이 서로 바뀐 것이다.** `hold` 는 "안 움직이고 재조준도
@@ -77,38 +94,64 @@ D84 실현 **19**. `--presets` 기본값(`usable_presets`)은 `--allow_zoom` 없
 > 같이 넘겨야 한다 (안 넘기면 preset 의 *현재* 기본값을 타서 조용히 다른 카메라가 나온다 —
 > 실측 pose 재현 오차 6.574e-01).
 
-### caption 문구 (`configs/caption_presets.json`, 40종 전량)
+### caption 문구 (`configs/caption_presets.json` `presets`, 46종 전량)
 
-| preset | phrase (`the camera ...`) |
-|---|---|
-| `dolly_in` | dollies straight forward toward the subject |
-| `dolly_out` | dollies straight back away from the subject |
-| `dolly_in_dont_look` | dollies in along its own axis without re-aiming |
-| `dolly_out_dont_look` | dollies back along its own axis without re-aiming |
-| `truck_left` / `truck_right` | trucks to the left/right, sliding sideways past the subject |
-| `pan_left` / `pan_right` | pans to the left/right across the scene |
-| `pan_right_zoom_out` | pans to the right while zooming out |
-| `pull_out_arc_left` / `_right` | arcs to the left/right while pulling back from the subject |
-| `push_in_arc_left` / `_right` | arcs to the left/right while pushing in toward the subject |
-| `orbit_left` / `orbit_right` | orbits to the left/right around the subject |
-| `orbit_left_pedestal_up` | orbits to the left around the subject while rising |
-| `s_curve` | weaves left then right around the subject |
-| `crane_up` | cranes upward and over the subject, revealing the space around it |
-| `crane_down` | cranes downward toward the subject, closing in from above |
-| `pedestal_up` | rises straight up while staying on the subject |
-| `pedestal_down` | drops straight down while staying on the subject |
-| `static_look_at` | holds still on the subject |
-| `static_hold` | holds completely locked off |
-| `static_zoom_in` | holds still on the subject while zooming in |
-| `track_look_at` | tracks the subject, keeping pace with it as it moves |
-| `track_hold` | tracks the subject with the framing locked off |
-| `track_dolly_in` / `_out` | tracks the subject while pushing in toward / pulling back from it |
-| `track_truck_left` / `_right` | tracks alongside the subject while sliding to the left/right |
-| `track_pull_out_arc_left` / `_right` | tracks the subject while arcing to the left/right and pulling back from it |
-| `track_push_in_arc_left` / `_right` | tracks the subject while arcing to the left/right and pushing in toward it |
-| `track_orbit_left` / `_right` | tracks the subject while orbiting to the left/right around it |
-| `track_crane_up` / `_down` | tracks the subject while craning upward over / downward toward it |
-| `track_pedestal_up` / `_down` | tracks the subject while rising straight up / dropping straight down |
+이 표는 2026-09-23 에 JSON 에서 **그대로 뽑았다** — 좌우를 `/` 로 합치지 않고 46행을 다 적는다.
+예전 판은 짝을 합치면서 `{target}` 자리표시자를 "the subject" 로 바꿔 적어 뒀는데, 그러면
+**어떤 preset 이 target 절을 받는지**가 지워진다 (`dolly_in` 은 안 받고 `dolly_in_look_at` 은 받는다).
+`{target}` `{it}` `{they}` `{s}` 는 `build_bank_captions.py` 가 채우는 자리표시자 원문이다.
+
+| preset | axis | tgtless | phrase (`the camera ...`) |
+|---|---|---|---|
+| `dolly_in` | dolly | — | dollies straight forward |
+| `dolly_in_look_at` | dolly | — | dollies straight forward toward {target} |
+| `dolly_out` | dolly | — | dollies straight back |
+| `dolly_out_look_at_legacy` | dolly | — | dollies straight back away from {target} |
+| `truck_left` | truck | — | trucks to the left, sliding sideways past {target} |
+| `truck_right` | truck | — | trucks to the right, sliding sideways past {target} |
+| `pan_left` | pan | **Y** | pans to the left across the scene |
+| `pan_right` | pan | **Y** | pans to the right across the scene |
+| `pan_right_zoom_out` | pan | **Y** | pans to the right while zooming out |
+| `tilt_down` | tilt | **Y** | tilts downward across the scene |
+| `tilt_up` | tilt | **Y** | tilts upward across the scene |
+| `pull_out_arc_left` | arc | — | arcs to the left while pulling back from {target} |
+| `pull_out_arc_right` | arc | — | arcs to the right while pulling back from {target} |
+| `push_in_arc_left` | arc | — | arcs to the left while pushing in toward {target} |
+| `push_in_arc_right` | arc | — | arcs to the right while pushing in toward {target} |
+| `orbit_left` | orbit | — | orbits to the left around {target} |
+| `orbit_left_pedestal_down` | orbit | — | orbits to the left around {target} while descending |
+| `orbit_left_pedestal_up` | orbit | — | orbits to the left around {target} while rising |
+| `orbit_right` | orbit | — | orbits to the right around {target} |
+| `crane_down` | crane | — | cranes downward toward {target}, closing in from above |
+| `crane_up` | crane | — | cranes upward and over {target}, revealing the space around {it} |
+| `pedestal_down` | pedestal | — | drops straight down while staying on {target} |
+| `pedestal_down_dolly_in` | pedestal | — | drops straight down while pushing in toward {target} |
+| `pedestal_up` | pedestal | — | rises straight up while staying on {target} |
+| `static_hold` | static | — | holds completely locked off |
+| `static_look_at` | static | — | holds still on {target} |
+| `static_zoom_in` | static | — | holds still on {target} while zooming in |
+| `track_crane_down` | track | — | tracks {target} while craning downward toward {it} |
+| `track_crane_up` | track | — | tracks {target} while craning upward over {it} |
+| `track_dolly_in` | track | — | tracks {target} while pushing in |
+| `track_dolly_in_look_at` | track | — | tracks {target} while pushing in toward {it} |
+| `track_dolly_out` | track | — | tracks {target} while pulling back from {it} |
+| `track_hold` | track | — | tracks {target} with the framing locked off |
+| `track_look_at` | track | — | tracks {target}, keeping pace with {it} as {they} move{s} |
+| `track_orbit_left` | track | — | tracks {target} while orbiting to the left around {it} |
+| `track_orbit_right` | track | — | tracks {target} while orbiting to the right around {it} |
+| `track_pedestal_down` | track | — | tracks {target} while dropping straight down |
+| `track_pedestal_down_dolly_in` | track | — | tracks {target} while dropping straight down and pushing in |
+| `track_pedestal_up` | track | — | tracks {target} while rising straight up |
+| `track_pull_out_arc_left` | track | — | tracks {target} while arcing to the left and pulling back from {it} |
+| `track_pull_out_arc_right` | track | — | tracks {target} while arcing to the right and pulling back from {it} |
+| `track_push_in_arc_left` | track | — | tracks {target} while arcing to the left and pushing in toward {it} |
+| `track_push_in_arc_right` | track | — | tracks {target} while arcing to the right and pushing in toward {it} |
+| `track_truck_left` | track | — | tracks alongside {target} while sliding to the left |
+| `track_truck_right` | track | — | tracks alongside {target} while sliding to the right |
+| `s_curve` | s_curve | — | weaves left then right around {target} |
+
+`dolly_in` / `dolly_out` 에는 `phrase_legacy_reaim` 이 하나 더 달려 있다 — D176-b 로 본문에서
+뺀 "along its own axis without re-aiming" 문구다. `LEGACY_AIM_COLLISIONS` 로 갈릴 때만 쓴다.
 
 ### 이름 규칙 · 부호 · 크기 손잡이
 
@@ -122,8 +165,10 @@ _dont_look   같은 궤적, aim=traj (재조준 없음)
 
 `DEFAULT_SHAPE = {dolly_frac 0.35, lateral_frac 0.35, sweep_deg 45.0, pan_deg 20.0}`, `NUM_FRAMES 49`.
 `PRESET_ZOOM_END = {static_zoom_in 1.15, pan_right_zoom_out 0.667}`.
-`ROTATION_ONLY_PRESETS = [pan_left, pan_right, pan_right_zoom_out]` (+`--external_shapes` 중 이동 0인 것)
-— 이동이 0이라 τ 로 크기를 못 정하므로 사다리를 **pan 각도**로 옮긴다.
+`ROTATION_ONLY_PRESETS = [pan_left, pan_right, pan_right_zoom_out, tilt_up, tilt_down]`
+(`fit/bank/sample_camera_bank.py:105`, +`--external_shapes` 중 이동 0인 것)
+— 이동이 0이라 τ 로 크기를 못 정하므로 사다리를 **pan 각도**로 옮긴다. `tilt` 2종은 D90 에
+들어왔고 손잡이는 pan 과 같은 `pan_deg` 를 쓴다.
 
 ### DataDoP `dd_*` (`--external_shapes`)
 
@@ -251,16 +296,3 @@ target: none.   motion: the camera moves downward while panning left.
 | framing (subject 면적비) | `0.005` extreme wide / `0.02` wide / `0.06` medium wide / `0.15` medium / `0.35` medium close-up / `1.01` close-up |
 | magnitude τ | `0.05` barely / `0.15` slightly / `0.45` steadily / `1.0` significantly / `1e9` dramatically |
 | magnitude pan_deg | `5` / `15` / `35` / `75` / `1e9` (같은 단어) |
-
----
-
-## 3. 알려진 구멍
-
-| 구멍 | 실측 |
-|---|---|
-| 라우터가 안 부르는 preset 15종 (`push_in_arc_*`, `pedestal_*`, `crane_down`, `*_dont_look`, zoom 2종 등) | D84 변이 0 |
-| `--vertical_fallback` off | anchor 540개 중 vertical 칸이 살아남은 건 251개 (46.5%) |
-| `speed` / `tracking` 다양성 | 12,193 변이 전량 `steady` / `drift` |
-| `pedestal_*` 문구와 `aim` 불일치 | 문구는 "staying on the subject" 인데 `aim=traj` (재조준 없음) |
-| `aim=look_at` 인데 subject 0px | 346 변이 (7.2%), 266편 중 47편에 집중 |
-| `pan_*` subject_in_frame | median 0.50 (46.7% 가 0.5 미만) vs `track_truck_*` median 1.000 |

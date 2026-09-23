@@ -313,7 +313,10 @@ def sequences_for_scene(trumans: str, uuid: str):
 
 def blend_frame_count(blender: str, blend: str, tmp: str):
     """headless Blender 로 frame_start/end/fps 를 읽는다 (1.6 GB blend 도 실측 3초)."""
-    script = path.join(HERE, "_probe_frames.py")
+    # 이 파일은 **여기서 만들어 쓰는 스크래치**다 (읽어 오는 게 아니다). 예전엔 `HERE` 에
+    # 썼는데, 그러면 소스 트리에 `_probe_frames.py` 가 남는다 — R6 이전에 `scripts/` 로
+    # 커밋돼 버린 것이 그 흔적이다. `tmp` 옆(=호출자가 정한 작업 폴더)에 쓴다.
+    script = path.join(path.dirname(path.abspath(tmp)), "_probe_frames.py")
     with open(script, "w", encoding="utf-8") as file:
         file.write("import bpy, json, sys\n"
                    "s = bpy.context.scene\n"

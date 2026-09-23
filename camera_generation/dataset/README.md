@@ -92,19 +92,7 @@ bool 은 집 스타일 `--flag`/`--no_flag` 쌍으로 나간다 (`"allow_zoom": 
 사람이 보는 순서는 정해져 있다: **`obb_overlay.mp4` 부터.** 박스가 물체를 안 감싸면 하류가 전부
 무효다. 그 다음 `board_candidates.png`(VLM 이 실제로 본 그림) → `plan_sbs.mp4` → `plan_cam.mp4`.
 
-### 지금 상태 (2026-08-21, camel / avocado-slice)
-
-| | camel | avocado-slice |
-|---|---|---|
-| subject | `dyn_*` (camel) | **`stat_0 (table)`** — 정적 노드 |
-| pool → 게이트 통과 → board | 45 → 33 → 9 | 45 → 14 → 9 |
-| preset (현재 디스크 산출물) | `orbit_left_arc` (steady, drift) | `orbit_left_arc` (steady, drift) |
-| `hole_fraction` | 0.0737215 | 0.289933 |
-| `tau_max` | 0.196051 | 0.197946 |
-| `max_view_angle_delta` | 12.9615° | 13.7096° |
-| `path_len_u` | 0.147629 | 0.15771 |
-| emit `--scales` | 0.346156 | 0.36666 |
-| verdict | PASS | PASS |
+### 정적 퇴화 — coverage 만 상 주면 안 움직이는 게 최적해다 (2026-08-21, camel / avocado-slice)
 
 이 절의 preset 이름은 **측정 당시(D76 rename 전) 이름 그대로**다 — `orbit_left_arc` = 지금의
 `orbit_left`, `static_hold_locked` = 지금의 `static_hold`(D94 전에는 `static_hold_dont_look`).
@@ -305,9 +293,9 @@ preset(= `static_look_at` 빼고 전부)에서 실효 겹침은 **이동 축만*
 **`pan` 계열은 L3 가 아예 안 걸린다.** 이동이 0 이라 어떤 `s` 에서도 τ 가 같아
 `tau_hi <= target_tau` 가지로 빠져 항상 `s = max_scale = 4.0` → `20° × 4 = 80°` 고정.
 사다리 5단이 전부 같은 궤적이 된다 (실측: camel `pan_left` 가 5단 전부 `path_len_u 0.0000`,
-`hole 0.740` 동일). 그래서 뱅크는 `ROTATION_ONLY_PRESETS` 3종만 사다리를 **회전 각도**로 옮기고
+`hole 0.740` 동일). 그래서 뱅크는 `ROTATION_ONLY_PRESETS` 5종만 사다리를 **회전 각도**로 옮기고
 (`--pan_deg_at_max × rung/max_rung`), `FIT_TAU_MAX_SCALE`(4.0)로 미리 나눠 요청 각도를 되돌린다
-(`sample_camera_bank.py:88-138`).
+(`fit/bank/sample_camera_bank.py:100-126`).
 
 **`true_orbit` 은 sweep 손잡이가 안 먹는다.** 순수 나선(screw)이라 sweep 과 scale 이 상쇄돼
 같은 τ 면 같은 궤적이 나온다 (실측 snowboard `dyn_0 orbit_left` τ0.6: sweep 45 → 53.5° /
@@ -397,10 +385,12 @@ truck" 이 되는 것이고 의도한 동작이다. **frame0 위치는 안 바�
   움직이므로 "정지"는 subject 기준이지 world 기준이 아니다.
   **D94 에서 static/track 이름 규칙이 맞춰졌다** — 양쪽 다 `hold`=완전고정 /
   `_look_at`=조준추종 이다 (옛 `*_hold`=조준추종, 옛 `*_hold_dont_look`=완전고정).
-- **회전 전용 3종** `ROTATION_ONLY_PRESETS = pan_left / pan_right / pan_right_zoom_out`
-  (`fit/bank/sample_camera_bank.py:92`). 이동이 0 이라 τ 이분법이 아무 스케일에서나 같은 τ 를 내고
-  항상 `max_scale=4.0` 으로 saturate 한다 — 뱅크는 이 3종에만 divisor 를 `FIT_TAU_MAX_SCALE` 로
-  바꿔서 크기를 정한다(`:133`).
+- **회전 전용 5종** `ROTATION_ONLY_PRESETS = pan_left / pan_right / pan_right_zoom_out /
+  tilt_up / tilt_down` (`fit/bank/sample_camera_bank.py:105`). `tilt` 2종은 D90 에 들어왔다 —
+  `T.tilt` 도 제자리 pitch 라 이동이 정확히 0 이다. 이동이 0 이라 τ 이분법이 아무 스케일에서나
+  같은 τ 를 내고 항상 `max_scale=4.0` 으로 saturate 한다 — 뱅크는 이 5종에만 divisor 를
+  `FIT_TAU_MAX_SCALE` 로 바꿔서 크기를 정한다(`:282`). **list 인 이유**: `--external_shapes`
+  로 등록한 DataDoP 궤적 중 이동 0 인 것이 `.extend()` 로 들어온다.
 - **zoom 2종은 기본 off.** `--allow_zoom` 없으면 후보에서 빠진다. focal 은 SE(3) 밖이라
   `fit_tau` 스케일이 안 먹고(광학 zoom 은 시차를 안 만든다), `emit_model_cams.py` 에 intrinsics
   채널이 없어서 emit 을 못 통과한다. 램프는 로그 선형(`focal_track`).

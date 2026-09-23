@@ -39,6 +39,9 @@ from concurrent.futures import ThreadPoolExecutor
 from os import makedirs, path
 
 HERE = path.dirname(path.abspath(__file__))
+# R6(2026-09-22) 재분류에서 드라이버(`scripts/`)와 피구동 스크립트(`fit/ingest/`)가 **갈라졌다.**
+# `path.join(HERE, ...)` 로 옆을 보면 안 나온다 — 형제 폴더를 명시한다 (R8 에서 잡음).
+INGEST = path.join(path.dirname(HERE), "fit", "ingest")
 TRUMANS_DEFAULT = "/data1/cympyc1785/data/trumans/Data_release"
 EVAL_DATA_DEFAULT = "/data1/cympyc1785/data/TRUMANS-Lite"
 #    `trumans_to_recon.py --min_subject_dist` 의 기본값과 **같은 값이어야 한다**. 여기서
@@ -86,7 +89,7 @@ def probe_usable(args, recording, action):
     궤적 합성 · 검증 · 렌더는 전부 낭비라 여기서 잘라낸다.
     """
     work_rec = path.join(args.work, recording + args.video_suffix)
-    command = [PYTHON, path.join(HERE, "trumans_to_recon.py"),
+    command = [PYTHON, path.join(INGEST, "trumans_to_recon.py"),
                "--recording", recording, "--action", str(action["index"]),
                "--trumans", args.trumans, "--eval_data", args.eval_data,
                "--subject_kind", args.subject_kind, "--anchor_origin", args.anchor_origin,
@@ -141,7 +144,7 @@ def list_actions(python, recording, args):
     `int("labeled")` 에서 죽는다.
     """
     proc = subprocess.run(
-        [python, path.join(HERE, "trumans_to_recon.py"), "--recording", recording,
+        [python, path.join(INGEST, "trumans_to_recon.py"), "--recording", recording,
          "--trumans", args.trumans, "--list_actions", *walk_flags(args)],
         capture_output=True, text=True)
     assert proc.returncode == 0, f"{recording} action 목록 실패:\n{proc.stderr[-2000:]}"
@@ -189,7 +192,7 @@ def run_one(args, recording, action, cell=None):
         return {"video": video, "recording": recording, "action": action["index"],
                 "kind": action["kind"], "text": action["text"], "status": "skip_done"}
 
-    command = [PYTHON, path.join(HERE, "trumans_to_recon.py"),
+    command = [PYTHON, path.join(INGEST, "trumans_to_recon.py"),
                "--recording", recording, "--action", str(action["index"]),
                "--seed", str(args.seed), "--trumans", args.trumans,
                "--eval_data", args.eval_data, "--max_tries", str(args.max_tries),

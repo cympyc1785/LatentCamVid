@@ -64,8 +64,11 @@ from subprocess import run
 import numpy as np
 
 HERE = path.dirname(path.abspath(__file__))
-WORKER = path.join(HERE, "trumans_blend_layout_worker.py")
-FRAME_SHIFT_STARTUP = path.join(HERE, "trumans_frame_shift_startup.py")
+# R6(2026-09-22) 재분류에서 드라이버(`scripts/`)와 Blender worker(`fit/ingest/`)가 **갈라졌다.**
+# `HERE` 옆을 보면 안 나온다 — 형제 폴더를 명시한다 (R8 에서 잡음).
+INGEST = path.join(path.dirname(HERE), "fit", "ingest")
+WORKER = path.join(INGEST, "trumans_blend_layout_worker.py")
+FRAME_SHIFT_STARTUP = path.join(INGEST, "trumans_frame_shift_startup.py")
 TRUMANS_DEFAULT = "/data1/cympyc1785/data/trumans/Data_release"
 BLENDER_DEFAULT = "/data1/cympyc1785/tools/blender/blender-4.5.9-linux-x64/blender"
 # 창별 runner 가 export 할 LBM 실행 env. `/tmp/lbm_run_fx.sh` 로 손으로 돌리던 값과 같다.

@@ -29,7 +29,11 @@ import time
 
 BLENDER = "/data1/cympyc1785/tools/blender/blender-4.5.9-linux-x64/blender"
 ROOT = "/data1/cympyc1785/data/trumans/Data_release/Recordings_blend"
-SCRIPT = path.join(path.dirname(path.abspath(__file__)), "trumans_first_pose_board.py")
+# R6(2026-09-22) 재분류에서 드라이버는 `exec/` 로, board 스크립트는 `fit/bank/` 로 **갈라졌다.**
+# 여기는 `dirname(__file__)` 옆을 보고 있었으므로 그때부터 안 돌았다 (R8 스모크에서 드러남).
+# `fit/bank/` 를 직접 가리킨다 — 옆이 아니라 형제 폴더다.
+SCRIPT = path.join(path.dirname(path.dirname(path.abspath(__file__))),
+                   "fit", "bank", "trumans_first_pose_board.py")
 
 
 def find_blends(root, limit=0):

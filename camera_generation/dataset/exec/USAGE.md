@@ -583,10 +583,10 @@ python exec/run_board_sweep.py --out out/sweep66 --skip_done \
 
 ### 비고
 
-- **현재 상태로는 안 돈다.** `SCRIPT`(`:32`)가
-  `path.join(dirname(abspath(__file__)), "trumans_first_pose_board.py")` = `exec/trumans_first_pose_board.py`
-  를 가리키는데, 그 파일은 실제로 `fit/bank/trumans_first_pose_board.py` 에 있다. 파일이 `scripts/`
-  에서 `exec/` 로 옮겨질 때 같이 안 따라온 것으로 보인다. 쓰려면 `SCRIPT` 를 고쳐야 한다.
+- ~~**현재 상태로는 안 돈다.**~~ → **고쳤다 (R8, 2026-09-23).** R6 재분류에서 드라이버는 `exec/`,
+  board 스크립트는 `fit/bank/` 로 **갈라졌는데** `SCRIPT` 가 `dirname(__file__)` **옆**을 보고
+  있어 그때부터 죽어 있었다. 이제 형제 폴더 `fit/bank/trumans_first_pose_board.py` 를 직접
+  가리킨다. 드라이버와 피구동 스크립트가 다른 갈래로 나뉜 유일한 조합이라 R6 재작성이 못 봤다.
 - `--out` 은 예시처럼 `out/` 아래로 두거나, 일회성이면 `/data1/cympyc1785/LatentCamVid/tmp/<작업>/`
   아래로 둔다.
 - TRUMANS 작업이라도 GPU 를 쓰는 부분은 0~3 안에서 해결한다 (예전 "TRUMANS 한정 GPU 5" 예외는 만료).

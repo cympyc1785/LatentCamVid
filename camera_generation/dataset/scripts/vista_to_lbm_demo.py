@@ -38,7 +38,9 @@ from os import makedirs, path
 import numpy as np
 
 HERE = path.dirname(path.abspath(__file__))
-BLEND_WORKER = path.join(HERE, "vista_blend_worker.py")
+# R6(2026-09-22) 재분류에서 드라이버(`scripts/`)와 Blender worker(`fit/ingest/`)가 **갈라졌다.**
+# `HERE` 옆을 보면 안 나온다 — 형제 폴더를 명시한다 (R8 에서 잡음).
+BLEND_WORKER = path.join(path.dirname(HERE), "fit", "ingest", "vista_blend_worker.py")
 
 #    `trumans_to_lbm_demo.py` 의 movement term 표를 그대로 쓴다. **문구를 새로 짓지 않는 게
 #    핵심**이다 — Director 의 `infer_movement_intent` / `infer_direction_label` 은 정해진

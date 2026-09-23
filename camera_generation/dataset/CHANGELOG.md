@@ -187,6 +187,23 @@ Follows [Keep a Changelog](https://keepachangelog.com/).
   기본값이 `zero` 라 기존 호출(D215/D224/D226/D227)은 비트 동일.
 
 ### Fixed
+- **R6 재분류로 갈라진 드라이버↔피구동 스크립트 경로 5건 (R8, 2026-09-23).** R6(2026-09-22)
+  이 평평한 `scripts/` 를 `exec/ fit/{ingest,graph,bank,caption,convert} eval/ viz/` 로 나눌 때,
+  **드라이버와 그것이 `subprocess` 로 부르는 스크립트가 서로 다른 갈래로 떨어진 조합**에서
+  `path.join(HERE, "X.py")` 가 조용히 죽었다. import 문도 문자열 리터럴 경로도 아니고
+  **런타임 `path.join` 조립**이라 R6 의 참조 재작성이 구조적으로 못 봤다. 4 파일 5 지점:
+  - `exec/run_board_sweep.py` → `fit/bank/trumans_first_pose_board.py`
+  - `scripts/trumans_lite_bank.py` → `fit/ingest/trumans_to_recon.py` (3 지점, `INGEST` 상수로 통일)
+  - `scripts/trumans_to_lbm_demo.py` → `fit/ingest/trumans_blend_layout_worker.py` ·
+    `fit/ingest/trumans_frame_shift_startup.py`
+  - `scripts/vista_to_lbm_demo.py` → `fit/ingest/vista_blend_worker.py`
+  - 검출은 `git ls-files` 의 `.py` 전량에서 `path.join(HERE|dirname(abspath(__file__)), "*.py")`
+    를 뽑아 `path.exists` 로 거른 스윕이다. 수리 후 재실행 **0건**, 편집한 5 파일
+    `ast.parse` 통과, 드라이버 4종 `--help` rc=0.
+- **`fit/ingest/trumans_to_recon.py` 가 소스 트리에 스크래치를 쓰던 것 (R8, 2026-09-23).**
+  `blend_frame_count()` 의 Blender 프로브 스크립트를 `HERE` 에 썼다 — 그래서 R6 이전에
+  `scripts/_probe_frames.py` 가 **커밋돼 버렸다**. 이제 `dirname(abspath(tmp))`(호출자가 정한
+  작업 폴더) 옆에 쓴다.
 - **`viz/viser_cloud.py --bundle` 가 dynpose 번들에서 "arm 이 0개"로 죽던 것
   (2026-09-22).** `load_bundle` 이 `cameras/*.npz` 만 읽는데 dynpose 번들에는 그 파일이
   없다 — `run_d219.py:stage_bundle` 이 Vista4D recon 이 있는 씬에만 npz 를 굽기 때문에
@@ -227,6 +244,31 @@ Follows [Keep a Changelog](https://keepachangelog.com/).
     전체**를 잡았기 때문이다 (`seg_instances/golf/meta.json` id 5). 별건.
 
 ### Changed
+- **`README.md` · `presets.md` 를 코드로 재실측 (R8, 2026-09-23).** 문서가 옛 스냅샷을
+  현재값처럼 적고 있던 것을 **런타임 import 로 다시 재서** 고쳤다. 추론이 아니라 실행값이다.
+  - `PRESETS` **40 → 46**. `presets.py` 의 dict 리터럴은 45 이고, 430행
+    `PRESETS.update(LEGACY_ONLY_PRESETS)` 가 1 을 더한다 — 정적 파싱으로는 안 보인다.
+    41~46번(`tilt_up` `tilt_down` `orbit_left_pedestal_down` `pedestal_down_dolly_in`
+    `track_dolly_in_look_at` `track_pedestal_down_dolly_in`) 행 추가.
+  - 35/36행 이름을 현재 이름(`dolly_in_look_at` / `dolly_out_look_at_legacy`)으로.
+    `aim` 도 `traj` → `look_at` 이 맞다.
+  - caption 문구 표를 `configs/caption_presets.json` 에서 **통째로 재생성**(46행). 예전 판은
+    좌/우 짝을 합치면서 `{target}` 자리표시자를 "the subject" 로 풀어 적어, **어떤 preset 이
+    target 절을 받는지**가 지워져 있었다 (`dolly_in` 은 안 받고 `dolly_in_look_at` 은 받는다).
+    D176-b 로 `dolly_in` 문구에서 빠진 `toward the subject` 도 이때 드러났다.
+  - `ROTATION_ONLY_PRESETS` **3 → 5** (`tilt_up`/`tilt_down` 은 D90). 위치도 틀려 있었다 —
+    `lbm/presets.py` 가 아니라 `fit/bank/sample_camera_bank.py:105` 이고 tuple 이 아니라
+    **list** 다 (`--external_shapes` 가 `.extend()` 한다). README 2곳 + presets.md 1곳.
+  - `--presets` 기본값(`sample_camera_bank.usable_presets`, `:127`)은 `--allow_zoom` 없이
+    **43**, 있으면 **45**. `configs/caption_presets.json` `presets` 는 `PRESETS` 와 양방향
+    1:1(불일치 0).
+  - D84 두 열(라우터 도달 23 / 실현 19)은 2026-08 스냅샷이므로 새 6종은 `0` 이 아니라 `—`
+    로 뒀다 — "안 재봤다" 는 뜻이다.
+- **현재 파이프라인과 무관해진 문서 43줄 삭제 (R8, 2026-09-23).** 사용자 승인 후.
+  `README.md` 의 2026-08-21 9행 지표표(camel/avocado 뱅크 수치 — 그 뒤 게이트가 여러 번
+  바뀌어 재현 불가)와 `presets.md` `## 3. 알려진 구멍`(D84 기준 라우터 미도달 15종 ·
+  `--vertical_fallback` 46.5% 등, 전부 D84 스냅샷). **README 의 진단 산문은 남겼다** —
+  "coverage 만 상 주면 안 움직이는 게 최적해" 는 지금도 유효한 설계 근거다.
 - **데이터 구축 파이프라인을 `camera_generation/dataset/` 으로 이전 (R7, 2026-09-23).**
   사용자 지시 "우리 데이터 구축 파이프라인이 CinemaTraj에 있는데 저건 원래 논문 폴더니까
   camera_generation/dataset 여기로 다 옮겨주고 경로들도 수정해줘". `CinemaTraj` 는 **논문 폴더

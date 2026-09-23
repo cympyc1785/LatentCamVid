@@ -14,9 +14,6 @@
 
 ## Request
 
-### R8. CinemaTraj md 파일 정리
-현재 파이프라인과 무관한 내용 삭제.
-
 ### R9. CinemaTraj `pipeline.md` 재작성 + `USAGE.md` 작성
 현재 데이터 구축 파이프라인 기준. (R7 이전 후라면 새 위치 기준)
 
@@ -42,8 +39,8 @@
 
 ## Working
 
-### R8. CinemaTraj md 파일 정리
-현재 파이프라인과 무관한 내용 삭제. 대상은 이제 `camera_generation/dataset/` 아래다.
+### R9. `camera_generation/dataset/pipeline.md` 재작성 + `USAGE.md` 작성
+현재 데이터 구축 파이프라인 기준(R7 이전 후 새 위치).
 
 ---
 
@@ -54,6 +51,19 @@ _(비어 있음)_
 ---
 
 ## Done
+
+### R8. `camera_generation/dataset/` md 정리 — 완료 (2026-09-23)
+추적 md 14개를 훑어 ① 무관해진 43줄 삭제(사용자 승인, "진단은 살리고 지표표만"),
+② 코드로 재실측해 틀린 수치 교정(`PRESETS` 40→46, `ROTATION_ONLY_PRESETS` 3→5 + 위치
+`fit/bank/sample_camera_bank.py:105`, caption 표 46행 JSON 에서 재생성),
+③ **R6 재분류로 죽어 있던 subprocess 경로 5건 수리**(4 파일) + 소스 트리 스크래치 쓰기 수정.
+- **부산물이 본론보다 컸다.** R6 이 `scripts/` 를 갈래로 쪼갤 때 드라이버와 피구동 스크립트가
+  다른 갈래로 떨어진 조합이 **런타임 `path.join` 조립**이라 참조 재작성에 안 잡혔다. 2026-09-22
+  부터 조용히 죽어 있었다. 스윕 재실행 0건 / `--help` rc=0 ×4 로 확인.
+- **reader agent 주장 5건이 틀렸다** (`exec/_legacy/` 34개 미추적 → 실제 34개 추적,
+  `PRESETS`=47 → 46, `ROTATION_ONLY_PRESETS` 위치·개수, `exec/USAGE.md` 를 문서 오류로 오인
+  → 실은 코드 버그를 정확히 기록한 것, `fit/USAGE.md` 9건 누락 → 13/13 전부 있음). 전량 직접 재측정.
+- 남은 것: `scripts/_probe_frames.py`(커밋된 런타임 스크래치) 삭제는 승인 대기.
 
 ### R7. 데이터 구축 파이프라인을 `camera_generation/dataset/` 으로 이전 — 완료 (2026-09-23)
 추적 19항목 `git mv` + 미추적 산출물 8항목 **433 GB** `mv` (같은 Lustre 마운트라 rename, 즉시).

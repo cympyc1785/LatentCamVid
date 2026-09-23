@@ -167,5 +167,5 @@ git status --porcelain -- <파일>          # 비어 있지 않으면 미커밋 
 
 - agent 는 **파일을 지우지 않는다.** 낡은 보고서가 보여도 건드리지 않는다.
 - `tmp/agent/` 가 쌓이면 main 이 정리한다. 삭제는 목록·근거를 보고하고 승인을 받는다.
-- 보고서를 `results/` 나 `DECISIONS.log` / `CHANGELOG.md` 로 **승격하는 것도 main 이 한다.**
+- 보고서를 `results/` 나 `DECISIONS.md` / `CHANGELOG.md` 로 **승격하는 것도 main 이 한다.**
   agent 는 그 파일들을 건드리지 않는다.

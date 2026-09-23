@@ -232,12 +232,23 @@ camera_generation/models/Planner/*
 !camera_generation/models/Planner/CinemaTraj/
 camera_generation/models/Planner/CinemaTraj/*
 !camera_generation/models/Planner/CinemaTraj/scripts/
+# R6(2026-09-23) scripts/ 재분류 목적지. 여기를 안 열면 새로 생긴 USAGE.md 가 조용히 추적 밖이다
+# (이미 추적 중이던 파일은 gitignore 와 무관하게 따라오므로 `git mv` 만으로는 안 들킨다).
+!camera_generation/models/Planner/CinemaTraj/exec/
+!camera_generation/models/Planner/CinemaTraj/fit/
+!camera_generation/models/Planner/CinemaTraj/eval/
+!camera_generation/models/Planner/CinemaTraj/viz/
 !camera_generation/models/Planner/CinemaTraj/lbm/
 !camera_generation/models/Planner/CinemaTraj/scene_graph/
 !camera_generation/models/Planner/CinemaTraj/decode/
 !camera_generation/models/Planner/CinemaTraj/configs/
 !camera_generation/models/Planner/CinemaTraj/*.py
 !camera_generation/models/Planner/CinemaTraj/*.md
+# R17(2026-09-23) 시간순으로 늘어나는 문서는 `.log` 로 바꿨다. `*.log` 를 통째로 열면 실행 로그가
+# 딸려 들어오므로 이름으로만 연다. DECISIONS 는 사용자 지시로 `.md` 로 되돌렸다
+# (위 `!…/*.md` 가 이미 열고 있어 예외가 필요 없다).
+!camera_generation/models/Planner/CinemaTraj/LBM_DEFECTS.log
+!camera_generation/models/Planner/CinemaTraj/fix.log
 # 4 MB 생성 데이터. retrieve_datadop_shapes.py 가 다시 만든다.
 camera_generation/models/Planner/CinemaTraj/configs/datadop_shapes.json
 video_generation/tools

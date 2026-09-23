@@ -36,8 +36,8 @@ $PY run_lbm_lite.py --stage board --videos camel --cuda 1
 각 단계는 여전히 **단독 실행 가능**하다. `run_lbm_lite.py` 는 subprocess 로 부르기만 한다:
 
 ```bash
-CUDA_VISIBLE_DEVICES=1 $PY scripts/build_scene_graph.py     --video camel
-CUDA_VISIBLE_DEVICES=1 $PY scripts/build_candidate_board.py --video camel
+CUDA_VISIBLE_DEVICES=1 $PY fit/graph/build_scene_graph.py     --video camel
+CUDA_VISIBLE_DEVICES=1 $PY fit/bank/build_candidate_board.py --video camel
 CUDA_VISIBLE_DEVICES=1 $PY -m lbm.loop                      --video camel
 CUDA_VISIBLE_DEVICES=1 $PY decode/build_poses.py            --video camel
 CUDA_VISIBLE_DEVICES=1 $PY decode/emit.py                   --video camel
@@ -57,7 +57,7 @@ CUDA_VISIBLE_DEVICES=1 $PY verify.py                        --video camel
 `--help` 로 import 를 찔러보고, 실패하면 멈추고 `conda run -n <env>` 명령을 찍는다.
 
 VLM 백엔드는 로컬 vLLM `Qwen/Qwen3-VL-30B-A3B-Instruct` @ `http://127.0.0.1:22002/v1`
-(`scripts/serve_qwen3vl.sh`). `--api_base`/`--model` 로 교체 가능.
+(`exec/serve_qwen3vl.sh`). `--api_base`/`--model` 로 교체 가능.
 
 ### 설정
 
@@ -77,10 +77,10 @@ bool 은 집 스타일 `--flag`/`--no_flag` 쌍으로 나간다 (`"allow_zoom": 
 
 | stage | 스크립트 | 산출물 |
 |---|---|---|
-| `nouns`* | `scripts/extract_static_nouns.py` | `out/static_nouns/static_nouns.json` |
-| `seg`* | `scripts/sam3_static_instances.py` | `<eval_data>/eval_data/seg_instances_static/<video>/` |
-| `graph` | `scripts/build_scene_graph.py` | `out/<video>/scene_graph.json`, `vis/obb_overlay.mp4`, `vis/topdown.png` |
-| `board` | `scripts/build_candidate_board.py` | `out/<video>/board/{board_candidates.png, source_frames.png, contract.txt, gates.csv, board.json}`, `cloud.npz` |
+| `nouns`* | `fit/graph/extract_static_nouns.py` | `out/static_nouns/static_nouns.json` |
+| `seg`* | `fit/ingest/sam3_static_instances.py` | `<eval_data>/eval_data/seg_instances_static/<video>/` |
+| `graph` | `fit/graph/build_scene_graph.py` | `out/<video>/scene_graph.json`, `vis/obb_overlay.mp4`, `vis/topdown.png` |
+| `board` | `fit/bank/build_candidate_board.py` | `out/<video>/board/{board_candidates.png, source_frames.png, contract.txt, gates.csv, board.json}`, `cloud.npz` |
 | `loop` | `python -m lbm.loop` | `out/<video>/decision.json`, `trace/turn_<nn>.json`, `trace/board_presets.png` |
 | `decode` | `decode/build_poses.py` | `out/<video>/poses.npz` (49,4,4) |
 | `emit` | `decode/emit.py` | `out/<video>/canonical/{canonical.json, canonical.npz}` + `emit_model_cams.py` 명령 |
@@ -398,7 +398,7 @@ truck" 이 되는 것이고 의도한 동작이다. **frame0 위치는 안 바�
   **D94 에서 static/track 이름 규칙이 맞춰졌다** — 양쪽 다 `hold`=완전고정 /
   `_look_at`=조준추종 이다 (옛 `*_hold`=조준추종, 옛 `*_hold_dont_look`=완전고정).
 - **회전 전용 3종** `ROTATION_ONLY_PRESETS = pan_left / pan_right / pan_right_zoom_out`
-  (`scripts/sample_camera_bank.py:92`). 이동이 0 이라 τ 이분법이 아무 스케일에서나 같은 τ 를 내고
+  (`fit/bank/sample_camera_bank.py:92`). 이동이 0 이라 τ 이분법이 아무 스케일에서나 같은 τ 를 내고
   항상 `max_scale=4.0` 으로 saturate 한다 — 뱅크는 이 3종에만 divisor 를 `FIT_TAU_MAX_SCALE` 로
   바꿔서 크기를 정한다(`:133`).
 - **zoom 2종은 기본 off.** `--allow_zoom` 없으면 후보에서 빠진다. focal 은 SE(3) 밖이라
@@ -420,7 +420,7 @@ truck" 이 되는 것이고 의도한 동작이다. **frame0 위치는 안 바�
   variant["aim"])` 처럼 `aim` 을 같이 넘겨야 한다** — `LEGACY_AIM_COLLISIONS` 가 그때만
   `dolly_*_dont_look` 으로 되돌린다. 안 넘기면 옛 행이 조용히 반대 문구를 받는다.
 
-### preset 에 직교하는 손잡이 (뱅크 축, `scripts/sample_camera_bank.py`)
+### preset 에 직교하는 손잡이 (뱅크 축, `fit/bank/sample_camera_bank.py`)
 
 | 손잡이 | 값 | 기본 |
 |---|---|---|
@@ -484,7 +484,7 @@ truck" 이 되는 것이고 의도한 동작이다. **frame0 위치는 안 바�
 - **board 는 9칸이 기본**(3×3, 640×360). 27칸(4352×818, 5.32:1)은 select 턴 100 draw 중 7개가
   `max_tokens` 에서 잘렸고(9칸 0/100) 숫자를 빼면 최상위 타일 픽이 0/5 로 무너진다.
 
-재현: `scripts/ablate_vlm_hole_perception.py --turn both`.
+재현: `eval/ablate_vlm_hole_perception.py --turn both`.
 
 ---
 

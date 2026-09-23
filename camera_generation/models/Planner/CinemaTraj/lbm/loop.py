@@ -22,7 +22,7 @@ LBM 원본의 Director→Cinematographer→VideoEngineer 3단 핸드오프를 �
 프리뷰는 **최종 디코더와 같은 코드**(`decode.build_poses.build_poses`)로 만든다. 다른 코드로
 그리면 board 에서 고른 것과 실제로 나오는 궤적이 갈라진다.
 
-env: `vista4d` (렌더러가 GPU 를 쓴다). VLM 서버는 `bash scripts/serve_qwen3vl.sh` 로 먼저 띄운다.
+env: `vista4d` (렌더러가 GPU 를 쓴다). VLM 서버는 `bash exec/serve_qwen3vl.sh` 로 먼저 띄운다.
 
 예시:
     CUDA_VISIBLE_DEVICES=0 python -m lbm.loop --video camel
@@ -54,8 +54,8 @@ from lbm.vlm import DEFAULT_API_BASE, DEFAULT_MODEL, VLMClient                  
 from scene_graph.io import load_scene                                            # noqa: E402
 from scene_graph.lift import apply_transform                                     # noqa: E402
 from scene_graph.obb import node_obb_at, obb_corners                             # noqa: E402
-from scripts.build_candidate_board import subject_track_volume                   # noqa: E402
-from scripts.build_decision_fallback import fallback_decision                    # noqa: E402
+from fit.bank.build_candidate_board import subject_track_volume                   # noqa: E402
+from fit.bank.build_decision_fallback import fallback_decision                    # noqa: E402
 
 SPEEDS = ("steady", "accel", "decel", "ease")
 # D127. `drift`(0.6) 삭제 — 조준은 "안 함(world)" 아니면 "한다(lock)" 둘뿐이다.

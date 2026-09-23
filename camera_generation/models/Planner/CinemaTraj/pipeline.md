@@ -409,30 +409,30 @@ target 은 우선 man 만"*.
 ## 실사 영상 (dynpose 880편 기준)
 
 ```bash
-# S1  VLM 명사 (선행: scripts/serve_qwen3vl.sh 로 vLLM 기동)
-screen -dmS nouns bash scripts/run_dynpose_d145_nouns.sh
+# S1  VLM 명사 (선행: exec/serve_qwen3vl.sh 로 vLLM 기동)
+screen -dmS nouns bash exec/_legacy/run_dynpose_d145_nouns.sh
 # S2  SAM3 동적
-screen -dmS sam0 bash scripts/run_dynpose_d145_sam3.sh <gpu> 0 2
+screen -dmS sam0 bash exec/_legacy/run_dynpose_d145_sam3.sh <gpu> 0 2
 #     SAM3 정적
-python scripts/extract_static_nouns.py --source vlm
-CUDA_VISIBLE_DEVICES=<gpu> python scripts/sam3_static_instances.py --num_shards 2 --shard_id 0
+python fit/graph/extract_static_nouns.py --source vlm
+CUDA_VISIBLE_DEVICES=<gpu> python fit/ingest/sam3_static_instances.py --num_shards 2 --shard_id 0
 # S3  GeoCalib 사이드카 (env geocalib)
-bash scripts/run_dynpose_d148_geocalib.sh <gpu> 0 2 <video_list>
+bash exec/_legacy/run_dynpose_d148_geocalib.sh <gpu> 0 2 <video_list>
 # S4~S9  그래프 → cloud → route → τ → fit → emit
-bash scripts/run_dynpose_d129_shard.sh <gpu> 0 4 <video_list> <log_dir>
+bash exec/_legacy/run_dynpose_d129_shard.sh <gpu> 0 4 <video_list> <log_dir>
 # S10~S11  describe → 캡션 → export → dd10
-bash scripts/run_dynpose_d147_caption_export.sh
+bash exec/_legacy/run_dynpose_d147_caption_export.sh
 ```
 
 ## TRUMANS
 
 ```bash
-bash scripts/run_trumans_d132_shard.sh <gpu> <shard> <nshard> <chunk_list> <log_dir>
+bash exec/_legacy/run_trumans_d132_shard.sh <gpu> <shard> <nshard> <chunk_list> <log_dir>
 #   PREP=1 (기본) 프런트엔드(⓪-a graph / ⓪-b cloud / ⓪-c mesh_grid)까지 빌드
 #   PREP=0        원본 48-chunk 실행을 비트 동일하게 재현
-python scripts/build_trumans_metadata.py
-python scripts/build_bank_captions.py --label_map <map> ...
-python scripts/trumans_lite_to_dl3dv.py --layout per_recording ...
+python fit/ingest/build_trumans_metadata.py
+python fit/caption/build_bank_captions.py --label_map <map> ...
+python fit/ingest/trumans_lite_to_dl3dv.py --layout per_recording ...
 ```
 
 ## env

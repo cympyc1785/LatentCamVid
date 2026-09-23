@@ -46,7 +46,7 @@ tools: Read, Grep, Glob, Bash
 <CinemaTraj>/out/<video>/scene_graph.json           노드 OBB · track · ground_z · gravity
 <CinemaTraj>/out/<video>/<bank>/{bank.csv,bank.json,poses.npz,skipped.json}
 <CinemaTraj>/configs/bank/*.json                    세대 설정 ("extends" 로 부모 상속)
-<CinemaTraj>/{CHANGELOG.md,DECISIONS.log}            세대별 결정 이력 (DECISIONS 가 원본)
+<CinemaTraj>/{CHANGELOG.md,DECISIONS.md}            세대별 결정 이력 (DECISIONS 가 원본)
 ```
 
 **코드 배치는 안정적이지 않다 — 경로를 기억하지 마라.** 디렉토리 구조가 재편되는 중이라
@@ -62,7 +62,7 @@ grep -rn 'def solve_knob' --include='*.py' <CinemaTraj>
 
 보고서에 경로를 인용할 때는 **그때 실제로 확인한 경로**를 쓴다. 기억이나 관례로 적지 않는다.
 
-규모: 씬 129 · 뱅크 세대 121 · `bank.csv` 1,187 · config 56 · `DECISIONS.log` 2,946줄.
+규모: 씬 129 · 뱅크 세대 121 · `bank.csv` 1,187 · config 56 · `DECISIONS.md` 2,946줄.
 **전수 스캔은 glob + python 집계로 한다** — 파일을 하나씩 Read 하면 컨텍스트가 먼저 터진다.
 `out/` 아래가 매우 크므로 `find` 를 레포 전체에 거는 것은 피한다 (코드 디렉토리로 좁힌다).
 

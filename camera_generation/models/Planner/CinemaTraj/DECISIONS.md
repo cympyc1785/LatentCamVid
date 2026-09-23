@@ -132,7 +132,7 @@
   저자들 스스로 `README.md:200` 에서 Grounded SAM 2 로 마스크를 뽑고 카메라는 UI 로 손수
   설계했다고 적어놨고, `:249` 가 그 열을 "Dynamic keywords used to obtain the segmentation map"
   이라고 정의한다. **배포 시엔 없는 데이터**이므로 detector 비교의 기준으로 쓰면 안 된다.
-- `scripts/extract_nouns_vlm.py` 가 그 자리를 채운다. 프레임 → Qwen3-VL → `{dynamic, static,
+- `fit/graph/extract_nouns_vlm.py` 가 그 자리를 채운다. 프레임 → Qwen3-VL → `{dynamic, static,
   subject}`. 계획서의 `extract_static_nouns.py`(metadata.csv `prompt` 열 파싱, `--llm` 선택)를
   **이걸로 대체**한다 — `prompt` 열도 같은 이유로 배포 시 없다.
 - 프롬프트에 "이미 적은 것의 상위어를 쓰지 말라"를 넣었다. GDINO caption 은 `" . "` 이어붙이기고
@@ -522,7 +522,7 @@ verify 도 `hole_fraction` 0.0737215 / 0.327682 로 복귀했다 (avocado `subje
 
 ### D28 정적 명사에는 **두 겹의 필터**를 건다 (동적 중복 · 광역 표면)
 
-계획서 7단계. `scripts/extract_static_nouns.py` 는 명사 목록을 만들기만 하는 게 아니라 거른다.
+계획서 7단계. `fit/graph/extract_static_nouns.py` 는 명사 목록을 만들기만 하는 게 아니라 거른다.
 거르지 않으면 두 가지가 깨지고, 둘 다 **조용히** 깨진다 (그림으로는 안 보이고 VLM 프롬프트
 텍스트에서만 드러난다).
 
@@ -719,7 +719,7 @@ table` 의 extent 가 `0.38,0.35,0.02` 로 h=0.02 인 판때기다 — ② 깊�
 **같은 프롬프트 텍스트에 preset 별 `coverage_min`/`coverage_end` 가 이미 들어 있어서**
 "magenta 를 봤다" 와 "0.68/0.60/0.69 를 읽고 magenta 라는 단어를 붙였다" 가 구분되지 않았다.
 
-`scripts/ablate_vlm_hole_perception.py` 로 4조건 × 3 draw × 2영상 = 24콜:
+`eval/ablate_vlm_hole_perception.py` 로 4조건 × 3 draw × 2영상 = 24콜:
 
 | 조건 | 그림 | coverage 숫자 | camel picks | avocado picks |
 |---|---|---|---|---|
@@ -793,7 +793,7 @@ VLM 의 자체 magenta 판정이 중간 구간에서 틀린다는 걸 보였고 
 
 D34 가 "안 한 것"으로 남긴 세 가지 중 두 가지를 했다 — ① temperature 를 올려 prior 흔들기
 ② 후보 `select` 턴 ablation ③ **그림 개입**(구멍 없는 렌더에 가짜 magenta 를 칠하기).
-(GPT-4.1 대조는 여전히 안 했다.) `scripts/ablate_vlm_hole_perception.py` 를 v2
+(GPT-4.1 대조는 여전히 안 했다.) `eval/ablate_vlm_hole_perception.py` 를 v2
 (`vlm_hole_ablation_v2`)로 다시 썼다. `select` 턴은 trace 가 없어서
 `out/<video>/board/contract.txt` + `lbm/prompts/system_select.md` + `[board_candidates.png,
 source_frames.png]` 로 프롬프트를 재구성한다.
@@ -868,7 +868,7 @@ camel 은 배경 0.03~0.15 위에 0.36~0.39 를 얹으니 대비가 명확하고
 작동**하고, 구멍이 많은 씬에서는 숫자가 유일하게 작동하는 채널이다. D35 의 "coverage 열을 빼지
 않는다" 결정을 그대로 굳힌다.
 
-**적용한 설정** (`scripts/build_candidate_board.py` 기본값):
+**적용한 설정** (`fit/bank/build_candidate_board.py` 기본값):
 `--board_size 27 --board_columns 9 --tile_width 480 --tile_height 270`
 → **`9 / 3 / 640 / 360`**. 예전 동작은 저 플래그 4개로 그대로 재현된다.
 `max_tokens` 는 2048 유지 (9칸에서 잘림 0/100 이라 올릴 이유가 없다).
@@ -923,7 +923,7 @@ preset 턴은 prior 라고 했으므로 **먹힐 가능성은 낮다.** ② `sta
 
 ---
 
-## 9단계 — camera augmentation sampler (`scripts/sample_camera_bank.py`)
+## 9단계 — camera augmentation sampler (`fit/bank/sample_camera_bank.py`)
 
 목표가 바뀌었다 (사용자, 2026-08-21): **"이 씬에 가장 좋은 카메라 1개"가 아니라 "다양한 카메라
 N개"**. 소스 카메라 움직임을 재현하는 게 아니라 augmentation 이다.
@@ -1011,7 +1011,7 @@ avocado-slice 406 (7 × 14 × 4 + 7 × 2).
 
 ---
 
-## 10단계 — preset 별 크기 상한 (`scripts/fit_hole_ladder.py`)
+## 10단계 — preset 별 크기 상한 (`fit/bank/fit_hole_ladder.py`)
 
 ### D42 상한은 τ 한 값이 아니라 **preset 마다 다른 값**이다 — hole 을 고정하고 τ 를 푼다
 
@@ -1127,7 +1127,7 @@ subject 를 담고 있나"**. 뱅크는 둘 다 열로 갖고 있고, 어느 쪽
 **+0.059** (avocado) — 사실상 0 이고 camel 은 부호마저 반대다 (위반 변이의 평균 hole 0.280 <
 정상 0.337). `corr(hole, occlusion_pass)` 도 −0.199 / −0.031.
 
-실측 (`scripts/audit_bank_geometry.py`, 소스 7프레임 재투영, margin 0.02·S):
+실측 (`eval/audit_bank_geometry.py`, 소스 7프레임 재투영, margin 0.02·S):
 
 | 뱅크 | 변이 | G1 위반 | G3 `occlusion_pass < 0.4` | 둘 다 | 둘 중 하나 |
 |---|---|---|---|---|---|
@@ -1510,7 +1510,7 @@ augmentation** 이므로 하류로 넘어갈 단위도 뱅크 전체여야 하�
 
 **이을 자리는 이미 나 있었다.** `canonical.json` 의 `cameras` 는 처음부터 **태그 → 궤적 dict**
 이고 `emit_model_cams.py:394,423` 은 `--cameras all` 로 전 태그를 돌며 `rel_c2w` 만 읽는다.
-그래서 `scripts/emit_bank.py` 는 새 스키마를 정의하지 않는다 — `build_canonical()` 을 변이마다
+그래서 `fit/bank/emit_bank.py` 는 새 스키마를 정의하지 않는다 — `build_canonical()` 을 변이마다
 부르고 `cameras` 만 합친다. canonical 규약(`rel[0]=I`, 단위 스케일, 21 index pick)의 구현은
 계속 `decode/emit.py` 한 곳이다. 태그는 `variant_id` 그대로 써서 하류 결과 파일명만으로
 "어느 anchor 의 어느 preset 이 어느 hole 단에서 깨졌나"를 되짚을 수 있게 한다.
@@ -1709,7 +1709,7 @@ camel `stat_3` × `pull_out_arc`/`straight_ease`, 단 Δ0.35).
 두 장(subject 만 / 전체)의 깊이를 비교하는데, **가리는 물체가 재구성이 안 됐으면 거기가 구멍**이라
 subject 가 그대로 비쳐서 "안 가려짐"으로 읽힌다. 생성 모델은 그 물체를 그릴 텐데도.
 
-`scripts/audit_bank_geometry.py --obb_occlusion` 을 만들어 재봤다 (렌더 0회 — 노드 OBB 를 투영해
+`eval/audit_bank_geometry.py --obb_occlusion` 을 만들어 재봤다 (렌더 0회 — 노드 OBB 를 투영해
 convex hull 로 painter's algorithm, 노드별 꼭짓점 z 중앙값으로 정렬). 두 측정의 불일치:
 
 | | camel 336 | avocado-slice 392 |
@@ -1962,7 +1962,7 @@ CLI 인자 46 → 39.
 
 **다른 건 진단 열 둘뿐이고, 렌더러 비결정성으로 설명된다.** `near_depth` 78/168 행
 (상대차 median 0.00% / p90 3.28% / max 18.20%), `subject_area_med` 45/168 행 (−4.35% ~ +0.36%).
-`scripts/probe_near_depth_repeat.py` 로 **같은 pose·같은 프로세스**에서 반복 측정:
+`eval/probe_near_depth_repeat.py` 로 **같은 pose·같은 프로세스**에서 반복 측정:
 
 | 변이 | 뱅크 | 재현 ×4 | 재현 산포 |
 |---|---|---|---|
@@ -2016,7 +2016,7 @@ mAP 전부 부재. 게다가 Collision Rate 는 optimizer 가 최소화하는 **
 가 5% 위면 λ_sdf 를 두 배(최대 10³)" 라는 규칙까지 있어 **보고 지표가 정지 조건이기도 하다**.
 한계 항목(Appendix K.1–K.4)에 미관측 공간·가림·monocular 얘기는 **없다**.
 
-**우리 쪽 (`scripts/probe_static_sdf.py` 실측).** 우리는 재료가 반대다 — 우리 SDF 는 **관측된
+**우리 쪽 (`eval/probe_static_sdf.py` 실측).** 우리는 재료가 반대다 — 우리 SDF 는 **관측된
 표면**에서 space carving 으로 만들 수밖에 없고, 그러면 세 번째 라벨이 반드시 생긴다:
 
 ```
@@ -2064,7 +2064,7 @@ UNKNOWN  둘 다 아니면 = 가려졌거나 **화각 밖**       (FREE 가 OCCU
 
 D58 이 "CinemaTraj SDF 는 관측이 아니라 박스 월드"라고 결론냈지만, 그 박스 월드에는
 **벽·바닥·천장**이 들어 있고 우리 노드 목록에는 없다. 그래서 "그 부분만이라도 가져올 수 있나"를
-따로 쟀다 (`scripts/probe_wall_planes.py`).
+따로 쟀다 (`eval/probe_wall_planes.py`).
 
 **셋으로 갈린다.**
 
@@ -2303,8 +2303,8 @@ D61 의 실측표와 비교가 안 된다. 상한은 `build_scene_graph.py` 플�
    계산에서 뺀다). G6 지면 게이트는 이 노드를 쓴다. 1번보다 스키마 변경이 크다.
 3. 그냥 노드로 넣는다. **비권장** — 위 이유로 뱅크가 전멸한다. 넣으려면 G5 를 먼저 고쳐야 한다.
 
-적용 지점: `scripts/build_scene_graph.py --max_dyn_nodes 3 --max_stat_nodes 5`,
-`scripts/extract_static_nouns.py` 의 `SURFACE_NOUNS` / `--max_nouns`, 그리고 1번을 택하면
+적용 지점: `fit/graph/build_scene_graph.py --max_dyn_nodes 3 --max_stat_nodes 5`,
+`fit/graph/extract_static_nouns.py` 의 `SURFACE_NOUNS` / `--max_nouns`, 그리고 1번을 택하면
 `scene_graph/gravity.py` 가 floor mask 를 받도록 인자 추가.
 
 ---
@@ -2654,7 +2654,7 @@ TRUMANS 6편 30개 clip **전량**이 1프레임. `renders/<shot>/<cam>/frames/f
 (3.6→1.80 / 3.0→1.52 / 2.5→1.24 / 3.8→1.92), 선언 fps 25 로 틀면 2배속이다. 의도 속도는 12.5 fps.
 
 지금은 고치지 않았다 — 우리가 LBM 에서 필요한 건 카메라 궤적이지 mp4 가 아니고, PNG 를 직접
-읽는 경로(`scripts/concat_videos.py --inputs <frames dir>`)를 뚫어놨다.
+읽는 경로(`viz/concat_videos.py --inputs <frames dir>`)를 뚫어놨다.
 
 선택지:
 1. **(선택함) 안 고치고 PNG 를 읽는다.** vendored LBM 을 안 건드린다. 비용: 렌더를 볼 때마다
@@ -2751,7 +2751,7 @@ D75 에서 이 두 문자열은 **`_locked` 의 별칭**(`aim="traj"`)이었다.
 
 ### 상류 LBM 어휘는 rename 대상이 아니다
 
-`scripts/expand_preset_variants.py` 의 `SHAPE_PRESETS`/`STATIC_PRESETS` 와
+`fit/bank/expand_preset_variants.py` 의 `SHAPE_PRESETS`/`STATIC_PRESETS` 와
 `scripts/trumans_to_lbm_demo.py` 의 이름들은 우리 `PRESETS` 가 아니라 원본 LBM
 `VideoEngineer/video_runtime.py:15-33 PRESET_NAMES` 로 나가는 문자열이다
 (`trajectory_plan.preset_name` → LBM `build_trajectory_plan`). 우리가 이름을 바꿔도 LBM 은
@@ -2891,7 +2891,7 @@ collision 4 → 16 이 F11(13→49)의 직접 효과다. obb 86 → 60 은 그�
 
 ### 실행
 
-`scripts/run_k6_d115_shard.sh`(vista) / `scripts/run_trumans_d115_shard.sh`(TRUMANS).
+`exec/_legacy/run_k6_d115_shard.sh`(vista) / `exec/_legacy/run_trumans_d115_shard.sh`(TRUMANS).
 vista 51편(camel 제외) 4샤드 = screen `bake1..bake4`, GPU 3/4/5/6.
 TRUMANS `tru_1d076f8c` 20 chunk 1샤드 = screen `bake5`, GPU 7.
 단계마다 마커(`.graph_s115` / `.cloud_s115`)와 산출물 존재 검사가 있어 재시작이 안전하다.

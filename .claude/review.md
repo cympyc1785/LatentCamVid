@@ -292,7 +292,7 @@ snowboard 0건) 4씬 위의 결론은 씬 우연이다.
   늘려도 n=4 다. (vista 4씬은 d77 과 눈금 맞추기용 paired 축으로 남기고 별도로 본다)
 
 ### C6 🔴 이 레포는 **자기 VLM 이 그림을 잘 안 본다는 것을 이미 증명해 놓았다**
-`DECISIONS.log` D34/D35/D36 + `scripts/ablate_vlm_hole_perception.py` 실측:
+`DECISIONS.md` D34/D35/D36 + `scripts/ablate_vlm_hole_perception.py` 실측:
 traj 턴은 9조건×2영상×3draw=54 draw 중 49가 같은 답. 이름 중립화(`M01..M13`)·행 셔플·
 temperature 1.0·숫자 반전·**가짜 magenta 칠하기** 다섯 개 전부 못 흔들었다. select 턴은 숫자 우세.
 구멍 많은 씬(avocado)에서는 그림 채널이 아예 죽는다.

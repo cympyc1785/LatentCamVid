@@ -59,8 +59,15 @@ main 이 **명시적으로 ledger 경로를 줬을 때만** 쓴다. 한 줄 = �
 가로질러 비교하기 위한 것이다 (예: d259 / d260 / d261 뱅크 감사를 나란히).
 
 ```
-/data1/cympyc1785/LatentCamVid/results/agent/<name>.jsonl
+/data1/cympyc1785/LatentCamVid/.claude/ledger/<name>.jsonl
 ```
+
+`results/` 가 아니라 `.claude/` 인 이유: `results/` 는 gitignore 대상이라 ledger 가 디스크에만
+남고 버전 관리가 안 된다 — "장기 기억" 이 존재 이유인데 그러면 다른 머신에서 보이지도, 언제
+어떤 값이었는지 되짚지도 못한다. `.claude/` 는 추적되고 **"에이전트만 읽는 문서는 `.claude/`
+아래"** 규약에도 맞는다. 확장자는 **`.jsonl`** 이다 (`*.log` 는 gitignore 에 걸린다).
+파일 이름은 **답하는 질문**으로 짓는다 (`bank_audit.jsonl`) — 한 파일에 성격이 다른 행을 섞으면
+키 집합이 늘어 아래 규칙이 깨진다.
 
 - **JSONL 한 줄만 append.** 기존 줄을 고치거나 지우지 않는다.
 - **한 줄 500 바이트 이내.** 서술을 넣지 말고 수치만 넣는다.

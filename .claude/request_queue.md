@@ -5,6 +5,8 @@
 
 - **Request** — 접수만 된 것. 아직 손대지 않았다.
 - **Working** — 지금 수행 중인 것. **동시에 하나만** 둔다.
+- **Wait** — 긴급 요청 때문에 **중단하고 비켜 둔 것.** 어디까지 했는지 한 줄 적어 두고,
+  긴급 건이 끝나면 다시 `Working` 으로 돌린다.
 - **Done** — 끝난 것. 한 줄 진행 내역을 같이 적는다.
 - **Incomplete** — 보류·차단된 것. **사유를 반드시 적고**, 다음 request 로 넘어간다.
 
@@ -60,11 +62,26 @@
 ### R15. 최종 git 정리 + 커밋
 데이터는 추적 제외, 나머지 미추적 수정사항은 추적되게 한 뒤 커밋.
 
+### R17. 타임라인 문서는 `.md` 말고 `.log` 로
+`fix`, `decision` 처럼 시간순으로 계속 늘어나는 문서는 확장자를 `.log` 로 바꾼다.
+대상: `CinemaTraj/fix.md` · `CinemaTraj/DECISIONS.md` (+ `LBM_DEFECTS.md`,
+`latentcam/docs/known_issues.md` 는 제안). `CHANGELOG.md` 4종은 Keep a Changelog 규약이라 제외.
+
+### R18. 긴급 끼어들기 규약 (`## Wait` 구역)
+`[긴급]` 접두사 또는 "이것부터 먼저" 요청이 오면 하던 것을 `## Wait` 로 비켜 두고 긴급 건을
+먼저 처리한 뒤 복귀. 큐 파일과 `CLAUDE.md` 양쪽에 규약 기록.
+
 ---
 
 ## Working
 
 ### R6. scripts/ 재분류 (exec / fit / eval / viz) — 계획 승인 필요
+
+---
+
+## Wait
+
+_(비어 있음)_
 
 ---
 

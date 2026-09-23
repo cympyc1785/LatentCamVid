@@ -11,6 +11,18 @@ Follows [Keep a Changelog](https://keepachangelog.com/).
 
 ### Added
 
+- **D272 — board 후보 시작 카메라로 TRUMANS source video (2026-09-23, R22 재계획).** 사용자 정정:
+  요청은 "sweep66 후보 시작 카메라로 source video 를 만드는 것" 이었다 (D271 은 옛 source 위 뱅크라
+  중단). 추가 지시 "같은 시간에 대해서 시작점이 같은 카메라 2개씩 다른 시작 카메라로 2x2".
+  - `fit/ingest/trumans_to_recon.py --board_json/--board_chunk/--board_candidate/--board_slot/
+    --exclude_presets` — 창 = board chunk 프레임, frame0 = board 후보 pose 그대로 (preset 만 흔든다).
+    작업 파일 접미사가 `_aNN` 대신 `<chunk>_kNNN_pN` 이라 같은 chunk 병렬 실행이 안 겹친다.
+    `synth_source_path(keep_start_z=True)` 는 board 모드에서만 — 바닥 클램프(0.25·h)가 board 의
+    low-angle 후보를 +6.4 cm 들어올리던 것을 막는다. 인자를 안 주면 기존 action 모드 비트 동일.
+  - `exec/run_board_sources.py --stage plan|render|report` — chunk 마다 시작점 2개(반경 또는 방위
+    ≥60° 차이) x 시작점당 움직이는 preset 2개(`hold` 제외). EEVEE 는 EGL 이라
+    `CUDA_VISIBLE_DEVICES` 를 무시해(실측: GPU 2 지정 → GPU 0 에 뜸) RGB 를 Cycles 32 spp 로 렌더.
+
 - **D271 — TRUMANS 737 clip 전량 구축 배선 (2026-09-23, R22).** 사용자 승인 계획: D266T gate
   (bank = elev + framing≥0.6, 충돌·가림은 mesh raycast 사후) + raycast 통과 사다리 칸 **전부** +
   GPU 3 + Qwen3-VL 캡션 단독 코퍼스.

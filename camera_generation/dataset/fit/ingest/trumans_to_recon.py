@@ -509,7 +509,7 @@ def renders_match(render_dir, poses, num_frames, rgb_engine="eevee"):
 
 
 def synth_source_path(probe, candidate, preset, aim_bias, track_gain,
-                      preset_scale=1.0, smooth_window=11, aim_keyframes=0):
+                      preset_scale=1.0, smooth_window=11, aim_keyframes=0, keep_start_z=False):
     """검증된 시작 pose + preset → (49,4,4) OpenCV c2w (TRUMANS world).
 
     높이는 **일정**하게 유지한다 (실제 pkl 2편의 z-span 이 정확히 0 이었다). `dheight` 가 있는
@@ -568,12 +568,18 @@ def synth_source_path(probe, candidate, preset, aim_bias, track_gain,
     rad = np.maximum(0.6, radius + spec["dradius"] * ease)
     zed = z0 + spec["dheight"] * ease
 
+    #    바닥 클램프 높이. `keep_start_z` (D272 board 모드) 면 시작 높이보다 위로는 안 올린다 —
+    #    board 는 `--min_height 0.30` 으로 0.25·h 보다 낮은 low-angle 후보를 통과시키는데, 그걸
+    #    0.25·h 로 끌어올리면 frame0 이 board 가 검증한 pose 가 아니게 된다 (실측 +6.4 cm).
+    z_floor = floor_z + 0.25 * height
+    if keep_start_z:
+        z_floor = min(z_floor, z0)
     positions = np.zeros((NUM_FRAMES, 3))
     for i in range(NUM_FRAMES):
         position = np.array([pivot[i, 0] + rad[i] * np.cos(phi[i]),
                              pivot[i, 1] + rad[i] * np.sin(phi[i]),
                              zed[i] + (pivot[i, 2] - pivot[0, 2])])
-        position[2] = max(position[2], floor_z + 0.25 * height)   # 바닥 밑으로 안 내려간다
+        position[2] = max(position[2], z_floor)   # 바닥 밑으로 안 내려간다
         positions[i] = position
 
     poses = np.zeros((NUM_FRAMES, 4, 4))
@@ -838,10 +844,41 @@ def main(args):
                   f"{(hit[0] if hit else '-'):>10s}  {action['text'][:40]}{extra}")
         return
 
-    assert 0 <= args.action < len(actions), f"--action 은 0..{len(actions) - 1}"
-    action = actions[args.action]
-    step = int(args.frame_step)
-    start, end = action_window(action, int(probe_meta["start"]), int(probe_meta["end"]), step)
+    board_cand, board_frames = None, []
+    if args.board_json:
+        #    `--board_json/--board_chunk/--board_candidate` (D272, 사용자 지시 2026-09-23 "후보군
+        #    시작 카메라로 source video"). 창은 action 이 아니라 **board chunk 의 프레임**이고,
+        #    시작 pose 는 자체 probe 격자에서 뽑지 않고 **board 후보 그대로**다. board 격자
+        #    (elev -10/10/25/45, r 1.1~2.6) 와 probe 격자 (elev 0/12/25/40, r 1.0~5.5) 가 거의 안
+        #    겹쳐서 `--anchor_cell` 로는 못 넘긴다 (tasks.md A1). action 은 창과 가장 많이 겹치는
+        #    것을 대표로 잡는다 — subject 결정·manifest 기록용이고, 캡션은 아래 `window_actions`
+        #    가 창에 걸친 action 을 전부 싣는다.
+        with open(args.board_json, encoding="utf-8") as file:
+            board = json.load(file)
+        chunk = next((c for c in board["chunks"] if c["tag"] == args.board_chunk), None)
+        assert chunk is not None, f"{args.board_json} 에 chunk {args.board_chunk} 가 없다"
+        board_cand = dict(chunk["candidates"][int(args.board_candidate)])
+        assert board_cand["usable"], (f"{args.board_chunk} 후보 {args.board_candidate} 는 board "
+                                      f"게이트 탈락이다: {board_cand['reject']}")
+        board_frames = [int(f) for f in chunk["frames"]]
+        assert len(board_frames) == NUM_FRAMES, f"board chunk 프레임 {len(board_frames)} != {NUM_FRAMES}"
+        step = int(board["frame_step"])
+        assert step == int(args.frame_step), (f"board frame_step {step} != --frame_step "
+                                              f"{args.frame_step} — 궤적 평활 폭이 어긋난다")
+        start, end = board_frames[0], board_frames[-1]
+        assert board_frames == list(range(start, end + 1, step)), "board 프레임이 균일 격자가 아니다"
+        overlap = [max(0, min(end, int(a["end"])) - max(start, int(a["start"])) + 1) for a in actions]
+        args.action = int(np.argmax(overlap)) if max(overlap) > 0 else 0
+        action = actions[args.action]
+    else:
+        assert 0 <= args.action < len(actions), f"--action 은 0..{len(actions) - 1}"
+        action = actions[args.action]
+        step = int(args.frame_step)
+        start, end = action_window(action, int(probe_meta["start"]), int(probe_meta["end"]), step)
+    # 작업 파일 접미사. action 모드는 예전 이름(`_aNN`) 그대로, board 모드는 chunk+후보라
+    # 같은 chunk 의 후보 여러 개가 병렬로 돌아도 서로의 probe/render 를 덮지 않는다.
+    ftag = (f"a{args.action:02d}" if board_cand is None
+            else f"{args.board_chunk}_k{int(args.board_candidate):03d}_p{int(args.board_slot)}")
 
     #    `--poses_override`: 카메라를 여기서 합성하지 않고 **밖에서 받아** 렌더만 한다.
     #    LBM 이 실제로 렌더한 카메라(`lbm_camera_to_poses.py` 산출물)를 Lite 뱅크와 **같은
@@ -885,7 +922,8 @@ def main(args):
                        "end": int(a["end"]), "text": a["text"]}
                       for i, a in enumerate(actions)
                       if int(a["start"]) <= end and int(a["end"]) >= start]
-    video = args.out_video or f"tru_{args.recording[:8]}_a{args.action:02d}"
+    video = args.out_video or (f"tru_{args.recording[:8]}_a{args.action:02d}" if board_cand is None
+                               else f"tru_{args.recording[:8]}_{ftag}")
     print(f"[{video}] action {args.action} '{action['text'][:44]}' -> frames {start}..{end} "
           f"step {step} ({NUM_FRAMES}장, {(NUM_FRAMES - 1) * step / args.motion_fps:.2f}s @ "
           f"{args.motion_fps / step:g}fps)  창 내 action {len(window_actions)}개")
@@ -900,7 +938,7 @@ def main(args):
           + (f"  prop {caption['prop']} {prop_names}" if prop_names else ""))
 
     # 1) 격자 probe
-    probe_path = path.join(work, f"probe_a{args.action:02d}.json")
+    probe_path = path.join(work, f"probe_{ftag}.json")
     timing["probe_grid"] = run_blender(
         args.blender, blend, path.join(HERE, "trumans_scene_probe.py"),
         ["--frames", str(start), str(end), str(step), "--out", probe_path,
@@ -918,7 +956,7 @@ def main(args):
               and c["floor_drop"] >= args.min_floor_drop]
     #    override 면 이 격자를 **쓰지 않는다** (카메라가 밖에서 온다). 후보가 0개인 것은
     #    그 자체로 진단이지 실패가 아니다 — 세워둔 카메라를 렌더하는 데는 지장이 없다.
-    if args.poses_override:
+    if args.poses_override or board_cand is not None:
         print(f"{'grid (참고용)':22s} usable {len(usable)}/{len(probe['candidates'])}")
     else:
         assert usable, (f"설 수 있는 후보가 없다 (clear&clearance>={args.min_clearance}"
@@ -958,11 +996,17 @@ def main(args):
         # 파이썬 `hash()` 는 문자열에 프로세스마다 다른 salt 를 쓴다 (PYTHONHASHSEED). 그걸로 seed 를
         # 만들면 같은 --seed 로 돌려도 매번 다른 카메라가 나오고, 렌더 재사용도 늘 빗나간다.
         key = f"{args.recording}|{args.action}|{args.seed}".encode()
+        if board_cand is not None:
+            key = f"{args.recording}|{ftag}|{args.seed}".encode()
         rng = np.random.default_rng(crc32(key))
         #    같은 방위각 구역(45도)에서 여러 개가 뽑히면 "다양한 시작점"이 아니다. 구역을 섞은 뒤
         #    구역마다 하나씩 뽑아 **재시도 순서**를 만든다 — 1지망이 궤적 검증에서 떨어져도
         #    방위각이 다른 2지망으로 넘어간다 (같은 구역 재시도는 사실상 같은 카메라다).
-        if args.radius_strata:
+        if board_cand is not None:
+            #    board 모드: 시작 pose 는 고정이고 흔드는 축은 preset 하나다. 아래 루프가
+            #    `order[i % len(order)]` 로 같은 후보를 돌면서 preset 만 바꾼다.
+            order = [[board_cand]]
+        elif args.radius_strata:
             #    반경도 같은 이유로 층화해야 한다. 격자 통과율이 반경에 따라 급락해서
             #    (7편 x 384 격자 실측: 1.5 m 50.3% / 2.2 m 23.2% / 3.0 m 8.4% / 4.0 m 2.3%)
             #    방위각만 층화하면 usable 풀이 1.5 m 로 60% 쏠리고 실제 채택은 **76% (72/95)**
@@ -995,6 +1039,10 @@ def main(args):
         #    **sweep 방향**이다 (같은 자리에서 왼쪽으로 돌면 벽, 오른쪽으로 돌면 뚫린다). 시작점만
         #    바꿔 재시도하면 그 축을 못 건드린다.
         presets = [args.preset] if args.preset else sorted(SOURCE_PRESETS)
+        #    `--exclude_presets` (D272): 같은 시작 pose 에서 두 번째 클립을 뽑을 때 첫 클립이 쓴
+        #    preset 을 뺀다 — 같은 시작점에서 **다른 움직임** 짝을 만드는 용도. 비면 그대로.
+        presets = [p for p in presets if p not in set(args.exclude_presets)]
+        assert presets, f"--exclude_presets {args.exclude_presets} 가 preset 을 전부 뺐다"
         rng.shuffle(presets)
         tries = []
         dropped = []
@@ -1017,14 +1065,15 @@ def main(args):
                   f"{sorted({f'{p}@r{r}' for r, p in dropped})}")
 
         synthesized = [synth_source_path(probe, c, p, args.aim_bias, args.track_gain,
-                                         args.preset_scale, smooth_window, args.aim_keyframes)
+                                         args.preset_scale, smooth_window, args.aim_keyframes,
+                                         keep_start_z=board_cand is not None)
                        for c, p in tries]
-        tries_path = path.join(work, f"tries_a{args.action:02d}.npz")
+        tries_path = path.join(work, f"tries_{ftag}.npz")
         np.savez(tries_path, cam_c2w=np.stack([p for p, _ in synthesized]))
 
         # 3) 궤적 검증 probe — 격자는 start/anchor/end 세 프레임뿐이라 이동 중 벽 통과를 못 잡는다.
         #    후보 전부를 **한 번의 Blender 기동**으로 검증한다 (기동+로드가 4초라 재시도가 비싸다).
-        verify_path = path.join(work, f"verify_a{args.action:02d}.json")
+        verify_path = path.join(work, f"verify_{ftag}.json")
         timing["probe_verify"] = run_blender(
             args.blender, blend, path.join(HERE, "trumans_scene_probe.py"),
             #    verify 도 **같은 subject** 로 돌려야 한다. 여기만 human 이면 시선 관통 판정이
@@ -1069,7 +1118,7 @@ def main(args):
               f"r {candidate['radius']:.1f} {preset})  clear {clear_frac:.2f}  "
               f"clearance {min_clearance:.3f}  "
               f"subject_dist {chosen.get('min_subject_dist', float('nan')):.3f}")
-    poses_path = path.join(work, f"poses_a{args.action:02d}.npz")
+    poses_path = path.join(work, f"poses_{ftag}.npz")
     #    override 면 **LBM 이 쓴 초점거리**를 같이 싣는다. `trumans_gt_render.load_poses_npz` 가
     #    `lens_mm` 을 보면 `--lens` 기본값(25 mm)을 무시하고 그 값을 쓴다 — LBM 은 24 mm 라
     #    이걸 안 실으면 화각이 4% 넓게 렌더돼서 프레이밍 지표가 통째로 어긋난다.
@@ -1081,7 +1130,7 @@ def main(args):
 
     # 4) GT 렌더. 이 단계만 3분대라 나머지 전부를 합친 것보다 20배 비싸다. 같은 pose 로 이미
     #    렌더해 뒀으면 재사용한다 — pose 를 대조하므로 stale 렌더를 집을 위험은 없다.
-    render_dir = path.join(work, f"render_a{args.action:02d}")
+    render_dir = path.join(work, f"render_{ftag}")
     if renders_match(render_dir, poses, num_frames=NUM_FRAMES, rgb_engine=args.rgb_engine):
         print(f"  렌더 재사용: {render_dir}")
         timing["render"] = 0.0
@@ -1121,6 +1170,15 @@ def main(args):
         # 창에 걸치는 action 전부. packer 가 caption 을 조립할 때 `action` 하나만 쓰면
         # step 3 (145프레임 창) 에서 클립의 69% 가 문장에 없는 동작을 보여준다.
         "window_actions": window_actions,
+        # D272 board 모드: 어느 board 후보에서 출발했나. 같은 chunk·같은 후보 = 같은 시작 pose.
+        "board": (None if board_cand is None else
+                  {"json": args.board_json, "chunk": args.board_chunk,
+                   "candidate": int(args.board_candidate), "slot": int(args.board_slot),
+                   "exclude_presets": list(args.exclude_presets),
+                   "azimuth_deg": board_cand["azimuth_deg"],
+                   "elevation_deg": board_cand["elevation_deg"],
+                   "radius": board_cand["radius"], "shot": board_cand.get("shot"),
+                   "position": board_cand["position"], "look_at": board_cand["look_at"]}),
         "frames": [start, end], "frame_step": step,
         # 실제 표본 격자. override 는 간격이 비균일해서 `frame_step` 만으로 못 되짚는다.
         "frame_list": frame_list,
@@ -1153,7 +1211,7 @@ def main(args):
                   "render": render_dir, "recon": out_recon, "seg": out_seg,
                   "seg_static": out_seg_static},
     }
-    with open(path.join(work, f"manifest_a{args.action:02d}.json"), "w", encoding="utf-8") as file:
+    with open(path.join(work, f"manifest_{ftag}.json"), "w", encoding="utf-8") as file:
         json.dump(manifest, file, ensure_ascii=False, indent=1)
 
     print(f"\n{'video':22s} {video}")
@@ -1237,6 +1295,13 @@ if __name__ == "__main__":
     # frame0 카메라를 클립 간 공유하려면 subject-local (방위각, 고도, 반경) 을 고정해야 한다
     # — position 만 공유해도 look_at 이 클립마다 달라 회전이 안 맞는다.
     parser.add_argument("--anchor_cell", default=[], nargs=3, type=float)
+    # D272 board 모드 — `trumans_first_pose_board.py` 의 board.json 에서 chunk 창 + 시작 pose.
+    # 셋 다 비면 예전 action 모드 그대로 (비트 동일).
+    parser.add_argument("--board_json", default="", type=str)
+    parser.add_argument("--board_chunk", default="", type=str)        # 예: c00_f00000
+    parser.add_argument("--board_candidate", default=-1, type=int)    # chunk["candidates"] 인덱스
+    parser.add_argument("--board_slot", default=0, type=int)          # 같은 시작 pose 의 몇 번째 클립
+    parser.add_argument("--exclude_presets", default=[], nargs="*", type=str)
     parser.add_argument("--seed", default=0, type=int)               # 시작 pose/preset 샘플 seed
     # 격자 원점. obb_center 는 subject-agnostic 이라 event/object 로 일반화되고 `anchor_cond` 가
     # 싣는 값과 원점이 일치한다. chest 는 human 전용이고 기존 뱅크 96편 재현 전용이다.

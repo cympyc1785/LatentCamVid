@@ -34,8 +34,10 @@ source video 는 `trumans_to_recon.py` 가 이미 Blender 합성 (follow + slow 
 ### R19~R22 — 전부 기동됨, 장시간 실행 감시 중 (2026-09-23) · 커밋 `bd78ac5`
 - R19 `dynpose_d200_siglip2_srccam` — SigLIP2 캐시 10169 완료 → smoke 통과 → **GPU 0 train2**.
 - R20 `dynpose_d200_umt5_srccam` — **GPU 1 train1** (~6 분/epoch).
-- R22 d271T 뱅크 737 clip — **GPU 3 4샤드** (clip 당 ~350 s). 이후 raycast → desc(vLLM) → captions → export.
-  첫 실패 1건 `tru_0ab03928_a13` fit: "소스 카메라가 mesh 격자에서 unreachable" (sample_camera_bank.py:403).
+- R22 **재계획 (사용자 정정 2026-09-23)**: 요청은 "sweep66 후보 시작 카메라로 **source video 를 새로 만드는**
+  계획" 이었다 — 옛 737 clip(자체 probe 격자 시작점) 에 뱅크를 돌린 것은 오해였다. 그 뱅크는
+  **Ctrl+C 로 중단** (310/737 완료분은 보존). 승인된 새 계획: board 807 chunk x **K=3** = 2,421 clip,
+  `trumans_to_recon.py --board` 모드(분기 추가) + `exec/run_board_sources.py` → 렌더 → d271 체인.
 - 공통 후속: srccam 계열은 `eval_testset.py` geo_proj MLP 미지원 (tasks.md A3) — testset eval 전 수리.
 
 ---

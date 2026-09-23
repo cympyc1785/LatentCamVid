@@ -7,6 +7,20 @@
 ## [Unreleased]
 
 ### Added
+- **`models/Vista4D/USAGE.md` 신설 — 우리가 이 모델을 어떻게 돌렸나 (2026-09-23, R12).**
+  upstream `README.md` 는 공식 데모 사용법이라, 우리 실행 경로가 어디에도 한 장으로 없었다.
+  8 절: ①한 장 요약(3-stage 도식) ②env·체크포인트 ③단일 씬 드라이버 `run_vista4d_gen.py`
+  ④공식 eval 전량 `run_eval_gen.sh` ⑤벤치마크 그리드 `run_grid.py --model vista4d`
+  ⑥카메라 규약 ⑦local 패치 ⑧이 트리를 읽어 가는 다른 코드 ⑨지뢰 12행.
+  인용한 `file:line` 은 전량 스크립트로 대조했다 (문제 0건).
+  - **추적되지 않는다.** `.gitignore` 의 `video_generation/models` 와 별개로 `Vista4D/` 가
+    **자기 `.git` 을 가진 별도 저장소**라, gitignore 에 `!` 예외를 넣어도 바깥 저장소가 그 안의
+    파일을 추적하지 못한다 (`git add` 가 조용히 아무것도 안 한다 — 시도해서 확인했다).
+    `.gitignore` 에는 그 사실만 주석으로 남겼다. 이 문서와 local 패치 2건은 재클론 시 소실된다.
+  - 기록하면서 바로잡은 것: FIX-11 이 적어 둔 `recon_and_seg_single.py:74-80` / `:142` 는
+    현재 `:75-81` / `:155` 로 밀렸고, `config.md` 의 `render_single.py:52-54` 는 `:57-58` 이다.
+    2026-08-19 eval 전량 실행이 쓴 GPU `0,1,6,7` 은 **"GPU 0~3 만"(2026-09-21) 이전** 기록이라
+    그대로 재현하면 안 된다고 명시했다.
 - **`results/20260819_vista4d_eval/run_eval_gen.sh` 가 절대경로 `CSV=` 를 받는다
   (2026-09-21, D221).** 두 단계 모두 `$R/$CSV` 로 고정돼 있어 metadata 를 그 결과 폴더 안에
   둘 때만 돌았다. 다른 작업(D221 은 `tmp/d221/`)의 metadata 를 먹이면

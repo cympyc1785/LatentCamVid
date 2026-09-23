@@ -221,6 +221,8 @@ DATA
 DATA/Vista4D-Eval-Data
 tools
 results
+meetings
+
 # camera_generation/models 는 vendored 모델 트리라 통째로 무시한다. 2026-09-09 부터 여기에
 # 예외가 하나 뚫려 있었다 — 논문 폴더 이름을 재사용한 우리 플래너 `Planner/CinemaTraj/` 다.
 # R7(2026-09-23) 로 그 코드가 `camera_generation/dataset/` 으로 나갔으므로 예외가 사라지고,
@@ -242,6 +244,8 @@ camera_generation/dataset/configs/datadop_shapes.json
 !camera_generation/dataset/fix.log
 !camera_generation/dataset/LBM_DEFECTS.log
 video_generation/tools
+# vendored 모델 트리. 개별 문서를 `!` 로 되살릴 수 없다 — `Vista4D/` 는 자체 `.git` 을 가진
+# 별도 저장소라 gitignore 를 풀어도 바깥 저장소가 그 안의 파일을 추적하지 않는다 (R12 실측).
 video_generation/models
 video_generation/results
 camera_generation/latentcam/results

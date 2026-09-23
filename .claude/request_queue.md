@@ -14,9 +14,6 @@
 
 ## Request
 
-### R13. `/data1/cympyc1785/LatentCamVid/pipeline.md`
-전체 파이프라인(데이터 구축 → 학습 → 평가, GenDoP·E.T. 비교 포함)의 위치와 구조.
-
 ### R14. `/data1/cympyc1785/LatentCamVid/context.md`
 컨텍스트에 남길 추가 사항.
 
@@ -27,8 +24,8 @@
 
 ## Working
 
-### R12. Vista4D `USAGE.md`
-해당 모델을 어떻게 돌렸는지.
+### R13. `/data1/cympyc1785/LatentCamVid/pipeline.md`
+전체 파이프라인(데이터 구축 → 학습 → 평가, GenDoP·E.T. 비교 포함)의 위치와 구조.
 
 ---
 
@@ -39,6 +36,25 @@ _(비어 있음)_
 ---
 
 ## Done
+
+### R12. `video_generation/models/Vista4D/USAGE.md` 신설 — 완료 (2026-09-23)
+upstream `README.md` 는 공식 데모 사용법이라 **우리가 어떻게 돌렸나**가 한 장으로 없었다.
+9 절 309행 — 한 장 요약(3-stage 도식) / env·체크포인트 / 실행 경로 셋 / 카메라 규약 /
+local 패치 / 이 트리를 읽어 가는 코드 7곳 / 지뢰 12행.
+- **우리 실행 경로가 셋으로 갈린다는 게 핵심이다.** ①벤치마크 그리드(`run_grid.py --model
+  vista4d`, `vista4d_prepare.py` 의 `g` 손잡이, stage 1 을 우리가 돌림) ②공식 eval 전량
+  (`run_eval_gen.sh`, 저자 배포 recon·카메라 그대로) ③단일 씬(`run_vista4d_gen.py`,
+  recon world 절대 미터 npz, `g` 없음 — **지금 쓰는 것**). 카메라를 먹이는 방식이 셋 다 다르다.
+- **`USAGE.md` 는 git 에 안 들어간다.** `.gitignore` 의 `video_generation/models` 와 별개로
+  `Vista4D/` 가 자기 `.git` 을 가진 별도 저장소라, gitignore 에 `!` 예외 사슬을 넣어 봐도
+  `git add` 가 조용히 아무것도 안 한다 (넣어 보고 되돌렸다). `.gitignore` 에는 그 사실만
+  주석으로 남겼다 — R15 에서 판단할 거리다.
+- **낡은 참조 셋을 바로잡았다.** FIX-11 의 `recon_and_seg_single.py:74-80`/`:142` → 현재
+  `:75-81`/`:155`, `config.md` 의 `render_single.py:52-54` → `:57-58`.
+- **2026-08-19 eval 전량은 GPU `0,1,6,7` 을 썼다** — "GPU 0~3 만"(2026-09-21) 이전 기록이라
+  그대로 재현하면 규칙 위반이 된다고 문서에 명시.
+- 인용 `file:line` 전량을 스크립트로 대조 (문제 0건). agent 보고서에서 틀린 것 셋도 실측으로
+  교정 — tmp 는 `/tmp` 가 아니라 repo `tmp/vista4d_gen/`, 줄 수 불일치, GPU 주석 누락.
 
 ### R11. `camera_generation/latentcam/train.md` 신설 — 완료 (2026-09-23)
 `pipeline.md` 가 "무엇이 학습되는가"(구조)라면 이쪽은 "어떻게 돌리고 어떻게 읽는가"다.

@@ -12,7 +12,7 @@ tools: Bash, Read, Grep, Glob
 
 **첫 행동으로 `/data1/cympyc1785/LatentCamVid/.claude/agent-report-protocol.md` 를 읽는다.**
 보고서 형식·예산·반환값은 전부 거기가 단일 출처다. 이 파일에 복붙해 두지 않은 이유는 그렇게
-하면 4개 정의가 서로 어긋나기 때문이다.
+하면 정의마다 서로 어긋나기 때문이다.
 
 요지만 미리 적으면: **내용은 파일에 쓰고, main 에는 JSON 한 줄만 반환한다.** 기본은
 `snapshot` 모드 — 지정된 경로 하나를 `Write` 로 **통째로 덮어쓴다**. 파일 전체 120줄 / 8 KB 가

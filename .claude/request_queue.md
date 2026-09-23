@@ -14,12 +14,6 @@
 
 ## Request
 
-### R9. CinemaTraj `pipeline.md` 재작성 + `USAGE.md` 작성
-현재 데이터 구축 파이프라인 기준. (R7 이전 후라면 새 위치 기준)
-
-### R10. `camera_generation/latentcam/pipeline.md`
-모델 전체 구조도, 변형 구조들, 모듈별 설명.
-
 ### R11. `camera_generation/latentcam/train.md`
 학습 방법·구조, 평가 방법·metric, 주의사항.
 
@@ -39,8 +33,8 @@
 
 ## Working
 
-### R9. `camera_generation/dataset/pipeline.md` 재작성 + `USAGE.md` 작성
-현재 데이터 구축 파이프라인 기준(R7 이전 후 새 위치).
+### R10. `camera_generation/latentcam/pipeline.md`
+모델 전체 구조도, 변형 구조들, 모듈별 설명.
 
 ---
 
@@ -51,6 +45,25 @@ _(비어 있음)_
 ---
 
 ## Done
+
+### R9. `camera_generation/dataset/` `pipeline.md` 재작성 + `USAGE.md` 신설 — 완료 (2026-09-23)
+옛 `pipeline.md` 446줄의 **파일 참조 40건 중 36건이 죽은 경로**였다 (R6 재분류 + R7 이동).
+기계적 스윕(백틱 참조 → `path.exists` → `git ls-files` basename 역추적)으로 먼저 재고 판단해
+패치가 아니라 재작성으로 갔다. 재작성본 재스윕 잔여 9건은 전부 산출물 파일명이다.
+- `pipeline.md`: **Part A(소스 영상 있음: dynpose/vista) / Part B(TRUMANS: `.blend` GT)** 로 분할.
+  A0~A11 = `graph→cloud→route→tau→fit→emit` + `desc→merge_desc→captions→export→verify`,
+  B0~B7 = D266 차이. 세대는 D185/D266 기준, 경로는 전부 R6·R7 이후.
+- `USAGE.md`: 갈래별 USAGE 허브 + 하드 규칙(cwd 역산·GPU 0~3·`/tmp` 금지·env 7종·vLLM
+  온디맨드·세대는 config 한 장) + 자주 치는 명령 + 산출물 규약 + 지뢰 10행.
+- **문서에 쓴 것을 전부 코드로 대조했고 8건이 틀렸다.** `file:line` 6건은 옛 문서에서
+  물려받은 낡은 참조(`route_presets.py:82→:162`, `sample_camera_bank.py:144-151→:245/:256`,
+  `fit_hole_ladder.py:791,868→:834-837/:924`, `extract_nouns_vlm.py:215-229→:233`,
+  `io.py:101→:106`, `build_bank_captions.py:221→:243`) — **R8 과 같은 실패 양식**이다.
+  CLI 예시 2건은 내가 새로 쓴 것이 틀렸다(`run_bank.py --bank_dir` · `rebake_scenes.py
+  --config` 둘 다 없는 플래그). `--help` 대조로 잡았고, 이어서 문서의 플래그 64개를 트리
+  전체 `add_argument` 집합과 대조해 미정의 0건까지 확인했다.
+- 남은 것(R9 범위 밖): `summary.md` 가 헤더에서 "gitignore 라 커밋에 안 들어간다" 고 하는데
+  R7 이후 추적 중이고, 내용은 `run_lbm_lite.py --stage bank_all` 옛 흐름이다. R15 에서 처리.
 
 ### R8. `camera_generation/dataset/` md 정리 — 완료 (2026-09-23)
 추적 md 14개를 훑어 ① 무관해진 43줄 삭제(사용자 승인, "진단은 살리고 지표표만"),

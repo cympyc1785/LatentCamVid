@@ -10,6 +10,36 @@ Follows [Keep a Changelog](https://keepachangelog.com/).
 ## [Unreleased]
 
 ### Added
+- **`USAGE.md` 신설 + `pipeline.md` 전면 재작성 (R9, 2026-09-23).** R6(재분류)·R7(트리 이동)
+  으로 문서의 경로가 통째로 낡아 있었다 — 옛 `pipeline.md` 446줄의 **파일 참조 40건 중 36건이
+  이제 존재하지 않는 경로**였다 (기계적 스윕: 백틱 참조 추출 → `path.exists` → 없으면 `git
+  ls-files` 에서 basename 역추적). 패치가 아니라 재작성이 맞다는 판단 근거가 이 36/40 이다.
+  - `pipeline.md` 는 **Part A(dynpose/vista: 소스 영상 있음) / Part B(TRUMANS: `.blend` 에서
+    GT 를 만든다)** 로 갈랐다. A0~A11 이 `graph → cloud → route → tau → fit → emit`
+    (`exec/run_bank.py`) 과 `desc → merge_desc → captions → export → verify`
+    (`exec/run_corpus_export.py`), B0~B7 이 D266 의 세 갈래 차이다. 세대 표기는 D185/D266 기준.
+  - `USAGE.md` 는 **갈래별 USAGE 로 보내는 허브**다 (`exec/` `fit/` `eval/` `viz/`).
+    하드 규칙(cwd 역산 · GPU 0~3 · `/tmp` 금지 · env 절대경로 7종 · vLLM 온디맨드 ·
+    세대는 스크립트가 아니라 config 한 장) + 자주 치는 명령 + 산출물 규약 + 지뢰 10행.
+  - **두 문서의 `file:line` 을 전부 실제 줄을 열어 확인했고 6건이 낡아 있었다** — 옛 문서에서
+    물려받은 참조를 그대로 믿었으면 조용히 틀렸을 것들이다:
+    `route_presets.py:82 → :162` (82는 `GRID_TRACK_BONUS_SLOTS`),
+    `sample_camera_bank.py:144-151 → anchor_nodes :245` / `if node_ids: :256`
+    (144-151은 fallback tier 설명 docstring),
+    `fit_hole_ladder.py:791,868 → plan_tier :834-837` · 진단 `:924`,
+    `extract_nouns_vlm.py:215-229 → json.dump :233` (215-229는 print 문),
+    `scene_graph/io.py:101 → :106` (`seg_static_root` 기본값),
+    `build_bank_captions.py:221 → normalize_label :243`.
+    **R8 이 고친 것과 같은 실패 양식이다** — 참조가 코드와 같이 안 움직인다.
+  - 초고의 CLI 예시 2건이 `--help` 대조에서 **틀린 것으로 드러나 고쳤다**:
+    `run_bank.py --bank_dir` 는 없는 플래그(출력 위치는 config 의 `"bank_dir"` 키),
+    `rebake_scenes.py --config` 도 없는 플래그(`--graph_config` + 콤마 구분 `--bank_configs`
+    두 개이고 `--stage` 는 뱅크 단계 이름이 아니라 `graph|bank|all`). 문서에 쓴 플래그 64개를
+    트리 전체 `add_argument` 집합과 대조해 미정의 0건까지 확인했다
+    (유일한 예외 `--cycles` 는 "만들지 말 것" 이라는 금지 문구다).
+  - `lbm/cloud.py` 가 렌더러를 **Vista4D 트리 `sys.path` 주입으로 빌려 쓴다**는 것을 명시했다
+    (`:28 VISTA4D_ROOT_DEFAULT` → `../../video_generation/models/Vista4D`, `:35 import_vista4d`).
+    Vista4D 가 옮겨가면 cloud 단계가 먼저 죽는데 import 문이 아니라 경로 주입이라 안 보인다.
 - **shot scale 사다리 `--ladder_metric shot_scale` + 프레이밍 게이트 `--min_subject_in_frame`
   (D266, 2026-09-23).** 사용자 지시 "trumans를 collision gate, occlusion을 ray cast로 바꿔주고
   hole gate는 안쓰고 subject의 shot scale을 기준으로 pilot 돌려줘봐". TRUMANS 는 씬이 `.blend`

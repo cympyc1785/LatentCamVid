@@ -55,7 +55,7 @@ fit → emit. 카메라가 벽 속에 들어가거나 씬을 못 보는 경우�
   깎는 것이 scene 수를 10배로 올릴 유일한 예산이다.
 
 구체적 손잡이(K1 preset 축소 / K2 사다리 2·4단만 / K3 scene 당 dd 하나)와 실측 근거는
-`camera_generation/models/Planner/CinemaTraj/DECISIONS.md` 의 "차기 뱅크(d157 후속)" 절에 있다.
+`camera_generation/models/Planner/CinemaTraj/DECISIONS.log` 의 "차기 뱅크(d157 후속)" 절에 있다.
 여기에는 목표만 적는다 — **scene ↑ (10k), preset ↓.**
 
 ### 2. film 유래 카메라 motion (DataDoP 계열)

@@ -9,10 +9,10 @@ Dynamic camera and video generation with from source video and user prompt.
 ## Don't
 
 - 실험 결과를 임의로 요약 금지 (wandb 원본 수치 그대로).
-- GPU 5~7 사용 금지. `CUDA_VISIBLE_DEVICES`는 항상 0~4 범위에서만 지정할 것 (2026-09-06 사용자 지시).
-  - **예외: TRUMANS 작업에 한해 GPU 5 사용 가능** (2026-09-20 사용자 지시). 뱅크 굽기·Blender 렌더·
-    TRUMANS 캡션용 vLLM 이 여기 해당한다. 6,7 은 여전히 금지이고, TRUMANS 가 아닌 학습/추론은
-    0~4 그대로다. CinemaTraj `run_bank.py` 는 `BANK_GPU_ALLOW=5` 를 줘야 `--gpu 5` 를 받는다.
+- GPU 4~7 사용 금지. `CUDA_VISIBLE_DEVICES`는 항상 **0~3** 범위에서만 지정할 것
+  (2026-09-21 사용자 지시). 이전의 "0~4" 와 "TRUMANS 한정 GPU 5 예외"(2026-09-20)는 **만료됐다** —
+  4~7 에 띄워 둔 것이 있으면 죽이고 0~3 으로 옮긴다. CinemaTraj `run_bank.py` 의
+  `BANK_GPU_ALLOW` 기본값은 아직 `"01234"` 라 4 를 받는다 (넘기지 말 것).
 
 ## Coding conventions
 
@@ -93,7 +93,7 @@ gitignore 대상이며, 작업이 끝나면 남길 것만 `results/` 로 옮기�
 
 ### 에이전트 전용 문서는 `.claude/` 에
 
-`request_queue.md` `tasks.md` `goals.md` `reader.md` `FIX.log` `EXPERIMENTS.log` 처럼
+`request_queue.md` `tasks.md` `goals.md` `review.md` `watch.md` `FIX.log` `EXPERIMENTS.log` 처럼
 에이전트만 읽는 문서는 `.claude/` 아래 둔다. 최상위에 남는 것은 `CLAUDE.md`(Claude Code 가
 최상위에서 읽는다) · `README.md` · `pipeline.md` 처럼 사람이 보는 문서뿐이다.
 
@@ -130,9 +130,6 @@ worktree 는 변경이 없으면 자동으로 정리된다.
 
 **정리** — 작업이 끝나면 `tmp/agent/` 에서 남길 것만 `results/` 나 `DECISIONS.md` 로 승격하고
 나머지는 정리한다 (삭제는 목록·근거를 보고하고 승인을 받은 뒤).
-
-주의: `.claude/reader.md` 는 **agent 가 아니다** — 이름만 같은 별개의 분석 노트다.
-agent 정의는 `.claude/agents/reader.md` 쪽이다.
 
 ### 모니터링 (`.claude/watch.md`)
 

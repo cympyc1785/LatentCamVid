@@ -1,6 +1,9 @@
-# reader.md — 외부 reader 의 읽기 노트 (읽기 전용 분석)
+# review.md — 레포 검토 노트 (읽기 전용 분석)
 
-이 파일은 reader(분석 담당)가 레포를 읽으면서 남기는 축약 노트다. **코드/데이터는 수정하지 않는다.**
+> 2026-09-23 에 `reader.md` 에서 이름을 바꿨다. `.claude/agents/reader.md`(subagent 정의)와
+> 파일명이 같아 헷갈렸다 — 이 파일은 **agent 가 아니라 분석 문서**다.
+
+이 파일은 레포를 읽으면서 남기는 축약 노트다. **코드/데이터는 수정하지 않는다.**
 기준 시점 **2026-09-04 19:44** 실측. 목표는 `goals.md`, 코드 규약은 `CLAUDE.md`.
 
 ---
@@ -126,14 +129,14 @@ d121/d122 arm 은 `train_seg_list`/`test_seg_list` 를 주므로 `base.py:88-105
 어긋난다" — 즉 **새로 굽는 뱅크에서만 켠다**는 설계. D122 dynpose 는 emit 만 끝났고 캡션은 아직
 안 구웠으므로 지금 켜면 재작업 0. 켠 사실은 캡션 JSON 헤더 `targetless_promoted` 에 남는다.
 
-### D2 [승인 대기] fix.md F7 "시간축 절단" 이 우선순위 1인데 미승인
-`fix.md:174`. 지금 `solve_knob` 은 게이트에 걸리면 **전 구간을 균일 축소**하므로 마지막 1프레임이
+### D2 [승인 대기] fix.log F7 "시간축 절단" 이 우선순위 1인데 미승인
+`fix.log:174`. 지금 `solve_knob` 은 게이트에 걸리면 **전 구간을 균일 축소**하므로 마지막 1프레임이
 벽에 닿으면 궤적 전체가 정지로 눌린다. F7 = "걸리는 프레임 앞까지만 움직이고 뒤는 hold".
 `goals.md` 중기 1 의 "τ 하한에 눌린 변이 회수"(`clamped_low + tau_floor` 15.4%, 길이 0 궤적
-1,565 = 7.3%)의 직접 처방. `fix.md` 자체가 우선순위 1로 적고 있다.
+1,565 = 7.3%)의 직접 처방. `fix.log` 자체가 우선순위 1로 적고 있다.
 
-### D3 [문서 어긋남] F11 은 이미 적용됐는데 fix.md 는 "미결정"
-`fix.md:191 F11` = `--behind_src_frames` 13→49. D121/D122 러너가 둘 다
+### D3 [문서 어긋남] F11 은 이미 적용됐는데 fix.log 는 "미결정"
+`fix.log:191 F11` = `--behind_src_frames` 13→49. D121/D122 러너가 둘 다
 `--behind_src_frames 49` 를 **명시로 넘긴다** (`run_k6_d121_shard.sh`, `run_dynpose_d122_shard.sh`).
 코드 문제 아님, 문서만 정정 대상.
 
@@ -180,7 +183,7 @@ VLM 입력이 아니다. 그리고 traj 턴은 D34/D35 실측에서 **prior**로
 | 7 | **D5** `keyframe_aim=preset_rel` 확인 | 1 씬 프로브 | 확인 후 판단 | 중기 2 병목 절반 |
 | 8 | **D4** `gauge_id` 3자 assert | 작다 | 불필요 | D122 사고 재발 방지 |
 
-M2/D2 는 arm 간 paired 비교를 깨므로 `fix.md` 규약대로 **한 판에 몰아서** 적용하는 게 맞다.
+M2/D2 는 arm 간 paired 비교를 깨므로 `fix.log` 규약대로 **한 판에 몰아서** 적용하는 게 맞다.
 
 ---
 
@@ -266,7 +269,7 @@ weighted F 라 부분점수가 없다 → fscore 가 0~0.09 를 추세 없이 �
 CinemaTraj 는 ScanNet++ **메시**에서 `SDF<0` 로 Collision Rate 를 낸다. 우리는 정적 메시가 없고
 dynamic video 의 **depth shell** 뿐이다. 낼 수 있는 건 `behind_surface_frames`(관측 표면 뒤) +
 `obb_clearance`(노드 박스 침투) 두 **proxy**. 나쁘지 않지만 **반드시 같이 보고할 두 가지**:
-- (i) **`judgeable_frac`** — G1 이 판정 불가(sky/무관측)인 프레임 비율. `fix.md:60 F4` 가
+- (i) **`judgeable_frac`** — G1 이 판정 불가(sky/무관측)인 프레임 비율. `fix.log:60 F4` 가
   "너무 높다"고 이미 적었고 **아직 열이 없다.** 이게 없으면 collision 0% 가 "안 부딪혔다"인지
   **"볼 수 없었다"** 인지 구분이 안 된다. VERTIGO/CinemaTraj 는 이 문제가 없다(엔진/메시가 있다)
 - (ii) F11(`--behind_src_frames` 13→49)이 D121/D122 러너에 적용됐으므로 d107/d110 로 학습한
@@ -289,7 +292,7 @@ snowboard 0건) 4씬 위의 결론은 씬 우연이다.
   늘려도 n=4 다. (vista 4씬은 d77 과 눈금 맞추기용 paired 축으로 남기고 별도로 본다)
 
 ### C6 🔴 이 레포는 **자기 VLM 이 그림을 잘 안 본다는 것을 이미 증명해 놓았다**
-`DECISIONS.md` D34/D35/D36 + `scripts/ablate_vlm_hole_perception.py` 실측:
+`DECISIONS.log` D34/D35/D36 + `scripts/ablate_vlm_hole_perception.py` 실측:
 traj 턴은 9조건×2영상×3draw=54 draw 중 49가 같은 답. 이름 중립화(`M01..M13`)·행 셔플·
 temperature 1.0·숫자 반전·**가짜 magenta 칠하기** 다섯 개 전부 못 흔들었다. select 턴은 숫자 우세.
 구멍 많은 씬(avocado)에서는 그림 채널이 아예 죽는다.
@@ -403,7 +406,7 @@ pseudo-GT 로 학습하는 프로젝트에서 이게 없으면 점수의 상한�
 
 | # | 항목 | 비용 | 재학습/재굽기 | 왜 |
 |---|---|---|---|---|
-| 9 | **C4** `judgeable_frac` 열 추가 | 작다 (`fix.md` F4) | 열만 | 없으면 collision 0% 를 해석 못 한다 |
+| 9 | **C4** `judgeable_frac` 열 추가 | 작다 (`fix.log` F4) | 열만 | 없으면 collision 0% 를 해석 못 한다 |
 | 10 | **C5** 최종 평가를 d122(266씬)로 이전 | 설계 | 불필요 | 지금 계획은 렌더를 늘려도 씬 n=4 |
 | 11 | **C4/TRUMANS** mesh SDF collision + SMPL framing 을 캘리브레이션 세트로 | 중간 | 불필요 | proxy 를 검증할 유일한 자리 |
 | 12 | **C2** caption F1 → preset/primitive 축 F1 | 작다 | 불필요 | 지금 지표는 추세가 없다 (0~0.09 랜덤) |
@@ -539,7 +542,7 @@ D90 이 이름 규칙을 뒤집으면서 **free-moving primitive(dolly/truck/ped
 ### P5 🟡 **`moving` 플래그가 dynpose 에서 정보를 잃었다**
 실측 moving 노드 비율 vista **24.6%** vs dynpose **94.6%**. `route_presets` 의 첫 신호가
 `node.moving` 인데 94.6% 면 분기가 사실상 상수 → dynpose 는 거의 전부 `track_*` 로 라우팅된다.
-`fix.md F1`(제자리형 subject 를 static 으로 라우팅)이 이 문제를 다루려 했지만 미승인이다.
+`fix.log F1`(제자리형 subject 를 static 으로 라우팅)이 이 문제를 다루려 했지만 미승인이다.
 README 가 이미 원인을 적어 뒀다 — *"정적 노드도 OBB 중심이 벽을 따라 미끄러진다
 (truck-pose `stat_0` 0.535u)"*. → **dynpose 에서 moving 임계를 다시 잡는 것이 F1 의 실측 근거다**
 
@@ -580,8 +583,8 @@ ELS = VBox 3.0×)을 도입하면 shot scale 이 **사후 측정(`subject_area_m
 
 ### P8 🟡 `judgeable_frac` 만 남았다 — G1 채널 분리는 이미 됐다
 실측 bank 열에 `behind_static_frac` / `behind_dyn_frac` / `behind_static_worst` /
-`behind_dyn_worst` 가 **이미 있다.** 즉 `fix.md F3`(관통 vs 너무 붙음)의 절반은 적용됐다.
-남은 건 `fix.md F4` 의 **판정 불가 비율**뿐이고, 그게 Part II C4 의 필수 열이다
+`behind_dyn_worst` 가 **이미 있다.** 즉 `fix.log F3`(관통 vs 너무 붙음)의 절반은 적용됐다.
+남은 건 `fix.log F4` 의 **판정 불가 비율**뿐이고, 그게 Part II C4 의 필수 열이다
 
 ### P9 🟡 hole 사다리에 **절대 상한이 없다**
 `--hole_mode excess`(기본)는 단을 `hole_static + Δ` 로 잡는다. 실측 `hole_static` p90 이
@@ -712,7 +715,7 @@ framing — anchor OBB 8꼭짓점 투영이 NDC 박스 안에 드는 프레임 �
 
 ### 왜 이건 되고 F10(가림 게이트)은 안 됐나 — **단조성**
 
-`fix.md F10` 이 실패한 이유는 *"가림은 knob 크기에 단조가 아니다 — 궤적을 줄여도 subject 를
+`fix.log F10` 이 실패한 이유는 *"가림은 knob 크기에 단조가 아니다 — 궤적을 줄여도 subject 를
 가리는 건 그대로다"* 였다 (실측: 해소 24건 vs 정지로 파괴 48건, 파괴가 2~4.6배).
 **framing 은 단조다.** 이번 세션 실측 — (씬, anchor, preset) 그룹별로 `knob` 오름차순 정렬 후
 `subject_in_frame` 의 차분 부호를 검사:
@@ -739,7 +742,7 @@ framing — anchor OBB 8꼭짓점 투영이 NDC 박스 안에 드는 프레임 �
 - 새 `framing_limited` status 가 생기고 궤적이 더 짧아진다. **hole 예산과 경쟁한다** —
   "구멍을 크게 만드는 큰 카메라"와 "대상을 놓치지 않는 작은 카메라"가 정면으로 부딪힌다
 - 그 긴장을 **캡션이 거짓말하는 형태로 숨기는 지금보다, `binding` 열에 드러내는 게 옳다**
-- 전량 재fit 필요 → `fix.md` 규약대로 F7 · P3 · P9 와 **한 판에** 묶는다
+- 전량 재fit 필요 → `fix.log` 규약대로 F7 · P3 · P9 와 **한 판에** 묶는다
 
 ## 21. 제안 F 를 미룰 때의 3단 대안 (비용순, 서로 배타적이지 않다)
 
@@ -1482,7 +1485,7 @@ D144 가 "인코더 vs 프레임수"를 가른다. 남은 confound = **캡션 �
 같은 d137 뱅크로 캡션 한 벌 더 구워 **2×2 (형식 × 인코더)** 를 돌리면 갈린다.
 **이 답이 Phase 2 투자 방향을 정한다** — 정보량이면 구도 절 추가(제안 S), 형식이면 텍스트 인코더.
 
-### Phase 2 — 데이터 한 판 (3~4주, `fix.md` 규약대로 몰아서)
+### Phase 2 — 데이터 한 판 (3~4주, `fix.log` 규약대로 몰아서)
 framing 예산 #8(제안 F) · F7 시간축 절단 · P3 `--follow_gains auto`(dynpose `tau_start>0.10`
 50.3%) · P9 absolute hole 상한 · **제안 S 시작 구도 샘플러 + `--free_start` + `unit_scale`
 모션범위 수정 + K1 비균일 keyframe** · **SCD 4축 어휘 + 구도 절 캡션화** ·

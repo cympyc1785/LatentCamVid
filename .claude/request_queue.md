@@ -16,9 +16,9 @@
 
 > 공통 배경 (2026-09-23): "DA3, Molmo2 를 encoder 로 쓰는 게 진짜 필요한지" 검증 실험. 학습 3건은 GPU 0~2.
 
-### R19. d200 dynpose — condition = text + SigLIP2 feature(Molmo2 visual) + camera embedding 학습 (GPU 0~2 중 하나)
-### R20. d200 dynpose — condition = text + camera embedding 만 학습 (GPU 0~2 중 하나)
-### R21. `20260918_140914_dynpose_d200_molmo2_l21_da3` 와 같게 하되 DA3 입력을 49프레임 전부로 학습 (GPU 0~2 중 하나)
+### R19. d200 dynpose — condition = text + SigLIP2 feature(Molmo2 visual) + camera embedding 학습 → Working
+### R20. d200 dynpose — condition = text + camera embedding 만 학습 → Working
+### R21. `20260918_140914_dynpose_d200_molmo2_l21_da3` 와 같게 하되 DA3 입력을 49프레임 전부로 학습 → Working
 ### R22. TRUMANS 데이터셋 구축 — **계획 승인됨 (2026-09-23)**
 조사: `tmp/agent/reader-r22-trumans.md` (핵심 주장 5건 직접 재확인). 사용자 결정 넷:
 ① 범위 = s3f0k6 **737 clip 전량** (191 은 prep 완료, 546 은 graph/cloud/mesh 부터)
@@ -32,12 +32,13 @@ source video 는 `trumans_to_recon.py` 가 이미 Blender 합성 (follow + slow 
 
 ## Working
 
-### R19~R21 (학습 3건, 병렬 기동) — 2026-09-23
-- R20 `dynpose_d200_umt5_srccam` — smoke 통과, **GPU 1 screen train1 학습 중**.
-- R19 `dynpose_d200_siglip2_srccam` — 사용자 결정: raw SigLIP2 ViT (vit_layers -3,-9, 2304-d, 8x8/프레임).
-  `cache_molmo2_embeddings.py --vit_only` 로 GPU 0 에서 6샤드 굽는 중 → 끝나면 smoke → GPU 0 학습.
-- R21 `dynpose_d200_molmo2_l21_da3_v49` — 사용자 결정: 캐시 없이 on-the-fly DA3 49 view. GPU 2 smoke 중.
-- R22 은 reader 조사 중 (승인 대기 예정).
+### R19~R22 — 전부 기동됨, 장시간 실행 감시 중 (2026-09-23) · 커밋 `bd78ac5`
+- R19 `dynpose_d200_siglip2_srccam` — SigLIP2 캐시 10169 완료 → smoke 통과 → **GPU 0 train2**.
+- R20 `dynpose_d200_umt5_srccam` — **GPU 1 train1** (~6 분/epoch).
+- R21 `dynpose_d200_molmo2_l21_da3_v49` — **GPU 2 train3**, on-the-fly 4.5 s/it ≈ 7.2 h/epoch (50ep ≈ 15일).
+- R22 d271T 뱅크 737 clip — **GPU 3 4샤드** (clip 당 ~350 s). 이후 raycast → desc(vLLM) → captions → export.
+  첫 실패 1건 `tru_0ab03928_a13` fit: "소스 카메라가 mesh 격자에서 unreachable" (sample_camera_bank.py:403).
+- 공통 후속: srccam 계열은 `eval_testset.py` geo_proj MLP 미지원 (tasks.md A3) — testset eval 전 수리.
 
 ---
 

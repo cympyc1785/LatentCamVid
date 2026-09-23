@@ -267,6 +267,129 @@ class MeshClearance:
         return dist
 
 
+def human_aim_points(mesh: "MeshClearance", frame: int, fracs=(0.5, 0.7, 0.85)):
+    """동적 격자 `frame` 에서 사람 몸통 조준점 3개 (blend world). (3,3) 또는 None(사람 없음).
+
+    `trumans_scene_probe.aim_points`(human = 몸통 높이띠 3점 median xy) 를 격자로 흉내 낸다.
+    동적 EDT 가 0 인 복셀 = 사람 표면이 걸친 복셀이다.
+    """
+    field = np.asarray(mesh.dyn_edt[int(frame)], dtype=np.float32)
+    occ = np.argwhere(field <= 0.5 * mesh.voxel)
+    if not len(occ):
+        return None
+    pts = mesh.d_origin + (occ + 0.5) * mesh.voxel
+    z0, z1 = float(pts[:, 2].min()), float(pts[:, 2].max())
+    out = []
+    for frac in fracs:
+        z = z0 + frac * (z1 - z0)
+        band = pts[np.abs(pts[:, 2] - z) < 1.5 * mesh.voxel]
+        xy = np.median((band if len(band) else pts)[:, :2], axis=0)
+        out.append([xy[0], xy[1], z])
+    return np.asarray(out, dtype=np.float64)
+
+
+def _static_march(mesh: "MeshClearance", origin, direction, max_dist: float):
+    """정적 EDT 위 sphere tracing. -> 첫 표면까지 거리 (못 맞히면 inf). 사람은 안 본다."""
+    d = np.asarray(direction, dtype=np.float64)
+    d = d / max(np.linalg.norm(d), 1e-12)
+    o = np.asarray(origin, dtype=np.float64)
+    hit_eps, t = 0.5 * mesh.voxel, 0.0
+    while t < max_dist:
+        dist, _ = mesh.static_clearance((o + t * d)[None])
+        if dist[0] <= hit_eps:
+            return t
+        t += max(float(dist[0]) - hit_eps, hit_eps)
+    return float("inf")
+
+
+def _static_march_batch(mesh: "MeshClearance", origins, dirs, max_dist, iters: int = 96):
+    """`_static_march` 의 벡터판: 광선 N 개를 한꺼번에. -> (N,) 첫 표면 거리 (없으면 inf)."""
+    o = np.asarray(origins, dtype=np.float64)
+    d = np.asarray(dirs, dtype=np.float64)
+    d = d / np.maximum(np.linalg.norm(d, axis=1, keepdims=True), 1e-12)
+    lim = np.broadcast_to(np.asarray(max_dist, dtype=np.float64), (len(o),)).copy()
+    eps = 0.5 * mesh.voxel
+    t = np.zeros(len(o))
+    hit = np.full(len(o), np.inf)
+    live = np.ones(len(o), dtype=bool)
+    for _ in range(iters):
+        if not live.any():
+            break
+        idx = np.flatnonzero(live)
+        dist, _ = mesh.static_clearance(o[idx] + t[idx, None] * d[idx])
+        got = dist <= eps
+        hit[idx[got]] = t[idx[got]]
+        live[idx[got]] = False
+        step = np.maximum(dist - eps, eps)
+        t[idx[~got]] += step[~got]
+        live &= t < lim
+    return hit
+
+
+def mesh_ray_profile(poses_blend, mesh: "MeshClearance", probe_distance: float = 1.5,
+                     floor_bias: float = 0.0, fast: bool = True):
+    """`mesh_ray_profile` 참조 정의 (아래) 의 벡터판. `fast=False` 면 프레임 루프 판."""
+    if not fast:
+        return _mesh_ray_profile_loop(poses_blend, mesh, probe_distance)
+    poses = np.asarray(poses_blend, dtype=np.float64)
+    pos = poses[:, :3, 3]
+    n = len(pos)
+    aims = [human_aim_points(mesh, i) for i in range(n)]
+    clr, _ = mesh.static_clearance(pos)
+    floor = _static_march_batch(mesh, pos, np.tile([0.0, 0.0, -1.0], (n, 1)), 10.0) + floor_bias
+    ok = np.array([a is not None for a in aims])
+    sdist = np.full(n, np.inf)
+    clear = np.zeros(n, dtype=bool)
+    if ok.any():
+        A = np.stack([aims[i] for i in np.flatnonzero(ok)])            # (m,3,3)
+        P = pos[ok][:, None, :].repeat(A.shape[1], axis=1)             # (m,3,3)
+        vec = (A - P).reshape(-1, 3)
+        length = np.linalg.norm(vec, axis=1)
+        sdist[ok] = length.reshape(A.shape[:2]).min(axis=1)
+        blocked = np.isfinite(_static_march_batch(mesh, P.reshape(-1, 3), vec, length))
+        clear[ok] = (~blocked).reshape(A.shape[:2]).any(axis=1)
+    clearance = np.minimum(clr, probe_distance)
+    return {"clear_frac": float(clear.mean()), "min_clearance": float(clearance.min()),
+            "min_subject_dist": float(sdist.min()), "min_floor_drop": float(floor.min()),
+            "frames": [{"clear": bool(c), "clearance": float(k), "floor_drop": float(f),
+                        "subject_dist": float(sd)} for c, k, f, sd in zip(clear, clearance, floor, sdist)]}
+
+
+def _mesh_ray_profile_loop(poses_blend, mesh: "MeshClearance", probe_distance: float = 1.5):
+    """궤적 (F,4,4) blend world -> `trumans_scene_probe --verify_poses` 와 같은 열을 **격자로**.
+
+    이 코드가 답하는 질문: "Blender 를 안 띄우고 mesh 격자만으로 raycast 게이트
+    (clearance / floor_drop / subject_dist / 시선) 를 fitting 루프 안에서 잴 수 있나" (R27).
+
+    정의 대응 — Blender 쪽 (`trumans_scene_probe.py:500-534`) 과 격자 쪽:
+      clearance     6방향 광선 최단(사람 제외, 1.5 m 포화)  ~ 정적 EDT (전방향이라 ≤ 6방향)
+      floor_drop    아래(-Z) 광선 첫 히트                  ~ 정적 EDT sphere tracing (-Z)
+      subject_dist  조준점 3개까지 최단 거리               ~ 격자 몸통 3점까지 최단
+      clear         조준점 중 하나라도 첫 히트가 subject    ~ 조준점까지 정적 표면에 안 막힘
+    프레임 i 는 격자 `dyn_edt[i]` (뱅크 49프레임과 같은 순서) 와 짝이다.
+    """
+    poses = np.asarray(poses_blend, dtype=np.float64)
+    rows = []
+    for i in range(len(poses)):
+        pos = poses[i, :3, 3]
+        aims = human_aim_points(mesh, i)
+        clr, _ = mesh.static_clearance(pos[None])
+        floor = _static_march(mesh, pos, (0.0, 0.0, -1.0), 10.0)
+        if aims is None:
+            clear, sdist = False, float("inf")
+        else:
+            sdist = float(np.min(np.linalg.norm(aims - pos, axis=1)))
+            clear = any(_static_march(mesh, pos, a - pos, float(np.linalg.norm(a - pos)))
+                        == float("inf") for a in aims)
+        rows.append({"clear": bool(clear), "clearance": float(min(clr[0], probe_distance)),
+                     "floor_drop": float(floor), "subject_dist": sdist})
+    return {"clear_frac": float(np.mean([r["clear"] for r in rows])),
+            "min_clearance": float(min(r["clearance"] for r in rows)),
+            "min_subject_dist": float(min(r["subject_dist"] for r in rows)),
+            "min_floor_drop": float(min(r["floor_drop"] for r in rows)),
+            "frames": rows}
+
+
 def mesh_behind_profile(poses_blend, mesh: MeshClearance, margin: float,
                         detail: bool = False):
     """`gates.behind_profile` 과 **같은 반환 규약**의 mesh 판정. `margin` 은 metre.

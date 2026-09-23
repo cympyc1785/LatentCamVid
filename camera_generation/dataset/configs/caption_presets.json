@@ -272,6 +272,165 @@
   "track_pull_out_arc_right": {
    "axis": "track",
    "phrase": "tracks {target} while arcing to the right and pulling back from {it}"
+  },
+  "orbit_right_pedestal_up": {
+   "axis": "orbit",
+   "phrase": "orbits to the right around {target} while rising"
+  },
+  "orbit_right_pedestal_down": {
+   "axis": "orbit",
+   "phrase": "orbits to the right around {target} while descending"
+  },
+  "pedestal_up_dolly_in": {
+   "axis": "pedestal",
+   "phrase": "rises straight up while pushing in toward {target}"
+  },
+  "pedestal_up_dolly_out": {
+   "axis": "pedestal",
+   "phrase": "rises straight up while pulling back from {target}"
+  },
+  "pedestal_down_dolly_out": {
+   "axis": "pedestal",
+   "phrase": "drops straight down while pulling back from {target}"
+  },
+  "truck_left_pedestal_up": {
+   "axis": "truck",
+   "phrase": "trucks to the left while rising, sliding past {target}"
+  },
+  "truck_left_pedestal_down": {
+   "axis": "truck",
+   "phrase": "trucks to the left while descending, sliding past {target}"
+  },
+  "truck_left_dolly_in": {
+   "axis": "truck",
+   "phrase": "trucks to the left while pushing in toward {target}"
+  },
+  "truck_left_dolly_out": {
+   "axis": "truck",
+   "phrase": "trucks to the left while pulling back from {target}"
+  },
+  "truck_right_pedestal_up": {
+   "axis": "truck",
+   "phrase": "trucks to the right while rising, sliding past {target}"
+  },
+  "truck_right_pedestal_down": {
+   "axis": "truck",
+   "phrase": "trucks to the right while descending, sliding past {target}"
+  },
+  "truck_right_dolly_in": {
+   "axis": "truck",
+   "phrase": "trucks to the right while pushing in toward {target}"
+  },
+  "truck_right_dolly_out": {
+   "axis": "truck",
+   "phrase": "trucks to the right while pulling back from {target}"
+  },
+  "crane_up_dolly_out": {
+   "axis": "crane",
+   "phrase": "cranes upward while pulling back from {target}, revealing the space around {it}"
+  },
+  "crane_down_dolly_in": {
+   "axis": "crane",
+   "phrase": "cranes down toward {target} while pushing in"
+  },
+  "track_orbit_right_pedestal_up": {
+   "axis": "track",
+   "phrase": "tracks {target} while orbiting to the right and rising"
+  },
+  "track_orbit_right_pedestal_down": {
+   "axis": "track",
+   "phrase": "tracks {target} while orbiting to the right and descending"
+  },
+  "track_orbit_left_pedestal_up": {
+   "axis": "track",
+   "phrase": "tracks {target} while orbiting to the left and rising"
+  },
+  "track_orbit_left_pedestal_down": {
+   "axis": "track",
+   "phrase": "tracks {target} while orbiting to the left and descending"
+  },
+  "track_pedestal_up_dolly_in": {
+   "axis": "track",
+   "phrase": "tracks {target} while rising straight up and pushing in",
+   "phrase_targetless": "moves while rising straight up and pushing in, keeping pace with the movement in the scene"
+  },
+  "track_pedestal_up_dolly_out": {
+   "axis": "track",
+   "phrase": "tracks {target} while rising straight up and pulling back",
+   "phrase_targetless": "moves while rising straight up and pulling back, keeping pace with the movement in the scene"
+  },
+  "track_pedestal_down_dolly_out": {
+   "axis": "track",
+   "phrase": "tracks {target} while dropping straight down and pulling back",
+   "phrase_targetless": "moves while dropping straight down and pulling back, keeping pace with the movement in the scene"
+  },
+  "track_crane_up_dolly_out": {
+   "axis": "track",
+   "phrase": "tracks {target} while craning upward and pulling back"
+  },
+  "track_crane_down_dolly_in": {
+   "axis": "track",
+   "phrase": "tracks {target} while craning down and pushing in"
+  },
+  "track_truck_left_pedestal_up": {
+   "axis": "track",
+   "phrase": "tracks {target} while sliding to the left and rising",
+   "phrase_targetless": "moves while sliding to the left and rising, keeping pace with the movement in the scene"
+  },
+  "track_truck_left_pedestal_down": {
+   "axis": "track",
+   "phrase": "tracks {target} while sliding to the left and descending",
+   "phrase_targetless": "moves while sliding to the left and descending, keeping pace with the movement in the scene"
+  },
+  "track_truck_left_dolly_in": {
+   "axis": "track",
+   "phrase": "tracks {target} while sliding to the left and pushing in",
+   "phrase_targetless": "moves while sliding to the left and pushing in, keeping pace with the movement in the scene"
+  },
+  "track_truck_left_dolly_out": {
+   "axis": "track",
+   "phrase": "tracks {target} while sliding to the left and pulling back",
+   "phrase_targetless": "moves while sliding to the left and pulling back, keeping pace with the movement in the scene"
+  },
+  "track_truck_right_pedestal_up": {
+   "axis": "track",
+   "phrase": "tracks {target} while sliding to the right and rising",
+   "phrase_targetless": "moves while sliding to the right and rising, keeping pace with the movement in the scene"
+  },
+  "track_truck_right_pedestal_down": {
+   "axis": "track",
+   "phrase": "tracks {target} while sliding to the right and descending",
+   "phrase_targetless": "moves while sliding to the right and descending, keeping pace with the movement in the scene"
+  },
+  "track_truck_right_dolly_in": {
+   "axis": "track",
+   "phrase": "tracks {target} while sliding to the right and pushing in",
+   "phrase_targetless": "moves while sliding to the right and pushing in, keeping pace with the movement in the scene"
+  },
+  "track_truck_right_dolly_out": {
+   "axis": "track",
+   "phrase": "tracks {target} while sliding to the right and pulling back",
+   "phrase_targetless": "moves while sliding to the right and pulling back, keeping pace with the movement in the scene"
+  },
+  "roll_left": {
+   "axis": "roll",
+   "phrase": "rolls to the left, tilting the horizon",
+   "targetless": true
+  },
+  "roll_right": {
+   "axis": "roll",
+   "phrase": "rolls to the right, tilting the horizon",
+   "targetless": true
+  },
+  "free_pedestal_up": {
+   "axis": "pedestal",
+   "phrase": "rises straight up through the scene",
+   "targetless": true
+  },
+  "free_pedestal_down": {
+   "axis": "pedestal",
+   "phrase": "drops straight down through the scene",
+   "targetless": true
   }
  }
 }

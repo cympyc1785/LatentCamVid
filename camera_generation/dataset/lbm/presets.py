@@ -274,6 +274,64 @@ PRESETS = {
                                                         T.dolly(-c["dolly"], n)), "look_at", False),
 }
 
+# ── D273. LAMP DSL 대비 빈 조합 (사용자 지시 2026-09-24 "LAMP의 DSL보면 부족한 preset들이 보일거야").
+#   전부 **기존 T.* primitive 의 compose** 다 — 새 필드 없음. 이름은 D76 규칙
+#   `[track_]<주동작>_<방향>_<부동작>_<방향>` (`orbit_left_pedestal_up` 과 같은 표기).
+#   aim 은 주동작을 따른다: orbit/crane 은 look_at, truck/pedestal/dolly/roll 은 free.
+#   track_ 짝은 같은 builder 에 이름만 다르다 — 추종은 `PRESET_FOLLOW` 가 접두사로 자동 부여.
+#   roll 은 제자리 회전이라 track_ 짝이 없고 `ROTATION_ONLY_PRESETS` 에 등록한다.
+def _d273_presets():
+    out = {}
+    side = {"left": -1.0, "right": 1.0}       # truck: left = -lateral (`truck_left` 과 같은 부호)
+    vert = {"up": 1.0, "down": -1.0}          # pedestal/crane: up = +lateral
+    fwd = {"in": 1.0, "out": -1.0}            # dolly: in = +dolly
+    orb = {"left": 1.0, "right": -1.0}        # true_orbit: left = +sweep (`orbit_left` 과 같은 부호)
+    for o, so in orb.items():
+        for v, sv in vert.items():
+            if o == "left":
+                continue                      # orbit_left_pedestal_{up,down} 은 이미 있다
+            out[f"orbit_{o}_pedestal_{v}"] = (
+                lambda n, c, so=so, sv=sv: T.compose(T.true_orbit(so * c["sweep"], c["radius"], n),
+                                                     T.pedestal(sv * c["lateral"], n)), "look_at", False)
+    for v, sv in vert.items():
+        for d, sd in fwd.items():
+            if (v, d) == ("down", "in"):
+                continue                      # pedestal_down_dolly_in 은 이미 있다
+            out[f"pedestal_{v}_dolly_{d}"] = (
+                lambda n, c, sv=sv, sd=sd: T.compose(T.pedestal(sv * c["lateral"], n),
+                                                     T.dolly(sd * c["dolly"], n)), "free", False)
+    for t, st in side.items():
+        for v, sv in vert.items():
+            out[f"truck_{t}_pedestal_{v}"] = (
+                lambda n, c, st=st, sv=sv: T.compose(T.truck(st * c["lateral"], n),
+                                                     T.pedestal(sv * c["lateral"], n)), "free", False)
+        for d, sd in fwd.items():
+            out[f"truck_{t}_dolly_{d}"] = (
+                lambda n, c, st=st, sd=sd: T.compose(T.truck(st * c["lateral"], n),
+                                                     T.dolly(sd * c["dolly"], n)), "free", False)
+    #   crane 은 올라가며 물러나는 "rise & reveal" 과 그 역 (내려오며 다가감).
+    out["crane_up_dolly_out"] = (lambda n, c: T.compose(T.crane(c["lateral"], c["radius"], n),
+                                                        T.dolly(-c["dolly"], n)), "look_at", False)
+    out["crane_down_dolly_in"] = (lambda n, c: T.compose(T.crane(-c["lateral"], c["radius"], n),
+                                                         T.dolly(c["dolly"], n)), "look_at", False)
+    tracked = {f"track_{k}": v for k, v in out.items()}
+    tracked["track_orbit_left_pedestal_up"] = PRESETS["orbit_left_pedestal_up"]
+    tracked["track_orbit_left_pedestal_down"] = PRESETS["orbit_left_pedestal_down"]
+    out.update(tracked)
+    #   roll — 광축 회전. 크기 손잡이는 pan/tilt 와 같은 `pan`(도).
+    out["roll_left"] = (lambda n, c: T.roll(c["pan"], n), "free", False)
+    out["roll_right"] = (lambda n, c: T.roll(-c["pan"], n), "free", False)
+    #   free_pedestal_* — **free-moving 세로** (사용자 지시 "free moving vertical도 돌아가게").
+    #   궤적은 `pedestal_*` 와 글자 그대로 같고 캡션만 targetless 다 — targetless 가 preset 단위
+    #   플래그(`caption_presets.json`)라 같은 이름으로 anchor 판과 free 판을 동시에 못 쓴다.
+    out["free_pedestal_up"] = (lambda n, c: T.pedestal(c["lateral"], n), "free", False)
+    out["free_pedestal_down"] = (lambda n, c: T.pedestal(-c["lateral"], n), "free", False)
+    return out
+
+
+D273_PRESETS = _d273_presets()
+PRESETS.update(D273_PRESETS)
+
 # **모양의 크기가 0** 인 preset — τ 이분법이 의미 없다 (어떤 s 든 같은 궤적이라 τ 가 안 변한다).
 # `track_hold*` 도 여기 든다: 모양은 identity 고 움직임은 전부 follow offset 에서 나오므로
 # 스케일 s 가 궤적을 못 바꾼다. 이름은 "정지"지만 판정 기준은 "τ 가 s 에 반응하나"다.

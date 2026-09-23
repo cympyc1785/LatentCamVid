@@ -208,6 +208,18 @@ TRACK_BONUS_SLOTS = ("recede", "advance", "vertical")
 # 안 따라와 조용히 track 이 빠지는 걸 막기 위함 — `track_pull_out_arc_*` 가 실제로 그 경우였다.
 PRESET_NAMES = frozenset(_PRESETS)
 
+# D273 `--slot_plan pool` / `--free_moving pool` 의 후보. 표에서 직접 읽는다 (위 PRESET_NAMES 와
+# 같은 이유 — preset 이 늘면 자동으로 따라온다). anchor 풀에서 빼는 것:
+#   targetless 회전(pan/tilt/roll) · free_*   → free-moving 풀로
+#   s_curve (D167 사용자 지시로 제거) · *_legacy · static_zoom_in (zoom 은 카메라 이동이 아니다)
+_ROTATION = ("pan_", "tilt_", "roll_")
+POOL_PRESETS = tuple(sorted(p for p in _PRESETS
+                            if not p.startswith(_ROTATION + ("free_",))
+                            and p not in ("s_curve", "static_zoom_in", "pan_right_zoom_out")
+                            and not p.endswith("_legacy")))
+FREE_POOL_PRESETS = tuple(sorted(p for p in _PRESETS
+                                 if p.startswith(_ROTATION + ("free_",)) and "zoom" not in p))
+
 
 def route(graph: dict, min_area_frac: float, allow_vertical_fallback: bool = False,
           track_mode: str = "add", node: dict = None,
@@ -497,6 +509,17 @@ def main(args):
                                args.max_anchors, args.min_anchor_sep,
                                min_drift_u=args.anchor_min_drift_u,
                                require_frame0=args.anchor_require_frame0)
+        # D273 (사용자 지시 2026-09-24 "anchor는 그냥 사람만"). `--anchor_labels` 에 적힌 라벨의
+        # 노드만 anchor 가 된다. 빈 문자열이면 끔 = 옛 동작. 캡 **뒤에** 거르면 사람이 면적 순위에
+        # 밀려 잘린 뒤라 0개가 될 수 있으므로, 후보 노드 자체를 먼저 거른 graph 로 다시 뽑는다.
+        labels = {x.strip() for x in args.anchor_labels.split(",") if x.strip()}
+        if labels:
+            only = dict(graph, nodes=[n for n in graph["nodes"] if n.get("label") in labels])
+            anchors = pick_anchors(only, args.min_area_frac,
+                                   args.max_dynamic_anchors, args.max_static_anchors,
+                                   args.max_anchors, args.min_anchor_sep,
+                                   min_drift_u=args.anchor_min_drift_u,
+                                   require_frame0=args.anchor_require_frame0)
         why = ("anchor 후보가 없다 (max_area_frac 하한을 낮추거나 graph 를 확인"
                + (f"; --anchor_min_drift_u {args.anchor_min_drift_u} 로 걸렀다)"
                   if args.anchor_min_drift_u > 0 else ")"))
@@ -559,6 +582,29 @@ def main(args):
         # 여기서 갈아야 화이트리스트/rotate/grid 가 뒤이어 걸리지 않는다. 슬롯 이름은
         # 하류에서 안 쓴다 (`sample_camera_bank.py:904` 가 `preset` 만 읽는다).
         # 빈 문자열이면 no-op = 옛 동작 비트 동일.
+        if args.slot_plan == "pool":
+            # D273 (사용자 지시 2026-09-24 "기본적으로 모든 조합의 preset을 쓸 수 있되 track은
+            # 일정 이상 움직일때만"). 슬롯 표(슬롯당 preset 1개 고정) 대신 **preset 전량**이
+            # 후보다. track 판정은 `route()` 가 이미 낸 `anchor_track_eligible`
+            # (= moving ∧ center_drift_u > --track_min_drift_u) 를 그대로 쓴다 — 문턱이 두 곳으로
+            # 갈리면 D166 버그가 돌아온다. 세로(crane/pedestal)는 gravity 를 믿을 때만.
+            # 제자리 회전(pan/tilt/roll)·free_ 는 targetless 라 여기가 아니라 free-moving 몫이다.
+            track_ok = bool(reasons.get("anchor_track_eligible"))
+            grav_ok = graph.get("gravity", {}).get("method") in vertical_gravity
+            pool = [p for p in POOL_PRESETS
+                    if (track_ok or not p.startswith("track_"))
+                    and (grav_ok or not any(v in p for v in ("crane", "pedestal")))]
+            rng = np.random.default_rng(stable_hash(f"{args.video}/{node['id']}/pool"))
+            pool = [pool[i] for i in rng.permutation(len(pool))]
+            reasons["pool_size"] = len(pool)
+            # `--pool_size N` — 섞은 풀의 앞 N 개만. τ 뱅크(`--variant_pool full`)가 풀 전량을
+            # 예비로 굽기 때문에 70 개면 tau 가 19 s -> 168 s 가 된다 (d273 스모크 1편). 씬마다
+            # 순서가 다르므로 코퍼스 전체로는 전량이 고르게 쓰인다. 0 = 전량.
+            if args.pool_size > 0:
+                pool = pool[:args.pool_size]
+            reasons["pool_track_ok"] = track_ok
+            reasons["pool_vertical_ok"] = grav_ok
+            slots = [(f"pool:{p}", p) for p in pool]
         if forced_presets:
             reasons["forced_presets"] = list(forced_presets)
             reasons["forced_replaced"] = [p for _, p in slots]
@@ -675,6 +721,12 @@ def main(args):
     if args.free_moving != "off":
         if args.free_moving == "rotate":
             free = full_first.get("rotate")
+        elif args.free_moving == "pool":
+            # D273 (사용자 지시 "free moving vertical도 돌아가게"). 제자리 회전 + 세로 병진
+            # (`free_pedestal_*`, caption targetless). 세로는 gravity 를 믿을 때만.
+            grav_ok = graph.get("gravity", {}).get("method") in vertical_gravity
+            cands = [p for p in FREE_POOL_PRESETS if grav_ok or "pedestal" not in p]
+            free = cands[stable_hash(f"{args.video}/free") % len(cands)]
         else:
             picked = pick_external(args.external_shapes, f"{args.video}/free",
                                    1, {s["slot"] for s in routed[0]["slots"]})
@@ -805,11 +857,15 @@ def build_parser():
     parser.add_argument("--min_anchor_sep", default=2.0, type=float)
     # D166: 슬롯 구성. full = 8슬롯 전량(옛 동작). grid2x2 = anchor 두 개가 **같은 슬롯 쌍**을
     # 써서 4칸을 만든다 (§GRID_SLOT_PAIRS). `sample_camera_bank --preset_route` 와 짝이다.
-    parser.add_argument("--slot_plan", default="full", type=str, choices=("full", "grid2x2"))
+    # D273: pool = 슬롯 표 대신 preset 전량 (`POOL_PRESETS`, track_ 은 추종 가능 anchor 만).
+    parser.add_argument("--slot_plan", default="full", type=str, choices=("full", "grid2x2", "pool"))
+    # D273: anchor 로 허용할 노드 라벨 (쉼표). 빈 문자열 = 끔 (옛 동작).
+    parser.add_argument("--anchor_labels", default="", type=str)
+    parser.add_argument("--pool_size", default=0, type=int)          # D273: --slot_plan pool 앞 N 개
     # D166: target 절 없는 변이를 scene 당 1개. off = 안 넣음(옛 동작).
     # rotate = 라우팅된 `pan_*`(caption `targetless`), datadop = `dd_*` 1개(`--external_shapes` 필요).
     parser.add_argument("--free_moving", default="off", type=str,
-                        choices=("off", "rotate", "datadop"))
+                        choices=("off", "rotate", "datadop", "pool"))
     # D166 (사용자 지시 2026-09-08): scene 당 변이 **상한**. 요구가 아니다 — 못 채우면 그대로 낸다.
     # `object_budget = target_variants - (free 1)` 이 anchor 를 쓰는 몫이고, 뱅크가 살아남은
     # anchor 수에 맞춰 나눈다 (2+ 이고 움직이면 2x2, 아니면 1 anchor x 4). JSON 에만 실린다.

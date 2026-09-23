@@ -103,7 +103,9 @@ TAU_LADDER = (0.10, 0.20, 0.35, 0.60, 1.00)
 # D90. tilt 2종 추가 — pan 과 똑같이 이동이 정확히 0 이라 τ 사다리가 안 먹는다 (`T.tilt` 는
 # 제자리 pitch 회전이다). 사다리 손잡이는 pan 과 같은 `pan_deg` 를 쓴다.
 ROTATION_ONLY_PRESETS = ["pan_left", "pan_right", "pan_right_zoom_out",
-                         "tilt_up", "tilt_down"]
+                         "tilt_up", "tilt_down",
+                         # D273. roll 도 제자리 회전 — 손잡이는 같은 `pan_deg`.
+                         "roll_left", "roll_right"]
 
 # 그 `max_scale` 을 되돌려야 요청한 각도가 그대로 나온다 (안 나누면 4배로 커진다). 기본값이
 # 바뀌어도 따라가도록 시그니처에서 읽는다.

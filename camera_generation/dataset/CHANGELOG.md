@@ -11,6 +11,23 @@ Follows [Keep a Changelog](https://keepachangelog.com/).
 
 ### Added
 
+- **D273 — preset 풀 라우팅 + LAMP 빈 조합 36종 + GT mesh 게이트 실험 (2026-09-24, R23~R27).**
+  - `lbm/presets.py` `D273_PRESETS` — 46 → **82** 개. LAMP DSL 대비 빈 조합을 기존 `T.*` compose 로만
+    채웠다: `orbit_right_pedestal_{up,down}`, `pedestal_up_dolly_{in,out}`, `pedestal_down_dolly_out`,
+    `truck_{l,r}_pedestal_{up,down}`, `truck_{l,r}_dolly_{in,out}`, `crane_up_dolly_out`,
+    `crane_down_dolly_in` + 전부의 `track_` 짝 (+ `track_orbit_left_pedestal_*`), `roll_{left,right}`
+    (`ROTATION_ONLY_PRESETS` 등록), `free_pedestal_{up,down}` (free-moving 세로, 캡션 targetless).
+    `configs/caption_presets.json` 에 36개 문구 추가 (기존 행 무변경). 사용자가 든 `push_in_arc_*`,
+    `crane_down`, `track_dolly_in`, `track_push_in_arc_*` 는 **이미 있었고** 라우팅이 안 냈을 뿐이다.
+  - `fit/bank/route_presets.py` — `--anchor_labels person` (anchor 라벨 제한), `--slot_plan pool`
+    (슬롯 표 대신 preset 전량 70개 풀을 씬마다 섞어 씀, `track_` 은 `center_drift_u >
+    --track_min_drift_u` anchor 만, 세로는 gravity 신뢰 시만), `--pool_size N`, `--free_moving pool`
+    (pan/tilt/roll/free_pedestal). 기본값은 전부 옛 동작 — d266 route 출력 비트 동일 확인.
+  - `configs/bank/d273_trumans_pool.json` — d271 을 extends, 위 route 인자 + `blend_gt_z_up` 을
+    세로 신뢰 목록에. 스모크 1편 OK (75 s, `truck_right_dolly_out`·`crane_down`·free `tilt_down`).
+  - `lbm/mesh_collision.py mesh_ray_profile` / `eval/compare_mesh_gates.py` (R27) — Blender raycast 의
+    clearance / floor_drop / subject_dist / 시선을 mesh_grid(EDT) 로 재는 벡터판 + Blender 판정 대조기.
+
 - **D272 — board 후보 시작 카메라로 TRUMANS source video (2026-09-23, R22 재계획).** 사용자 정정:
   요청은 "sweep66 후보 시작 카메라로 source video 를 만드는 것" 이었다 (D271 은 옛 source 위 뱅크라
   중단). 추가 지시 "같은 시간에 대해서 시작점이 같은 카메라 2개씩 다른 시작 카메라로 2x2".

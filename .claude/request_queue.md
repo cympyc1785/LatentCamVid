@@ -18,6 +18,11 @@
 
 ### R19. d200 dynpose — condition = text + SigLIP2 feature(Molmo2 visual) + camera embedding 학습 → Working
 ### R20. d200 dynpose — condition = text + camera embedding 만 학습 → Working
+### R23. TRUMANS route: anchor 는 사람만 (2026-09-24)
+### R24. preset 빈 조합 채우기 — push_in_arc, crane_down, track_dolly_in, track_push_in_arc 등. LAMP DSL 대조로 부족분 찾기 → 추가 목록 보고
+### R25. free-moving vertical 허용 + 기본적으로 모든 preset 조합 사용 가능, track_ 은 subject 가 일정 이상 움직일 때만
+### R26. push/pull out 계열은 hole gate 대신 subject 화면 면적(shot scale) 기준으로 적당히 멀어지게 (hole gate 대체)
+### R27. TRUMANS: 충돌·occlusion·거리·프레이밍 gate 를 fitting **중에** Blender GT mesh raycast 로 — 가능한지 실험
 ### R22. TRUMANS 데이터셋 구축 — **계획 승인됨 (2026-09-23)**
 조사: `tmp/agent/reader-r22-trumans.md` (핵심 주장 5건 직접 재확인). 사용자 결정 넷:
 ① 범위 = s3f0k6 **737 clip 전량** (191 은 prep 완료, 546 은 graph/cloud/mesh 부터)

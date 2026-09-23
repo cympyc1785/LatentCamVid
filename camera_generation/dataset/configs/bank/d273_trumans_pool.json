@@ -1,0 +1,38 @@
+{
+  "extends": "d271_trumans_full.json",
+  "_why": "D273 — R23/R24/R25 (사용자 지시 2026-09-24): anchor 는 사람만(`--anchor_labels person`), 슬롯 표 대신 preset 전량 풀(`--slot_plan pool`, track_ 은 center_drift_u > 0.05 인 anchor 만), free-moving 은 회전 + 세로(`--free_moving pool`), TRUMANS GT 중력(`blend_gt_z_up`)을 세로 신뢰 목록에 추가. tau/fit/emit 은 d266 과 글자 그대로 같다 (fit 은 이미 shot_scale 사다리 — R26 은 d266 에서 충족).",
+  "generation": "d273T",
+  "tau_bank_dir": "bank_d273T",
+  "bank_dir": "hole_bank_d273T",
+  "route": {
+    "out": "preset_route_d273T.json",
+    "args": [
+      "--num_external",
+      "0",
+      "--max_dynamic_anchors",
+      "1",
+      "--max_static_anchors",
+      "0",
+      "--max_anchors",
+      "1",
+      "--min_anchor_sep",
+      "2.0",
+      "--track_min_drift_u",
+      "0.05",
+      "--target_variants",
+      "3",
+      "--skip_if_empty",
+      "--slot_plan",
+      "pool",
+      "--free_moving",
+      "pool",
+      "--anchor_labels",
+      "person",
+      "--vertical_gravity",
+      "ground_ransac,geocalib,blend_gt_z_up",
+      "--pool_size",
+      "12"
+    ]
+  },
+  "_pool_size": "`--pool_size 12` — 씬마다 섞은 70개 풀의 앞 12개만 τ 로 굽는다 (전량이면 tau 가 편당 168 s). fit 의 fallback 사다리 예비로 12개면 충분하고, 순서가 씬마다 달라 코퍼스 전체로는 70개가 고르게 나온다."
+}

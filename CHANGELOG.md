@@ -11,6 +11,25 @@
 
 ### Added
 
+- **`context.md` — 다음 세션이 알아야 할 것** (R14). `CLAUDE.md`(규칙) · `pipeline.md`(지도) ·
+  `.claude/goals.md`(목표) 어디에도 안 들어가는데 **모르면 사고가 나는 것**을 모았다.
+  7 절: 서 있는 지시 / 문서 간 어긋남 / 세대 이름 / 비교 금지 지표 / 반복된 실패 양식 /
+  env 대응 / 열려 있는 것.
+  - **`SPECS.md` 가 없다.** `CLAUDE.md` 의 `## Specifics` 와 `.claude/goals.md` 가 둘 다
+    이 파일을 가리키는데 저장소에 존재하지 않는다. 두 문서가 가리키는 곳이 빈 곳이라는
+    사실 자체를 기록했다.
+  - **`CLAUDE.md:182`·`:189` 가 "GPU 0~4" 라고 쓴다** — 같은 파일 `## Don't` 의 0~3 과
+    충돌한다. 어느 쪽이 이기는지(`## Don't`)를 명시.
+  - **`camera_generation/dataset/summary.md` 헤더가 두 겹으로 틀렸다** — "gitignore 라
+    커밋에 안 들어간다"(R7 이후 추적 중) + 인용한 `.gitignore:222` 가 지금은 `tools` 줄이다.
+  - 사용자가 한 번 말하고 계속 유효한 지시 9건을 표로 (릴 단위 seed 3개 concat, GenDoP
+    `--raw`, GPU 0~3 예외 전부 만료, 학습 중지는 Ctrl+C 먼저, 대기열 자동 진행 등).
+  - **반복해서 밟은 실패 양식 셋**을 실측 건수와 함께 — ① 참조가 코드를 안 따라간다
+    (R9 40건 중 36건 / R12 3건 / R13 18건) ② agent 보고서가 매번 틀린다 (R8 5건 · R10 4건 ·
+    R12 3건 · R13 4건) ③ **rc=0 은 "됐다" 가 아니다** (nested repo `git add`, `eval_dir`
+    태그 누락, `route` 없는 `tau` 굽기, `--videos all`).
+  - `file:line`·경로 전량 스크립트 검산 (문제 0건) + 표 행 파손 검사.
+
 - **`pipeline.md` — 저장소 전체 지도** (R13). 지금까지 비어 있던 파일을 채웠다. 네 단계
   (① 데이터 구축 `camera_generation/dataset/` → ② 학습 `camera_generation/latentcam/` →
   ③ 평가 → ④ 영상 생성 `video_generation/models/Vista4D/`) 의 **위치와 기동 방법만** 적고,

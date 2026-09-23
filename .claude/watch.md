@@ -44,3 +44,12 @@ main session 은 컨텍스트가 압축되거나 세션이 끝나면 **자기가
 - 나아가나: tqdm `Epoch N` 증가
 - 끝났나  : epoch_cap 50 → results/*_dynpose_d200_siglip2_srccam/ckpts/last.pth
 - 이상신호: Traceback / CUDA out of memory / nan / 30분간 it 정지
+
+### R22 TRUMANS board source video 2x2 (D272, 807 chunk)
+- screen  : r22b_render   pid: 237498   GPU: 2, 3 (worker 4 x 2, Cycles 32spp)
+- 로그    : <repo>/tmp/r22b/render_full.out (clip 별 tmp/r22b/log/, chunk 상태 tmp/r22b/status/)
+- 살아있나: pid 존재 + GPU 2/3 에 blender 프로세스
+- 나아가나: status/*.json 개수 증가 (pilot 6 에서 시작, 파일럿 속도 ~6 chunk/h @4 worker)
+- 끝났나  : 로그 `[render] ALL DONE` → `--stage report` → 다음: d273 bank → raycast → caption → export
+- 이상신호: Traceback / 1시간 status 정지 / complete 비율 급락
+

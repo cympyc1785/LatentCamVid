@@ -46,7 +46,7 @@ subject-in-frame fraction, collision도 포함해서". 두 건 다 **eval 이 �
 - **d263 (umt5only)**: s91 seg-list id 가 eval 이 만든 dataset index 와 안 붙어
   `val 5/5144` 로 떨어졌다 (loss_latent 173.47 — 쓸 수 없는 값).
 - ⚠ **subject_in_frame / collision 은 wandb 에 아예 없다** (3 run 전부 summary key 18~19개,
-  해당 key 0개). 예측 위에서 재는 도구는 `CinemaTraj/scripts/eval_subject_in_frame.py` 이고
+  해당 key 0개). 예측 위에서 재는 도구는 `camera_generation/dataset/eval/eval_subject_in_frame.py` 이고
   **collision 은 아직 옵션이 없다** — `verify.py` metric 4 (`behind_surface_frames`) 를
   옵션 분기로 붙여야 한다.
 - 비용: 실측 429 s/씬, test 1,017 씬 = 단일 GPU 121 h. 샤딩은 씬 단위.

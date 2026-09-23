@@ -221,36 +221,26 @@ DATA
 DATA/Vista4D-Eval-Data
 tools
 results
-# camera_generation/models 는 vendored 모델 트리라 통째로 무시한다. 유일한 예외가 우리가 직접
-# 쓴 CinemaTraj 플래너 **코드**다 — 여기가 추적 밖이면 스크립트를 지웠을 때 되돌릴 방법이 없다
-# (2026-09-09, 정리 작업 선행 조건). git 은 부모 디렉토리가 제외되면 자식을 되살릴 수 없으므로
-# `models` 를 `models/*` 로 바꿔 경로를 한 단계씩 열어 준다 (무시 범위는 이전과 동일).
-# 산출물(out*/ logs/ results/ __pycache__)은 `CinemaTraj/*` 줄에서 계속 닫혀 있다.
+# camera_generation/models 는 vendored 모델 트리라 통째로 무시한다. 2026-09-09 부터 여기에
+# 예외가 하나 뚫려 있었다 — 논문 폴더 이름을 재사용한 우리 플래너 `Planner/CinemaTraj/` 다.
+# R7(2026-09-23) 로 그 코드가 `camera_generation/dataset/` 으로 나갔으므로 예외가 사라지고,
+# 이 줄 하나로 되돌아왔다. 제자리에 남은 건 논문 PDF 한 개뿐이라 무시되는 게 맞다.
 camera_generation/models/*
-!camera_generation/models/Planner/
-camera_generation/models/Planner/*
-!camera_generation/models/Planner/CinemaTraj/
-camera_generation/models/Planner/CinemaTraj/*
-!camera_generation/models/Planner/CinemaTraj/scripts/
-# R6(2026-09-23) scripts/ 재분류 목적지. 여기를 안 열면 새로 생긴 USAGE.md 가 조용히 추적 밖이다
-# (이미 추적 중이던 파일은 gitignore 와 무관하게 따라오므로 `git mv` 만으로는 안 들킨다).
-!camera_generation/models/Planner/CinemaTraj/exec/
-!camera_generation/models/Planner/CinemaTraj/fit/
-!camera_generation/models/Planner/CinemaTraj/eval/
-!camera_generation/models/Planner/CinemaTraj/viz/
-!camera_generation/models/Planner/CinemaTraj/lbm/
-!camera_generation/models/Planner/CinemaTraj/scene_graph/
-!camera_generation/models/Planner/CinemaTraj/decode/
-!camera_generation/models/Planner/CinemaTraj/configs/
-!camera_generation/models/Planner/CinemaTraj/*.py
-!camera_generation/models/Planner/CinemaTraj/*.md
-# R17(2026-09-23) 시간순으로 늘어나는 문서는 `.log` 로 바꿨다. `*.log` 를 통째로 열면 실행 로그가
-# 딸려 들어오므로 이름으로만 연다. DECISIONS 는 사용자 지시로 `.md` 로 되돌렸다
-# (위 `!…/*.md` 가 이미 열고 있어 예외가 필요 없다).
-!camera_generation/models/Planner/CinemaTraj/LBM_DEFECTS.log
-!camera_generation/models/Planner/CinemaTraj/fix.log
+
+# R7(2026-09-23) 데이터 구축 파이프라인의 새 집. 여기는 **무시 대상이 아니다** —
+# 옛 위치처럼 `models/*` 를 닫고 한 단계씩 여는 구조가 필요 없다. 그래서 규칙의 방향이 뒤집힌다:
+# 옛날에는 "열어 줄 것"을 적었지만 여기서는 **"닫을 것"만** 적는다.
+# 이걸 빠뜨리면 433 GB 산출물이 조용히 `git status` 에 올라온다 (out 270G · out_trumans 137G).
+camera_generation/dataset/out/
+camera_generation/dataset/out_*/
+camera_generation/dataset/logs/
+camera_generation/dataset/results/
 # 4 MB 생성 데이터. retrieve_datadop_shapes.py 가 다시 만든다.
-camera_generation/models/Planner/CinemaTraj/configs/datadop_shapes.json
+camera_generation/dataset/configs/datadop_shapes.json
+# 59행의 전역 `*.log` 가 타임라인 문서 2종을 삼킨다 (R17). 이름으로만 다시 연다 —
+# `*.log` 를 통째로 열면 실행 로그가 딸려 들어온다. DECISIONS 는 `.md` 라 예외가 필요 없다.
+!camera_generation/dataset/fix.log
+!camera_generation/dataset/LBM_DEFECTS.log
 video_generation/tools
 video_generation/models
 video_generation/results

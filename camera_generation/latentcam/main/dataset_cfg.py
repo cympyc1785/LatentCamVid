@@ -103,7 +103,7 @@ AVG_SCALE_DIRS = {
     #     non-sky 평균 ray 길이. context range 는 영상 전체 [0,49) 인데 분모만 첫 프레임이다.
     #   ctx_all_first_cam                    = **전 프레임** depth 를 unproject 한 점군에서
     #     첫 카메라까지의 평균 거리. 기준점(첫 카메라)은 같고 점 집합만 구간 전체로 넓혔다.
-    # 생성기: models/Planner/CinemaTraj/scripts/make_avg_scale_vista4d_ctxall.py
+    # 생성기: camera_generation/dataset/fit/caption/make_avg_scale_vista4d_ctxall.py
     #   (정의는 trumans_to_recon.py:avg_scale_first_cam 을 import 해서 그대로 쓴다)
     # 52편 실측 ratio(ctxall/S) med 1.0110 min 0.8258(soapbox) max 6.1598(camera-lens) --
     # 대부분은 거의 안 변하고, 카메라가 크게 빠지는 씬(camera-lens 는 z_med 가 1.06->20.84)

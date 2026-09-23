@@ -22,7 +22,7 @@
 # 커진다 (camera-lens 는 z_med 가 1.059 -> 20.844 로 단조 증가하는 pull-out, sky frac max 0.035).
 # 그런 씬에서 frame0 분모는 target translation 을 과대평가하게 만든다 -- 그게 이 arm 이 재는 것.
 #
-# 생성기: models/Planner/CinemaTraj/scripts/make_avg_scale_vista4d_ctxall.py
+# 생성기: camera_generation/dataset/fit/caption/make_avg_scale_vista4d_ctxall.py
 #   (정의는 trumans_to_recon.py:avg_scale_first_cam 을 import 해서 그대로 쓴다. stride 2.
 #    52편 / 13,705 변이 전량 기록됐고, 같은 로더로 재계산한 frame0 S 가 뱅크 저장값과 1e-6 안에서
 #    일치하는지 영상마다 assert 로 확인했다 -- 로더/규약 드리프트가 없다는 뜻.)

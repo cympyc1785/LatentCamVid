@@ -1187,7 +1187,7 @@ class CamDataset(torch.utils.data.Dataset):
     def _target_track(self, scene_idx, seg_key):
         """[new 2026-08-27] target_track_dim>0: 변이의 subject(anchor) OBB world 궤적.
 
-        `<scene>/da3/target_track.npz` (CinemaTraj/scripts/export_target_track.py 산출):
+        `<scene>/da3/target_track.npz` (camera_generation/dataset/fit/bank/export_target_track.py 산출):
             track_world (V,T,3) float32 — DA3 world 좌표의 OBB/track center
             valid       (V,)   bool     — anchor 를 scene_graph 에서 못 찾은 변이는 False
             keys        (V,)   str      — target_poses.npz 와 같은 세그먼트 키
@@ -1200,7 +1200,7 @@ class CamDataset(torch.utils.data.Dataset):
             if not osp.isfile(p):
                 raise FileNotFoundError(
                     f"target_track_dim>0 (또는 peav_readout_aux_dim>0) 인데 파일이 없다: {p} — "
-                    f"CinemaTraj/scripts/export_target_track.py 를 먼저 돌릴 것")
+                    f"camera_generation/dataset/fit/bank/export_target_track.py 를 먼저 돌릴 것")
             z = np.load(p, allow_pickle=True)
             cache = {'track': torch.from_numpy(np.asarray(z['track_world'], dtype=np.float32)),
                      'valid': np.asarray(z['valid'], dtype=bool),

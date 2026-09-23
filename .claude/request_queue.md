@@ -14,11 +14,6 @@
 
 ## Request
 
-### R7. 데이터 구축 파이프라인을 `camera_generation/dataset/` 으로 이전
-`CinemaTraj` 는 원래 논문 폴더다. 우리 파이프라인을 `camera_generation/dataset/` 로 옮기고 경로도 전부 수정.
-- ⚠ R6 과 순서 의존: R6(폴더 재분류) 먼저 → R7(통째 이전).
-- ⚠ R9 와 충돌 가능: 이전 후에는 문서도 새 위치에 있어야 한다. R7 진행 시 확인.
-
 ### R8. CinemaTraj md 파일 정리
 현재 파이프라인과 무관한 내용 삭제.
 
@@ -47,7 +42,8 @@
 
 ## Working
 
-### R7. 데이터 구축 파이프라인을 `camera_generation/dataset/` 으로 이전
+### R8. CinemaTraj md 파일 정리
+현재 파이프라인과 무관한 내용 삭제. 대상은 이제 `camera_generation/dataset/` 아래다.
 
 ---
 
@@ -58,6 +54,23 @@ _(비어 있음)_
 ---
 
 ## Done
+
+### R7. 데이터 구축 파이프라인을 `camera_generation/dataset/` 으로 이전 — 완료 (2026-09-23)
+추적 19항목 `git mv` + 미추적 산출물 8항목 **433 GB** `mv` (같은 Lustre 마운트라 rename, 즉시).
+옛 위치엔 논문 PDF 하나만 남겼다. 드라이버 `tmp/scripts/_tools/r7_move_pipeline.py`
+(`--stage plan|move|refs|climb|verify`).
+- **안 고쳐도 된 것:** `__file__` 루트 계산 105곳은 전부 자기 위치 기준 → 트리째 옮기면 보존.
+- **고친 것 ①** 하드코딩 절대경로 **39 파일**.
+- **고친 것 ② (조사 때 놓쳤던 것)** 트리 **밖**으로 올라가는 상대경로 **15곳**. `..` 개수가
+  트리 깊이를 인코딩하는데 4단계 → 2단계로 얕아졌다. `import se3` 가 import 시점에 터져
+  `--help` 조차 못 내는 **시끄러운** 실패라 스모크에서 바로 잡혔다.
+- **고친 것 ③** 문자열이 두 리터럴로 쪼개진 절대경로 1곳(`audit_lbm_distance.py` `RECON_DEFAULT`) —
+  연속 부분문자열 치환이 구조적으로 못 보는 종류다 (R6 때도 같은 부류가 8곳 있었다).
+- **`.gitignore` 는 손으로.** 옛 구조가 "`models/*` 닫고 CinemaTraj 만 열기"라, 그대로 옮기면
+  **여는 규칙만 남아 433 GB 가 추적으로 딸려 들어온다.** 방향을 뒤집어 닫을 것만 적었다.
+  R17 이 경고한 `!…/{fix,LBM_DEFECTS}.log` 두 줄도 새 경로로 옮겨 붙여 해소.
+- 검증: 추적 282 · `ast.parse` 167/0오류 · 진입점 32개 `--help` 통과 · conf yaml 158 파싱 통과 ·
+  `git status` 산출물 0행 · 경로형 `CinemaTraj` 잔여 0 (논문 지칭 6곳은 의도적으로 보존).
 
 ### R17. 타임라인 문서는 `.md` 말고 `.log` 로 — 완료 (일부 되돌림, 2026-09-23)
 `git mv` 로 `fix.md`→**`fix.log`**, `LBM_DEFECTS.md`→**`LBM_DEFECTS.log`**.

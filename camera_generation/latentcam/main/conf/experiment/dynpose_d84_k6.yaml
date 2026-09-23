@@ -23,7 +23,7 @@
 #     "target: none. motion: the camera moves downward while panning left."
 # target 없음 6,578 (53.9%) / 있음 5,615 (46.1%) 로 거의 반반이다. 없음 쪽은 `dd_*` 5,830 +
 # `pan_*` 748 (`targetless` 플래그, D86) 이다 — pan 은 sif median 0.50 이라 target 을 적으면
-# 지키지 못할 약속이 된다. 자세한 근거는 CinemaTraj/presets.md §0.
+# 지키지 못할 약속이 된다. 자세한 근거는 camera_generation/dataset/presets.md §0.
 #
 # ═══ event 절이 비어 있다 ═══════════════════════════════════════════════════════════════
 # DynPose 의 metadata.csv 는 `video,dynamic` 두 열뿐이라 씬 캡션 소스가 없다. 기본

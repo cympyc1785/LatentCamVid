@@ -11,7 +11,7 @@
 ## 0. 한 줄 지도
 
 ```
-[데이터 생성]  camera_generation/models/Planner/CinemaTraj   (env: vista4d)
+[데이터 생성]  camera_generation/dataset   (env: vista4d)
    video 1편 -> scene_graph.json -> cloud.npz -> 후보 sampling -> τ 뱅크 -> hole 사다리 fit
              -> emit(canonical) -> 캡션 -> *_to_dl3dv.py 로 DL3DV 포맷 코퍼스
 
@@ -244,7 +244,7 @@ Fréchet 거리는 공분산 추정이라 소표본에서 폭증한다. **eval_m
   ③ PRDC `manifold_k=3` 이 n=77 에서 무의미함을 명시 (`prdc.py:57`)
 
 ### C2 🔴 caption F1 은 고장이 이미 진단됐는데 안 고쳤다
-`CinemaTraj/summary.md:313-402`: `CaptionMetrics` 의 `cam_static_threshold=0.02` 가
+`camera_generation/dataset/summary.md:313-402`: `CaptionMetrics` 의 `cam_static_threshold=0.02` 가
 **절대 world 단위**라 TRUMANS 는 45.2% 축이 임계 경계에 앉고, `27×7=189` 클래스 **완전일치**
 weighted F 라 부분점수가 없다 → fscore 가 0~0.09 를 추세 없이 튄다 (DataDoP fscore 정확히 0 과
 같은 현상). Vista4D/dynpose 는 2.7~3.3% 라 덜하지만 **τ 사다리 하단(0.10) 변이는 구조적으로

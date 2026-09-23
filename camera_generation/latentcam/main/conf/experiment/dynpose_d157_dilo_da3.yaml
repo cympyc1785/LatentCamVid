@@ -20,7 +20,7 @@
 # 아니라 preset 축을 없앤 것 + D149 앞단 + D151 τ 분모 S 다.
 #
 # ═══ 코퍼스 재현 ══════════════════════════════════════════════════════════════════════════
-#     bash models/Planner/CinemaTraj/scripts/run_dynpose_d163_export.sh
+#     bash camera_generation/dataset/exec/_legacy/run_dynpose_d163_export.sh
 #   (bank.json 글롭으로 그 시점 완료분만 캡션→export→`filter_seg_list_by_preset.py --presets
 #    dolly_in_look_at --suffix dilo`. D157 이 다 구워지면 같은 명령을 다시 돌려 증분으로 붙인다.)
 #

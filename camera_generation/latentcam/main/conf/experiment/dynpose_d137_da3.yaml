@@ -25,7 +25,7 @@
 #
 # ═══ 재현 ════════════════════════════════════════════════════════════════════════════════
 #     SKIP_CAPS=1 OUT=<root> DROP=clamped_low \
-#       bash models/Planner/CinemaTraj/scripts/run_dynpose_d129_export.sh
+#       bash camera_generation/dataset/exec/_legacy/run_dynpose_d129_export.sh
 #     python latentcam/scripts/data/filter_seg_list_by_preset.py --root <root> \
 #       --prefix seg_list_dynpose --target_frac_prefix dd_ --target_frac 0.10 --suffix dd10
 # `DROP=` (빈 값) 이면 필터 없는 d129 코퍼스가 비트 동일하게 다시 나온다.

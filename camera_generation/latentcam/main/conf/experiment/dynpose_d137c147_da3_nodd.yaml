@@ -34,7 +34,7 @@
 # 다만 테스트 리스트도 갈리므로(1129 vs 1016) 지표를 나란히 놓을 때 그 113 행 차이는 남는다.
 #
 # ═══ 재현 ════════════════════════════════════════════════════════════════════════════════
-#     bash models/Planner/CinemaTraj/scripts/run_dynpose_d147_caption_export.sh   # 코퍼스
+#     bash camera_generation/dataset/exec/_legacy/run_dynpose_d147_caption_export.sh   # 코퍼스
 #     python latentcam/scripts/data/filter_seg_list_by_preset.py \
 #       --root /data1/cympyc1785/data/DynPose-LBM/latentcam_dynpose_d137c147 \
 #       --prefix seg_list_dynpose --exclude_presets_prefix dd_ --suffix nodd      # nodd 리스트

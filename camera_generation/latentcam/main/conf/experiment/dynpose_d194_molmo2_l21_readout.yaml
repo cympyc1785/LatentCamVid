@@ -30,7 +30,7 @@
 #
 # ═══ 데이터 전제 ═════════════════════════════════════════════════════════════════════════
 # `<scene>/da3/target_track.npz` 가 있어야 한다. d194 코퍼스는 2026-09-15 에
-# `CinemaTraj/scripts/export_target_track.py --corpus dynpose --out_root out_dynpose` 로
+# `camera_generation/dataset/fit/bank/export_target_track.py --corpus dynpose --out_root out_dynpose` 로
 # 전량 생성했다 (6,894/6,894 변이, valid 100%, missing anchor 0).
 # 파일이 없으면 dataset 이 **터진다** — 조용히 zero 조건으로 학습되면 이 arm 이 l21 대조군과
 # 같아져 버리고 로그에 흔적이 안 남기 때문이다.

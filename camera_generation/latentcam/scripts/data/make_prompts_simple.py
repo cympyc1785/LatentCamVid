@@ -26,7 +26,7 @@
 고르는 모드다. `--fields motion` 이면
     "target: man motion: the camera dramatically arcs to the left ..."
     ->            "motion: the camera dramatically arcs to the left ..."
-가 된다. 조립 규칙은 `CinemaTraj/scripts/build_bank_captions.py:84 prompt_of` 와 같다
+가 된다. 조립 규칙은 `camera_generation/dataset/fit/caption/build_bank_captions.py:84 prompt_of` 와 같다
 (`"{field}: {value}"` 를 공백으로 join, 빈 필드는 건너뜀) — 그래서 `--fields target,motion` 은
 원본 `prompts.json` 을 그대로 재현한다 (동일성 확인용).
 

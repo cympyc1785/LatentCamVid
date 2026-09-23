@@ -14,7 +14,7 @@
 # null = 전 채널 0 (target_track_dropout 0.1 로 per-sample 드랍) — concat 조건은 uncond
 # forward 에도 채널이 있어야 해서 CFG 를 빼기가 아니라 null 값으로 정의한다.
 #
-# target_track.npz 는 CinemaTraj/scripts/export_target_track.py 산출 (scene_graph.json 의
+# target_track.npz 는 camera_generation/dataset/fit/bank/export_target_track.py 산출 (scene_graph.json 의
 # track.center_smooth(dyn) / obb.center(stat) 를 T_wg 로 world 변환, 변이별 anchor 매핑).
 exp_name: vista4d_pgt_k6_track
 dl3dv_root: /data1/cympyc1785/data/Vista4D-Eval-Data/latentcam_da3

@@ -14,9 +14,6 @@
 
 ## Request
 
-### R12. Vista4D `USAGE.md`
-해당 모델을 어떻게 돌렸는지.
-
 ### R13. `/data1/cympyc1785/LatentCamVid/pipeline.md`
 전체 파이프라인(데이터 구축 → 학습 → 평가, GenDoP·E.T. 비교 포함)의 위치와 구조.
 
@@ -30,8 +27,8 @@
 
 ## Working
 
-### R11. `camera_generation/latentcam/train.md`
-학습 방법·구조, 평가 방법·metric, 주의사항.
+### R12. Vista4D `USAGE.md`
+해당 모델을 어떻게 돌렸는지.
 
 ---
 
@@ -42,6 +39,24 @@ _(비어 있음)_
 ---
 
 ## Done
+
+### R11. `camera_generation/latentcam/train.md` 신설 — 완료 (2026-09-23)
+`pipeline.md` 가 "무엇이 학습되는가"(구조)라면 이쪽은 "어떻게 돌리고 어떻게 읽는가"다.
+§1 기동 / §2 학습 루프 / §3 평가 / §4 체크포인트 / §5 지뢰 15행.
+- **기동 한 줄의 정본은 `scripts/train/queue_runs.py:99-101`** — `cd main` + `PYTHONPATH=<repo>:.`
+  + conda env python. 셋 중 하나만 빠져도 즉사하거나 엉뚱한 곳에 결과를 쓴다.
+- **평가 두 층위를 분리해 적었다** — 학습 중 val 은 `val_max_batches 20 × batch_size 8`
+  = **160 표본** 추정치라 arm 비교에 못 쓰고, 비교는 `scripts/eval_testset.py` 전량이다.
+  그 스크립트가 run 자신의 `results/<run>/config.yaml` 을 읽는 이유(살아있는 yaml 로 돌리면
+  `vae_latent_scale` 이 조용히 달라진다)도 같이 적었다.
+- **wandb 키 사전 20행** — `train/aim_n` 이 0 근처면 게이트가 배치를 통째로 걸렀다는 뜻,
+  `train/start_mse` 는 내려가는데 `start_rot_deg` 가 안 내려가면 이동만 맞히는 것 같은
+  읽는 법까지.
+- **인용 `file:line` 74개 + 경로 49개를 스크립트로 전량 대조.** 미해결은 산출물 파일명뿐.
+- 확정한 것 셋 — ① `eval_subject_in_frame.py`/`eval_collision_rate.py` 는 latentcam 이
+  아니라 `camera_generation/dataset/eval/` 에 있다. ② paired bootstrap 은 per-sample 지표
+  5개만 가능(PRDC/FCD 는 전 행 복제된 집합 지표). ③ CLaTr subprocess 실패는 학습을 안 죽이고
+  한 줄만 남긴다 (`:1150`, `:1155`).
 
 ### R10. `camera_generation/latentcam/pipeline.md` 신설 — 완료 (2026-09-23)
 이 트리에 모델 구조 문서가 **없었다** (`docs/` 는 ablation 메모 4장, `CHANGELOG.md` 45만 자).

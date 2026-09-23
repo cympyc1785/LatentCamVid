@@ -5,6 +5,22 @@ All notable changes to the latentcam sub-project. Follows [Keep a Changelog](htt
 ## [Unreleased]
 
 ### Added
+- **`train.md` 신설 — 학습·평가 운용 문서 (2026-09-23, R11).** `pipeline.md` 가 "무엇이
+  학습되는가"(구조)를 다루므로, "어떻게 돌리고 어떻게 읽는가"를 여기에 분리했다.
+  §1 기동(명령 한 줄 · GPU · screen · `queue_runs.py` 대기열 · 중단/재개 · smoke)
+  / §2 학습 루프(세 갈래 · 보조 손실 셋 · `epoch_cap` · `step_timing`)
+  / §3 평가(학습 중 val 160 표본 vs `eval_testset.py` 전량 · **wandb 키 사전 20행** ·
+  CLaTr subprocess 두 개와 조용한 skip · paired bootstrap) / §4 체크포인트 / §5 지뢰 15행.
+  - **인용한 `file:line` 74개를 전부 스크립트로 열어 대조했다** (`train_latent_cam_dm.py` 62,
+    `conf/config.yaml` 9, `queue_runs.py` 5, `stop_at_epoch.sh` 1). 경로 49개도 존재 확인 —
+    미해결은 산출물 파일명(`last.pth` / `metrics.json` 등)과 basename 인용뿐이다.
+  - 문서화하면서 확정한 것 셋: ① `eval_subject_in_frame.py` / `eval_collision_rate.py` 는
+    latentcam 이 아니라 `camera_generation/dataset/eval/` 에 있다 (코퍼스 기하가 필요해서
+    학습 루프에 없다). ② `eval_paired_bootstrap.py` 로 CI 를 낼 수 있는 건 per-sample 지표
+    5개뿐이고 `clatr/{precision,recall,density,coverage,fcd}` 는 전 행에 전역 값이 복제된
+    집합 지표라 못 낸다. ③ CLaTr subprocess 실패는 `metrics.json not produced` 한 줄만
+    남기고 학습을 죽이지 않는다 (`main/train_latent_cam_dm.py:1150`, `:1155`) — 곡선에서
+    `val/clatr/*` 가 통째로 비면 이 줄부터 찾아야 한다.
 - **`pipeline.md` 신설 — latentcam 모델 구조 문서 (2026-09-23, R10).** 이 트리에는 모델
   구조를 한 장에 놓은 문서가 없었다 (`docs/` 는 ablation 메모 4장, `CHANGELOG.md` 는 45만 자).
   Part A 모델 본체 / Part B 변형 축(arm) / Part C 모듈별 + 부록 지뢰 표.

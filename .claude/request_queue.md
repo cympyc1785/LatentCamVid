@@ -14,9 +14,6 @@
 
 ## Request
 
-### R14. `/data1/cympyc1785/LatentCamVid/context.md`
-컨텍스트에 남길 추가 사항.
-
 ### R15. 최종 git 정리 + 커밋
 데이터는 추적 제외, 나머지 미추적 수정사항은 추적되게 한 뒤 커밋.
 
@@ -24,8 +21,8 @@
 
 ## Working
 
-### R13. `/data1/cympyc1785/LatentCamVid/pipeline.md`
-전체 파이프라인(데이터 구축 → 학습 → 평가, GenDoP·E.T. 비교 포함)의 위치와 구조.
+### R14. `/data1/cympyc1785/LatentCamVid/context.md`
+컨텍스트에 남길 추가 사항.
 
 ---
 
@@ -36,6 +33,23 @@ _(비어 있음)_
 ---
 
 ## Done
+
+### R13. `/data1/cympyc1785/LatentCamVid/pipeline.md` — 완료 (2026-09-23)
+비어 있던 최상위 `pipeline.md` 를 채웠다. **지도로만 쓴다** — 네 단계의 위치·기동 방법만 적고
+내부 규약은 기존 하위 문서 여섯(합 2,673행)으로 넘긴다. 복사하면 두 곳이 갈라진다.
+- 단계 넷: ① 데이터 구축 `dataset/` → ② 학습 `latentcam/` → ③ 평가 → ④ 영상 생성 `Vista4D/`.
+- **§3.2 — GenDoP 과 E.T. 는 배선이 다르다.** GenDoP 은 `ARMS`(`run_gendop_eval.py:297-300`)
+  로 직접 돌리고, E.T./DIRECTOR 는 arm 이 아니라 **이미 만들어진 eval 폴더**를
+  `--extra_eval_dir LABEL=DIR`(`:510`) 로 같은 표에 올린다. `--arm none` = GenDoP 0개.
+- **`--raw` 가 기본값이다** (`:496-497` 에서 default 가 `False` 로 뒤집혀 있다). 조사 보고서가
+  이 배선을 "미추적" 으로 적은 것을 직접 읽어 반증했다 — 최상위는 `--raw`, `--no_rescale` 은
+  하위로 자동 전달(`:421-422`).
+- `evaluation/` 은 **빈 폴더**(파일 0개), `DATA` 는 **심볼릭 링크**(`-> /data1/cympyc1785/data`).
+  둘 다 최상위 표와 지뢰 표 양쪽에 적었다.
+- `file:line` 전량 스크립트 검산. 상대경로 **18건**을 저장소 기준 경로로 고쳤다.
+- **최상위 `CHANGELOG.md` 를 새로 열었다** — 하위 트리 셋에만 있었고, 세 트리에 걸친 문서를
+  어느 한 트리 기록에 넣으면 찾을 수 없다.
+- 커밋 `1c72103`.
 
 ### R12. `video_generation/models/Vista4D/USAGE.md` 신설 — 완료 (2026-09-23)
 upstream `README.md` 는 공식 데모 사용법이라 **우리가 어떻게 돌렸나**가 한 장으로 없었다.

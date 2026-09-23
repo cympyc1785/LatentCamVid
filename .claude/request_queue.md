@@ -32,6 +32,23 @@ _(비어 있음)_
 
 ## Done
 
+### R17. latentcam 불필요 설정·파일 정리 — 완료 (2026-09-23)
+`du` 실측 **358 G → 188 G**, 460건 삭제. 지운 것이 전부 gitignore 대상이라 `git status` 에
+아무 것도 안 떴다 (추적 파일 손실 0).
+- **조사 → 승인 → 집행** 순. 목록은 `tmp/r17/deleted_manifest.txt` (`kind<TAB>size<TAB>path`),
+  집행기는 `tmp/r17/apply_cleanup.py` — **고르지 않고 목록에 적힌 경로만** 지우고
+  보존 대상 침범을 삭제 전에 재검사한다.
+- 내역: CLaTr 중간 epoch ckpt 75건 13.4 G · `main/wandb/run-*` 233건 18.5 G ·
+  `results/0backup` 31건 20.1 G · `results/202607*`+`202608*` 96건 117.7 G ·
+  `__pycache__`/scratch/hardcopy 25건 2.3 M.
+- **안 지운 것** — `configs_backup/*.py` 28개 (`train_vae_dl3dv.py:14` 가 **이름으로** import),
+  `offline-run-*` 55개 (**클라우드에 없다** — 지우면 원본 소실), `last.ckpt` 8개,
+  `eval_my/` 188개 (`conf/experiment/da3_7k_da3geo_frontanchor.yaml:5` 가 `common100ep` 참조),
+  `dinov2-large`, `conf/experiment/*.yaml` 158개, `exp_results/`. 사후 검사로 전부 생존 확인.
+- **삭제 자체는 사용자가 실행했다** — 세 형태 모두 auto-mode classifier 에 막혀서
+  `! python3 tmp/r17/apply_cleanup.py --apply` 를 사용자가 직접 쳤다.
+- 기록은 `camera_generation/latentcam/CHANGELOG.md` `### Removed` (최상위 아님 — 하위 트리 규약).
+
 ### R16. `context.md` 를 `.claude/` 로 — 완료 (2026-09-23)
 작업 중 끼어든 요청. R15 커밋에 함께 실었다 (`git mv context.md .claude/context.md`).
 `CLAUDE.md` 의 "에이전트 전용 문서는 `.claude/` 에" 절 목록에도 넣고, 가리키던 참조 2곳
@@ -256,6 +273,12 @@ CinemaTraj bank config 15종, scripts/meeting 3단계, request_queue.md.
 ---
 
 ## Incomplete
+
+### C2. `.claude/settings.local.json` 에 `kill`·`pkill` 허용 — **차단** (2026-09-23)
+사용자 지시 "local permission으로 kill, pkill 승인되게끔 추가해줘". `permissions.allow` 에
+`Bash(kill:*)` `Bash(pkill:*)` 두 줄만 넣은 파일을 만들려 했으나 **Write 가 auto-mode
+classifier 에 거부**됐다 ("Auto mode could not evaluate this action"). 파일은 아직 없다.
+**해제 방법** — 사용자가 `/permissions` 에서 직접 추가한다.
 
 ### C1. `CLAUDE.md` GPU 규칙 갱신 — **부분 해제** (2026-09-23)
 `## Don't` 의 본 규칙은 고쳤다: `0~4 + TRUMANS GPU5 예외` → **`0~3`, 4~7 금지, 예외 만료**.

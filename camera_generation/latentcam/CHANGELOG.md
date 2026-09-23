@@ -4,6 +4,27 @@ All notable changes to the latentcam sub-project. Follows [Keep a Changelog](htt
 
 ## [Unreleased]
 
+### Removed
+
+- **latentcam 트리 정리 — 460건 / 169.6 G 삭제 (2026-09-23, R17).** `du` 실측 358 G → **188 G**.
+  지운 것은 전부 gitignore 대상이라 `git status` 에 아무 것도 안 뜬다 (추적 파일 손실 0).
+  - `main/evaluate/CLaTr/results/**/epoch=*.ckpt` **75건 13.4 G** — 중간 epoch 체크포인트.
+    **`last.ckpt` 는 남겼다** (8개). 현재 게이지는 `checkpoints/clatr_dynpose_d200_s91_real_epoch149.ckpt`
+    로 이미 `results/` **밖에** 복사돼 있다.
+  - `main/wandb/run-*` **233건 18.5 G** — 클라우드에 동기가 끝난 online run 디렉토리.
+    **`offline-run-*` 55건(4.4 M)은 남겼다** — 이것들은 클라우드에 없어서 지우면 원본이 사라진다.
+  - `results/0backup` **31건 20.1 G**, `results/202607*`·`results/202608*` **96건 117.7 G**.
+  - `__pycache__` · CLaTr `tmp*/` scratch · `hc*_*.txt` hardcopy **25건 2.3 M**.
+  - **지우지 않은 것과 그 이유** — `main/configs_backup/*.py` 28개는
+    `main/train_vae_dl3dv.py:14` 가 `load_cfg('config_vae_dl3dv')` 로 **이름으로** 부른다
+    (디렉토리 이름이 backup 이라 죽은 것처럼 보이는 게 함정이다). `eval_my/` 188개는
+    `main/conf/experiment/da3_7k_da3geo_frontanchor.yaml:5` 가 `common100ep` 을 가리켜
+    통째로 보존. `checkpoints/dinov2-large/`, `main/conf/experiment/*.yaml` 158개,
+    `exp_results/` 도 보존.
+  - 집행기 `tmp/r17/apply_cleanup.py` 는 **고르지 않고 매니페스트(`tmp/r17/deleted_manifest.txt`)
+    에 적힌 경로만** 지우며, 보존 대상 침범을 삭제 전에 재검사해 하나라도 걸리면 멈춘다.
+    사후 dry-run 이 `실재 0건 / 이미 없음 460건` 을 찍어 전량 집행을 확인했다.
+
 ### Added
 - **`train.md` 신설 — 학습·평가 운용 문서 (2026-09-23, R11).** `pipeline.md` 가 "무엇이
   학습되는가"(구조)를 다루므로, "어떻게 돌리고 어떻게 읽는가"를 여기에 분리했다.

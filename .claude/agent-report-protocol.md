@@ -53,16 +53,18 @@ agent 의 반환 텍스트가 길면 main session 의 컨텍스트를 그만큼 
 (`tmp/agent/reader-d259.md`, `reader-d260.md` …). 경로가 겹치면 서로 덮어쓴다 — 그건 main 의
 책임이고, agent 는 받은 경로를 의심하지 않는다.
 
-### ledger (opt-in) — 세대 간 대조가 필요할 때만
+### history (opt-in) — 세대 간 대조가 필요할 때만
 
-main 이 **명시적으로 ledger 경로를 줬을 때만** 쓴다. 한 줄 = 한 실행이고, 나중에 세대를
+`snapshot` 이 **현재 상태 하나**라면 이쪽은 **시간에 걸친 누적**이다. 둘은 짝이고 용도가 다르다.
+
+main 이 **명시적으로 history 경로를 줬을 때만** 쓴다. 한 줄 = 한 실행이고, 나중에 세대를
 가로질러 비교하기 위한 것이다 (예: d259 / d260 / d261 뱅크 감사를 나란히).
 
 ```
-/data1/cympyc1785/LatentCamVid/.claude/ledger/<name>.jsonl
+/data1/cympyc1785/LatentCamVid/.claude/history/<name>.jsonl
 ```
 
-`results/` 가 아니라 `.claude/` 인 이유: `results/` 는 gitignore 대상이라 ledger 가 디스크에만
+`results/` 가 아니라 `.claude/` 인 이유: `results/` 는 gitignore 대상이라 history 가 디스크에만
 남고 버전 관리가 안 된다 — "장기 기억" 이 존재 이유인데 그러면 다른 머신에서 보이지도, 언제
 어떤 값이었는지 되짚지도 못한다. `.claude/` 는 추적되고 **"에이전트만 읽는 문서는 `.claude/`
 아래"** 규약에도 맞는다. 확장자는 **`.jsonl`** 이다 (`*.log` 는 gitignore 에 걸린다).
@@ -75,7 +77,7 @@ main 이 **명시적으로 ledger 경로를 줬을 때만** 쓴다. 한 줄 = �
   깨진다. 줄 게 없는 키는 `null` 로 둔다.
 - **중복을 신경 쓰지 않는다.** 같은 대상을 두 번 감사하면 줄이 둘 생기는 게 맞다 —
   `generated` 가 늦은 줄이 최신이고, 정리는 main 이 한다. 기존 줄을 찾아 고치려 들지 않는다.
-- ledger 를 썼어도 **snapshot 보고서는 따로 쓴다.** `report` 는 항상 md 를 가리킨다.
+- history 를 썼어도 **snapshot 보고서는 따로 쓴다.** `report` 는 항상 md 를 가리킨다.
 
 ## 4. 보고서 형식 — 섹션을 새로 만들지 않는다
 

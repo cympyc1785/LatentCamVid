@@ -38,9 +38,9 @@
 | 어긋남 | 상태 |
 |---|---|
 | `CLAUDE.md` · `.claude/goals.md` → `SPECS.md` | **파일이 없다.** 둘 다 가리키는데 저장소에 없다 |
-| `camera_generation/dataset/summary.md` 헤더 | "`.gitignore:222 camera_generation/models` 아래라 커밋에 안 들어간다" 고 적혀 있는데 **R7 이후 추적 중**이고, 인용한 `.gitignore:222` 는 지금 `tools` 줄이다. 내용도 `run_lbm_lite.py --stage bank_all` 옛 흐름이라 현재 드라이버(`camera_generation/dataset/exec/run_bank.py`)와 다르다. R15 에서 처리 |
-| `CLAUDE.md:182` (학습 3번) · `CLAUDE.md:189` (추론 2번) | "GPU 0~4 중 가장 여유가 있는" 이라고 적혀 있다. 같은 파일 `## Don't` 가 0~3 을 명시하므로 **`## Don't` 가 이긴다**. 두 줄 수정은 시도했다가 막혔다 |
-| `video_generation/models/Vista4D/USAGE.md` | **git 이 추적하지 못한다.** `Vista4D/` 가 자기 `.git` 을 가진 별도 저장소라 `.gitignore` 를 풀어도 소용없다. 그 안의 local 패치 2건과 함께 **재클론하면 사라진다** |
+| `camera_generation/dataset/summary.md` 헤더 | ~~고쳤다 (R15).~~ 옛 헤더는 "`.gitignore:222 camera_generation/models` 아래라 커밋에 안 들어간다" 였는데 **R7 이후 추적 중**이고 `.gitignore:222` 는 지금 `tools` 줄이다. 본문은 **2026-08-23 스냅샷 그대로 둔다** — `run_lbm_lite.py` 는 저장소에 없고 현재 드라이버는 `camera_generation/dataset/exec/run_bank.py`(`graph→cloud→route→tau→fit→emit`) 라는 경고를 헤더에 박았다 |
+| `CLAUDE.md:183` (학습 3번) · `CLAUDE.md:190` (추론 2번) | "GPU 0~4 중 가장 여유가 있는" 이라고 적혀 있다. 같은 파일 `## Don't` 가 0~3 을 명시하므로 **`## Don't` 가 이긴다**. 두 줄 수정은 **두 번 막혔다** (R14·R15 모두 classifier denial) — 사용자가 직접 고쳐야 한다 |
+| Vista4D 사용법 문서 | ~~해결했다 (R15).~~ `video_generation/models/Vista4D/USAGE.md` → **`video_generation/Vista4D_USAGE.md`** 로 옮겨 추적 대상이 됐다. `Vista4D/` 는 자기 `.git` 을 가진 별도 저장소라 그 안에 두면 `!` 예외로도 못 살린다. **local 패치 2건은 여전히 재클론하면 사라진다** |
 
 ---
 

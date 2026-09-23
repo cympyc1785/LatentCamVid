@@ -44,7 +44,7 @@
 | `camera_generation/dataset/exec/USAGE.md` | 671 | ① 의 **드라이버별 인자 사전**. `exec/*.py` 를 하나씩 |
 | `camera_generation/latentcam/pipeline.md` | 463 | ② 의 **모델 구조**. CameraVAE + 8층 DiT, arm 축 5개, 모듈별 생사 판정 |
 | `camera_generation/latentcam/train.md` | 424 | ②③ 의 **실행**. 기동 한 줄, 손실, wandb 키 사전, 평가 두 층위 |
-| `video_generation/models/Vista4D/USAGE.md` | 309 | ④ 의 **실행**. 경로 셋, 카메라 규약, local 패치 2건 |
+| `video_generation/Vista4D_USAGE.md` | 309 | ④ 의 **실행**. 경로 셋, 카메라 규약, local 패치 2건 |
 
 > **이 문서는 위 여섯을 대체하지 않는다.** 어느 단계를 실제로 돌리려면 해당 문서를 연다.
 > 여기서 명령을 복사해 쓰지 말 것 — 인자는 하위 문서가 정본이다.
@@ -178,11 +178,13 @@
 
 카메라를 받아 영상을 만든다. 실행 경로가 셋이고 현재 쓰는 건
 `camera_generation/dataset/exec/run_vista4d_gen.py`.
-전부 `video_generation/models/Vista4D/USAGE.md` 에 있다.
+전부 `video_generation/Vista4D_USAGE.md` 에 있다.
 
 > **이 트리는 git 추적 대상이 아니다.** `.gitignore:249` 가 `video_generation/models` 를 막고,
-> 그와 별개로 `Vista4D/` 가 **자기 `.git` 을 가진 별도 저장소**라 `!` 예외로도 되살릴 수 없다.
-> 그 안의 문서와 local 패치 2건은 **재클론하면 사라진다** (`.gitignore:247-248` 주석).
+> 그와 별개로 `Vista4D/` 가 **자기 `.git` 을 가진 별도 저장소**라 `!` 예외로도 되살릴 수 없다
+> (`.gitignore:247-248` 주석). 그래서 사용법 문서는 R15 에서 트리 **밖**으로 빼
+> `video_generation/Vista4D_USAGE.md` 로 추적한다. **local 패치 2건은 여전히 재클론하면 사라진다** —
+> 무엇을 고쳤는지는 그 문서에 적혀 있다.
 
 ---
 
@@ -191,7 +193,7 @@
 | 경로 | 무엇 | 추적 |
 |---|---|---|
 | `camera_generation/dataset/` | ① 데이터 구축 | ✅ (`out*/`·`logs/`·`results/` 제외 — `.gitignore:236-239`) |
-| `camera_generation/latentcam/` | ② 학습 · ③ 평가 | ✅ (`results/`·`eval_my/`·`data/`·`checkpoints/` 등 제외 — `.gitignore:251-260`) |
+| `camera_generation/latentcam/` | ② 학습 · ③ 평가 | ✅ (`results/`·`eval_my/`·`data/`·`checkpoints/` 등 제외 — `.gitignore:251-263`) |
 | `camera_generation/models/` | 논문 vendored 9종 (CCD, CamVLA, DIRECTOR, Director3D, GenDoP, I3DM, LAMP, Planner, SCVideo) | ❌ `.gitignore:230` |
 | `camera_generation/tools/` | 외부 도구 11종 (Depth-Anything-3, GeoCalib, Grounded-SAM-2, molmo2, qwen3vl, trumans_utils 등) | — |
 | `video_generation/models/` | ④ Vista4D 외 | ❌ `.gitignore:249` |
@@ -202,7 +204,7 @@
 | `scripts/` | `meeting/` 만 | ✅ |
 | `meetings/` | 회의 자료 | ❌ `.gitignore:224` |
 | `evaluation/` | **빈 폴더.** 파일 0개 | — |
-| `tmp/` | 작업용 임시. **`/tmp` 대신 여기** | ❌ `.gitignore:263` |
+| `tmp/` | 작업용 임시. **`/tmp` 대신 여기** | ❌ `.gitignore:273` |
 | `.claude/` | 에이전트 전용 문서 (`request_queue.md` `tasks.md` `watch.md` `FIX.log` `EXPERIMENTS.log`) | ✅ |
 
 ---

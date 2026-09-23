@@ -20,8 +20,7 @@ _(비어 있음)_
 
 ## Working
 
-### R15. 최종 git 정리 + 커밋
-데이터는 추적 제외, 나머지 미추적 수정사항은 추적되게 한 뒤 커밋.
+_(비어 있음)_
 
 ---
 
@@ -33,7 +32,25 @@ _(비어 있음)_
 
 ## Done
 
-### R14. `/data1/cympyc1785/LatentCamVid/context.md` — 완료 (2026-09-23)
+### R16. `context.md` 를 `.claude/` 로 — 완료 (2026-09-23)
+작업 중 끼어든 요청. R15 커밋에 함께 실었다 (`git mv context.md .claude/context.md`).
+`CLAUDE.md` 의 "에이전트 전용 문서는 `.claude/` 에" 절 목록에도 넣고, 가리키던 참조 2곳
+(`CHANGELOG.md`, `request_queue.md` R14 행) 을 새 경로로 고쳤다.
+
+### R15. 최종 git 정리 + 커밋 — 완료 (2026-09-23)
+미추적 항목을 **추적 / 닫기** 둘 중 하나로 전부 처리해 작업 트리를 비웠다.
+- **추적으로** — `.claude/goals.md` 1행 경로 수정(R7 잔여), `video_generation/Vista4D_USAGE.md`
+  (원래 `models/Vista4D/USAGE.md` 였는데 **nested `.git` 탓에 추적 불가**라 밖으로 뺐다.
+  Vista4D 기준 상대경로 7곳을 저장소 기준으로 고쳤다).
+- **닫기로** — `.gitignore` 에 `CLaTr/tmp*/`(torch scratch) 와 `hc_*.txt`·`hc2_*.txt`·
+  `hcfull_*.txt`(screen hardcopy, cwd 아무데나 떨어져서 이름으로 닫았다) 추가.
+  `hc2_train5.txt` 1,048행 / `hc2_train2.txt` 24행 둘 다 tqdm·프롬프트 덤프라 재생성 가능.
+  **지우지 않고 무시만 했다** (삭제는 승인 사항).
+- **곁다리 수정** — `dataset/summary.md` 헤더의 틀린 gitignore 주장 2건 + 없어진
+  `run_lbm_lite.py` 경고, `.gitignore` 증가로 밀린 `pipeline.md` 인용 2곳.
+- **미완** — `CLAUDE.md:183`·`:190` "GPU 0~4" 수정이 **두 번째로 classifier 에 막혔다** (C1).
+
+### R14. `context.md` — 완료 (2026-09-23) · R16 에서 `.claude/context.md` 로 이동
 `CLAUDE.md`(규칙) · `pipeline.md`(지도) · `.claude/goals.md`(목표) **어디에도 안 들어가는데
 모르면 사고가 나는 것**을 7 절로 모았다.
 - **`SPECS.md` 가 없다.** `CLAUDE.md` 의 `## Specifics` 와 `.claude/goals.md` 가 둘 다 이 파일을

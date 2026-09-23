@@ -93,9 +93,10 @@ gitignore 대상이며, 작업이 끝나면 남길 것만 `results/` 로 옮기�
 
 ### 에이전트 전용 문서는 `.claude/` 에
 
-`request_queue.md` `tasks.md` `goals.md` `review.md` `watch.md` `FIX.log` `EXPERIMENTS.log` 처럼
-에이전트만 읽는 문서는 `.claude/` 아래 둔다. 최상위에 남는 것은 `CLAUDE.md`(Claude Code 가
-최상위에서 읽는다) · `README.md` · `pipeline.md` 처럼 사람이 보는 문서뿐이다.
+`request_queue.md` `tasks.md` `goals.md` `context.md` `review.md` `watch.md` `FIX.log`
+`EXPERIMENTS.log` 처럼 에이전트만 읽는 문서는 `.claude/` 아래 둔다. 최상위에 남는 것은
+`CLAUDE.md`(Claude Code 가 최상위에서 읽는다) · `README.md` · `pipeline.md` 처럼 사람이
+보는 문서뿐이다.
 
 ### Agent 위임
 

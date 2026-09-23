@@ -1,8 +1,16 @@
 # LBM-Lite / TRUMANS-Lite 요약 (2026-08-23)
 
-> 이 파일은 `.gitignore:222 camera_generation/models` 아래라 **커밋에 안 들어간다.**
-> 원본 근거는 `DECISIONS.md` D1–D69, `video_generation/CHANGELOG.md`,
+> **이 파일은 2026-08-23 시점의 스냅샷이다** — 그 뒤로 트리가 재편됐으므로 아래 경로·명령은
+> 현재 코드와 다르다. 지금의 입구는 `camera_generation/dataset/exec/run_bank.py`
+> (체인 `graph → cloud → route → tau → fit → emit`, 설정은 `configs/bank/<gen>.json`) 이고,
+> 아래 `run_lbm_lite.py` 는 **저장소에 더 이상 없다.** 수치와 설계 근거만 읽을 것.
+>
+> 원본 근거는 `camera_generation/dataset/DECISIONS.md` D1–D69, `video_generation/CHANGELOG.md`,
 > `camera_generation/latentcam/{EXPERIMENTS.log,FIX.log}` 에 있다. 아래 수치는 전부 실측이다.
+>
+> (옛 헤더는 "`.gitignore:222 camera_generation/models` 아래라 커밋에 안 들어간다" 고 적었지만
+> **두 겹으로 틀렸다** — R7 에서 `camera_generation/dataset/` 로 옮겨져 지금은 추적 중이고,
+> 인용한 `.gitignore:222` 는 현재 `tools` 줄이다.)
 
 ---
 

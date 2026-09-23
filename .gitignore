@@ -257,7 +257,17 @@ camera_generation/latentcam/main/wandb
 camera_generation/latentcam/main/configs_backup
 camera_generation/latentcam/main/evaluate/CLaTr/lightning_logs
 camera_generation/latentcam/main/evaluate/CLaTr/results
+# torch.distributed 가 rank 마다 만드는 scratch (`_remote_module_non_scriptable.py`).
+# 이름이 매번 달라서(`tmpufjwdnwl`) 개별로 못 적는다.
+camera_generation/latentcam/main/evaluate/CLaTr/tmp*/
 camera_generation/latentcam/checkpoints
+
+# screen hardcopy 덤프. `screen -X hardcopy hc_train1.txt` 는 **그 screen 의 cwd** 에
+# 떨어지므로 어느 디렉토리에도 생길 수 있다 — 경로가 아니라 이름으로 닫는다.
+# tqdm 진행바가 통째로 들어와 있고 재생성 가능하다 (R15 실측: 1,048행 / 24행).
+hc_*.txt
+hc2_*.txt
+hcfull_*.txt
 
 # 작업용 임시 파일 — /tmp 대신 여기를 쓴다 (CLAUDE.md "임시 파일은 <repo>/tmp/")
 /tmp/

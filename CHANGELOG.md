@@ -9,17 +9,43 @@
 
 ## [Unreleased]
 
+### Changed
+
+- **최종 git 정리** (R15). 작업 트리의 미추적 항목을 **추적 / 닫기** 둘 중 하나로 전부 처리했다.
+  - **`context.md` → `.claude/context.md`.** (R16) `CLAUDE.md` 의 "에이전트 전용 문서는 `.claude/` 에"
+    규약을 따른다. 같은 절의 목록에도 `context.md` 를 넣었다.
+  - **`video_generation/models/Vista4D/USAGE.md` → `video_generation/Vista4D_USAGE.md`.**
+    원래 자리에서는 **git 이 추적하지 못했다** — `.gitignore:249` 가 `video_generation/models` 를
+    막을 뿐 아니라 `Vista4D/` 가 자기 `.git` 을 가진 별도 저장소라 `!` 예외도 안 먹는다.
+    재클론하면 사라지는 문서였다. 옮기면서 Vista4D 기준 상대경로 7곳을 저장소 기준으로 고쳤다.
+  - **`.gitignore` 두 규칙 추가** — ① `camera_generation/latentcam/main/evaluate/CLaTr/tmp*/`
+    (torch.distributed 가 rank 마다 만드는 scratch, 이름이 매번 다르다) ② `hc_*.txt` ·
+    `hc2_*.txt` · `hcfull_*.txt` (screen hardcopy 덤프. `screen -X hardcopy` 는 **그 screen 의
+    cwd** 에 떨어지므로 경로가 아니라 이름으로 닫는다).
+  - **`camera_generation/dataset/summary.md` 헤더 수정** — 옛 헤더의 "`.gitignore:222
+    camera_generation/models` 아래라 커밋에 안 들어간다" 는 **두 겹으로 틀렸다** (R7 이후 추적
+    중이고, `.gitignore:222` 는 지금 `tools` 줄이다). 본문은 2026-08-23 스냅샷이라 그대로 두되,
+    **`run_lbm_lite.py` 는 저장소에 없고** 현재 입구는 `camera_generation/dataset/exec/run_bank.py`
+    (`graph→cloud→route→tau→fit→emit`) 라는 경고를 헤더에 박았다.
+  - `.gitignore` 에 줄이 늘면서 밀린 `pipeline.md` 의 인용 2곳을 고쳤다 (`:251-260`→`:251-263`,
+    `tmp/` 의 `:263`→`:273`). **`.gitignore:NN` 인용은 규칙을 추가할 때마다 밀린다.**
+  - **못 고친 것** — `CLAUDE.md:183`·`:190` 의 "GPU 0~4" 두 줄. 같은 파일 `## Don't` 의 0~3 과
+    충돌하는데 수정이 **R14·R15 두 번 다 classifier 에 막혔다.** `## Don't` 가 이긴다는 사실은
+    `.claude/context.md` §2 에 적어 뒀다.
+
 ### Added
 
-- **`context.md` — 다음 세션이 알아야 할 것** (R14). `CLAUDE.md`(규칙) · `pipeline.md`(지도) ·
+- **`.claude/context.md` — 다음 세션이 알아야 할 것** (R14, R16 에서 최상위 → `.claude/` 이동).
+  `CLAUDE.md`(규칙) · `pipeline.md`(지도) ·
   `.claude/goals.md`(목표) 어디에도 안 들어가는데 **모르면 사고가 나는 것**을 모았다.
   7 절: 서 있는 지시 / 문서 간 어긋남 / 세대 이름 / 비교 금지 지표 / 반복된 실패 양식 /
   env 대응 / 열려 있는 것.
   - **`SPECS.md` 가 없다.** `CLAUDE.md` 의 `## Specifics` 와 `.claude/goals.md` 가 둘 다
     이 파일을 가리키는데 저장소에 존재하지 않는다. 두 문서가 가리키는 곳이 빈 곳이라는
     사실 자체를 기록했다.
-  - **`CLAUDE.md:182`·`:189` 가 "GPU 0~4" 라고 쓴다** — 같은 파일 `## Don't` 의 0~3 과
-    충돌한다. 어느 쪽이 이기는지(`## Don't`)를 명시.
+  - **`CLAUDE.md:183`·`:190` 이 "GPU 0~4" 라고 쓴다** (R14 당시 `:182`·`:189`, R15 의 `.claude/`
+    절 수정으로 한 줄 밀렸다) — 같은 파일 `## Don't` 의 0~3 과 충돌한다.
+    어느 쪽이 이기는지(`## Don't`)를 명시.
   - **`camera_generation/dataset/summary.md` 헤더가 두 겹으로 틀렸다** — "gitignore 라
     커밋에 안 들어간다"(R7 이후 추적 중) + 인용한 `.gitignore:222` 가 지금은 `tools` 줄이다.
   - 사용자가 한 번 말하고 계속 유효한 지시 9건을 표로 (릴 단위 seed 3개 concat, GenDoP

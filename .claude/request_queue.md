@@ -18,7 +18,6 @@
 
 ### R19. d200 dynpose — condition = text + SigLIP2 feature(Molmo2 visual) + camera embedding 학습 → Working
 ### R20. d200 dynpose — condition = text + camera embedding 만 학습 → Working
-### R21. `20260918_140914_dynpose_d200_molmo2_l21_da3` 와 같게 하되 DA3 입력을 49프레임 전부로 학습 → Working
 ### R22. TRUMANS 데이터셋 구축 — **계획 승인됨 (2026-09-23)**
 조사: `tmp/agent/reader-r22-trumans.md` (핵심 주장 5건 직접 재확인). 사용자 결정 넷:
 ① 범위 = s3f0k6 **737 clip 전량** (191 은 prep 완료, 546 은 graph/cloud/mesh 부터)
@@ -35,7 +34,6 @@ source video 는 `trumans_to_recon.py` 가 이미 Blender 합성 (follow + slow 
 ### R19~R22 — 전부 기동됨, 장시간 실행 감시 중 (2026-09-23) · 커밋 `bd78ac5`
 - R19 `dynpose_d200_siglip2_srccam` — SigLIP2 캐시 10169 완료 → smoke 통과 → **GPU 0 train2**.
 - R20 `dynpose_d200_umt5_srccam` — **GPU 1 train1** (~6 분/epoch).
-- R21 `dynpose_d200_molmo2_l21_da3_v49` — **GPU 2 train3**, on-the-fly 4.5 s/it ≈ 7.2 h/epoch (50ep ≈ 15일).
 - R22 d271T 뱅크 737 clip — **GPU 3 4샤드** (clip 당 ~350 s). 이후 raycast → desc(vLLM) → captions → export.
   첫 실패 1건 `tru_0ab03928_a13` fit: "소스 카메라가 mesh 격자에서 unreachable" (sample_camera_bank.py:403).
 - 공통 후속: srccam 계열은 `eval_testset.py` geo_proj MLP 미지원 (tasks.md A3) — testset eval 전 수리.
@@ -291,6 +289,11 @@ CinemaTraj bank config 15종, scripts/meeting 3단계, request_queue.md.
 ---
 
 ## Incomplete
+
+### R21. DA3 49프레임 학습 — **사용자 지시로 중단 (2026-09-23)**
+`dynpose_d200_molmo2_l21_da3_v49` (wandb apgr3om0) 를 epoch 0 도중 Ctrl+C 로 정상 종료.
+on-the-fly DA3 4.5 s/it ≈ 7.2 h/epoch (50 epoch ≈ 15일) 이었다. yaml 은 남겨 뒀다 — 재개하려면
+토큰 풀링 캐시(~200 GB) 같은 속도 대책이 먼저 필요하다. GPU 2 비어 있음.
 
 ### C2. `.claude/settings.local.json` 에 `kill`·`pkill` 허용 — **차단** (2026-09-23)
 사용자 지시 "local permission으로 kill, pkill 승인되게끔 추가해줘". `permissions.allow` 에

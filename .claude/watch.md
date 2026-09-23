@@ -45,14 +45,6 @@ main session 은 컨텍스트가 압축되거나 세션이 끝나면 **자기가
 - 끝났나  : epoch_cap 50 → results/*_dynpose_d200_siglip2_srccam/ckpts/last.pth
 - 이상신호: Traceback / CUDA out of memory / nan / 30분간 it 정지
 
-### R21 학습 dynpose_d200_molmo2_l21_da3_v49 (D270)
-- screen  : train3        pid: 4107199        GPU: 2
-- 로그    : <repo>/tmp/r19_r21/train_r21.log
-- 살아있나: pid 존재 + GPU 2 점유 > 30 GiB
-- 나아가나: tqdm it 증가 (4.48 s/it, 5784 it/epoch ≈ 7.2 h/epoch)
-- 끝났나  : epoch_cap 50 → results/*_dynpose_d200_molmo2_l21_da3_v49/ckpts/last.pth (≈15일)
-- 이상신호: Traceback / OOM / nan / 1시간 it 정지
-
 ### R22 TRUMANS 뱅크 d271T (737 clip, 4샤드)
 - screen  : r22_bank_0..3  pid: 73220 73224 73228 73229   GPU: 3
 - 로그    : <repo>/tmp/r22/bank_s{0..3}.out (씬별 단계 로그 tmp/r22/log/)

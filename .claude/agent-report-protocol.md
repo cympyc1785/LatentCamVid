@@ -1,7 +1,7 @@
 # agent 보고 규약 (단일 출처)
 
 `.claude/agents/*.md` 전부가 이 파일을 참조한다. 규약을 고칠 일이 생기면 **여기만** 고친다 —
-정의마다 복붙해 두면 그것부터 서로 어긋난다.
+4개 정의에 복붙해 두면 그것부터 서로 어긋난다.
 
 ## 왜 파일로 보고하나
 
@@ -19,7 +19,7 @@ agent 의 반환 텍스트가 길면 main session 의 컨텍스트를 그만큼 
 | 키 | 값 |
 |---|---|
 | `status` | `ok` 완수 / `partial` 일부만 / `failed` 못 함 |
-| `role` | `reader` \| `critic` \| `executor` |
+| `role` | `reader` \| `critic` \| `executor` \| `writer` |
 | `report` | 보고서 **절대 경로** |
 | `lines` / `bytes` | 실제로 쓴 파일 크기 (예산 준수 증거) |
 | `headline` | **120자 이내** 한 줄. 원본 수치 포함 |

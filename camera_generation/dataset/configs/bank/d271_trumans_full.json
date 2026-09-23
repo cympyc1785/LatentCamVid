@@ -1,0 +1,20 @@
+{
+  "extends": "d266_trumans_shotscale.json",
+  "_why": "D271 — R22 (사용자 승인 2026-09-23): TRUMANS s3f0k6 **737 clip 전량**을 D266T 방식(bank = elev + framing≥0.6, 충돌·가림은 mesh raycast 로 사후)으로. D266 과 route/tau/fit/emit 인자가 **글자 단위로 같고** 뱅크 폴더도 같은 `bank_d266T`/`hole_bank_d266T` 를 쓴다 — 이미 구운 190 편은 `canonical.json` 으로 SKIP 되고, 새 546 편만 앞단부터 돈다. 다른 것은 앞단 셋(graph/cloud/mesh)을 드라이버 안으로 들인 것뿐이다.",
+  "_앞단": "graph/cloud 인자는 `exec/_legacy/run_trumans_d132_shard.sh:94-110` 과 **글자 그대로** 같다 — 마커가 `.graph_s115`/`.cloud_s115` 라서 다른 설정으로 지어 놓고 같은 마커를 찍으면 chunk 마다 `S` 게이지가 갈리고 사후에 구분이 안 된다 (그 스크립트 :83-86 경고). `--no_skip_done` 은 마커가 done 판정을 대신하므로 그대로 둔다.",
+  "_require_markers": "비운다. 부모의 `[.graph_s115, .cloud_s115]` 는 앞단을 **안 도는** config 용이라, 두면 새 546 편이 graph 전에 FAIL(마커 없음) 으로 끝난다. 대신 graph/cloud 단계가 성공해야 마커가 찍히고, 실패하면 그 편은 route 로 안 간다.",
+  "generation": "d271T",
+  "stages": ["graph", "cloud", "mesh", "route", "tau", "fit", "emit"],
+  "require_markers": [],
+  "graph": {
+    "marker": ".graph_s115",
+    "args": ["--gravity_source", "gt", "--ground_source", "gt", "--subject_source", "gt",
+             "--scene_scale_mode", "points_first_cam", "--scene_scale_stride", "1",
+             "--no_skip_done", "--no_overlay", "--no_topdown"]
+  },
+  "cloud": {
+    "marker": ".cloud_s115",
+    "args": ["--no_skip_done", "--scene_scale_mode", "points_first_cam", "--scene_scale_stride", "1"]
+  },
+  "mesh": {"args": []}
+}

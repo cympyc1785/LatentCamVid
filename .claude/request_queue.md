@@ -14,13 +14,30 @@
 
 ## Request
 
-_(비어 있음)_
+> 공통 배경 (2026-09-23): "DA3, Molmo2 를 encoder 로 쓰는 게 진짜 필요한지" 검증 실험. 학습 3건은 GPU 0~2.
+
+### R19. d200 dynpose — condition = text + SigLIP2 feature(Molmo2 visual) + camera embedding 학습 (GPU 0~2 중 하나)
+### R20. d200 dynpose — condition = text + camera embedding 만 학습 (GPU 0~2 중 하나)
+### R21. `20260918_140914_dynpose_d200_molmo2_l21_da3` 와 같게 하되 DA3 입력을 49프레임 전부로 학습 (GPU 0~2 중 하나)
+### R22. TRUMANS 데이터셋 구축 — **계획 승인됨 (2026-09-23)**
+조사: `tmp/agent/reader-r22-trumans.md` (핵심 주장 5건 직접 재확인). 사용자 결정 넷:
+① 범위 = s3f0k6 **737 clip 전량** (191 은 prep 완료, 546 은 graph/cloud/mesh 부터)
+② gate = D266T (bank: elev + framing≥0.6) + mesh raycast, **통과한 사다리 칸 전부** 내보냄
+   (exporter 에 raycast selection 필터 옵션 신설 필요)
+③ GPU = **3 만** (CLAUDE.md 0~3 준수, 사용자 원래 지시 3~4 에서 변경)
+④ caption = Qwen3-VL instance_desc (vLLM 온디맨드), **단독 trumans 코퍼스**
+source video 는 `trumans_to_recon.py` 가 이미 Blender 합성 (follow + slow arc) — 재렌더 없음.
 
 ---
 
 ## Working
 
-_(비어 있음)_
+### R19~R21 (학습 3건, 병렬 기동) — 2026-09-23
+- R20 `dynpose_d200_umt5_srccam` — smoke 통과, **GPU 1 screen train1 학습 중**.
+- R19 `dynpose_d200_siglip2_srccam` — 사용자 결정: raw SigLIP2 ViT (vit_layers -3,-9, 2304-d, 8x8/프레임).
+  `cache_molmo2_embeddings.py --vit_only` 로 GPU 0 에서 6샤드 굽는 중 → 끝나면 smoke → GPU 0 학습.
+- R21 `dynpose_d200_molmo2_l21_da3_v49` — 사용자 결정: 캐시 없이 on-the-fly DA3 49 view. GPU 2 smoke 중.
+- R22 은 reader 조사 중 (승인 대기 예정).
 
 ---
 

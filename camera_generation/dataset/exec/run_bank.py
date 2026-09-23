@@ -65,7 +65,10 @@ HERE = path.dirname(path.dirname(path.abspath(__file__)))
 # 그래서 여기서 못 박는다. 서브프로세스 모드에는 영향이 없다 (이미 들어있으면 안 넣는다).
 if HERE not in sys.path:
     sys.path.insert(0, HERE)
-STAGE_ORDER = ("graph", "cloud", "route", "tau", "fit", "emit")
+# [D271] `mesh` = TRUMANS 전용 mesh 점유/EDT 격자 (`build_trumans_mesh_grid.py`). 예전엔
+# `exec/_legacy/run_trumans_d132_shard.sh` 의 PREP 블록에만 있었다. config 에 `mesh` 키가 없으면
+# 단계가 통째로 건너뛰어지므로 (process_video 의 `spec is None`) 기존 세대는 동작 그대로다.
+STAGE_ORDER = ("graph", "cloud", "mesh", "route", "tau", "fit", "emit")
 # BLAS/OpenMP 스레드 상한. **이걸 안 걸면 graph 단계가 CPU 를 48배 낭비한다** (D179 실측,
 # 씬 bb3bd56c 1편 · 같은 인자 · 산출물 md5 동일):
 #     캡 없음   user 12,326.7 s / wall 393 s / 3136% CPU / 비자발 문맥전환 4,435,047
@@ -79,6 +82,7 @@ THREAD_ENV_KEYS = ("OMP_NUM_THREADS", "OPENBLAS_NUM_THREADS", "MKL_NUM_THREADS",
 STAGE_ENTRY = {
     "graph": ("script", "fit/graph/build_scene_graph.py"),
     "cloud": ("module", "lbm.cloud"),
+    "mesh": ("script", "fit/ingest/build_trumans_mesh_grid.py"),
     "route": ("script", "fit/bank/route_presets.py"),
     "tau": ("script", "fit/bank/sample_camera_bank.py"),
     "fit": ("script", "fit/bank/fit_hole_ladder.py"),
@@ -265,6 +269,18 @@ def process_video(cfg, video, stages, gpu, log_dir, skip_done, tag, threads=0, m
             if rc != 0:
                 return f"FAIL({stage} rc={rc})"
             open(marker, "w").close()
+
+        elif stage == "mesh":
+            # 산출물 자체가 done 판정이다 (legacy PREP 블록의 `[ ! -f mesh_grid.npz ]` 와 같다).
+            # GPU 불필요 — Blender 가 CPU 로 한 번 뜬다 (로드 16 s).
+            if skip_done and path.exists(path.join(root, "mesh_grid.npz")):
+                continue
+            print(f"[{tag}] MESH  {video}  {_now()}", flush=True)
+            rc, _ = _run(stage, ["--video", video, "--output_root", cfg["output_root"]]
+                         + spec.get("args", []), log_path, None, threads=threads,
+                         mode="subprocess")
+            if rc != 0 or not path.exists(path.join(root, "mesh_grid.npz")):
+                return f"FAIL(mesh rc={rc})"
 
         elif stage == "route":
             rc, text = _run(stage, _base_args(cfg, video, stage=stage) + spec["args"]

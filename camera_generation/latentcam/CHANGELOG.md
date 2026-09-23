@@ -26,6 +26,18 @@ All notable changes to the latentcam sub-project. Follows [Keep a Changelog](htt
     사후 dry-run 이 `실재 0건 / 이미 없음 460건` 을 찍어 전량 집행을 확인했다.
 
 ### Added
+- **"DA3·Molmo2 인코더가 필요한가" ablation 3 arm (2026-09-23, R19~R21 / D268~D270).**
+  - `conf/experiment/dynpose_d200_umt5_srccam.yaml` (D268) — umt5 text + srccam Plücker 만.
+    D262 srccam 에서 Molmo2 video CA 를 뺀 것.
+  - `conf/experiment/dynpose_d200_siglip2_srccam.yaml` (D269) — umt5 text + **SigLIP2 ViT
+    feature** (3136 x 2304) + srccam. D262 의 Molmo2 LM hidden 을 ViT 출력으로 교체, Molmo2
+    prefill text part 제거.
+  - `conf/experiment/dynpose_d200_molmo2_l21_da3_v49.yaml` (D270) — D200 molmo2_l21_da3 에서
+    `geo_num_views: 6 -> 49`, 캐시 없이 on-the-fly DA3.
+  - `main/cache_molmo2_embeddings.py --vit_only` — Molmo2 `vision_backbone.encode_image`
+    (vit_layers -3,-9 concat = 2304-d) 를 프레임 안 27x27 -> 8x8 평균풀링해 씬당 `{'emb'}` 로
+    굽는다. LM forward 0회. 플래그를 안 주면 기존 경로 그대로.
+
 - **`train.md` 신설 — 학습·평가 운용 문서 (2026-09-23, R11).** `pipeline.md` 가 "무엇이
   학습되는가"(구조)를 다루므로, "어떻게 돌리고 어떻게 읽는가"를 여기에 분리했다.
   §1 기동(명령 한 줄 · GPU · screen · `queue_runs.py` 대기열 · 중단/재개 · smoke)

@@ -169,6 +169,8 @@ def stage_export(args, scenes, avail):
         cmd += ["--drop_status", *args.drop_status]
     if args.drop_suspect:
         cmd += ["--drop_suspect", *args.drop_suspect]
+    if args.raycast_name:                  # D271 TRUMANS — 안 주면 예전 명령과 글자 그대로
+        cmd += ["--raycast_name", args.raycast_name]
     print(f"{'export -> ':22s} {args.out_root}")
     print(f"{'씬':22s} {len(scenes):,d}   상한 {args.per_scene_cap}   "
           f"drop_status {args.drop_status}   drop_suspect {args.drop_suspect or '없음'}")
@@ -262,6 +264,8 @@ if __name__ == "__main__":
     # ── 필터. 사용자 지시(2026-09-16): **clamped_low 만** 뺀다. free-moving 도 남긴다 ──
     p.add_argument("--drop_status", nargs="*", default=["clamped_low"])
     p.add_argument("--drop_suspect", nargs="*", default=[])
+    # D271. TRUMANS mesh raycast 통과 변이만 내보낸다 (`vista4d_bank_to_dl3dv.py --raycast_name`).
+    p.add_argument("--raycast_name", default=None, type=str)
     # ── 경로 ──────────────────────────────────────────────────────────────────
     p.add_argument("--cine_out", default=path.join(CINE, "out_dynpose"), type=str)
     p.add_argument("--recon_root", default="/data1/cympyc1785/LatentCamVid/DATA/"

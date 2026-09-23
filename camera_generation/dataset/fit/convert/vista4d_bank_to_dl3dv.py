@@ -110,7 +110,33 @@ def scaled_K(K0, scale):
     return K
 
 
-def filter_variants(bank, bank_ids, drop_status, drop_suspect, picked_only, drop_hist):
+def load_raycast_pass(cine_out, raycast_name, video, bank_dir):
+    """`<cine_out>/<video>/<raycast_name>/selection.json` -> raycast 통과 variant_id 집합 (D271).
+
+    `exec/run_raycast.py` 가 뱅크 옆(`--out_name`)에 쓰는 위치 그대로다.
+
+    None 이면 None (필터 없음). 파일이 없으면 **빈 집합** — 그 씬은 전량 기각이다 (raycast 가
+    변이 0개면 `bank_to_blender_poses.py` 가 selection.json 을 안 쓰고 죽는다).
+    selection 이 다른 뱅크 세대에서 나왔으면 id 가 우연히 겹쳐도 다른 카메라라 assert 로 막는다.
+    `scale != 1` (= `--raycast_solve` 가 축소한 카메라) 은 뱅크 pose 와 다르므로 받지 않는다.
+    """
+    if raycast_name is None:
+        return None
+    p = path.join(cine_out, video, raycast_name, "selection.json")
+    if not path.isfile(p):
+        return set()
+    sel = json.load(open(p, encoding="utf-8"))
+    assert sel.get("bank_dir") == bank_dir, f"{p}: bank_dir {sel.get('bank_dir')} != {bank_dir}"
+    out = set()
+    for row in (sel.get("raycast") or {}).get("audit") or []:
+        if row.get("passed"):
+            assert float(row.get("scale", 1.0)) == 1.0, f"{p}: {row['variant_id']} scale != 1"
+            out.add(str(row["variant_id"]))
+    return out
+
+
+def filter_variants(bank, bank_ids, drop_status, drop_suspect, picked_only, drop_hist,
+                    raycast_pass=None):
     """뱅크 하나에서 내보낼 변이 인덱스를 고른다. `drop_hist` 는 씬 전체에서 공유한다.
 
     세 축이 **서로 독립**이고 순서대로 적용된다:
@@ -136,7 +162,12 @@ def filter_variants(bank, bank_ids, drop_status, drop_suspect, picked_only, drop
        `emit_bank.py --picked_only` 와 같은 열·같은 판정. 켰는데 열이 비어 있으면 그 씬이
        0행이 되므로 (조용한 전멸) `unpicked` 를 히스토그램에 싣는다.
 
-    셋 다 기본값이 빈 리스트 / False 라 안 주면 예전 코퍼스와 **비트 동일**하다.
+    ④ `raycast_pass` (D271) — TRUMANS mesh raycast (`bank_to_blender_poses.py --raycast`) 를
+       **통과한 variant_id 집합**. D266T 뱅크는 충돌·가림 게이트를 끄고 굽기 때문에 이 축이
+       없으면 벽을 뚫는 카메라가 그대로 나간다. `selection.json` 의 `raycast.audit` 에서
+       `passed` 인 행 **전부**(사다리 모든 칸)를 쓴다 — `variants` 목록은 preset 당 최상단 한 칸뿐이다.
+
+    넷 다 기본값이 빈 리스트 / False / None 이라 안 주면 예전 코퍼스와 **비트 동일**하다.
     """
     rows = {v["variant_id"]: v for v in bank["variants"]}
     keep = []
@@ -161,6 +192,9 @@ def filter_variants(bank, bank_ids, drop_status, drop_suspect, picked_only, drop
         if picked_only and not row.get("picked"):
             drop_hist["unpicked"] = drop_hist.get("unpicked", 0) + 1
             continue
+        if raycast_pass is not None and vid not in raycast_pass:
+            drop_hist["raycast_reject"] = drop_hist.get("raycast_reject", 0) + 1
+            continue
         keep.append(i)
     return rows, keep
 
@@ -171,7 +205,7 @@ def convert_scene(job):
 
     (video, chunk, out_root, image_dir, image_scale, recon_root, cine_out, bank_dirs,
      refs, skip_done, dedup, captions_name, drop_status, drop_suspect, picked_only,
-     per_scene_cap) = job
+     per_scene_cap, raycast_name) = job
     dst = path.join(out_root, *chunk.split("/"))
     da3, img = path.join(dst, "da3"), path.join(dst, image_dir)
     try:
@@ -198,7 +232,8 @@ def convert_scene(job):
             # `grade` 는 뱅크마다 **자기** retry_suspect 로 매긴다 — 세대 설정이 다르다.
             retry_suspect = tuple((bank.get("fallback") or {}).get("retry_suspect") or ())
             rows, kept = filter_variants(bank, bank_ids, drop_status, drop_suspect,
-                                         picked_only, drop_hist)
+                                         picked_only, drop_hist,
+                                         load_raycast_pass(cine_out, raycast_name, video, bank_dir))
             n_drop += len(bank_ids) - len(kept)
             for i in kept:
                 row = rows[bank_ids[i]]
@@ -403,6 +438,10 @@ def main():
     # 같은 열). 기본 꺼짐 = 열이 없던 예전 뱅크와 비트 동일.
     parser.add_argument("--picked_only", action="store_true", default=False)
     parser.add_argument("--no_picked_only", dest="picked_only", action="store_false")
+    # D271. TRUMANS mesh raycast 통과 변이만 (`filter_variants` ④).
+    # `<cine_out>/<video>/<name>/selection.json` 이 없는 씬은 0행이 된다 (raycast 가 전량 기각했거나
+    # 안 돌았다). 기본 None = 예전과 비트 동일.
+    parser.add_argument("--raycast_name", default=None, type=str)
     parser.add_argument("--workers", default=8, type=int)
     parser.add_argument("--skip_done", action="store_true", default=True)
     parser.add_argument("--no_skip_done", dest="skip_done", action="store_false")
@@ -442,7 +481,8 @@ def main():
         jobs.append((video, chunk, args.out_root, args.image_dir, args.image_scale,
                      args.recon_root, args.cine_out, avail, args.avg_scale_refs,
                      args.skip_done, args.dedup, args.captions_name, list(args.drop_status),
-                     list(args.drop_suspect), args.picked_only, args.per_scene_cap))
+                     list(args.drop_suspect), args.picked_only, args.per_scene_cap,
+                     args.raycast_name))
 
     print(f"{'bank_dir':22s} {' '.join(bank_dirs)}")
     print(f"{'per_scene_cap':22s} {args.per_scene_cap or '(없음 — 재고 전량)'}")

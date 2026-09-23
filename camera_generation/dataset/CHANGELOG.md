@@ -10,6 +10,21 @@ Follows [Keep a Changelog](https://keepachangelog.com/).
 ## [Unreleased]
 
 ### Added
+
+- **D271 — TRUMANS 737 clip 전량 구축 배선 (2026-09-23, R22).** 사용자 승인 계획: D266T gate
+  (bank = elev + framing≥0.6, 충돌·가림은 mesh raycast 사후) + raycast 통과 사다리 칸 **전부** +
+  GPU 3 + Qwen3-VL 캡션 단독 코퍼스.
+  - `configs/bank/d271_trumans_full.json` — d266 을 `extends`, 앞단 graph/cloud(legacy
+    `run_trumans_d132_shard.sh:94-110` 인자 글자 그대로, 마커 `.graph_s115`/`.cloud_s115`)
+    + mesh 를 드라이버 안으로. 뱅크 폴더는 `hole_bank_d266T` 그대로라 기존 190 편은 SKIP.
+  - `exec/run_bank.py` — `mesh` 단계(`build_trumans_mesh_grid.py`) 추가. config 에 키가 없으면
+    건너뛰므로 기존 세대 동작 그대로.
+  - `exec/run_raycast.py` — `tmp/scripts/d266/run_raycast.py` 승격 (R7 이전 경로 두 곳 수리).
+    산출물은 뱅크 옆 `<out>/<video>/raycast_d266T/`, 전량 기각은 `none.json`.
+  - `fit/convert/vista4d_bank_to_dl3dv.py --raycast_name` — `filter_variants` ④ 축:
+    `selection.json` 의 `raycast.audit` 에서 `passed` 인 variant_id 만. 기존 d266 selection
+    188 씬으로 대조해 1,080 통과 (조사 보고서 수치와 일치). 기본 None = 비트 동일.
+    `exec/run_corpus_export.py --raycast_name` 이 그대로 넘긴다.
 - **`USAGE.md` 신설 + `pipeline.md` 전면 재작성 (R9, 2026-09-23).** R6(재분류)·R7(트리 이동)
   으로 문서의 경로가 통째로 낡아 있었다 — 옛 `pipeline.md` 446줄의 **파일 참조 40건 중 36건이
   이제 존재하지 않는 경로**였다 (기계적 스윕: 백틱 참조 추출 → `path.exists` → 없으면 `git

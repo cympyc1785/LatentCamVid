@@ -29,15 +29,34 @@ main session 은 컨텍스트가 압축되거나 세션이 끝나면 **자기가
 
 ## 지금 돌고 있는 것
 
-(없음 — 2026-09-23 감시자 221개를 전부 정리했고, GPU 0~4 유휴)
+### R20 학습 dynpose_d200_umt5_srccam (D268)
+- screen  : train1        pid: 4095610        GPU: 1
+- 로그    : <repo>/tmp/r19_r21/train_r20.log
+- 살아있나: pid 존재 + GPU 1 점유 > 10 GiB
+- 나아가나: tqdm `Epoch N` 증가 (epoch 당 ~15분, 5784 it)
+- 끝났나  : epoch_cap 50 완주 → results/*_dynpose_d200_umt5_srccam/ckpts/last.pth
+- 이상신호: Traceback / CUDA out of memory / nan / 30분간 it 정지
 
-<!-- 양식
-### <이름>  (예: d267 뱅크 굽기 / 학습 run name)
-- screen  : train2        pid: 123456        GPU: 1
-- 로그    : <repo>/tmp/d267/bake.log
-- 살아있나: pid 존재 + GPU 1 점유 > 1 GiB
-- 나아가나: 10분마다 `done=` 숫자 증가 (현재 12/190)
-- 끝났나  : 로그에 `ALL SHARDS EXITED` 또는 out/*/hole_bank_d267/bank.json 190개
-- 이상신호: Traceback / CUDA out of memory / 30분간 done 정지
-- 다음확인: 2026-09-23 15:30
--->
+### R19 학습 dynpose_d200_siglip2_srccam (D269)
+- screen  : train2        pid: 96579        GPU: 0
+- 로그    : <repo>/tmp/r19_r21/train_r19.log
+- 살아있나: pid 존재 + GPU 0 점유 > 10 GiB
+- 나아가나: tqdm `Epoch N` 증가
+- 끝났나  : epoch_cap 50 → results/*_dynpose_d200_siglip2_srccam/ckpts/last.pth
+- 이상신호: Traceback / CUDA out of memory / nan / 30분간 it 정지
+
+### R21 학습 dynpose_d200_molmo2_l21_da3_v49 (D270)
+- screen  : train3        pid: 4107199        GPU: 2
+- 로그    : <repo>/tmp/r19_r21/train_r21.log
+- 살아있나: pid 존재 + GPU 2 점유 > 30 GiB
+- 나아가나: tqdm it 증가 (4.48 s/it, 5784 it/epoch ≈ 7.2 h/epoch)
+- 끝났나  : epoch_cap 50 → results/*_dynpose_d200_molmo2_l21_da3_v49/ckpts/last.pth (≈15일)
+- 이상신호: Traceback / OOM / nan / 1시간 it 정지
+
+### R22 TRUMANS 뱅크 d271T (737 clip, 4샤드)
+- screen  : r22_bank_0..3  pid: 73220 73224 73228 73229   GPU: 3
+- 로그    : <repo>/tmp/r22/bank_s{0..3}.out (씬별 단계 로그 tmp/r22/log/)
+- 살아있나: pid 4개 존재
+- 나아가나: out_trumans/*/hole_bank_d266T/{canonical/canonical.json|skipped.json} 개수 증가 (시작 190+1)
+- 끝났나  : 4 로그 전부 `=== 요약 ===` → 다음: exec/run_raycast.py 4샤드 (CPU) → desc(vLLM GPU3) → captions → export
+- 이상신호: Traceback / FAIL 비율 급증 / 30분간 개수 정지

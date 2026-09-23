@@ -1,0 +1,31 @@
+# @package _global_
+# D269 — **text(umt5) + SigLIP2 visual feature + 소스 카메라(Plücker)** arm (사용자 지시 2026-09-23:
+# "condition에 text, SigLiP2 feature (Molmo2에서 사용하는 visual feature), camera embedding을
+#  condition으로 학습").
+#
+# "Molmo2 LLM 이 정말 필요한가" 대조. `dynpose_d200_molmo2_l21_srccam` (D262) 을 물려받아
+# **코퍼스·분할·CLaTr 게이지·umt5 캐시·srccam 배선이 전부 같은 자**이고, video CA 가 먹는 것만
+# 바뀐다:
+#   before (D262): Molmo2 LM blocks[21] hidden, video 3136 x 2560 + Molmo2 prefill text 128 x 2560
+#   after  (D269): Molmo2 ViT(SigLIP2) 출력, video 3136 x 2304, text part 없음 (text 는 umt5 CA 만)
+# 3136 = 49 프레임 x 8x8 — 27x27 patch 를 **프레임 안에서만** 평균풀링. D262 와 격자가 같다.
+# 2304 = `adapter_config.vit_layers` (-3,-9) 두 층 concat (1152 x 2) — Molmo2 connector 입력 그대로.
+# 캐시: `cache_molmo2_embeddings.py --vit_only` (docstring `main_vit_only` 참조).
+#
+# ═══ 읽는 법 ══════════════════════════════════════════════════════════════════════════════
+#   이 arm ≈ D262 srccam        → Molmo2 LM 을 태운 이득이 없다 (ViT 만으로 충분).
+#   이 arm ≈ D268 umt5_srccam   → 시각 스트림 자체가 기여하는 게 없다.
+defaults:
+  - dynpose_d200_molmo2_l21_srccam
+
+exp_name: dynpose_d200_siglip2_srccam
+
+# ─── video CA: Molmo2 LM hidden -> SigLIP2 ViT feature ─────────────────────────────────────
+peav_video_cache_dir: /data1/cympyc1785/data/DynPose-LBM/latentcam_dynpose_d200/siglip2_cache/video
+peav_text_cache: null        # Molmo2 prefill text 없음 — text 는 umt5 CA 하나
+peav_layer: null             # 캐시 키 `emb` (vit_only 캐시는 이 키 하나뿐)
+video_latent_dim: 2304
+video_text_in_stream: false
+video_text_dim: 0
+peav_in_ln: true             # 유지 — 두 ViT 층 concat 이라 스케일 흡수용 LN 이 있어야 한다
+video_gate: true

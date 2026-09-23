@@ -662,6 +662,74 @@ def merge_shards(args):
 
 # ------------------------------------------------------------------ main
 
+@torch.inference_mode()
+def main_vit_only(args):
+    """`--vit_only` (D269): Molmo2 의 **SigLIP2 ViT 출력만** 씬당 1파일로 굽는다. LM 은 안 탄다.
+
+    "Molmo2 LLM 이 정말 필요한가" 대조용 (사용자 지시 2026-09-23 "SigLiP2 feature (Molmo2에서
+    사용하는 visual feature)"). 뽑는 자리는 `Molmo2VisionBackbone.encode_image` — Molmo2 가
+    connector 로 넘기는 바로 그 feature 다: `adapter_config.vit_layers` (-3, -9) 두 층 concat
+    = 1152 x 2 = **2304-d**, 프레임당 27x27 patch. attention pooling / projector (Molmo2 학습분)
+    이전이라 Molmo2 가 학습한 가중치는 한 개도 안 거친다 (SigLIP2 는 Molmo2 학습 중 같이
+    튜닝됐으므로 "순정 SigLIP2" 는 아니다 — 쓰는 가중치는 Molmo2-4B 체크포인트 안의 ViT).
+    풀링은 `pool_video` 와 같게 **프레임 안에서만** 27x27 -> pool x pool 평균이라 토큰 격자가
+    기존 video 캐시(49 x 8 x 8 = 3136)와 같다. 저장 키는 `emb` 하나라 하류는
+    `peav_video_cache_dir` 경로와 `video_latent_dim: 2304` 만 바꾸면 된다.
+    """
+    from transformers import AutoProcessor, AutoModelForImageTextToText
+    device = torch.device('cuda' if torch.cuda.is_available() else 'cpu')
+    dtype = torch.bfloat16
+    t0 = time.time()
+    proc = AutoProcessor.from_pretrained(args.ckpt, trust_remote_code=True)
+    model = AutoModelForImageTextToText.from_pretrained(
+        args.ckpt, dtype=dtype, trust_remote_code=True).to(device).eval()
+    vb = model.model.vision_backbone
+    print(f'[load] Molmo2 in {time.time() - t0:.1f}s  vit_only: layers {vb.vit_layers} '
+          f'x {vb.vit_config.hidden_size}', flush=True)
+    items = collect(args.root, args.splits.split(','), args.seg_prefix)
+    scenes = {}
+    for it in items:
+        prev = scenes.setdefault(it['scene_key'], (it['chunk'], it['frame_idx']))
+        assert prev[1] == it['frame_idx'], (
+            f"{it['scene_key']}: frame_idx 가 세그먼트마다 다르다 — 씬 단위 캐시 불가")
+    keys = sorted(scenes)[:args.limit_scenes] if args.limit_scenes else sorted(scenes)
+    if args.num_shards > 1:
+        keys = [k for i, k in enumerate(keys) if i % args.num_shards == args.shard_id]
+    print(f'[data] {len(items)} segments / {len(scenes)} scenes  [shard {args.shard_id}/'
+          f'{args.num_shards}: {len(keys)}]', flush=True)
+    makedirs(args.video_out, exist_ok=True)
+    ndone, nskip, t0 = 0, 0, time.time()
+    for n, sk in enumerate(keys):
+        vp = osp.join(args.video_out, f'{sk}.pt')
+        if args.skip_done and osp.exists(vp):
+            nskip += 1
+            continue
+        chunk, (s, e) = scenes[sk]
+        video = load_frames(args.root, chunk, int(s), int(e))
+        batch = processor_inputs(proc, video, PREFIX_PROBE_CAPTION, args.fps)
+        px = batch['pixel_values_videos'].to(device, dtype)         # (T, N, patch_px)
+        feat = vb.encode_image(px[None])[0]                          # (T, N, 2304)
+        T, N = feat.shape[:2]
+        side = int(round(N ** 0.5))
+        assert side * side == N and T == video.shape[0], f'{sk}: feat {tuple(feat.shape)}'
+        emb = pool_video(feat.reshape(T * N, -1).float(),
+                         torch.ones(T * N, dtype=torch.bool, device=device),
+                         T, side, args.video_pool)
+        torch.save({'emb': emb.half().cpu(), 'frames': int(T),
+                    'meta': {'src': 'molmo2_vit_only', 'vit_layers': list(vb.vit_layers),
+                             'side': side, 'pool': args.video_pool}}, vp + '.tmp')
+        # rename 으로 원자적 교체 — 중간에 죽어도 반쪽 파일이 `skip_done` 에 걸리지 않게.
+        import os
+        os.replace(vp + '.tmp', vp)
+        ndone += 1
+        if n == 0 or ndone % 200 == 0:
+            el = time.time() - t0
+            print(f'[vit] {n + 1}/{len(keys)} done {ndone} skip {nskip}  '
+                  f'{el / max(ndone, 1):.2f}s/scene  emb {tuple(emb.shape)}', flush=True)
+    print(f'[vit] ALL DONE shard {args.shard_id}: wrote {ndone} skip {nskip} '
+          f'in {time.time() - t0:.0f}s', flush=True)
+
+
 def main(args):
     from transformers import AutoProcessor, AutoModelForImageTextToText
     global PROBE, TIMING
@@ -1092,6 +1160,8 @@ if __name__ == '__main__':
     # 켜지 않는다 (--limit_scenes 몇 편으로 재는 용도). 기본 off 면 코드 경로가 그대로다.
     p.add_argument('--timing', action='store_true')
     p.add_argument('--timing_out', default=None)                      # json 경로 (선택)
+    # D269: SigLIP2 ViT 출력만 (LM 없음). text 는 안 굽는다 — `main_vit_only` docstring.
+    p.add_argument('--vit_only', action='store_true')
     _a = p.parse_args()
     assert 0 <= _a.shard_id < _a.num_shards, f'shard_id {_a.shard_id} / num_shards {_a.num_shards}'
     if _a.joint:
@@ -1100,5 +1170,7 @@ if __name__ == '__main__':
     if _a.merge_shards:
         assert _a.num_shards > 1, '--merge_shards 는 --num_shards > 1 일 때만 뜻이 있다'
         merge_shards(_a)
+    elif _a.vit_only:
+        main_vit_only(_a)
     else:
         main(_a)

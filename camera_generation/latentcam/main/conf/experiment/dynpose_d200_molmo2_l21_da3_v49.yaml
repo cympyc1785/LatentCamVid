@@ -1,0 +1,18 @@
+# @package _global_
+# D270 — `dynpose_d200_molmo2_l21_da3` 와 같되 **DA3 에 49 프레임 전부**를 넣는 arm
+# (사용자 지시 2026-09-23: "da3에 넣는 프레임을 49프레임 다 넣어서 condition으로").
+#
+# 부모와의 차이는 geo view 수 하나다: 6 view (`_even_indices(49,6)`=[0,10,19,29,38,48]) -> 49 view.
+# geo 토큰 6 x 576 = 3456 -> 49 x 576 = 28,224 개 (전량, 풀링·resampler 없음).
+#
+# ═══ 캐시 없음 — on-the-fly DA3 (사용자 결정 2026-09-23) ══════════════════════════════════
+# 49 view raw 캐시는 ~1.76 TB 로 /data1 여유(1.8 TB)를 다 먹는다. 사용자가 "캐시 없이 on-the-fly"
+# 를 골랐다. 그래서 `geo_raw_cache_dir: null` — 매 스텝 DA3-giant 가 B x 49 장을 돈다 (느리다).
+# 부모의 6-view bf16 캐시를 그대로 두면 view 수가 안 맞으니 반드시 끈다.
+defaults:
+  - dynpose_d200_molmo2_l21_da3
+
+exp_name: dynpose_d200_molmo2_l21_da3_v49
+
+geo_num_views: 49            # context_uniform -> _even_indices(49,49) = 0..48 전부
+geo_raw_cache_dir: null      # on-the-fly (위 절)

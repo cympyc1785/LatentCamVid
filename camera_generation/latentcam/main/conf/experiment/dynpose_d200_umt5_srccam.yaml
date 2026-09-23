@@ -1,0 +1,26 @@
+# @package _global_
+# D268 — **text(umt5) + 소스 카메라(Plücker)** 두 조건만 주는 arm (사용자 지시 2026-09-23:
+# "text, camera embedding을 condition으로 사용한 것도 학습 돌려줘").
+#
+# "DA3·Molmo2 인코더가 진짜 필요한가" 검증의 세 번째 줄. `dynpose_d200_molmo2_l21_srccam`
+# (D262) 을 통째로 물려받아 **코퍼스·분할·CLaTr 게이지·umt5 캐시·srccam 배선이 전부 같은 자**이고,
+# 지운 것은 video CA (Molmo2 l21) 하나뿐이다:
+#   text CA  (umt5, 128 슬롯)              유지
+#   geo CA   (srccam plucker 49 x 54-d)    유지 — D262 와 동일 (geo_in_mlp + geo_pe 자동)
+#   video CA (Molmo2 l21)                  제거 — 아래 블록은 `dynpose_d200_umt5only` 와 글자 그대로
+#
+# ═══ 읽는 법 ══════════════════════════════════════════════════════════════════════════════
+#   이 arm ≈ D262 srccam      → Molmo2 스트림이 주던 게 거의 없다.
+#   이 arm ≈ D263 umt5only    → 소스 카메라가 주던 게 거의 없다.
+defaults:
+  - dynpose_d200_molmo2_l21_srccam
+
+exp_name: dynpose_d200_umt5_srccam
+
+# ─── video(Molmo2) 스트림 제거 ────────────────────────────────────────────────────────────
+video_latent_dim: 0          # 0 -> _vid_kw 가 비어 video CA 모듈이 생성되지 않는다
+video_text_in_stream: false
+video_text_dim: 0
+peav_video_cache_dir: null   # 305 GB 캐시를 안 읽는다
+peav_text_cache: null
+peav_layer: null

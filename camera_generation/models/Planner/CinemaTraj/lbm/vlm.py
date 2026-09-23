@@ -12,7 +12,7 @@ JSON 복구 4단계는 LBM `Director/director_engine_llm.py:187-260` 의 **로�
 **스키마 위반에 temperature 를 올리지 않는다.** 규칙을 어긴 건 샘플링 문제가 아니라 이해 문제라
 같은 온도로 `## VALIDATION_ERRORS` 를 붙여 다시 묻는 게 맞다 (최대 `max_repairs` 회).
 
-서버 띄우기: `screen -dmS vlm bash scripts/serve_qwen3vl.sh` (모델 로딩 ~3분)
+서버 띄우기: `screen -dmS vlm bash exec/serve_qwen3vl.sh` (모델 로딩 ~3분)
 
 예시:
     python lbm/vlm.py --ping
@@ -117,7 +117,7 @@ class VLMClient:
             except (urllib.error.URLError, TimeoutError) as exc:
                 if attempt == self.retries - 1:
                     raise RuntimeError(f"{self.api_base} 에 못 붙었다: {exc}. "
-                                       "서버가 떠 있나? `bash scripts/serve_qwen3vl.sh`") from exc
+                                       "서버가 떠 있나? `bash exec/serve_qwen3vl.sh`") from exc
             time.sleep(2.0 * (2 ** attempt))
         raise AssertionError("unreachable")
 

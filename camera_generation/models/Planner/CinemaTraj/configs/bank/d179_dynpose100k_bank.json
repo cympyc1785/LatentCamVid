@@ -7,7 +7,7 @@
 
   "_cloud": "cloud 단계 없음 — tau/fit 이 `--cloud_source memory` 로 recon 에서 그 자리에 굽는다 (D178). npz 로 남기면 영상당 1.44 GiB × 10,346 = 14.5 TiB 이고 /data1 여유는 2.9 TB 다.",
 
-  "_pipeline_order": "graph(d172) → 정지 소품 강등(`scripts/dynpose_dynamic_mask_from_seg.py --demote_static_objects`) → route/tau/fit/emit(이 config). 강등은 run_bank 단계가 아니라 `tmp/d179/chain_bank_10k.py` 가 라운드마다 돌린다 — `scene_graph.json` 을 읽고 `dynamic_mask/` png 를 덮으므로 graph 뒤·route 앞이어야 한다.",
+  "_pipeline_order": "graph(d172) → 정지 소품 강등(`fit/ingest/dynpose_dynamic_mask_from_seg.py --demote_static_objects`) → route/tau/fit/emit(이 config). 강등은 run_bank 단계가 아니라 `tmp/d179/chain_bank_10k.py` 가 라운드마다 돌린다 — `scene_graph.json` 을 읽고 `dynamic_mask/` png 를 덮으므로 graph 뒤·route 앞이어야 한다.",
 
   "_args": "route/tau/fit/emit 인자는 `d177_dynpose.json` / `d178_dynpose_rest.json` 과 글자 그대로 같다 (tau/fit 맨 앞 `--cloud_source memory` 만 D178 에서 추가된 것).",
 

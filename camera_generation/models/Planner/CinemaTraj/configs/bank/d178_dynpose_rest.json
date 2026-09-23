@@ -3,7 +3,7 @@
 
   "_what_differs_vs_d177": "① **graph 를 돈다** — 483편 중 `.graph_d157` 이 있는 건 42편뿐이라 마커 재사용이 안 된다. graph 인자는 `d157_dynpose.json` 글자 그대로(`--gravity_source geocalib`, geocalib 사이드카 483/483 확보 확인). 마커는 `.graph_d178` 로 새로 판다 — `.graph_d157` 은 `d172_dynpose100k_graph.json` 이 **같은 `output_root` 에서 같은 이름으로** 쓰고 있어서(out_dynpose 의 1,087개 중 653개가 DynPose-100K 편) 마커로 세대를 가를 수가 없다. ② **cloud 단계가 없다** — tau/fit 이 `--cloud_source memory` 로 recon 에서 그 자리에 굽는다 (D178). cloud.npz 는 영상당 1.4 GiB 라 483편이면 676 GiB 가 새로 쌓였을 것이다. ③ 나머지(route/tau/fit/emit 인자)는 `d177_dynpose.json` 과 글자 그대로 같다.",
 
-  "_pipeline_order": "graph 와 route 사이에 **run_bank 단계가 아닌 것**이 하나 낀다 — D177 정지 소품 강등(`scripts/dynpose_dynamic_mask_from_seg.py --demote_static_objects`)은 `scene_graph.json` 의 `center_drift_u`/`path_len_u`/`d_ref` 를 읽으므로 graph 뒤에 와야 하고, cloud/tau/fit 이 읽는 `dynamic_mask` 를 바꾸므로 route 앞에 와야 한다. 그래서 이 config 는 **두 번 호출**한다: `--stages graph` 로 483편 → 강등 1회 → `--stages route,tau,fit,emit`. d177 은 강등이 이미 끝난 뒤에 돌아서 이 문제가 없었다.",
+  "_pipeline_order": "graph 와 route 사이에 **run_bank 단계가 아닌 것**이 하나 낀다 — D177 정지 소품 강등(`fit/ingest/dynpose_dynamic_mask_from_seg.py --demote_static_objects`)은 `scene_graph.json` 의 `center_drift_u`/`path_len_u`/`d_ref` 를 읽으므로 graph 뒤에 와야 하고, cloud/tau/fit 이 읽는 `dynamic_mask` 를 바꾸므로 route 앞에 와야 한다. 그래서 이 config 는 **두 번 호출**한다: `--stages graph` 로 483편 → 강등 1회 → `--stages route,tau,fit,emit`. d177 은 강등이 이미 끝난 뒤에 돌아서 이 문제가 없었다.",
 
   "_scope": "`tmp/d178/videos.txt` 483편 = (`seg_instances` masks 보유 ∩ `recon_and_seg`) − d177 스코프. `out_dynpose` 를 DynPose-100K 와 공유하므로 디렉토리 목록으로 스코프를 잡으면 안 된다 (`d177_dynpose.json` 의 `_scope` 참고).",
 

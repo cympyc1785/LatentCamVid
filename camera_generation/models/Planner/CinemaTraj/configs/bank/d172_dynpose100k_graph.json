@@ -5,7 +5,7 @@
 
   "_marker_reuse": "graph marker 를 `.graph_d172` 가 아니라 **`.graph_d157` 그대로** 쓴다. 이미 굽힌 391편을 다시 굽지 않으려는 것이고, 근거는 위 `_eval_data` — 입력(recon_and_seg 심볼릭 공유 + seg 876/877 동일)과 args 가 d157 과 글자 단위로 같다. 예외인 `015b197d` 는 마커를 지워 강제 재굽기한다. **args 를 한 글자라도 바꾸면 이 재사용은 즉시 무효**이니 그때는 marker 를 `.graph_d172` 로 바꿀 것.",
 
-  "_prereq": "graph 는 ① `recon_and_seg/<v>/dynamic_mask` 가 **SAM3 합집합으로 덮인 뒤**여야 하고(recon 직후엔 전 프레임 0 이라 정적 subject 만 남는다 — `dynpose_dynamic_mask_from_seg.py` 가 덮는다) ② `out_dynpose/<v>/geocalib_gravity.json` 사이드카가 있어야 한다(`--gravity_source geocalib` 가 없으면 assert). 사이드카는 2026-09-10 기준 880/10,346 뿐이라 9,466편을 `scripts/geocalib_gravity.py` (env `geocalib`) 로 먼저 굽는다. 체인 순서: sam3 -> dynmask -> geocalib -> graph.",
+  "_prereq": "graph 는 ① `recon_and_seg/<v>/dynamic_mask` 가 **SAM3 합집합으로 덮인 뒤**여야 하고(recon 직후엔 전 프레임 0 이라 정적 subject 만 남는다 — `dynpose_dynamic_mask_from_seg.py` 가 덮는다) ② `out_dynpose/<v>/geocalib_gravity.json` 사이드카가 있어야 한다(`--gravity_source geocalib` 가 없으면 assert). 사이드카는 2026-09-10 기준 880/10,346 뿐이라 9,466편을 `fit/ingest/geocalib_gravity.py` (env `geocalib`) 로 먼저 굽는다. 체인 순서: sam3 -> dynmask -> geocalib -> graph.",
 
   "_runtime": "실측 — geocalib 3.5 s/편(모델 로드 35 s 제외), graph 85.5 s/편. graph 를 16 샤드(GPU 0~3 x4)로 돌리면 9,955편 x 85.5 s / 16 = 약 14.7 시간.",
 

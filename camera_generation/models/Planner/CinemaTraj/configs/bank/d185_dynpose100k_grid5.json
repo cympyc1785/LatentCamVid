@@ -13,7 +13,7 @@
 
   "_격리": "`route.out` = `preset_route_d185.json`, 세대 디렉토리 `bank_d185`/`hole_bank_d185`. 이름을 안 바꾸면 d179/d183/d184 의 라우팅 파일을 덮는다.",
 
-  "_실행": "**D184 와 겹쳐 돈다** (사용자 지시 2026-09-12 \"gpu 활용률이 저조한데 버전 나눠서 카메라 5개짜리 버전도 같이 돌려줘\"). screen infer4: `scripts/chain_bank_rounds.py --config configs/bank/d185_dynpose100k_grid5.json --videos tmp/d172/videos_10346.txt --work tmp/d185 --graph_marker .graph_d182 --bank_dir hole_bank_d185 --require_bank_dir hole_bank_d184 --stage bank --graph_pattern 'run_bank.py --config configs/bank/d184_' --bank_shards 4 --round_cap 400 --max_rounds 200`. `--require_bank_dir` 로 **D184 가 이미 끝낸 편만** 집어 강등 경합을 피하고, `--stage bank` 로 강등을 건너뛴다 (D184 라운드가 `.graph_d182` 기준으로 이미 했다).",
+  "_실행": "**D184 와 겹쳐 돈다** (사용자 지시 2026-09-12 \"gpu 활용률이 저조한데 버전 나눠서 카메라 5개짜리 버전도 같이 돌려줘\"). screen infer4: `exec/chain_bank_rounds.py --config configs/bank/d185_dynpose100k_grid5.json --videos tmp/d172/videos_10346.txt --work tmp/d185 --graph_marker .graph_d182 --bank_dir hole_bank_d185 --require_bank_dir hole_bank_d184 --stage bank --graph_pattern 'run_bank.py --config configs/bank/d184_' --bank_shards 4 --round_cap 400 --max_rounds 200`. `--require_bank_dir` 로 **D184 가 이미 끝낸 편만** 집어 강등 경합을 피하고, `--stage bank` 로 강등을 건너뛴다 (D184 라운드가 `.graph_d182` 기준으로 이미 했다).",
 
   "_샤드_4개인_이유": "GPU 는 0~3 네 장을 D184 와 공유한다. `run_bank.py:159 _run()` 은 `--gpu` 가 없으면 `fan_out` 의 `GPUS[shard % 4]` 를 쓰므로 **샤드 합계가 장당 부하**다. 처음에 D185 도 8샤드로 띄웠더니 8+8=16 = 장당 4 로 네 장 전부 75~80 GB(상한 81.5) 에 닿아 CUDA OOM 이 났다 — D184 r07 이 `FAIL(tau rc=1) 27 / FAIL(fit rc=1) 23` (직전 라운드들은 0~5). 4 로 줄여 합계 12 = 장당 3, 피크 77 GB, OOM 0건. 자세한 건 `video_generation/FIX.log` 2026-09-12 항목.",
 

@@ -176,7 +176,7 @@ def assert_dynamic_mask_nonempty(dyn_frac: float, video: str, eval_data: str):
         f"{video}: dynamic_mask 가 전부 0 이다 — cloud 를 구우면 전 픽셀이 정적이 되어 "
         f"동적 물체가 49개 사본으로 남는다.\n"
         f"  seg_instances masks.npz {'있음' if path.isfile(seg_npz) else '없음'}: {seg_npz}\n"
-        f"  있으면 `scripts/dynpose_dynamic_mask_from_seg.py` (dynmask 단계) 를 먼저 돌릴 것.\n"
+        f"  있으면 `fit/ingest/dynpose_dynamic_mask_from_seg.py` (dynmask 단계) 를 먼저 돌릴 것.\n"
         f"  정말 동적 물체가 없는 씬이면 `--allow_empty_dynamic_mask` 로 통과시킨다.")
 
 

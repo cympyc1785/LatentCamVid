@@ -10,11 +10,11 @@ pose 를 재사용한다(운이 나쁠 때). 여기서는 `shared` 블록 하나
 `--dry_run` 으로 그대로 찍는다. 기존 사용법(`python -m lbm.loop --video camel`)은 안 바뀐다.
 
 stage 이름과 실제 스크립트:
-    nouns   scripts/extract_static_nouns.py     정적 명사 (VLM)      * 기본 실행 안 함
-    seg     scripts/sam3_static_instances.py    정적 인스턴스 (SAM3) * 기본 실행 안 함
-    graph   scripts/build_scene_graph.py        scene_graph.json + obb_overlay.mp4
+    nouns   fit/graph/extract_static_nouns.py     정적 명사 (VLM)      * 기본 실행 안 함
+    seg     fit/ingest/sam3_static_instances.py    정적 인스턴스 (SAM3) * 기본 실행 안 함
+    graph   fit/graph/build_scene_graph.py        scene_graph.json + obb_overlay.mp4
     pcd     python -m lbm.cloud                 4D 점군 cloud.npz (board/bank/fit 가 읽는다)
-    board   scripts/build_candidate_board.py    후보 풀 → 게이트 → board (별칭 `cloud`)
+    board   fit/bank/build_candidate_board.py    후보 풀 → 게이트 → board (별칭 `cloud`)
     loop    python -m lbm.loop                  VLM select/micro/traj → decision.json
     decode  decode/build_poses.py               decision → poses (49,4,4)  (별칭 `poses`)
     emit    decode/emit.py                      canonical.json/.npz + emit 명령
@@ -22,10 +22,10 @@ stage 이름과 실제 스크립트:
 
 뱅크 경로 (VLM 루프를 안 쓰는 **카메라 augmentation** 경로. `--stage bank_all`):
     dynseg    video_generation/scripts/sam3_seg_instances.py  동적 인스턴스 (SAM3) * 기본 실행 안 함
-    bank      scripts/sample_camera_bank.py       소스 측정 + 변이 나열 → bank/
-    fit       scripts/fit_hole_ladder.py          hole 사다리 이분법 → hole_bank/
-    bankemit  scripts/emit_bank.py                뱅크 전량 → canonical
-    bankvid   scripts/render_bank_videos.py       타일 애니메이션 preview.mp4
+    bank      fit/bank/sample_camera_bank.py       소스 측정 + 변이 나열 → bank/
+    fit       fit/bank/fit_hole_ladder.py          hole 사다리 이분법 → hole_bank/
+    bankemit  fit/bank/emit_bank.py                뱅크 전량 → canonical
+    bankvid   viz/render_bank_videos.py       타일 애니메이션 preview.mp4
 
 `--stage all` = graph,pcd,board,loop,decode,emit,verify (nouns/seg 는 이름을 직접 줘야 돈다 —
 공유 `eval_data` 디렉토리에 쓰고 SAM3 가 GPU 를 오래 잡는다).
@@ -61,14 +61,14 @@ CONFIG_FORMAT = "lbm_lite_config_v1"
 #   "module:" 접두사면 `python -m <name>`, 아니면 스크립트 경로.
 #   영상 인자가 "--videos" 인 단계는 영상 여러 개를 한 번에 받는다 (샤딩 스크립트라서).
 STAGES = {
-    "nouns":  {"target": "scripts/extract_static_nouns.py",  "video_flag": "--videos", "accepts": []},
-    "seg":    {"target": "scripts/sam3_static_instances.py", "video_flag": "--videos", "accepts": []},
-    "graph":  {"target": "scripts/build_scene_graph.py",     "video_flag": "--video",  "accepts": []},
+    "nouns":  {"target": "fit/graph/extract_static_nouns.py",  "video_flag": "--videos", "accepts": []},
+    "seg":    {"target": "fit/ingest/sam3_static_instances.py", "video_flag": "--videos", "accepts": []},
+    "graph":  {"target": "fit/graph/build_scene_graph.py",     "video_flag": "--video",  "accepts": []},
     # board/bank/fit/bankvid 는 전부 `<out>/<video>/cloud.npz` 를 **읽기만** 한다 (없으면 assert).
     # 파일럿 2편은 손으로 `python -m lbm.cloud` 를 돌려놨어서 안 보였던 구멍이다 — 전량 확장에는 필수.
     "pcd":    {"target": "module:lbm.cloud",                 "video_flag": "--video",
                "accepts": ["device"]},
-    "board":  {"target": "scripts/build_candidate_board.py", "video_flag": "--video",
+    "board":  {"target": "fit/bank/build_candidate_board.py", "video_flag": "--video",
                "accepts": ["device", "max_tau", "max_view_angle_deg", "min_coverage", "center_box"]},
     "loop":   {"target": "module:lbm.loop",                  "video_flag": "--video",
                "accepts": ["device", "start_mode", "max_tau", "max_view_angle_deg",
@@ -85,13 +85,13 @@ STAGES = {
                    path.dirname(path.abspath(__file__)), "..", "..", "..", "..",
                    "video_generation", "scripts", "sam3_seg_instances.py")),
                "video_flag": "--videos", "accepts": []},
-    "bank":     {"target": "scripts/sample_camera_bank.py",  "video_flag": "--video",
+    "bank":     {"target": "fit/bank/sample_camera_bank.py",  "video_flag": "--video",
                  "accepts": ["device"]},
-    "fit":      {"target": "scripts/fit_hole_ladder.py",     "video_flag": "--video",
+    "fit":      {"target": "fit/bank/fit_hole_ladder.py",     "video_flag": "--video",
                  "accepts": ["device"]},
-    "bankemit": {"target": "scripts/emit_bank.py",           "video_flag": "--video",
+    "bankemit": {"target": "fit/bank/emit_bank.py",           "video_flag": "--video",
                  "accepts": []},
-    "bankvid":  {"target": "scripts/render_bank_videos.py",  "video_flag": "--video",
+    "bankvid":  {"target": "viz/render_bank_videos.py",  "video_flag": "--video",
                  "accepts": ["device"]},
 }
 ALIASES = {"cloud": "board", "poses": "decode"}          # 계획서에서 쓰던 이름

@@ -9,7 +9,7 @@ TRUMANS 는 씬이 `.blend` 로 있어서 **부피를 안다**. 알면서 shell 
 **왜 Blender 로 광선을 쏘지 않나.** `scene.ray_cast` 는 프레임마다 `frame_set()` 아마추어 평가가
 필요하고, 이 chunk 의 blend 는 **로드만 16.06 s** 다 (502 오브젝트, 실측 `real 16.062s`).
 이분법은 변이당 4회 × 영상당 수백 변이라 프로브마다 Blender 를 띄우는 건 불가능하다. 그래서
-역할을 쪼갠다 — **Blender 는 삼각형만 뽑고**(`scripts/trumans_export_mesh.py`, chunk 당 1회),
+역할을 쪼갠다 — **Blender 는 삼각형만 뽑고**(`fit/ingest/trumans_export_mesh.py`, chunk 당 1회),
 판정은 여기서 numpy/scipy 로 한다. env `vista4d` 에 `open3d`/`pysdf`/`embree` 가 없어서 정확한
 mesh proximity 는 못 쓴다 — 점유 격자 + `scipy.ndimage.distance_transform_edt` 가 유일하게
 현실적인 경로이고, 어차피 임계가 cm 단위(0.02·S ≈ 3.9 cm)라 5 cm 격자면 해상도가 남는다.
@@ -321,7 +321,7 @@ def resolve_mesh_grid(args, out_root: str) -> str:
     grid = args.mesh_grid or path.join(out_root, args.video, "mesh_grid.npz")
     assert path.isfile(grid), (
         f"`--collision_source mesh` 인데 격자가 없다: {grid}\n"
-        f"  먼저 `scripts/trumans_export_mesh.py` → `python -m lbm.mesh_collision` 를 돌려라.")
+        f"  먼저 `fit/ingest/trumans_export_mesh.py` → `python -m lbm.mesh_collision` 를 돌려라.")
     return grid
 
 

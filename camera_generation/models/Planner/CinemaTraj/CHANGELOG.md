@@ -125,38 +125,38 @@ Follows [Keep a Changelog](https://keepachangelog.com/).
   같은 동작에 이름이 둘 생긴다. `aim="free"`(구성 primitive 둘 다 재조준 없음),
   `PRESET_FOLLOW`/`PRESET_TAU_REF` 는 접두어로 자동 적용되므로 dict 한 줄이 전부다.
   기존 45종 동작은 비트 동일.
-- **`scripts/run_gendop_eval.py` CORPORA `dynpose_d254` (2026-09-22).** dynpose #2186
+- **`exec/run_gendop_eval.py` CORPORA `dynpose_d254` (2026-09-22).** dynpose #2186
   (`5ec7f200`, 도로 위 파란 차)을 `track_crane_up` 하나로 지목해 구운 1-entry 코퍼스의
   GenDoP 대조군. 사용자가 "car_5ec7f200 track_crane_up gendop 도" 라고 해서 추가했다.
   플래그·ckpt·recon 루트·`depth_norm` 은 `dynpose_d244` 와 한 글자도 다르지 않다 —
   두 표를 나란히 읽으려면 gauge 가 같아야 한다. entry 가 **1개**라 FCD/PRDC 는 NaN 이고
   fscore 도 0 아니면 1 로만 나오니 arm 간 비교에 쓰지 말 것. 표 항목 하나 추가라
   기존 코퍼스 동작은 그대로다.
-- **`scripts/run_gendop_eval.py` CORPORA `dynpose_d244` (2026-09-22).** dynpose #386
+- **`exec/run_gendop_eval.py` CORPORA `dynpose_d244` (2026-09-22).** dynpose #386
   (`370548b3`, 터널 보행자)을 `track_dolly_in` / `track_dolly_in_look_at` 두 preset 으로
   지목해 구운 2-entry 코퍼스의 GenDoP 대조군. 사용자가 "#386 은 gendop 도" 라고 해서
   추가했다. `eval_data` 는 `DynPose-100K/eval_data` — 이 씬은 dynpose-100k 에서 떼 온
   것이라 옛 `DynPose-LBM/eval_data` 를 쓰면 recon 을 조용히 못 찾는다. cloud.npz 는
   D178 이후 디스크에 없으므로 score 는 `--cloud_source memory`. 표 항목 하나라 기존
   코퍼스 동작은 그대로다. entry 2개라 FCD/PRDC 는 인용하지 말 것.
-- **`scripts/run_gendop_eval.py` CORPORA `vista_d241` (2026-09-22).** `vista_d238` 과
+- **`exec/run_gendop_eval.py` CORPORA `vista_d241` (2026-09-22).** `vista_d238` 과
   **카메라가 같고 문장만 짧은** 대조군. 지칭구를 "the man in a light shirt and dark pants
   walking up a rocky slope" → "the man walking on a rocky slope" 로 줄여 캡션만 다시 구운
   세대(`run_forced.py --bank_gen d238`)라 뱅크 행은 d238 과 비트 동일하다. 문장 길이가
   CLaTr 에 얼마나 먹히는지 두 코퍼스를 나란히 두고 본다. 세대를 가른 이유는 같은 이름으로
   재굽기하면 이미 평가를 끝낸 d238 eval 폴더가 조용히 다른 문장을 가리키기 때문.
   entry 1개라 FCD/PRDC 는 NaN 이니 분포 지표를 이 표에서 인용하지 말 것.
-- **`scripts/run_gendop_eval.py` CORPORA `vista_d238` (2026-09-22).** hike
+- **`exec/run_gendop_eval.py` CORPORA `vista_d238` (2026-09-22).** hike
   `pull_out_arc_left` = `vista4d_hike_1` **1 entry**. split 은 한 줄짜리
   `seg_list_d238_hike1.txt` — d238 test 목록엔 hike 0/1/2 가 다 있지만 대조 대상이 이
   preset 하나라 나머지를 섞으면 표가 안 맞는다. `ref` 는 비교 대상인 `d238_s2026`.
   entry 1개라 FCD/PRDC 는 NaN 이니 분포 지표를 이 표에서 인용하지 말 것.
-- **`scripts/run_gendop_eval.py` CORPORA `vista_d229` (2026-09-22).** lady-running
+- **`exec/run_gendop_eval.py` CORPORA `vista_d229` (2026-09-22).** lady-running
   **3 entry** 코퍼스 (`track_orbit_right` / `track_orbit_left` / `track_pull_out_arc_right`).
   D223 에서 새로 ingest 한 씬이라 d215 keeper 17씬에 없어 항목을 따로 뒀다. `ours` 는
   d229 seed 42/1234/2026 의 `__last` eval 폴더. entry 3개라 FCD/PRDC 는 NaN 이니
   분포 지표를 이 표에서 인용하지 말 것 — 읽을 건 `clatr/clatr_score` 와 caption 지표뿐이다.
-- **`scripts/run_gendop_eval.py` CORPORA `vista_d234` (2026-09-21).** soapbox
+- **`exec/run_gendop_eval.py` CORPORA `vista_d234` (2026-09-21).** soapbox
   `track_orbit_right` **1 entry** 짜리 코퍼스. d215 의 soapbox 캡션은 anchor 라벨 그대로
   "wheel" 이었는데 d234 에서 `--desc_override` 로 지칭구를 "the blue cart" 로 바꿔 다시
   구웠다. GenDoP 을 **그 바뀐 문장**("The camera tracks the blue cart while orbiting to the
@@ -185,7 +185,7 @@ Follows [Keep a Changelog](https://keepachangelog.com/).
   기본값이 `zero` 라 기존 호출(D215/D224/D226/D227)은 비트 동일.
 
 ### Fixed
-- **`scripts/viser_cloud.py --bundle` 가 dynpose 번들에서 "arm 이 0개"로 죽던 것
+- **`viz/viser_cloud.py --bundle` 가 dynpose 번들에서 "arm 이 0개"로 죽던 것
   (2026-09-22).** `load_bundle` 이 `cameras/*.npz` 만 읽는데 dynpose 번들에는 그 파일이
   없다 — `run_d219.py:stage_bundle` 이 Vista4D recon 이 있는 씬에만 npz 를 굽기 때문에
   예측 JSON(`<arm>_transforms.json`)만 복사된다. `car_5ec7f200` 는 9 preset x 8 arm 이
@@ -211,9 +211,9 @@ Follows [Keep a Changelog](https://keepachangelog.com/).
   `static_mask = ~dynamic_mask` 로 **전 점이 static** 이 되고, static 점은 `visible` 이
   전 프레임 True 라 TP 렌더가 프레임마다 49개 사본을 같이 그렸다. my-clip 실측
   `points 44,994,231 / dynamic(visible.sum==1) 0` — 골퍼가 스윙 전 구간 유령 다발.
-  - `scripts/render_bank_videos.py: render_variant(temporal_persistence=True)` 인자 추가 →
+  - `viz/render_bank_videos.py: render_variant(temporal_persistence=True)` 인자 추가 →
     `renderer.render` 로 전달. 기본 True 라 기존 호출부 6곳 전부 비트 동일.
-  - `scripts/render_pred_depth_warp.py --temporal_persistence {auto,on,off}` (기본 `auto`).
+  - `viz/render_pred_depth_warp.py --temporal_persistence {auto,on,off}` (기본 `auto`).
     `auto` 는 `--allow_no_seg` 일 때만 NTP 로 떨어진다 — seg 가 있는 기존 릴은 TP 유지.
     `index.json` 에 `temporal_persistence` / `num_dynamic_points` 를 같이 적는다 (이 값이
     0 이면 그 릴은 믿으면 안 된다는 뜻이라 사후에 되짚을 수 있어야 한다).
@@ -225,6 +225,34 @@ Follows [Keep a Changelog](https://keepachangelog.com/).
     전체**를 잡았기 때문이다 (`seg_instances/golf/meta.json` id 5). 별건.
 
 ### Changed
+- **타임라인 문서를 `.log` 로 (R17, 2026-09-23).** 사용자 지시 "fix, decision 같은 것들은
+  timeline으로 계속 늘어나니까 md말고 log로 바꿔줘". `git mv fix.md fix.log` ·
+  `git mv LBM_DEFECTS.md LBM_DEFECTS.log`. 두 파일을 가리키던 참조 20곳도 같이 고쳤다
+  (`fit/bank/fit_hole_ladder.py` 2 · `viz/viz_f1_inplace.py` 3 · `exec/_legacy/run_k6_d115_shard.sh` 1 ·
+  `.claude/review.md` 14).
+  - **`DECISIONS` 는 `.md` 로 되돌렸다** — 사용자가 "git 추적되어야 해서" 직접 되돌렸다.
+    루트 `.gitignore:59` 의 전역 `*.log` 때문에 `.log` 는 경로마다 이름으로 화이트리스트해야
+    한다. 그래서 `.gitignore` 에 `!…/CinemaTraj/{fix,LBM_DEFECTS}.log` 두 줄이 붙었다.
+    ⚠ CinemaTraj 를 옮기면(R7 → `camera_generation/dataset/`) 이 두 줄이 빗나가 **조용히
+    추적 밖**이 된다. 이동 시 같이 고칠 것.
+  - `latentcam/docs/known_issues.md` 는 **`.md` 유지.** append-only 타임라인이 아니라 항목을
+    `✅[FIXED]` / `🔴[PARKED]` 로 제자리 수정하는 상태 카탈로그다.
+  - `CHANGELOG.md` 4종은 Keep a Changelog 규약이라 대상 밖.
+
+- **`scripts/` 174개를 `exec/ fit/ eval/ viz/` 로 재분류 (R6, 2026-09-23).** 사용자 지침대로
+  run 계열 11개 → `exec/`, 구세대 dNNN bash 샤드 34개 → `exec/_legacy/`, 데이터 구축 →
+  `fit/{ingest,graph,bank,caption,convert}` 58개, eval 37개 → `eval/`, 시각화 35개 → `viz/`.
+  `scripts/` 에는 LBM 데모·프로브 8개만 남는다. 전부 `git mv` 라 이력이 이어진다.
+  - **네 폴더에 `USAGE.md` 신규** (`exec/` 671줄 · `fit/` 1,790줄 · `eval/` 992줄 ·
+    `viz/` 1,114줄). 기존 `scripts/USAGE.md` 는 GenDoP 전용이라 `eval/GENDOP_USAGE.md` 로.
+  - **참조 434곳 재작성 (186 파일).** `from scripts.X` → 새 dotted 경로, `scripts/X.py` 문자열
+    경로, 그리고 두 단계 아래(`fit/*`, `exec/_legacy/`)로 내려간 파일의 루트 관용구
+    (`path.dirname` 한 겹 추가 · bash `cd "$(dirname "$0")/../.."`).
+  - 정규식이 구조적으로 못 보는 **16곳은 따로 고쳤다**: `path.join(root,"scripts","X.py")` 처럼
+    문자열이 쪼개진 것(8), `from scripts import X`(1), `sys.path` 해킹 뒤 맨이름 import(5),
+    `repick_bank.py` 의 `spec_from_file_location` 동적 로딩(2). 진입점 10개 `--help` 통과.
+  - `.gitignore` 에 `exec/ fit/ eval/ viz/` 화이트리스트 추가 — 이미 추적 중이던 파일은
+    gitignore 와 무관하게 따라오므로, 안 열면 **새로 생긴 `USAGE.md` 만 조용히 추적 밖**이 된다.
 - **`viser_frame.py` 저장 prefix 를 GUI 에서 직접 고친다 (2026-09-22).** 새 `save prefix`
   텍스트 입력. 자동값(`--name_from`)이 초기값이고, **손대지 않은 동안에만** 영상 전환을
   따라간다 — 타이핑한 이름이 드롭다운을 돌릴 때마다 지워지면 손잡이가 아니라 방해물이 된다.
@@ -266,7 +294,7 @@ Follows [Keep a Changelog](https://keepachangelog.com/).
   `--no_ground_grid` 는 아예 안 만드는 것이고(그러면 GUI 체크박스도 비활성이라 켤 수가 없다),
   `--ground_on` 은 만든 것을 처음부터 보이게 하는 것이다. 기본은 "만들되 숨김" 이라
   `view > ground grid` 로 언제든 켤 수 있다.
-- **`scripts/run_custom_caption.py` 를 추론 전용 최소 경로로 축소 (2026-09-21).**
+- **`exec/run_custom_caption.py` 를 추론 전용 최소 경로로 축소 (2026-09-21).**
   사용자 지시 "sam3, vlm 이런거 안돌리고 순수히 우리 카메라 생성 모델만 돌리는거야 …
   따로 pipeline 만들어달라고 한건 최소한의 기능만 남긴 inference code였어".
   - 단계 8 → 7: `geocalib` 삭제, `graph`(`build_scene_graph.py`) → `scale` 로 교체.
@@ -284,13 +312,13 @@ Follows [Keep a Changelog](https://keepachangelog.com/).
   실측 (golf source, 49f, S 6.9976): hole_magenta_frac s42 0.0685 / s1234 0.0124 /
   s2026 0.0.
 - **`scene_graph/io.py: load_scene(allow_no_seg=False)` + `lbm/render.py` 전달,
-  `scripts/render_pred_depth_warp.py --allow_no_seg --allow_empty_dynamic_mask`.**
+  `viz/render_pred_depth_warp.py --allow_no_seg --allow_empty_dynamic_mask`.**
   SAM3 를 안 돌린 recon 을 통과시키는 스위치 셋. **전부 기본 off** 라 기존 뱅크·릴
   경로는 비트 동일하다. cloud 캐시 키에도 `allow_no_seg` 를 넣었다 — 안 넣으면 같은
   씬의 seg 있는/없는 두 호출이 서로의 점군을 받는다.
 
 ### Added
-- **`scripts/run_vista4d_gen.py` — 영상 + 카메라 → Vista4D 생성 영상 (2026-09-21).**
+- **`exec/run_vista4d_gen.py` — 영상 + 카메라 → Vista4D 생성 영상 (2026-09-21).**
   사용자 지시 "vista4d 돌리는 것도 영상, 카메라 주면 영상 나오게끔". `run_custom_caption.py`
   가 끝나는 지점(카메라)에서 이어받는 한 줄짜리 드라이버다.
   `--stage {recon,cam,gen,out,all}` — recon(DA3 depth/mask/cameras.npz, 이미 있으면 건너뜀)
@@ -298,14 +326,14 @@ Follows [Keep a Changelog](https://keepachangelog.com/).
   가로 concat 릴. 출력은 `results/20260921_vista4d_custom/<name>/<tag>/`.
   **Vista4D 규약 변환은 새로 쓰지 않고** `bank_to_vista4d_cams.py` 한 군데로 몬다 —
   두 경로가 갈리면 같은 궤적이 다른 영상이 된다.
-- **`scripts/bank_to_vista4d_cams.py --cams` — 카메라 파일 직접 입력 (2026-09-21).**
+- **`fit/convert/bank_to_vista4d_cams.py --cams` — 카메라 파일 직접 입력 (2026-09-21).**
   기존 두 소스(`--variants` 뱅크 / `--preds` 평가 폴더)는 둘 다 **이름 규약**을 요구한다
   (`<bank_dir>:<variant_id>`, `<eval_dir>/test/<entry>_transforms_*.json`). 번들에 떨어진
   `cameras/s1234.npz` 나 손으로 만든 `transforms.json` 은 그 규약 밖이라 못 먹였다.
   `--cams <경로>[=<tag>]` 는 확장자로 갈라 `.npz`(이미 OpenCV recon world) 는 그대로,
   `.json`(nerfstudio) 은 `load_pred` 와 **같은 식**으로 OpenCV·recon 픽셀 단위로 돌린다.
   세 옵션 중 정확히 하나를 요구하므로 **기존 호출은 비트 동일**하다.
-- **`scripts/run_custom_caption.py` — 영상 1개 + 캡션 1줄 → 카메라 + depth warp (2026-09-21).**
+- **`exec/run_custom_caption.py` — 영상 1개 + 캡션 1줄 → 카메라 + depth warp (2026-09-21).**
   사용자 지시 "내가 영상 위치랑 caption text 직접 넣으면 우리 모델 돌려서 카메라 저장하고
   depth warp 영상도 만들어서 저장해주는 pipeline". `--stage {recon,geocalib,graph,corpus,
   molmo2,eval,warp,bundle,all}` 하나짜리 python 드라이버다. `run_d215.py` 계열과 다른 점은
@@ -324,7 +352,7 @@ Follows [Keep a Changelog](https://keepachangelog.com/).
   `aim=='free'` 변이가 0개가 되고, `zero` 는 그때 assert 로 죽는다
   (`cache_molmo2_embeddings.py:485`). free 변이가 0개면 `zero` 와 `off` 의 산출물은 같다.
   molmo2 override 는 D200 학습 분포대로 `Track {지칭구}.` 한 형식이다 (캡션 원문이 아니다).
-- **`scripts/build_bank_captions.py --desc_override` + `configs/bank/d225_desc.json`
+- **`fit/caption/build_bank_captions.py --desc_override` + `configs/bank/d225_desc.json`
   (2026-09-21, D225).** 카메라는 그대로 두고 **target 지칭구만 사람이 고쳐 쓰는** 재시도용이다.
   `{"<씬>": {"<node_id>": "<지칭구>"}}` JSON 을 받아 캡션을 굽기 직전에 갈아끼운다.
   `out/<씬>/instance_desc.json` 을 직접 고치지 않는 이유는 그게 VLM 산출물이라 다음 세대에
@@ -333,7 +361,7 @@ Follows [Keep a Changelog](https://keepachangelog.com/).
   줄였다. d224 코퍼스에 덮어쓰지 않고 d225 로 세대를 가른 이유는 캡션 한 줄이 곧 모델
   입력이라, 같은 이름의 `d224_s*` eval 폴더가 다른 텍스트를 가리키게 되기 때문이다
   (memory `eval-dir-name-must-carry-tag` 와 같은 함정).
-- **`scripts/route_presets.py --force_presets` — 슬롯 표를 건너뛰고 preset 을 이름으로 지목
+- **`fit/bank/route_presets.py --force_presets` — 슬롯 표를 건너뛰고 preset 을 이름으로 지목
   (2026-09-21, D224).** `route()` 의 슬롯 표는 **슬롯당 preset 을 하나로 못 박아** 둬서,
   사람이 이름으로 부르는 요청 중 라우팅으로는 아예 안 나오는 것이 있다 — `advance` 는
   `dolly_in_look_at` 고정이라 맨 `dolly_in` 이 없고, `arc` 는 `pull_out_arc_*` 고정이라
@@ -354,7 +382,7 @@ Follows [Keep a Changelog](https://keepachangelog.com/).
   `[0, 0.35, 0]` + `dolly_in` `[0, 0, 0.35]` 의 합. preset 수 43 → 44.
 - **`configs/caption_presets.json` 에 `pedestal_down_dolly_in`** — axis `pedestal`,
   phrase "drops straight down while pushing in toward {target}" (2026-09-21, D224).
-- **`scripts/viser_frame.py` — 영상 프레임 고르기 + 그 한 장 png 저장 (2026-09-21).**
+- **`viz/viser_frame.py` — 영상 프레임 고르기 + 그 한 장 png 저장 (2026-09-21).**
   릴에서 "몇 번째 프레임에서 카메라가 벽을 뚫는가"를 찾을 때 영상 플레이어는 프레임 번호를
   안 알려주고, 초 단위로 긁어 `ffmpeg -ss` 로 다시 뽑으면 그 초가 어느 프레임인지 또 어긋난다.
   여기서는 슬라이더 값이 곧 프레임 인덱스이고 파일 이름(`<stem>_f0023.png`)에 그 번호가 박혀
@@ -366,15 +394,15 @@ Follows [Keep a Changelog](https://keepachangelog.com/).
   캐시이고, 못 여는 컨테이너만 `imageio` 전량 디코드로 내려간다. 같은 프레임을 두 번 누르면
   `_2`/`_3` 이 붙는다 (덮어쓰면 방금 저장한 것이 조용히 사라진다).
   실측: `warp_f0023.png` 이 `decord[23]` 과 maxdiff 0.
-- **`scripts/bank_to_vista4d_cams.py --cam_dir` — npz 저장 위치 분기 (2026-09-21, D221).**
+- **`fit/convert/bank_to_vista4d_cams.py --cam_dir` — npz 저장 위치 분기 (2026-09-21, D221).**
   기본은 여전히 Vista4D 가 읽는 `<eval_data>/eval_data/cameras/<video>/` 다. 릴 번들처럼
   **생성을 안 돌리고 카메라만 보관**할 때는 번들 폴더로 직접 굽는다 — d215 릴 47건 x 4 arm
   = 188 개의 안 쓰는 npz 를 공유 eval_data 에 쌓지 않기 위한 것이다.
-- **`scripts/run_gendop_eval.py` 에 `vista_d215` 코퍼스 (2026-09-21, D221).** d215 test 92
+- **`exec/run_gendop_eval.py` 에 `vista_d215` 코퍼스 (2026-09-21, D221).** d215 test 92
   entry 에 GenDoP 릴리즈 ckpt 를 **우리 캡션 그대로** 돌리는 항목. arm 은 모델 3개가 아니라
   한 ckpt(d200 molmo2_l21)의 seed 3개이고 캡션이 셋 다 같으므로 `ref` 는 s42 하나면 된다.
   depth 게이지는 vista_d121 과 같은 `median`.
-- **`scripts/bank_to_vista4d_cams.py --preds` — 모델 예측 궤적을 Vista4D 카메라로
+- **`fit/convert/bank_to_vista4d_cams.py --preds` — 모델 예측 궤적을 Vista4D 카메라로
   (2026-09-21, D221).** 지금까지 이 다리는 뱅크 `poses.npz` 한 곳에서만 pose 를 읽었다.
   "d215 seed 3개를 Vista4D 로 생성" 하려면 소스가 평가 산출물
   `<eval_dir>/test/<entry>_transforms_{pred,ref}.json` 이어야 한다. 뱅크 경로는 그대로 두고
@@ -449,7 +477,7 @@ Follows [Keep a Changelog](https://keepachangelog.com/).
   크기의 1.07 배** 굵기로 그려졌다. 박스가 점으로 뭉쳐 "OBB 가 안 보인다"로 읽히고, 원인이
   데이터(cm 단위 OBB)라는 게 드러나지 않는다. 노드 id 와 extent 를 찍고 `OBB thickness` 를
   내리거나 `labels` 로 위치를 읽으라고 안내한다.
-- **`scripts/run_gendop_eval.py` 기본값이 `--raw` + `--no_scale_token` (2026-09-21, D222).**
+- **`exec/run_gendop_eval.py` 기본값이 `--raw` + `--no_scale_token` (2026-09-21, D222).**
   사용자 지시("gendop 돌릴때 rmax 곱하면 안되고 raw 로 normalized 되어서 나오는 원본 코드
   그대로 나온걸 저장해서 써야해"). 지금까지는 GenDoP 출력에 우리 쪽에서 rmax 를 곱해 미터로
   되돌렸는데, 그건 원저자 코드에 없는 후처리라 베이스라인이 우리 가정을 타게 된다.

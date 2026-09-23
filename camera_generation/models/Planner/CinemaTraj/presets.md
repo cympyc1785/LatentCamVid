@@ -135,7 +135,7 @@ _dont_look   같은 궤적, aim=traj (재조준 없음)
 
 ## 2. Option 표
 
-### 2-1. `scripts/route_presets.py` — 어떤 preset 이 코퍼스에 들어오는가
+### 2-1. `fit/bank/route_presets.py` — 어떤 preset 이 코퍼스에 들어오는가
 
 | 옵션 | 가능한 값 | 기본 | D84 | 효과 |
 |---|---|---|---|---|
@@ -161,7 +161,7 @@ _dont_look   같은 궤적, aim=traj (재조준 없음)
 | static | `track_look_at` / `static_look_at` | track 여부 |
 | datadop:{slot} | `dd_*` | `--external_shapes` 있을 때 `--num_external` 개 |
 
-### 2-2. `scripts/sample_camera_bank.py` — τ 뱅크 (변이 축)
+### 2-2. `fit/bank/sample_camera_bank.py` — τ 뱅크 (변이 축)
 
 | 옵션 | 가능한 값 | 기본 | D84 |
 |---|---|---|---|
@@ -197,7 +197,7 @@ _dont_look   같은 궤적, aim=traj (재조준 없음)
 | `--num_samples` / `--seed` | int | `0`(전량) / `0` | 동일 |
 | `--preview` / `--preview_max` / `--preview_columns` | flag / int / int | on / `24` / `6` | 동일 |
 
-### 2-3. `scripts/fit_hole_ladder.py` — hole 사다리 (최종 크기 결정)
+### 2-3. `fit/bank/fit_hole_ladder.py` — hole 사다리 (최종 크기 결정)
 
 | 옵션 | 가능한 값 | 기본 | D84 |
 |---|---|---|---|
@@ -226,7 +226,7 @@ G3_center → G3_area → G3_occlusion`. 상한: `max_tau 0.30` · `max_view_ang
 어느 게이트가 크기를 멈췄는지는 변이의 `binding` 열
 (`hole` / `collision` / `obb` / `elev` / `ground` / `approach` / `none`).
 
-### 2-4. `scripts/build_bank_captions.py` — 문장 생성
+### 2-4. `fit/caption/build_bank_captions.py` — 문장 생성
 
 | 옵션 | 가능한 값 | 기본 |
 |---|---|---|

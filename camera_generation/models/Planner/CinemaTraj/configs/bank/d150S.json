@@ -1,5 +1,5 @@
 {
-  "_why": "D150 파일럿: τ 분모를 z_med_frame0 -> S 로 바꿨을 때 뱅크가 얼마나 움직이나. 나머지 축은 vista d128(`scripts/run_k6_d128_shard.sh`)과 문자 단위로 같다 — 대조군이 곧 hole_bank_k6_d128 이므로 다른 축이 하나라도 다르면 비교가 무의미해진다. GRAPH/CLOUD 는 안 돈다 (.graph_s115/.cloud_s115 재사용).",
+  "_why": "D150 파일럿: τ 분모를 z_med_frame0 -> S 로 바꿨을 때 뱅크가 얼마나 움직이나. 나머지 축은 vista d128(`exec/_legacy/run_k6_d128_shard.sh`)과 문자 단위로 같다 — 대조군이 곧 hole_bank_k6_d128 이므로 다른 축이 하나라도 다르면 비교가 무의미해진다. GRAPH/CLOUD 는 안 돈다 (.graph_s115/.cloud_s115 재사용).",
   "generation": "d150S",
   "output_root": "out",
   "eval_data": null,

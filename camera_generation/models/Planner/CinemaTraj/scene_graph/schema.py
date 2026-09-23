@@ -119,7 +119,7 @@ def load_graph(input_path: str):
 
 
 # ── anchor(=target) 선별 (D127) ──────────────────────────────────────────────
-# 두 소비자(`scripts/sample_camera_bank.py`, `scripts/route_presets.py`)가 같은 규칙을 써야
+# 두 소비자(`fit/bank/sample_camera_bank.py`, `fit/bank/route_presets.py`)가 같은 규칙을 써야
 # 라우팅 표와 실제 뱅크가 안 어긋난다. 그래서 여기 한 벌만 둔다.
 
 # **target 이 될 수 없는 라벨** — 벽/바닥/천장/울타리/난간/문/창 같은 "씬의 껍데기".

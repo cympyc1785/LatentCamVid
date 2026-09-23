@@ -28,7 +28,7 @@ def scene_scale(depths: np.ndarray, K: np.ndarray, sky_mask: np.ndarray | None =
     왜 바꿨나: 예전 정의(`mode="frame0_ray"`)는 **frame 0 한 장**의 평균 ray length 였다. 카메라가
     돌아서 다른 공간을 보면 그 뒤 프레임의 실제 관측 거리가 몇 배가 되는데 S 는 안 따라간다 —
     그러면 `u` 로 표현된 모든 것(OBB extent · 후보 거리 · 게이트 마진 `0.02·S` · τ 임계)이 그
-    프레임들에서만 조용히 어긋난다. 72편 실측(`scripts/audit_scene_scale.py`)에서 프레임별
+    프레임들에서만 조용히 어긋난다. 72편 실측(`eval/audit_scene_scale.py`)에서 프레임별
     평균 ray length 의 max/min 비가 p50 1.0961 · 12.5% 가 1.5 초과 · 최대 12.4030 이었다.
 
     dynamic 은 **안 뺀다** — 사용자가 sky 만 제외라고 지정했다. 동적 표면도 그 시각에 카메라가

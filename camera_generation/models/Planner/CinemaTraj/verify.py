@@ -51,7 +51,7 @@ from lbm.render import CloudRenderer                                            
 from lbm.render import add_cloud_source_args, open_renderer                        # noqa: E402
 from scene_graph.lift import apply_transform                                       # noqa: E402
 from scene_graph.obb import node_obb_at, obb_corners                               # noqa: E402
-from scripts.build_candidate_board import subject_track_volume                     # noqa: E402
+from fit.bank.build_candidate_board import subject_track_volume                     # noqa: E402
 
 if RECAMMASTER_ROOT not in sys.path:
     sys.path.insert(0, RECAMMASTER_ROOT)

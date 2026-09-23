@@ -2,7 +2,7 @@
 
 왜 파일로 주고받는가: GeoCalib 은 `kornia` 를 요구하는데 그건 env `geocalib` 에만 있고,
 scene graph 는 env `vista4d` 에서 돈다. 새 패키지를 깔지 않기로 했으므로 두 단계로 쪼갠다 —
-`scripts/geocalib_gravity.py`(env `geocalib`) 가 사이드카를 굽고, 여기서 읽는다.
+`fit/ingest/geocalib_gravity.py`(env `geocalib`) 가 사이드카를 굽고, 여기서 읽는다.
 
 왜 GeoCalib 을 1순위로 쓰는가 (TRUMANS GT 65 chunk 실측, GT 대비 각도 오차):
 
@@ -53,7 +53,7 @@ def load_geocalib_gravity(video: str, output_root: str):
         payload = json.load(file)
     assert payload.get("format") == FORMAT, (
         f"{file_path}: format 이 {payload.get('format')} 다 (기대 {FORMAT}). "
-        f"scripts/geocalib_gravity.py 로 다시 구울 것.")
+        f"fit/ingest/geocalib_gravity.py 로 다시 구울 것.")
 
     up = np.asarray(payload["up_world"], dtype=np.float64)
     up /= np.linalg.norm(up)

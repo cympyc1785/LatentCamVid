@@ -14,25 +14,6 @@
 
 ## Request
 
-### R2. 미완료 요청을 `tasks.md` 에 저장
-진행 안 됐거나 완료 안 된 내 요청들을 `tasks.md` 로.
-
-### R3. `CinemaTraj/out*` 잉여 폴더 정리
-최근에 안 쓴 / 필요 없는 out 폴더 삭제. **중요 파일로 판단되면 승인받을 것.**
-
-### R4. `CinemaTraj/results` 불필요 폴더 정리
-
-### R5. `tmp/` 를 `log` / `scripts` / `results` 로 재정리
-
-### R6. scripts/ 재분류 (exec / fit / eval / viz) — 계획 승인 필요
-`camera_generation/models/Planner/CinemaTraj/scripts` 에 스크립트가 전부 쌓이고 있다. 지침:
-- run 계열 → `CinemaTraj/exec/` + `USAGE.md` (파일별 실행법)
-- 데이터 구축에 **실제로 필요한 것만** → `CinemaTraj/fit/` + `USAGE.md`
-- eval 계열 → `CinemaTraj/eval/` + `USAGE.md`
-- 시각화 계열 → `CinemaTraj/viz/` + `USAGE.md`
-- 그 외는 `scripts/` 에 남긴다. 추가 분류가 필요하면 제안할 것.
-**먼저 간단한 계획을 세워 승인받고 진행.**
-
 ### R7. 데이터 구축 파이프라인을 `camera_generation/dataset/` 으로 이전
 `CinemaTraj` 는 원래 논문 폴더다. 우리 파이프라인을 `camera_generation/dataset/` 로 옮기고 경로도 전부 수정.
 - ⚠ R6 과 순서 의존: R6(폴더 재분류) 먼저 → R7(통째 이전).
@@ -62,15 +43,6 @@
 ### R15. 최종 git 정리 + 커밋
 데이터는 추적 제외, 나머지 미추적 수정사항은 추적되게 한 뒤 커밋.
 
-### R17. 타임라인 문서는 `.md` 말고 `.log` 로
-`fix`, `decision` 처럼 시간순으로 계속 늘어나는 문서는 확장자를 `.log` 로 바꾼다.
-대상: `CinemaTraj/fix.log` · `CinemaTraj/DECISIONS.log` (+ `LBM_DEFECTS.log`,
-`latentcam/docs/known_issues.md` 는 제안). `CHANGELOG.md` 4종은 Keep a Changelog 규약이라 제외.
-
-### R18. 긴급 끼어들기 규약 (`## Wait` 구역)
-`[긴급]` 접두사 또는 "이것부터 먼저" 요청이 오면 하던 것을 `## Wait` 로 비켜 두고 긴급 건을
-먼저 처리한 뒤 복귀. 큐 파일과 `CLAUDE.md` 양쪽에 규약 기록.
-
 ---
 
 ## Working
@@ -86,6 +58,19 @@ _(비어 있음)_
 ---
 
 ## Done
+
+### R17. 타임라인 문서는 `.md` 말고 `.log` 로 — 완료 (일부 되돌림, 2026-09-23)
+`git mv` 로 `fix.md`→**`fix.log`**, `LBM_DEFECTS.md`→**`LBM_DEFECTS.log`**.
+`DECISIONS` 는 한 번 `.log` 로 바꿨다가 **사용자가 `.md` 로 되돌렸다** (git 추적 사유) — 참조
+20곳도 전부 `DECISIONS.md` 그대로다. `.gitignore` 59행의 전역 `*.log` 때문에 `.log` 두 개는
+이름으로 화이트리스트해야 한다 (`!…/CinemaTraj/{fix,LBM_DEFECTS}.log`) — **R7 주의:**
+CinemaTraj 를 `camera_generation/dataset/` 으로 옮기면 이 두 줄이 빗나가 조용히 추적 밖이 된다.
+`latentcam/docs/known_issues.md` 는 **`.md` 유지** — 시간순 append 가 아니라 항목을
+`✅[FIXED]`/`🔴[PARKED]` 로 제자리 수정하는 **상태 카탈로그**다.
+
+### R18. 긴급 끼어들기 규약 (`## Wait` 구역) — 완료
+큐 헤더에 `Wait` 정의 추가 + `CLAUDE.md` `### 요청 대기열` 에 5번 항목(끼어들기) 신설.
+`Wait` 는 **중단**(긴급 건에 자리를 내줌), `Incomplete` 는 **차단**(내가 못 하는 것)으로 구분.
 
 ### R6. scripts/ 재분류 (exec / fit / eval / viz) — 완료
 `scripts/` 174개 → `exec/` 11 · `exec/_legacy/` 34 · `fit/{ingest 18, graph 6, bank 13,

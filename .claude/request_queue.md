@@ -21,8 +21,6 @@
   1차 (2026-09-24): mesh_grid EDT 로 벡터판 `mesh_ray_profile` — 194 ms/궤적, Blender 판정과 20씬 175 rung
   **88.0% 일치** (grid 만 탈락 19 / Blender 만 탈락 2). 원인: 시선 10(5 cm 격자가 얇은 물체 부풂),
   subject_dist 6(조준점 정의 차이). 다음: 2.5 cm 격자 + Blender 조준점 export → fit 게이트로 배선.
-### R40. TRUMANS Blender 렌더 속도 개선 방법 찾기 (2026-09-24) — **렌더 실험은 GPU 6,7 사용 허용** (사용자 명시)
-### R41. VLM 인식 확인 — 50 영상, 프레임 interval 바꿔 넣기 vs 영상 fps=2 입력, 구조화 caption(화면 구성/점유율/1·3인칭/셀피/신체 일부 등) 한 폴더에 → 사용자가 입력 방식 판단
 ### R22. TRUMANS 데이터셋 구축 — **계획 승인됨 (2026-09-23)**
 조사: `tmp/agent/reader-r22-trumans.md` (핵심 주장 5건 직접 재확인). 사용자 결정 넷:
 ① 범위 = s3f0k6 **737 clip 전량** (191 은 prep 완료, 546 은 graph/cloud/mesh 부터)
@@ -54,7 +52,10 @@ _(비어 있음)_
 
 ## Done
 
-_(비어 있음 — 10개 차면 `.claude/request_done.md` 로 옮긴다)_
+### R40. Blender 렌더 속도 — depth/index animation job 적용 (D279) · 커밋 `16235b8`
+geom 197.2 → 39.4 s (산출물 일치), clip ~331 → ~173 s 예상. RGB 옵션(16spp/bounce/해상도)은 화질 트레이드오프라 사용자 결정 대기.
+### R41. VLM 입력 방식 비교 50 clip x 5 모드 — 완료, 사용자 판단 대기 (`tmp/r41/index.html`)
+5 모드 모두 parse 50/50, 시점 5모드 일치 45/50, closeup 을 모든 모드가 third 로 봄(7~8/9). vLLM 내림.
 
 ---
 

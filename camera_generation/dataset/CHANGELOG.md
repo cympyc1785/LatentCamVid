@@ -11,6 +11,18 @@ Follows [Keep a Changelog](https://keepachangelog.com/).
 
 ### Added
 
+- **D275 — targetless preset 은 shot scale 대신 이동량 사다리 (2026-09-24, R33).** 사용자 지시
+  "static을 포함한 anchor가 의미가 없는 free-moving은 shot scale 적용을 안하는게". static 은 원래
+  손잡이가 없어 사다리를 안 탄다(1단). `fit_hole_ladder.py --shot_exempt targetless
+  --motion_ladder 0.20 0.35 0.60` — 캡션 `targetless` 플래그 preset(pan/tilt/roll/free_pedestal,
+  pan_right_zoom_out)은 단 i 의 목표가 τ=motion_ladder[i] (회전은 ×60° = 12/21/36°). 물리 게이트는
+  그대로 이분법, 프레이밍 게이트는 끔. variant_id 접두 `motion`, `ladder_metric` 열 `motion`.
+  스모크 tilt_down 12.0/21.0/36.0° 정확, anchor preset knob 은 이전과 동일. d273 config 에 켬.
+- **D276 — TRUMANS 렌더 2-job 분리 (2026-09-24, R34, 사용자 채택).** `trumans_to_recon.py --rgb_anim`:
+  RGB 는 `--anim` 1 job(Cycles GPU), depth/index 는 별 job — 한 job 안에서 GPU↔CPU 가 번갈아
+  바뀌어 persistent data 가 안 먹던 것을 없앤다. 같은 GPU·같은 시각 A/B **666.9 s → 343.8 s**,
+  depth 비트 동일, rgb mean|Δ| 0.2~0.3/255. `run_board_sources.py` 가 기본으로 넘긴다.
+
 - **D273 — preset 풀 라우팅 + LAMP 빈 조합 36종 + GT mesh 게이트 실험 (2026-09-24, R23~R27).**
   - `lbm/presets.py` `D273_PRESETS` — 46 → **82** 개. LAMP DSL 대비 빈 조합을 기존 `T.*` compose 로만
     채웠다: `orbit_right_pedestal_{up,down}`, `pedestal_up_dolly_{in,out}`, `pedestal_down_dolly_out`,

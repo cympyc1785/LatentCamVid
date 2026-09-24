@@ -283,6 +283,21 @@ SHAPE_DEFAULTS = {"aim_ramp_frames": 12, "orbit_span_frac": 0.8, "min_sweep_deg"
                   "tau_denom": "z_med_frame0"}
 
 
+# D275 (사용자 지시 2026-09-24 "static을 포함한 anchor가 의미가 없는 free-moving은 shot scale
+# 적용을 안하는게 좋을 것 같은데"). targetless = 캡션이 대상을 안 부르는 preset — 조준도 추종도
+# 안 하므로 "subject 가 얼마나 커지나" 가 크기 기준이 될 수 없다. 정의는 캡션 설정의 `targetless`
+# 플래그 한 곳에서 읽는다 (build_bank_captions 가 target 절을 빼는 판정과 같은 출처).
+def _targetless_presets():
+    cfg_path = path.join(path.dirname(path.dirname(path.dirname(path.abspath(__file__)))),
+                         "configs", "caption_presets.json")
+    with open(cfg_path, encoding="utf-8") as file:
+        presets = json.load(file)["presets"]
+    return frozenset(k for k, v in presets.items() if v.get("targetless"))
+
+
+TARGETLESS_PRESETS = _targetless_presets()
+
+
 def knob_kind(preset: str):
     """이 preset 의 크기 손잡이가 무엇인가. `None` 이면 손잡이가 없다 (정지)."""
     if preset in STATIC_PRESETS:
@@ -1131,6 +1146,7 @@ def main(args):
                                                   gate_check=gate_check)
                     if stats.get("gated"):
                         gated_probes[0] += 1
+                    stats["_knob"] = float(knob)     # D275 motion 사다리의 metric (손잡이 자체)
                     _cache[knob] = (stats, poses, extra["info"], mult, hold_from)
                 stats = _cache[knob][0]
                 # 두 번째 자리는 예전엔 `behind_frac` 스칼라였는데 **stats 통째**로 바꿨다
@@ -1186,7 +1202,13 @@ def main(args):
             # 값 자체는 무의미하지만, 같은 값을 실어야 `emit_bank` 가 τ 뱅크와 **같은 결정**을
             # 되만든다 (pose 대조 assert 가 이 일치를 검사한다).
             rungs = [ladder[0]] if kind is None else ladder
-            for delta in rungs:
+            # D275. targetless preset 은 shot scale 대신 **이동량 사다리** — 단 i 의 목표는
+            # `--motion_ladder[i]` (τ). 회전(pan_deg)은 τ 뱅크와 같은 60°×τ 로 바꾼다
+            # (`sample_camera_bank.py` 의 pan_deg = 60 × τ / 1.00). 이분법·물리 게이트는 그대로라
+            # 게이트가 물리면 작게 풀린다. 프레이밍 게이트는 끈다 (subject 를 안 겨눈다).
+            motion = bool(shot_ladder and args.shot_exempt == "targetless"
+                          and preset in TARGETLESS_PRESETS and kind is not None)
+            for rung_i, delta in enumerate(rungs):
                 # shot 사다리에서 Δ 는 **바닥 대비 배율의 로그**라 이미 상대량이다 —
                 # `excess` 처럼 바닥을 더하면 이중으로 상대화된다. 그래서 그대로 쓴다.
                 target = delta if shot_ladder else (hole_static + delta if excess else delta)
@@ -1222,6 +1244,23 @@ def main(args):
                             why = "framing"
                         if why is not None:
                             status, binding = f"{why}_blocked", why
+                elif motion:
+                    goal = float(args.motion_ladder[min(rung_i, len(args.motion_ladder) - 1)])
+                    goal_k = goal * 60.0 if kind == "pan_deg" else goal
+                    # 목표를 goal 바로 위에 둔다 — `over()` 가 `metric >= target` 이라 손잡이가
+                    # 정확히 goal 이면 "넘었다" 로 판정되어 한 단 아래로 내려앉는다 (실측 12°→11.4°).
+                    target = goal_k * (1.0 + 1e-6)
+                    # metric 이 손잡이 자체라 bracket 을 목표점 하나로 준다 — 게이트가 허락하면
+                    # 정확히 goal 에 앉고, 물리면 [하한, goal] 에서 이분법으로 내려간다.
+                    # (빈 bracket 은 [2°,180°] 전 구간 4회 이분이라 12° 목표가 2° 로 떨어졌다.)
+                    knob, status, binding, calls = solve_knob(probe, target,
+                                                              [(goal_k, goal_k)], kind,
+                                                              args.iterations, max_behind, min_obb,
+                                                              max_elev, min_ground, lo_override,
+                                                              min_approach, min_seen,
+                                                              max_behind_dyn,
+                                                              metric_fn=lambda st: st["_knob"],
+                                                              min_in_frame=0.0)
                 else:
                     # D266. shot 사다리에서는 bracket 을 **안 쓴다** — `points` 는 τ 뱅크가 hole
                     # 로 매긴 (손잡이, hole) 쌍이라 shot scale 의 bracket 이 아니다. 빈 리스트를
@@ -1279,7 +1318,8 @@ def main(args):
                     # 정식 경로는 `hole_delta` **열**이고(`emit_bank.rung_of`), 그 열은 그대로
                     # 채운다 — 이름을 파싱하는 곳은 릴 도구 하나뿐이다
                     # (`render_target_swap_warp.py:40`, 못 읽으면 inf 로 뒤로 민다).
-                    "variant_id": (f"{anchor}__{preset}__{'shot' if shot_ladder else 'hole'}{delta:g}"
+                    "variant_id": (f"{anchor}__{preset}__"
+                                   f"{'motion' if motion else ('shot' if shot_ladder else 'hole')}{delta:g}"
                                    + (f"__{cand_id}" if cand_id else "")),
                     "anchor_id": anchor, "anchor_label": node["label"], "preset": preset,
                     # D259. 후보 전문을 그대로 옮겨 싣는다 — `emit_bank` 가 이 값으로 같은
@@ -1289,7 +1329,7 @@ def main(args):
                     "hole_static": round(hole_static, 4),
                     # D266. 사다리가 무엇을 재고 있나 + shot 모드의 바닥 면적. `hole` 이면
                     # 두 열이 비어 예전 뱅크와 같은 스키마다.
-                    **({"ladder_metric": "shot_scale",
+                    **({"ladder_metric": "motion" if motion else "shot_scale",
                         "area_static": round(area_static, 5),
                         "shot_dev": (lambda d: round(d, 4) if d == d else "")(shot_dev(stats))}
                        if shot_ladder else {}),
@@ -1879,6 +1919,10 @@ def build_parser():
     #   `shot_scale` — Δ 는 **정지(손잡이 0) 대비 subject 화면면적 배율의 로그 절대값**이다.
     #                  Δ 0.2/0.4/0.7/1.1 ≈ ×1.22/×1.49/×2.0/×3.0. hole 은 열로만 남는다.
     parser.add_argument("--ladder_metric", default="hole", choices=("hole", "shot_scale"))
+    # D275. shot_scale 사다리에서 빼는 preset 군. targetless = 캡션 `targetless` 플래그
+    # (pan/tilt/roll/free_pedestal) → 이동량 사다리 `--motion_ladder` (τ; 회전은 ×60°). none = 옛 동작.
+    parser.add_argument("--shot_exempt", default="none", choices=("none", "targetless"))
+    parser.add_argument("--motion_ladder", default=[0.20, 0.35, 0.60], nargs="+", type=float)
     # D266. subject 중심이 중앙 박스(`--center_box`) 안이던 프레임 비율의 하한. 0 = 끔(기본,
     # 예전과 비트 동일). 가림(`--min_subject_visible`)과 달리 렌더가 안 늘어난다.
     parser.add_argument("--min_subject_in_frame", default=0.0, type=float)

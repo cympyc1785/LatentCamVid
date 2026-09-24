@@ -1134,6 +1134,39 @@ def main(args):
     if renders_match(render_dir, poses, num_frames=NUM_FRAMES, rgb_engine=args.rgb_engine):
         print(f"  렌더 재사용: {render_dir}")
         timing["render"] = 0.0
+    elif args.rgb_anim and not frame_list and args.rgb_engine == "cycles":
+        #    D276 (사용자 채택 2026-09-24 "blender 렌더 개선안 채택할게"). 한 job 에서 프레임마다
+        #    RGB(Cycles GPU) ↔ depth/index(Cycles CPU) 를 번갈아 돌리면 장치가 바뀔 때마다 씬 전체를
+        #    다시 올려서 persistent data 가 안 먹는다 (`trumans_gt_render.py:439-460`: 렌더 자체는
+        #    4.6%, 95% 가 재동기화). 그래서 job 을 둘로 쪼갠다:
+        #      ① RGB 만 `--anim` (animation render 1회 — 재동기화가 job 당 1회)
+        #      ② depth,index 만 프레임 루프 (엔진·장치가 안 바뀌어 persistent data 가 먹는다)
+        #    실측 (0ac97866 c17 k059, 단독 GPU): 7.8+4.2 s/frame → 2.1+2.9 s/frame.
+        #    ①의 rgb/ 를 ② 폴더로 옮겨 `convert` 가 보는 구조는 예전과 같다.
+        rgb_dir = render_dir + "_rgb"
+        common = ["--poses", poses_path, "--frames", str(start), str(end), str(step),
+                  "--res", str(args.res[0]), str(args.res[1]), "--lens", str(args.lens)]
+        t_rgb = run_blender(
+            args.blender, blend, path.join(CINEMATRAJ_ROOT, "viz", "trumans_gt_render.py"),
+            common + ["--passes", "rgb", "--rgb_engine", "cycles",
+                      "--rgb_samples", str(args.rgb_samples), "--rgb_cdevice", args.rgb_cdevice,
+                      "--anim", "--out", rgb_dir], "gt_render(rgb anim)",
+            retries=args.blender_retries)
+        t_geo = run_blender(
+            args.blender, blend, path.join(CINEMATRAJ_ROOT, "viz", "trumans_gt_render.py"),
+            common + ["--passes", "depth,index", "--out", render_dir], "gt_render(depth,index)",
+            retries=args.blender_retries)
+        import shutil
+        dst = path.join(render_dir, "rgb")
+        if path.isdir(dst):
+            shutil.rmtree(dst)
+        shutil.move(path.join(rgb_dir, "rgb"), dst)
+        shutil.copy(path.join(rgb_dir, "render_meta.json"), path.join(render_dir, "render_meta_rgb.json"))
+        shutil.rmtree(rgb_dir)
+        n_rgb = len([f for f in listdir(dst) if f.endswith(".png")])
+        assert n_rgb == NUM_FRAMES, f"rgb anim 프레임 {n_rgb} != {NUM_FRAMES}: {dst}"
+        timing["render"] = t_rgb + t_geo
+        timing["render_rgb"], timing["render_geom"] = t_rgb, t_geo
     else:
         timing["render"] = run_blender(
             args.blender, blend, path.join(CINEMATRAJ_ROOT, "viz", "trumans_gt_render.py"),
@@ -1352,6 +1385,8 @@ if __name__ == "__main__":
     # 저작이라 4.5 의 EEVEE_NEXT 에서는 발광 재질이 타서 옆 물체까지 번진다 — `cycles` 가 그
     # 탈출구다. 기본값 `eevee` 면 인자를 아예 안 넘겨 기존 명령과 비트 동일하다.
     parser.add_argument("--rgb_engine", default="eevee", choices=["eevee", "cycles"], type=str)
+    # D276. cycles RGB 를 `--anim` 한 job + depth/index 별 job 으로 (균일 간격만). 끄면 예전 1-job.
+    parser.add_argument("--rgb_anim", action="store_true", default=False)
     parser.add_argument("--rgb_samples", default=128, type=int)      # rgb_engine=cycles 일 때 spp
     parser.add_argument("--rgb_cdevice", default="GPU", choices=["CPU", "GPU"], type=str)
     parser.add_argument("--sky_depth", default=1000.0, type=float)   # 배경 clamp (float16 상한 회피)

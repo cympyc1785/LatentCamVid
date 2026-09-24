@@ -22,6 +22,10 @@
   **88.0% 일치** (grid 만 탈락 19 / Blender 만 탈락 2). 원인: 시선 10(5 cm 격자가 얇은 물체 부풂),
   subject_dist 6(조준점 정의 차이). 다음: 2.5 cm 격자 + Blender 조준점 export → fit 게이트로 배선.
 ### R30. Blender render 가 느린 이유 — 조사 완료, 개선안(RGB --anim + depth 분리 job, ~2.3x) 적용 여부 사용자 확인 대기
+### R33. static·free-moving(targetless) 은 shot scale 미적용 (2026-09-24) — 작업 중
+### R34. Blender 렌더 개선안(RGB --anim + depth/index 별 job) 적용 — 사용자 채택
+### R35. 질문: mesh_grid 와 mesh 차이 / 클립마다 따로 만들어야 하나 / Blender mesh 직접 쓰면 저장공간 절약 / 같은 scene 한 번 올려 여러 클립 병렬 raycast·렌더
+### R36. 질문: DA3 12 frame 은 cache 로 학습 중인가 / Molmo2 대비 토큰 수
 ### R22. TRUMANS 데이터셋 구축 — **계획 승인됨 (2026-09-23)**
 조사: `tmp/agent/reader-r22-trumans.md` (핵심 주장 5건 직접 재확인). 사용자 결정 넷:
 ① 범위 = s3f0k6 **737 clip 전량** (191 은 prep 완료, 546 은 graph/cloud/mesh 부터)

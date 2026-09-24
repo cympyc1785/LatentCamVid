@@ -109,6 +109,9 @@ def run_clip(a, row, cand, slot, exclude, gpu, log_dir):
            # D276 (사용자 채택): RGB `--anim` 1 job + depth/index 별 job. 같은 조건 A/B 에서
            # 666.9 s -> 343.8 s (depth 비트 동일, rgb mean|Δ| 0.2~0.3/255 = 샘플 노이즈).
            "--rgb_anim",
+           # D278 (사용자 지시 "바꿔줘"): probe(grid/verify) 를 recording 상주 Blender 서버에서.
+           # grid probe JSON 이 새 Blender 판과 전체 일치 (00add26c c01 k029, 576 후보).
+           "--probe_server",
            "--eval_data", a.eval_data] + RECON_ARGS
     env = {"CUDA_VISIBLE_DEVICES": str(gpu), "OMP_NUM_THREADS": "8", "PATH": "/usr/bin:/bin"}
     import os

@@ -31,6 +31,7 @@ Blender 판정과 88.0% 만 맞았다 (R27). 여기서는 **Blender 를 recordin
   {"op":"load_clip","clip":"<id>","frames":[f...]}     -> {"ok":true,"n":49}
   {"op":"profile","clip":"<id>","poses":[[[4x4]..F]..K], "per_frame":false}
                                                        -> {"ok":true,"rows":[{clear_frac,...}]*K}
+  {"op":"probe","argv":[...]}                          -> `trumans_scene_probe.main(argv)` in-process
   {"op":"shutdown"}
 poses 는 **blend world OpenCV c2w** (`MeshClearance.to_blend` / `bank_to_blender_poses` 와 같은 좌표).
 
@@ -171,6 +172,13 @@ class Server:
                                     out = self.load_clip(req)
                                 elif op == "profile":
                                     out = self.profile(req)
+                                elif op == "probe":
+                                    # D278. `trumans_scene_probe.py` 를 **같은 인자로 in-process**
+                                    # 실행 — 결과 JSON 은 probe 가 `--out` 에 쓴다. 매번 Blender 를
+                                    # 새로 띄워 1.6 GB blend 를 읽던 것(clip 당 2회)을 없앤다.
+                                    t0 = time.time()
+                                    PROBE.main(PROBE.build_parser().parse_args(req["argv"]))
+                                    out = {"ok": True, "sec": round(time.time() - t0, 2)}
                                 elif op == "shutdown":
                                     state["stop"] = True
                                     out = {"ok": True}

@@ -11,6 +11,13 @@ Follows [Keep a Changelog](https://keepachangelog.com/).
 
 ### Added
 
+- **D278 — TRUMANS 렌더의 probe 도 Blender 상주 서버로 (2026-09-24, R38).** 사용자 지시 "바꿔줘".
+  `trumans_scene_probe.py` 의 CLI 를 `build_parser()` 로 빼고(동작 동일), 서버에 `probe` 요청을
+  추가해 같은 인자로 `main()` 을 in-process 실행한다. `trumans_to_recon.py --probe_server` 면
+  probe(grid)/probe(verify) 가 recording 서버로 간다 — clip 당 Blender 기동 4 → 2회.
+  grid probe JSON 이 새 Blender 판과 **전체 일치** (00add26c c01 k029, 576 후보), verify 7~10 → 5.1 s.
+  `run_board_sources.py` 가 기본으로 넘긴다.
+
 - **D277 — Blender raycast 상주 서버 + fitting 중 GT mesh 게이트 (2026-09-24, R37).** 사용자 지시
   "blender 서버 연결 만들어줘봐".
   - `fit/ingest/blender_raycast_server.py` (Blender 안에서 돈다) — recording `.blend` 를 1회 로드,

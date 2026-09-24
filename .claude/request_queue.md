@@ -21,6 +21,7 @@
   1차 (2026-09-24): mesh_grid EDT 로 벡터판 `mesh_ray_profile` — 194 ms/궤적, Blender 판정과 20씬 175 rung
   **88.0% 일치** (grid 만 탈락 19 / Blender 만 탈락 2). 원인: 시선 10(5 cm 격자가 얇은 물체 부풂),
   subject_dist 6(조준점 정의 차이). 다음: 2.5 cm 격자 + Blender 조준점 export → fit 게이트로 배선.
+### R39. GPU 3 에서 VLM 영상 분류 — 이전 1인칭/셀피/subject 과대/신체 일부 필터의 worldtraj·dynamicverse·dynpose-100k 결과 리스트 찾고 개선점 제안
 ### R22. TRUMANS 데이터셋 구축 — **계획 승인됨 (2026-09-23)**
 조사: `tmp/agent/reader-r22-trumans.md` (핵심 주장 5건 직접 재확인). 사용자 결정 넷:
 ① 범위 = s3f0k6 **737 clip 전량** (191 은 prep 완료, 546 은 graph/cloud/mesh 부터)
@@ -51,6 +52,9 @@ _(비어 있음)_
 ---
 
 ## Done
+
+### R38. 렌더 probe 도 Blender 서버로 (D278) — 완료 (2026-09-24)
+grid probe JSON 전체 일치. 렌더를 GPU 2 단독(worker 6)으로 재기동 — GPU 3 은 R39 VLM 용으로 비움.
 
 ### R37. Blender raycast 상주 서버 + fit 게이트 (D277) — 완료 (2026-09-24)
 사후 raycast 와 182씬 1,634 rung 98.8% 일치 (20씬 100%), 4.9 ms/궤적. `--ray_gate server` 로 fit 에 배선,

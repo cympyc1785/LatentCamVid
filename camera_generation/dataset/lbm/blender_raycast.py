@@ -107,6 +107,10 @@ class RaycastClient:
         return self._call({"op": "profile", "clip": clip, "poses": poses,
                            "per_frame": per_frame})["rows"]
 
+    def probe(self, argv):
+        """`trumans_scene_probe.py` 를 서버 안에서 같은 인자로 돌린다 (D278). -> 서버 측 소요 초."""
+        return self._call({"op": "probe", "argv": [str(x) for x in argv]})["sec"]
+
     def shutdown(self):
         try:
             self._call({"op": "shutdown"})

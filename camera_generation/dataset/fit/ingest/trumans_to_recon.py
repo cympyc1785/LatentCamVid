@@ -625,6 +625,22 @@ def path_stats(poses):
 BLENDER_RETRY_SLEEP = (20.0, 60.0)     # 재시도 전 대기 — 이웃 worker 의 렌더가 끝날 시간을 준다
 
 
+_PROBE_CLIENT = {}
+
+
+def run_probe(args, blend, script, script_args, log_tag, retries: int = 0):
+    """probe 1회. `--probe_server` 면 recording 상주 서버에서 in-process 로 (D278), 아니면
+    예전처럼 Blender 를 새로 띄운다 (`run_blender`, 비트 동일 경로)."""
+    if not args.probe_server:
+        return run_blender(args.blender, blend, script, script_args, log_tag, retries=retries)
+    started = time.time()
+    if args.recording not in _PROBE_CLIENT:
+        from lbm.blender_raycast import RaycastClient
+        _PROBE_CLIENT[args.recording] = RaycastClient(args.recording)
+    _PROBE_CLIENT[args.recording].probe(script_args)
+    return time.time() - started
+
+
 def run_blender(blender, blend, script, script_args, log_tag, retries: int = 0):
     started = time.time()
     for attempt in range(retries + 1):
@@ -939,8 +955,8 @@ def main(args):
 
     # 1) 격자 probe
     probe_path = path.join(work, f"probe_{ftag}.json")
-    timing["probe_grid"] = run_blender(
-        args.blender, blend, path.join(HERE, "trumans_scene_probe.py"),
+    timing["probe_grid"] = run_probe(
+        args, blend, path.join(HERE, "trumans_scene_probe.py"),
         ["--frames", str(start), str(end), str(step), "--out", probe_path,
          "--anchor_origin", args.anchor_origin,
          "--min_clearance", str(args.min_clearance), *subject_flags]
@@ -1074,8 +1090,8 @@ def main(args):
         # 3) 궤적 검증 probe — 격자는 start/anchor/end 세 프레임뿐이라 이동 중 벽 통과를 못 잡는다.
         #    후보 전부를 **한 번의 Blender 기동**으로 검증한다 (기동+로드가 4초라 재시도가 비싸다).
         verify_path = path.join(work, f"verify_{ftag}.json")
-        timing["probe_verify"] = run_blender(
-            args.blender, blend, path.join(HERE, "trumans_scene_probe.py"),
+        timing["probe_verify"] = run_probe(
+            args, blend, path.join(HERE, "trumans_scene_probe.py"),
             #    verify 도 **같은 subject** 로 돌려야 한다. 여기만 human 이면 시선 관통 판정이
             #    사람만 보고, 소품이 벽장 안이든 화면 밖이든 통과해 버린다.
             ["--frames", str(start), str(end), str(step), "--out", verify_path,
@@ -1387,6 +1403,9 @@ if __name__ == "__main__":
     parser.add_argument("--rgb_engine", default="eevee", choices=["eevee", "cycles"], type=str)
     # D276. cycles RGB 를 `--anim` 한 job + depth/index 별 job 으로 (균일 간격만). 끄면 예전 1-job.
     parser.add_argument("--rgb_anim", action="store_true", default=False)
+    # D278. probe(grid)/probe(verify) 를 recording 상주 Blender 서버(`lbm/blender_raycast.py`)에서.
+    # 끄면 예전처럼 probe 마다 Blender 를 새로 띄운다.
+    parser.add_argument("--probe_server", action="store_true", default=False)
     parser.add_argument("--rgb_samples", default=128, type=int)      # rgb_engine=cycles 일 때 spp
     parser.add_argument("--rgb_cdevice", default="GPU", choices=["CPU", "GPU"], type=str)
     parser.add_argument("--sky_depth", default=1000.0, type=float)   # 배경 clamp (float16 상한 회피)

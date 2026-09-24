@@ -664,7 +664,9 @@ def main(args):
     print(f"{'->':22s} {args.out}")
 
 
-if __name__ == "__main__":
+def build_parser():
+    """CLI 인자. D277 — Blender 상주 서버(`blender_raycast_server.py` 의 `probe` 요청)가 같은 인자로
+    `main` 을 in-process 로 부르려고 함수로 뺐다. `__main__` 동작은 그대로다."""
     parser = ArgumentParser()
     parser.add_argument("--out", required=True, type=str)                 # 결과 JSON
     # start end [step]. end 포함. step 은 모션 프레임 간격 (30 Hz 기준 3 => 10 fps 샘플).
@@ -704,4 +706,8 @@ if __name__ == "__main__":
     # `vertex` = 실제 정점(기본).  `obb_lbm` = LBM 45점 OBB 격자 그대로 (비교 전용 —
     # 표본이 공기에 앉으면 `miss_frac` 으로 찍힌다).  `--los_samples` 는 obb_lbm 에서 무시된다.
     parser.add_argument("--los_mode", default="vertex", choices=("vertex", "obb_lbm"))
-    main(parser.parse_args(cli_argv()))
+    return parser
+
+
+if __name__ == "__main__":
+    main(build_parser().parse_args(cli_argv()))

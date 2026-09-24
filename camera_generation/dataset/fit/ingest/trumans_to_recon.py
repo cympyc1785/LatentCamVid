@@ -509,7 +509,8 @@ def renders_match(render_dir, poses, num_frames, rgb_engine="eevee"):
 
 
 def synth_source_path(probe, candidate, preset, aim_bias, track_gain,
-                      preset_scale=1.0, smooth_window=11, aim_keyframes=0, keep_start_z=False):
+                      preset_scale=1.0, smooth_window=11, aim_keyframes=0, keep_start_z=False,
+                      kf_ease="smoothstep", pos_keyframes=0):
     """검증된 시작 pose + preset → (49,4,4) OpenCV c2w (TRUMANS world).
 
     높이는 **일정**하게 유지한다 (실제 pkl 2편의 z-span 이 정확히 0 이었다). `dheight` 가 있는
@@ -582,8 +583,30 @@ def synth_source_path(probe, candidate, preset, aim_bias, track_gain,
         position[2] = max(position[2], z_floor)   # 바닥 밑으로 안 내려간다
         positions[i] = position
 
+    # D283 (사용자 지시 2026-09-24 "smooth_kf 적용하는거 아니었나? translation, rotation 다 keyframe
+    # 6개 정도로 interpolation"). 위치도 keyframe 으로 줄였다가 natural cubic 으로 다시 채운다 —
+    # 뱅크 target 의 `--follow_keyframes 6 --follow_kf_interp cubic` 과 **같은 함수**
+    # (`decode/build_poses.keyframe_follow_centers`). 끝점(frame 0) 은 매듭이라 board 시작 pose 가 보존된다.
+    # 0 이면 예전처럼 매 프레임 위치 그대로 (비트 동일).
+    if int(pos_keyframes) > 1:
+        from decode.build_poses import keyframe_follow_centers
+        start_keep = positions[0].copy()
+        positions = keyframe_follow_centers(positions, keyframes=int(pos_keyframes), interp="cubic")
+        assert np.abs(positions[0] - start_keep).max() < 1e-9, "keyframe 보간이 frame0 을 옮겼다"
     poses = np.zeros((NUM_FRAMES, 4, 4))
-    if int(aim_keyframes):
+    if int(aim_keyframes) and kf_ease == "smooth_kf":
+        # D283. 회전은 뱅크 target 의 `--keyframe_ease smooth_kf` 와 같은 함수
+        # (`decode/build_poses.smooth_kf_schedule`: slerp 折れ線 + SO(3) Laplacian 평활, 양 끝 고정).
+        from decode.build_poses import smooth_kf_schedule
+        frames = keyframe_indices(NUM_FRAMES, int(aim_keyframes))
+        rotations = [look_at_c2w(positions[f], aim[f])[:3, :3] for f in frames]
+        schedule = (smooth_kf_schedule(rotations, frames, NUM_FRAMES) if len(frames) > 1
+                    else [rotations[0]] * NUM_FRAMES)
+        for f in range(NUM_FRAMES):
+            poses[f][:3, :3] = schedule[f]
+        poses[:, :3, 3] = positions
+        poses[:, 3, 3] = 1.0
+    elif int(aim_keyframes):
         # keyframe 조준 (Vista4D 뱅크와 동일). keyframe 에서만 look-at 을 세우고 사이는
         # smoothstep slerp — keyframe 에서 각속도가 0 이라 이음매가 안 튄다.
         frames = keyframe_indices(NUM_FRAMES, int(aim_keyframes))
@@ -1082,7 +1105,9 @@ def main(args):
 
         synthesized = [synth_source_path(probe, c, p, args.aim_bias, args.track_gain,
                                          args.preset_scale, smooth_window, args.aim_keyframes,
-                                         keep_start_z=board_cand is not None)
+                                         keep_start_z=board_cand is not None,
+                                         kf_ease=args.source_kf_ease,
+                                         pos_keyframes=args.source_pos_keyframes)
                        for c, p in tries]
         tries_path = path.join(work, f"tries_{ftag}.npz")
         np.savez(tries_path, cam_c2w=np.stack([p for p, _ in synthesized]))
@@ -1252,6 +1277,7 @@ def main(args):
             "preset": preset, "seed": args.seed,
             "candidate": candidate, "aim_bias": args.aim_bias, "track_gain": args.track_gain,
             "aim_keyframes": int(args.aim_keyframes),
+            "kf_ease": args.source_kf_ease, "pos_keyframes": int(args.source_pos_keyframes),   # D283
             "stats": stats,
             "reference": {"note": "실제 pkl 2편(00add26c, 0aa05d5a) 통계에 맞춤",
                           "dt_median": [0.01286, 0.01280], "net49_median": [0.5794, 0.6180]},
@@ -1408,6 +1434,9 @@ if __name__ == "__main__":
     # D278. probe(grid)/probe(verify) 를 recording 상주 Blender 서버(`lbm/blender_raycast.py`)에서.
     # 끄면 예전처럼 probe 마다 Blender 를 새로 띄운다.
     parser.add_argument("--probe_server", action="store_true", default=False)
+    # D283. 소스 궤적 보간 — 뱅크 target 과 같은 규약. 기본은 예전 (smoothstep 회전, 위치 매 프레임).
+    parser.add_argument("--source_kf_ease", default="smoothstep", choices=("smoothstep", "smooth_kf"))
+    parser.add_argument("--source_pos_keyframes", default=0, type=int)
     parser.add_argument("--rgb_samples", default=128, type=int)      # rgb_engine=cycles 일 때 spp
     parser.add_argument("--rgb_cdevice", default="GPU", choices=["CPU", "GPU"], type=str)
     parser.add_argument("--sky_depth", default=1000.0, type=float)   # 배경 clamp (float16 상한 회피)

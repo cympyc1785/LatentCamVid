@@ -19,6 +19,14 @@ Follows [Keep a Changelog](https://keepachangelog.com/).
 
 ### Changed
 
+- **D283 — TRUMANS source 궤적 보간을 뱅크 target 과 같은 규약으로 (2026-09-24, 사용자 지시 "smooth_kf 적용하는거
+  아니었나? translation, rotation 다 keyframe 6개").** `trumans_to_recon.py --source_kf_ease smooth_kf
+  --source_pos_keyframes 6`: 회전 = keyframe 6 look-at + `decode/build_poses.smooth_kf_schedule`,
+  위치 = `keyframe_follow_centers(6, cubic)`. 기본값은 옛 동작(smoothstep, 매 프레임 위치) — 옛 설정이
+  저장된 poses 를 **max|Δ| 0.0** 으로 재현하는 것을 확인. 1d43e076 c01 k120 p0: jerk RMS 0.00437 → 0.00043,
+  각가속 RMS 0.458 → 0.043°, frame0 동일. manifest `source_camera` 에 `kf_ease`/`pos_keyframes` 기록.
+  `run_board_sources.py` 가 기본으로 넘긴다 — 이미 끝난 199 chunk 는 옛 보간 그대로다.
+
 - **D281 — TRUMANS board source 렌더 RGB 32 → 16 spp (2026-09-24, 사용자 지시 "16 spp로 전면 교체").**
   `exec/run_board_sources.py --rgb_samples` 기본 16. 128 spp 기준 PSNR 42.3 → 39.6 dB (denoise 켬),
   RGB 133.7 → 103.6 s (단일 워커). 이미 렌더된 32 spp clip 은 manifest 로 재사용되어 그대로 남는다.

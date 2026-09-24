@@ -30,7 +30,7 @@ main session 은 컨텍스트가 압축되거나 세션이 끝나면 **자기가
 ## 지금 돌고 있는 것
 
 ### R22 TRUMANS board source video 2x2 (D272, 807 chunk)
-- screen  : r22b_render   pid: 2622805  GPU: 2 (worker 6, Cycles 16spp, D276 rgb --anim + D279 geom --anim + D278 probe 서버, GPU3 는 R39 VLM 에 비움)
+- screen  : r22b_render   pid: 2465272  GPU: 2 (worker 6, Cycles 16spp, D283 smooth_kf+pos kf6, D276 rgb --anim + D279 geom --anim + D278 probe 서버, GPU3 는 R39 VLM 에 비움)
 - 로그    : <repo>/tmp/r22b/render_full.out (clip 별 tmp/r22b/log/, chunk 상태 tmp/r22b/status/)
 - 살아있나: pid 존재 + GPU 2/3 에 blender 프로세스
 - 나아가나: status/*.json 개수 증가 (pilot 6 에서 시작, 파일럿 속도 ~6 chunk/h @4 worker)

@@ -45,7 +45,11 @@ PY = "/data1/cympyc1785/miniconda3/envs/vista4d/bin/python"
 TO_RECON = path.join(HERE, "fit", "ingest", "trumans_to_recon.py")
 # s3f0k6 뱅크(`out/trumans_lite_bank_s3f0k6/bank_manifest.json`)와 같은 합성 설정.
 RECON_ARGS = ["--frame_step", "3", "--preset_scale", "3.0", "--aim_keyframes", "6",
-              "--max_tries", "8"]
+              "--max_tries", "8",
+              # D283 (사용자 지시 2026-09-24): 회전 smooth_kf + 위치 6 keyframe natural cubic —
+              # 뱅크 target 과 같은 보간. 1d43e076 c01 k120 실측: jerk RMS 0.00437 -> 0.00043,
+              # 각가속 RMS 0.458 -> 0.043°, frame0 동일, 위치 최대 2.7 cm 차.
+              "--source_kf_ease", "smooth_kf", "--source_pos_keyframes", "6"]
 
 
 def plan_order(cands, seed_key):

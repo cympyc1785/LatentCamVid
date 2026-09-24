@@ -21,11 +21,7 @@
   1차 (2026-09-24): mesh_grid EDT 로 벡터판 `mesh_ray_profile` — 194 ms/궤적, Blender 판정과 20씬 175 rung
   **88.0% 일치** (grid 만 탈락 19 / Blender 만 탈락 2). 원인: 시선 10(5 cm 격자가 얇은 물체 부풂),
   subject_dist 6(조준점 정의 차이). 다음: 2.5 cm 격자 + Blender 조준점 export → fit 게이트로 배선.
-### R28. shot scale 사진 보여주기 (2026-09-24)
-### R29. mesh 격자(mesh_grid) 시각화
-### R30. Blender render 가 느린 이유 — GPU 를 쓰는지 조사
-### R31. `dynpose_d200_molmo2_l21_da3` 에서 DA3 입력을 12 프레임으로 학습
-### R32. 현재 디스크 용량 보고
+### R30. Blender render 가 느린 이유 — 조사 완료, 개선안(RGB --anim + depth 분리 job, ~2.3x) 적용 여부 사용자 확인 대기
 ### R22. TRUMANS 데이터셋 구축 — **계획 승인됨 (2026-09-23)**
 조사: `tmp/agent/reader-r22-trumans.md` (핵심 주장 5건 직접 재확인). 사용자 결정 넷:
 ① 범위 = s3f0k6 **737 clip 전량** (191 은 prep 완료, 546 은 graph/cloud/mesh 부터)
@@ -56,6 +52,12 @@ _(비어 있음)_
 ---
 
 ## Done
+
+### R28/R29/R32. shot scale 사진 · 격자 시각화 · 디스크 — 완료 (2026-09-24)
+그림 `tmp/r28/shot_scale_*.png`, `tmp/r29/grid_viz.png` 전송. 발견: shot_dev 는 **median 프레임** 기준이라
+끝 프레임 Δ 가 목표의 2~3배 (pull_out_arc_left GT 0.64/1.14/1.63), 보행 subject 가 화면을 나가면
+사다리가 같은 knob 으로 붕괴, 벽 뒤로 빠지는 dolly_out 은 point-cloud 면적이 그걸 못 봄.
+### R31. DA3 12 프레임 — 기동 (2026-09-24) · 커밋 `1685f3b` · GPU1 train1, 1.82 it/s (~44 h)
 
 ### R20. text + camera embedding 학습 — 완료 (2026-09-24)
 `dynpose_d200_umt5_srccam` wandb bsqhncd4, epoch_cap 50 완주. 수치는 `.claude/EXPERIMENTS.log` (원본 그대로).

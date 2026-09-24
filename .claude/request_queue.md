@@ -21,7 +21,7 @@
   1차 (2026-09-24): mesh_grid EDT 로 벡터판 `mesh_ray_profile` — 194 ms/궤적, Blender 판정과 20씬 175 rung
   **88.0% 일치** (grid 만 탈락 19 / Blender 만 탈락 2). 원인: 시선 10(5 cm 격자가 얇은 물체 부풂),
   subject_dist 6(조준점 정의 차이). 다음: 2.5 cm 격자 + Blender 조준점 export → fit 게이트로 배선.
-### R52. 통과·탈락 4x4 concat 사유와 함께 보여주기 → 검사 통과 시 데이터셋 확장(recon·camera fitting 빠르게) 계획
+### R52. 통과·탈락 4x4 reel 전송 완료 → **사용자 검사 대기** → 통과 시 데이터셋 확장(recon·camera fitting) 계획 실행
 ### R22. TRUMANS 데이터셋 구축 — **계획 승인됨 (2026-09-23)**
 조사: `tmp/agent/reader-r22-trumans.md` (핵심 주장 5건 직접 재확인). 사용자 결정 넷:
 ① 범위 = s3f0k6 **737 clip 전량** (191 은 prep 완료, 546 은 graph/cloud/mesh 부터)
@@ -43,9 +43,6 @@ source video 는 `trumans_to_recon.py` 가 이미 Blender 합성 (follow + slow 
   `trumans_to_recon.py --board` 모드(분기 추가) + `exec/run_board_sources.py` → 렌더 → d271 체인.
 - 공통 후속: srccam 계열은 `eval_testset.py` geo_proj MLP 미지원 (tasks.md A3) — testset eval 전 수리.
 
-### R49~R51. DynPose-100K 43,782편 VLM+SAM3 필터 (D282) — 실행 중 (2026-09-24) · 커밋 `89258b5` `4a01cbb`
-VLM GPU3 (프레임당 640x360, ~5 h) → SAM3 GPU0 3프로세스 (VLM 끝나면 GPU3 에 3개 추가, 합 ~11~12 h)
-→ judge/export(pass.csv·fail.csv 사유)/reel. 스모크 30편 6 통과. 첫 판(원해상도) ~150편은 tmp/r49/old_fullres 로 옮김.
 
 ---
 
@@ -56,6 +53,10 @@ _(비어 있음)_
 ---
 
 ## Done
+
+### R49~R51. DynPose-100K 43,782편 VLM+SAM3 필터 (D282) — 완료 (2026-09-24 22:45) · 커밋 `6bb2cd5`
+VLM 0 실패, SAM3 12샤드(GPU 0,3,6,7 — 6,7 은 사용자 허용). 9,396 통과(21.5%), pass.csv/fail.csv/summary.json,
+reel 17개 전송. 통과 중 신규 recon 필요 7,168 (기존 2,228).
 
 ### R53. TRUMANS source 궤적 smooth_kf + 위치 kf6 (D283) + 옛 보간 clip 재렌더 — 적용·재기동 (2026-09-24) · 커밋 `f818ce4`
 옛 clip 916개(경로 8,444개)·chunk 상태 200개를 `/data1/cympyc1785/data/TRUMANS-Lite/old_d272_nokf/` 로 **이동**

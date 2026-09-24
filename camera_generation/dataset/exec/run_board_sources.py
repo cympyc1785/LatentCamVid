@@ -219,7 +219,7 @@ if __name__ == "__main__":
     q.add_argument("--min_az", default=60.0, type=float)     # 같은 반경이면 방위각 이만큼은 떨어져야
     q.add_argument("--gpus", default=[2, 3], nargs="+", type=int)
     q.add_argument("--workers_per_gpu", default=3, type=int)
-    q.add_argument("--rgb_samples", default=32, type=int)
+    q.add_argument("--rgb_samples", default=16, type=int)      # D281 (사용자 지시): 32 -> 16 (PSNR 42.3 -> 39.6 dB, RGB 133.7 -> 103.6 s)
     q.add_argument("--timeout", default=3600, type=int)
     q.add_argument("--num_shards", default=1, type=int)
     q.add_argument("--shard_id", default=0, type=int)

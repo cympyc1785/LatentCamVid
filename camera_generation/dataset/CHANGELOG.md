@@ -9,6 +9,12 @@ Follows [Keep a Changelog](https://keepachangelog.com/).
 
 ## [Unreleased]
 
+### Changed
+
+- **D281 — TRUMANS board source 렌더 RGB 32 → 16 spp (2026-09-24, 사용자 지시 "16 spp로 전면 교체").**
+  `exec/run_board_sources.py --rgb_samples` 기본 16. 128 spp 기준 PSNR 42.3 → 39.6 dB (denoise 켬),
+  RGB 133.7 → 103.6 s (단일 워커). 이미 렌더된 32 spp clip 은 manifest 로 재사용되어 그대로 남는다.
+
 ### Added
 
 - **D279 — depth/index 도 animation render 1 job (2026-09-24, R40).** `viz/trumans_gt_render.py

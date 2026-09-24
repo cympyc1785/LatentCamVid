@@ -293,6 +293,15 @@ def judge_one(v, s):
         why.append("selfie")
     elif vp == "none" or g(p, "main_subject", "category") in ("none", None):
         why.append("no_subject")
+    # 2차 판정 (첫 전량 판정의 PASS reel 16편 중 6편이 손만 나오는 탁상/물체 클로즈업이었다 —
+    # 사람 크기·잘림 게이트는 main 이 물체면 아무것도 안 본다). subject 는 사람/동물/탈것만 둔다.
+    cat, noun = g(p, "main_subject", "category"), str(g(p, "main_subject", "noun") or "").lower()
+    parts = set(g(p, "main_subject", "visible_body_parts") or [])
+    if cat == "object":
+        why.append("subject_is_object")
+    if noun in ("hand", "hands", "finger", "fingers", "arm", "arms") or \
+            (cat == "person" and parts and parts <= {"hands", "arms"}):
+        why.append("hands_only")
     q = p.get("quality") or {}
     for k, code in (("scene_cut", "scene_cut"), ("text_overlay_or_watermark", "overlay"),
                     ("letterbox_or_vertical", "letterbox"), ("synthetic_or_game", "synthetic"),

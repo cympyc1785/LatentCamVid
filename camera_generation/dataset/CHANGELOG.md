@@ -16,6 +16,10 @@ Follows [Keep a Changelog](https://keepachangelog.com/).
   경쟁 인스턴스; main = 면적 중앙값 x 지속 x 중앙성) → `pass.csv`/`fail.csv`(사유 코드 전부) → 4x4 reel.
   임계는 `TH` 1차값 (손라벨로 보정 예정). 30편 스모크: 6 통과, VLM overlay 13/30 — 육안 확인 결과 대부분
   실제 방송 로고·워터마크(D264 G3 가 놓친 작은 로고).
+  **전량 결과 (2026-09-24 22:45, 43,782편)**: 1차 판정 11,161 통과 → PASS reel 16편 중 6편이 손만 나오는
+  탁상/물체 클로즈업이라 `subject_is_object`·`hands_only` 두 사유를 추가(judge 만 재실행) → **9,396 통과
+  (21.5%)**. 첫 사유 상위: overlay 9,387 / first_person 7,606 / selfie 5,177 / hands_only 3,401 /
+  body_part_or_cut 2,762. 통과 중 기존 recon 있음 2,228, 신규 7,168.
 
 ### Changed
 

@@ -127,7 +127,8 @@ class VLMClient:
             return json.loads(response.read().decode("utf-8"))
 
     # ---------------------------------------------------------------- chat
-    def chat(self, prompt: str, images=(), system: str | None = None, label: str = ""):
+    def chat(self, prompt: str, images=(), system: str | None = None, label: str = "",
+             video: str | None = None, video_fps: float | None = None):
         """(text, meta). 이미지는 data URL 로 실린다. 텍스트가 **이미지 뒤**에 온다.
 
         순서를 이렇게 두는 이유: contract 텍스트가 "이 board 에서 골라라"라고 지시하는데
@@ -135,11 +136,19 @@ class VLMClient:
         """
         content = [{"type": "image_url", "image_url": {"url": image_data_url(str(image))}}
                    for image in images]
+        # D280 (R41). 영상 입력 — mp4 를 data URL 로 싣고, 샘플링 fps 는 Qwen3-VL 프로세서에
+        # `mm_processor_kwargs` 로 넘긴다. 안 주면 content/payload 가 예전과 글자 그대로 같다.
+        if video is not None:
+            with open(video, "rb") as file:
+                url = "data:video/mp4;base64," + base64.b64encode(file.read()).decode("ascii")
+            content.append({"type": "video_url", "video_url": {"url": url}})
         content.append({"type": "text", "text": prompt})
         messages = ([{"role": "system", "content": system}] if system else []) + \
                    [{"role": "user", "content": content}]
         payload = {"model": self.model, "messages": messages,
                    "temperature": self.temperature, "max_tokens": self.max_tokens}
+        if video is not None and video_fps is not None:
+            payload["mm_processor_kwargs"] = {"fps": float(video_fps)}
 
         started = time.time()
         response = self._post("/chat/completions", payload)

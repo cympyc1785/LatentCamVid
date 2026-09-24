@@ -11,6 +11,16 @@ Follows [Keep a Changelog](https://keepachangelog.com/).
 
 ### Added
 
+- **D279 — depth/index 도 animation render 1 job (2026-09-24, R40).** `viz/trumans_gt_render.py
+  --passes depth,index --anim` (rgb `--anim` 과 같은 카메라 keyframe + File Output `{key}_#####_`).
+  벤치(0ac97866 c17 k059, 단일 워커, GPU 6/7 — 사용자 허용): 프레임 루프 CPU 197.2 s → **39.4 s**,
+  산출물 일치 (depth >1cm 또는 배경 불일치 0.001% px, index 0.000% px, 프레임 offset 0).
+  `trumans_to_recon.py --rgb_anim` 경로가 쓴다. RGB 벤치(같은 clip, 128 spp 기준 PSNR):
+  32 spp 133.7 s 42.3 dB / 16 spp 103.6 s 39.8 dB / bounces 4 107.0 s 36.5 dB / 480x270 56.2 s 33.7 dB.
+- **D280 — `lbm/vlm.py VLMClient.chat(video=, video_fps=)` (2026-09-24, R41).** mp4 를 data URL
+  `video_url` 로, fps 는 `mm_processor_kwargs`. vLLM 비디오 로더가 이미 fps 로 샘플하므로
+  `do_sample_frames` 는 주지 않는다 (주면 원본 인덱스로 재샘플해 IndexError).
+
 - **D278 — TRUMANS 렌더의 probe 도 Blender 상주 서버로 (2026-09-24, R38).** 사용자 지시 "바꿔줘".
   `trumans_scene_probe.py` 의 CLI 를 `build_parser()` 로 빼고(동작 동일), 서버에 `probe` 요청을
   추가해 같은 인자로 `main()` 을 in-process 실행한다. `trumans_to_recon.py --probe_server` 면

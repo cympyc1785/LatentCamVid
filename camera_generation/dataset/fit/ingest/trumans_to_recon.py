@@ -1170,7 +1170,9 @@ def main(args):
             retries=args.blender_retries)
         t_geo = run_blender(
             args.blender, blend, path.join(CINEMATRAJ_ROOT, "viz", "trumans_gt_render.py"),
-            common + ["--passes", "depth,index", "--out", render_dir], "gt_render(depth,index)",
+            # D279 (R40): depth/index 도 animation render 1 job — 프레임 루프 197.2 s -> 39.4 s,
+            # 산출물 일치 (depth >1cm 0.001% px, index 0.000% px, 프레임 정렬 offset 0).
+            common + ["--passes", "depth,index", "--anim", "--out", render_dir], "gt_render(depth,index)",
             retries=args.blender_retries)
         import shutil
         dst = path.join(render_dir, "rgb")

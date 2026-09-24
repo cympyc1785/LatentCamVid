@@ -459,11 +459,15 @@ def main(args):
     # depth/index 는 프레임마다 엔진·필터를 갈아끼우므로 한 job 으로 못 묶는다.
     # 기본 off = 예전 동작 비트 동일.
     if args.anim:
-        assert want_rgb and not need_cycles, \
-            "--anim 은 --passes rgb 전용이다 (depth/index 는 프레임마다 엔진을 바꾼다)"
+        # D279 (R40). `--passes depth,index` 단독이면 geometry 도 animation render 1회로 굽는다 —
+        # 엔진을 프레임마다 안 바꾸는 job 이라 D207 이 rgb 에서 없앤 재동기화를 여기서도 없앤다.
+        # rgb 와 geometry 를 **한 job 에서** 섞는 것은 여전히 불가 (엔진·필터를 갈아끼워야 한다).
+        geom_anim = (not want_rgb) and need_cycles
+        assert geom_anim or (want_rgb and not need_cycles), \
+            "--anim 은 --passes rgb 단독 또는 depth,index 단독이다 (한 job 에 섞으면 엔진을 바꿔야 한다)"
         assert poses_gl is not None, "--anim 은 --poses / --camera_pose_pkl 이 필요하다"
         assert step > 0, "--anim 은 균일 간격 프레임만 된다 (--frame_list 는 불가)"
-        assert args.rgb_engine == "cycles", "--anim 은 cycles rgb 경로만 검증했다"
+        assert geom_anim or args.rgb_engine == "cycles", "--anim 은 cycles rgb 경로만 검증했다"
 
         cam_obj.rotation_mode = "QUATERNION"        # euler 는 keyframe 사이에서 뒤집힌다
         for order, frame in enumerate(frames):
@@ -475,33 +479,65 @@ def main(args):
         for fcurve in cam_obj.animation_data.action.fcurves:
             for kp in fcurve.keyframe_points:
                 kp.interpolation = "CONSTANT"
+        if geom_anim:
+            # 프레임 루프의 geometry 설정과 **같은 값** (아래 `need_cycles` 가지 참조).
+            scene.render.engine = "CYCLES"
+            scene.cycles.samples = 1
+            scene.cycles.use_denoising = False
+            scene.cycles.use_adaptive_sampling = False
+            scene.cycles.pixel_filter_type = "BOX"
+            scene.cycles.filter_width = 0.01
+            scene.cycles.max_bounces = 0
+            scene.cycles.device = args.cdevice
+            link_pass_sockets(tree, layers, outs)
+            for key, node in outs.items():
+                node.mute = False
+                # `#####` = 0 채움 프레임 번호 -> `depth_01777_.exr`. 아래 EXR 수집 glob
+                # (`{key}_{frame:05d}_*.exr`) 이 프레임 루프 산출물과 같은 이름으로 찾는다.
+                node.file_slots[0].path = f"{key}_#####_"
+            composite.mute = True
+            scene.frame_start, scene.frame_end, scene.frame_step = frames[0], frames[-1], step
+            t0 = time.time()
+            bpy.ops.render.render(animation=True, write_still=False)
+            t_all = time.time() - t0
+            composite.mute = False
+            print(f"[gt] anim geometry {len(frames)} frames in {t_all:.1f}s "
+                  f"({t_all / len(frames):.2f}s/frame)")
+            cameras = []
+            for order, frame in enumerate(frames):
+                scene.frame_set(frame)
+                bpy.context.view_layer.update()
+                cameras.append(camera_record(cam_obj, scene, frame, order))
+            timings = [{"frame": f, "rgb_s": 0.0, "cycles_s": t_all / len(frames),
+                        "total_s": t_all / len(frames)} for f in frames]
+        else:
 
-        for node in outs.values():
-            node.mute = True
-        composite.mute = False
-        scene.render.engine = "CYCLES"
-        scene.cycles.samples = args.rgb_samples
-        scene.cycles.use_denoising = True
-        scene.cycles.use_adaptive_sampling = True
-        scene.cycles.pixel_filter_type = "BLACKMAN_HARRIS"
-        scene.cycles.filter_width = 1.5
-        scene.cycles.max_bounces = args.rgb_bounces
-        scene.cycles.device = rgb_cdevice
-        scene.frame_start, scene.frame_end, scene.frame_step = frames[0], frames[-1], step
-        # `#####` 는 Blender 가 0 채움 프레임 번호로 바꾼다 -> 프레임 루프와 같은 `frame_01777.png`.
-        scene.render.filepath = path.join(out, "rgb", "frame_#####")
-        t0 = time.time()
-        bpy.ops.render.render(animation=True, write_still=False)
-        t_all = time.time() - t0
-        print(f"[gt] anim render {len(frames)} frames in {t_all:.1f}s "
-              f"({t_all / len(frames):.2f}s/frame)")
-        cameras = []
-        for order, frame in enumerate(frames):
-            scene.frame_set(frame)
-            bpy.context.view_layer.update()
-            cameras.append(camera_record(cam_obj, scene, frame, order))
-        timings = [{"frame": f, "rgb_s": t_all / len(frames), "cycles_s": 0.0,
-                    "total_s": t_all / len(frames)} for f in frames]
+            for node in outs.values():
+                node.mute = True
+            composite.mute = False
+            scene.render.engine = "CYCLES"
+            scene.cycles.samples = args.rgb_samples
+            scene.cycles.use_denoising = True
+            scene.cycles.use_adaptive_sampling = True
+            scene.cycles.pixel_filter_type = "BLACKMAN_HARRIS"
+            scene.cycles.filter_width = 1.5
+            scene.cycles.max_bounces = args.rgb_bounces
+            scene.cycles.device = rgb_cdevice
+            scene.frame_start, scene.frame_end, scene.frame_step = frames[0], frames[-1], step
+            # `#####` 는 Blender 가 0 채움 프레임 번호로 바꾼다 -> 프레임 루프와 같은 `frame_01777.png`.
+            scene.render.filepath = path.join(out, "rgb", "frame_#####")
+            t0 = time.time()
+            bpy.ops.render.render(animation=True, write_still=False)
+            t_all = time.time() - t0
+            print(f"[gt] anim render {len(frames)} frames in {t_all:.1f}s "
+                  f"({t_all / len(frames):.2f}s/frame)")
+            cameras = []
+            for order, frame in enumerate(frames):
+                scene.frame_set(frame)
+                bpy.context.view_layer.update()
+                cameras.append(camera_record(cam_obj, scene, frame, order))
+            timings = [{"frame": f, "rgb_s": t_all / len(frames), "cycles_s": 0.0,
+                        "total_s": t_all / len(frames)} for f in frames]
 
     # --- 렌더 루프 -------------------------------------------------------------------------
     cameras, timings = ([], []) if not args.anim else (cameras, timings)

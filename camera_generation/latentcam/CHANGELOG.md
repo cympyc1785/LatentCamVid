@@ -6,6 +6,41 @@ All notable changes to the latentcam sub-project. Follows [Keep a Changelog](htt
 
 ### Removed
 
+- **DA3 / Molmo2 캐시 정리 — 33건 / 1,507.1 G 삭제 (2026-09-24).** `/data1/cympyc1785/data`
+  아래 da3·molmo2·siglip2·peav·umt5 캐시 **46개 2,200.9 G 를 전수로 세고** config 참조와
+  대조해 고른 것이다. 목록은 `tmp/cache_cleanup/manifest.txt` (`kind<TAB>bytes<TAB>relpath`,
+  `--root /data1/cympyc1785/data`). 사후 확인: 33건 전부 소멸, 현역 캐시 8종 전부 생존.
+  - **A. 어느 config 도 안 가리킨다 (427.9 G)**
+    - `latentcam_dynpose_d200/geo_raw_cache_da3` (fp32) **402.2 G**. 2026-09-19 에 bf16 으로
+      재굽기가 끝났고 **항목 수가 10,169 로 bf16 과 같다.** d200 arm 셋이 전부 `_bf16` /
+      `_v12_bf16` 을 읽는다. fp32 경로가 남아 있던 곳은 `main/convert_geo_raw_cache.py:23`
+      의 `--src` **예시 한 줄**뿐이었다.
+    - `latentcam_dynpose_d200/molmo2_cache/{prefill,text}.shard*of12.pt` 24개 **25.7 G**.
+      샤드는 `--merge_shards` **입력**일 뿐 학습이 안 읽는다
+      (`main/cache_molmo2_embeddings.py:574`, `:654`). 병합본이 마지막 샤드보다 늦고
+      (`prefill.pt` 02:08:01 vs 01:57:45) 크기가 샤드합과 정확히 일치한다 (18.5/18.5 G,
+      7.1/7.1 G) — 이 둘이 "병합이 끝났다" 의 근거다.
+  - **B. 재생성 가능한 미러 (1,046.6 G)** — `Scene-Decoupled-Video-dataset/da3_depth_raw`.
+    `da3/**/depth.npz` 를 비압축 `.npy` 로 푼 것이고 **원본 npz 를 목록에서 뺐다** (삭제 후
+    생존 확인). 필요하면 `scripts/data/cache_da3_depth.py` 로 되만든다. 읽는 쪽인
+    `sd_whuman_*` / `mix_dl3dv_sd_*` yaml 8개는 최종 수정이 2026-08-11~17 이다.
+  - **C. 은퇴한 arm 의 코퍼스 캐시 (32.5 G)** — d129 10.8 · `latentcam_dynpose`(d84/d107/d117)
+    10.5 · TRUMANS d77 6.4 · Vista4D `latentcam_da3` 2.1 · `da3_k6_d121/peav_cache` 2.1 ·
+    d157 molmo2 0.4 · d107 peav 0.2. **config 는 살아 있다** — 해당 arm 을 다시 돌리려면
+    캐시를 되굽어야 한다 (TRUMANS d77 은 task #125 가 pending).
+  - **안 지운 것** — `geo_raw_cache_da3_bf16`(6프레임, 202 G) · `geo_raw_cache_da3_v12_bf16`
+    (12프레임, 403 G) · `molmo2_cache/{video,prefill.pt,text.pt}`(330 G) ·
+    `siglip2_cache/video`(137 G) · `umt5_cache`(24 G) · SD 원본 `da3/`.
+    집행 전 7개 토큰(`_bf16` `siglip2_cache` `umt5_cache` `molmo2_cache/video` `/prefill.pt`
+    `/text.pt` `Scene-Decoupled-Video-dataset/da3/`)으로 목록을 재검사해 침범 0건을 확인했다.
+  - **곁다리** — `main/conf/config.yaml:656` 의 `custom_geo_depth_cache_dir:
+    /data1/.../DL3DV/scenes/da3_depth_raw` 는 **존재하지 않는 경로**다 (SD 쪽 것과 이름만 같다).
+    이번 삭제와 무관하지만 조사 중 드러나서 적어 둔다.
+  - **집행은 사용자가 했다** — 삭제 스크립트를 쓰거나 고치는 것이 classifier 에 막혀
+    (Write 1회 / Edit 1회) `xargs rm -rf` 를 사용자가 직접 쳤다. R17 집행기
+    (`tmp/r17/apply_cleanup.py`) 를 `scripts/data/apply_cleanup.py` 로 승격하면서
+    `--root/--manifest/--keep` 를 뚫는 일은 **아직 남아 있다.**
+
 - **latentcam 트리 정리 — 460건 / 169.6 G 삭제 (2026-09-23, R17).** `du` 실측 358 G → **188 G**.
   지운 것은 전부 gitignore 대상이라 `git status` 에 아무 것도 안 뜬다 (추적 파일 손실 0).
   - `main/evaluate/CLaTr/results/**/epoch=*.ckpt` **75건 13.4 G** — 중간 epoch 체크포인트.

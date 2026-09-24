@@ -21,6 +21,10 @@
   1차 (2026-09-24): mesh_grid EDT 로 벡터판 `mesh_ray_profile` — 194 ms/궤적, Blender 판정과 20씬 175 rung
   **88.0% 일치** (grid 만 탈락 19 / Blender 만 탈락 2). 원인: 시선 10(5 cm 격자가 얇은 물체 부풂),
   subject_dist 6(조준점 정의 차이). 다음: 2.5 cm 격자 + Blender 조준점 export → fit 게이트로 배선.
+### R49. DynPose-100K 전체 VLM 판정 (영상 전체 fps2) (2026-09-24)
+### R50. SAM3 영상추적 9프레임 → instance mask 저장 → VLM 보조 판정, 판정 기록 저장
+### R51. 통과/탈락 CSV (사유 분류)
+### R52. 통과·탈락 4x4 concat 사유와 함께 보여주기 → 검사 통과 시 데이터셋 확장(recon·camera fitting 빠르게) 계획
 ### R22. TRUMANS 데이터셋 구축 — **계획 승인됨 (2026-09-23)**
 조사: `tmp/agent/reader-r22-trumans.md` (핵심 주장 5건 직접 재확인). 사용자 결정 넷:
 ① 범위 = s3f0k6 **737 clip 전량** (191 은 prep 완료, 546 은 graph/cloud/mesh 부터)

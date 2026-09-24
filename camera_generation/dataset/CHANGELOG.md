@@ -9,6 +9,14 @@ Follows [Keep a Changelog](https://keepachangelog.com/).
 
 ## [Unreleased]
 
+### Added
+- **D282 — 소스 영상 필터 `exec/run_video_filter.py` (2026-09-24, R49~R52).** VLM(Qwen3-VL, 영상 전체 fps 2,
+  구조화 JSON + `main_subject.noun`) + SAM3(VLM noun 으로 영상 전체 균등 9프레임 추적, 인스턴스 마스크
+  320x180 bitpack 저장) → `judge`(VLM=시점/셀피/자막/컷/합성, SAM3=main 면적·마주보는 두 변 접촉·지속·
+  경쟁 인스턴스; main = 면적 중앙값 x 지속 x 중앙성) → `pass.csv`/`fail.csv`(사유 코드 전부) → 4x4 reel.
+  임계는 `TH` 1차값 (손라벨로 보정 예정). 30편 스모크: 6 통과, VLM overlay 13/30 — 육안 확인 결과 대부분
+  실제 방송 로고·워터마크(D264 G3 가 놓친 작은 로고).
+
 ### Changed
 
 - **D281 — TRUMANS board source 렌더 RGB 32 → 16 spp (2026-09-24, 사용자 지시 "16 spp로 전면 교체").**

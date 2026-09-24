@@ -117,7 +117,10 @@ def recon_done(recon_dir: str, num_frames: int):
         return False
     for sub in ("depths", "dynamic_mask", "sky_mask"):
         d = path.join(recon_dir, sub)
-        if not path.isdir(d) or len(listdir(d)) != num_frames:
+        # D284. 프레임 파일만 센다 — dynmask 단계가 `dynamic_mask/from_seg.json` 을 덧붙여서
+        # 파일 수가 50 이 되고, 그러면 **완료된 recon 2,218편이 미완료로 되살아나** 재계산된다
+        # (게다가 그 폴더들은 DynPose-LBM 으로의 symlink 라 원본 코퍼스를 덮어쓴다).
+        if not path.isdir(d) or len([f for f in listdir(d) if not f.endswith(".json")]) != num_frames:
             return False
     # `conf` 는 **일부러 검사하지 않는다** (D169). 2026-09-09 에 conf 저장을 켰는데, 이걸
     # 완료 조건에 넣으면 그 전에 구운 6천여 편이 전부 '미완료'로 되살아나 재계산된다.
@@ -424,8 +427,11 @@ def stage_launch(args, scenes):
     이게 끝난 뒤 별도 호출로 간다 (사용자 지시: "다 되면 다음 단계로").
     """
     gpus = [g.strip() for g in args.gpus.split(",") if g.strip()] if args.gpus else []
+    # 프로젝트 규칙은 0~3 (CLAUDE.md `## Don't`). 사용자가 특정 작업에 한해 더 열어 줄 때만
+    # `INGEST_GPU_ALLOW` 로 넓힌다 (`run_bank.py` 의 `BANK_GPU_ALLOW` 와 같은 통로).
+    allow = environ.get("INGEST_GPU_ALLOW", "0123")
     for g in gpus:
-        assert 0 <= int(g) <= 4, f"GPU 는 0~4 만 쓴다 (프로젝트 규칙). 받은 값: {g}"
+        assert str(g) in list(allow), f"GPU 는 {allow} 만 (CLAUDE.md / INGEST_GPU_ALLOW). 받은 값: {g}"
     n = len(gpus) if gpus else args.workers
     assert n > 0, "--gpus 나 --workers 중 하나는 있어야 한다"
 
@@ -443,6 +449,8 @@ def stage_launch(args, scenes):
                "--nouns_dir", args.nouns_dir, "--noun_frames", str(args.noun_frames),
                "--api_base", args.api_base, "--vlm_model", args.vlm_model,
                "--noun_source", args.noun_source]
+        if args.scene_list:
+            cmd += ["--scene_list", args.scene_list]
         cmd += ["--skip_done"] if args.skip_done else ["--no_skip_done"]
         cmd += ["--save_conf"] if args.save_conf else ["--no_save_conf"]
         env = dict(environ)
@@ -480,6 +488,7 @@ def main():
     ap.add_argument("--done_root", default=DONE_ROOT_DEFAULT)      # 재사용할 기존 코퍼스
     ap.add_argument("--shards", default="0000-0011")               # dynpose-NNNN 범위
     ap.add_argument("--work_dir", default=path.join(REPO, "tmp", "d169"))
+    ap.add_argument("--scene_list", default=None)                  # D284: 이 uuid 들만 (csv 첫 열 가능)
 
     ap.add_argument("--num_shards", default=1, type=int)           # 워커 수
     ap.add_argument("--shard_id", default=0, type=int)             # 이 워커 인덱스
@@ -517,6 +526,16 @@ def main():
 
     shards = parse_shards(args.shards)
     scenes, missing = list_scenes(args.src_root, shards)
+    # D284. `--scene_list` — 이 목록의 video_id(uuid) 만 (예: D282 필터 pass.csv 의 scene 열).
+    # 안 주면 shard 전량 = 옛 동작.
+    if args.scene_list:
+        keep = set()
+        for line in open(args.scene_list, encoding="utf-8"):
+            tok = line.strip().split(",")[0]
+            if tok and tok != "scene":
+                keep.add(tok.rstrip("/").split("/")[-1])
+        scenes = [sc for sc in scenes if sc[0] in keep]
+        print(f"  --scene_list       {args.scene_list}: 목록 {len(keep)} / 해당 scene {len(scenes)}")
     mine = scenes[args.shard_id::args.num_shards]
 
     print()

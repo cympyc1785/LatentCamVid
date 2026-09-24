@@ -10,6 +10,14 @@ Follows [Keep a Changelog](https://keepachangelog.com/).
 ## [Unreleased]
 
 ### Added
+
+- **D284 — DynPose 확장 ingest: `dynpose_ingest.py --scene_list` (2026-09-25, R52).** D282 필터 pass.csv 의 uuid 만
+  처리 (9,396 → 신규 7,168, 기존 recon 2,228 skip). 사용자 지시로 GPU 0,3,6,7.
+  - **fix `recon_done`**: dynmask 단계가 남기는 `dynamic_mask/from_seg.json` 까지 세서 파일 수 50 ≠ 49 가 되어
+    완료된 recon 2,218편을 미완료로 봤다 — 그 폴더들은 **DynPose-LBM 원본으로의 symlink** 라 재계산하면 d200
+    코퍼스를 덮어쓴다. 프레임 파일만 센다.
+  - launch GPU 가드가 옛 규칙(0~4) 이었다 → 기본 `0123` + `INGEST_GPU_ALLOW` 로 명시적 예외 (run_bank 의
+    `BANK_GPU_ALLOW` 와 같은 통로).
 - **D282 — 소스 영상 필터 `exec/run_video_filter.py` (2026-09-24, R49~R52).** VLM(Qwen3-VL, 영상 전체 fps 2,
   구조화 JSON + `main_subject.noun`) + SAM3(VLM noun 으로 영상 전체 균등 9프레임 추적, 인스턴스 마스크
   320x180 bitpack 저장) → `judge`(VLM=시점/셀피/자막/컷/합성, SAM3=main 면적·마주보는 두 변 접촉·지속·

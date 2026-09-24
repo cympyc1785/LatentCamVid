@@ -57,6 +57,10 @@ _(비어 있음)_
 
 ## Done
 
+### R53. TRUMANS source 궤적 smooth_kf + 위치 kf6 (D283) + 옛 보간 clip 재렌더 — 적용·재기동 (2026-09-24) · 커밋 `f818ce4`
+옛 clip 916개(경로 8,444개)·chunk 상태 200개를 `/data1/cympyc1785/data/TRUMANS-Lite/old_d272_nokf/` 로 **이동**
+(삭제 아님, 목록 tmp/r22b/moved_old_nokf.txt). 렌더 재기동 → 807 chunk 전부 새 보간.
+
 ### R46. 렌더 16 spp 전면 교체 (D281) — 완료 (2026-09-24) · 커밋 `c390179` · 샘플 영상은 첫 16spp clip 나오면 전송
 ### R47/R48. VLM 입력 방식 권고(영상 fps2) · raw output+영상 5개 전송 · SAM3+VLM 협업 설계 답변 — 완료
 SAM3 video 9프레임(fps2 부표본) 추적 2.38 s/clip 추가 측정.

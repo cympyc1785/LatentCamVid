@@ -52,6 +52,10 @@ _(비어 있음)_
 
 ## Done
 
+### R46. 렌더 16 spp 전면 교체 (D281) — 완료 (2026-09-24) · 커밋 `c390179` · 샘플 영상은 첫 16spp clip 나오면 전송
+### R47/R48. VLM 입력 방식 권고(영상 fps2) · raw output+영상 5개 전송 · SAM3+VLM 협업 설계 답변 — 완료
+SAM3 video 9프레임(fps2 부표본) 추적 2.38 s/clip 추가 측정.
+
 ### R42~R45. spp 비교 그림 · VLM prompt · 답 갈린 5개 · SAM3 속도 — 완료 (2026-09-24)
 SAM3(GPU3, 49f 640x360, 'person'): video 1프로세스 12.15 s/clip, 3프로세스 실효 6.3 s, image 8프레임 0.89 s.
 

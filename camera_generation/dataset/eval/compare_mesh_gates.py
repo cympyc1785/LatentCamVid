@@ -23,6 +23,8 @@ HERE = path.dirname(path.dirname(path.abspath(__file__)))
 sys.path.insert(0, HERE)
 from lbm.mesh_collision import MeshClearance, mesh_ray_profile  # noqa: E402
 
+# D277. `--backend server` = Blender 상주 서버(`lbm/blender_raycast.py`). grid(기본) 는 R27 1차 판.
+
 GATES = {"clear_frac": ("min_clear_frac", 0.90), "min_clearance": ("min_clearance", 0.20),
          "min_subject_dist": ("min_subject_dist", 0.80), "min_floor_drop": ("min_floor_drop", 0.30)}
 
@@ -30,6 +32,7 @@ GATES = {"clear_frac": ("min_clear_frac", 0.90), "min_clearance": ("min_clearanc
 def main(a):
     sels = sorted(glob(path.join(a.sel_root, "*", "selection.json")))[:a.limit or None]
     rows, secs = [], []
+    clients = {}
     for sp in sels:
         video = path.basename(path.dirname(sp))
         grid = path.join(HERE, a.output_root, video, "mesh_grid.npz")
@@ -40,12 +43,22 @@ def main(a):
         poses = np.load(pz)
         ids = [str(v) for v in poses["variant_id"].tolist()]
         audit = json.load(open(sp))["raycast"]["audit"]
+        if a.backend == "server":
+            from lbm.blender_raycast import RaycastClient
+            rec = video.split("_")[1]
+            if rec not in clients:
+                clients[rec] = RaycastClient(rec)
+            rc = clients[rec]
+            rc.load_clip(video, mesh.frame_list.tolist())
         for row in audit:
             if row["variant_id"] not in ids:
                 continue
             c2w = poses["cam_c2w"][ids.index(row["variant_id"])]
             t0 = time.time()
-            g = mesh_ray_profile(mesh.to_blend(c2w), mesh)
+            if a.backend == "server":
+                g = rc.profile(video, [mesh.to_blend(c2w)])[0]
+            else:
+                g = mesh_ray_profile(mesh.to_blend(c2w), mesh)
             secs.append(time.time() - t0)
             rows.append({"video": video, "variant_id": row["variant_id"],
                          "blender": {k: row.get(k) for k in GATES}, "grid": {k: g[k] for k in GATES},
@@ -85,4 +98,5 @@ if __name__ == "__main__":
     q.add_argument("--bank_dir", default="hole_bank_d266T")
     q.add_argument("--limit", default=0, type=int)
     q.add_argument("--out", default="")
+    q.add_argument("--backend", default="grid", choices=("grid", "server"))
     main(q.parse_args())

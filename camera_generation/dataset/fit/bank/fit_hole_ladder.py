@@ -372,6 +372,29 @@ def behind_over(stats: dict, max_behind: float, max_behind_dyn: float) -> bool:
             or stats.get("behind_dyn_frac", 0.0) > max_behind_dyn)
 
 
+# D277 (R37). fitting **중** GT mesh raycast 게이트. `--ray_gate server` 면 main 이 임계를 채운다.
+# None 이면 꺼짐 — 아래 두 판정 함수가 아무것도 안 해서 옛 동작과 비트 동일하다.
+# 판정 정의·임계는 `bank_to_blender_poses.py --raycast` 사후 판정과 같다 (서버가 Blender 판정과
+# 188씬 전량 일치 — `eval/compare_mesh_gates.py --backend server`).
+RAY_GATE = None
+RAY_CLIENT = None
+
+
+def ray_verdict(stats: dict):
+    """raycast 열(`ray_*`)로 판정. 걸린 사유 또는 None. 열이 없으면(게이트 꺼짐) None."""
+    if RAY_GATE is None or "ray_min_clearance" not in stats:
+        return None
+    if stats["ray_min_clearance"] < RAY_GATE["min_clearance"]:
+        return "wall"
+    if stats["ray_min_floor_drop"] < RAY_GATE["min_floor_drop"]:
+        return "floor"
+    if stats["ray_min_subject_dist"] < RAY_GATE["min_subject_dist"]:
+        return "subject"
+    if stats["ray_clear_frac"] < RAY_GATE["min_clear_frac"]:
+        return "occluded"
+    return None
+
+
 def physical_verdict(stats: dict, max_behind: float, min_obb: float, max_elev: float,
                      min_ground: float, min_approach: float,
                      max_behind_dyn: float | None = None):
@@ -401,7 +424,7 @@ def physical_verdict(stats: dict, max_behind: float, min_obb: float, max_elev: f
         return "elev"
     if approach == approach and approach < min_approach:
         return "approach"
-    return None
+    return ray_verdict(stats)
 
 
 def truncate_hold(poses: np.ndarray, hold_from: int) -> np.ndarray:
@@ -692,6 +715,10 @@ def solve_knob(probe, target_hole: float, points: list, kind: str, iterations: i
             # 물릴 때 `binding` 귀속이 예전 뱅크와 달라진다.
             elif approach == approach and approach < min_approach:
                 verdicts[knob] = (True, "approach")
+            # D277. GT mesh raycast (벽/바닥/피사체 거리/시선). approach 뒤, 프레이밍 앞 —
+            # 물리 게이트 무리 끝에 둔다. 꺼져 있으면 `ray_verdict` 가 None 이라 no-op.
+            elif ray_verdict(geo) is not None:
+                verdicts[knob] = (True, ray_verdict(geo))
             # D266. 프레이밍은 예산(hole/shot) **앞**에 둔다 — subject 가 화면을 벗어난 크기는
             # shot scale 이 얼마든 못 쓰는 카메라다. 끄면 `-inf` 라 조건이 영원히 거짓이다.
             elif (lambda f: f == f and f < min_in_frame)(
@@ -761,6 +788,18 @@ def main(args):
     #    `--cloud_source npz`(기본) 는 예전과 같이 cloud.npz 를 읽고, `memory` 는 recon 에서
     #    그 자리에 굽는다 (`lbm/render.py:open_renderer`).
     renderer, recon = open_renderer(args, out_root, graph)
+    global RAY_GATE, RAY_CLIENT
+    RAY_CLIENT = None
+    if args.ray_gate == "server":
+        from lbm.blender_raycast import RaycastClient
+        grid = np.load(path.join(out_root, args.video, "mesh_grid.npz"), allow_pickle=True)
+        RAY_GATE = {"min_clearance": args.ray_min_clearance, "min_floor_drop": args.ray_min_floor_drop,
+                    "min_subject_dist": args.ray_min_subject_dist,
+                    "min_clear_frac": args.ray_min_clear_frac}
+        client = RaycastClient(args.video.split("_")[1])
+        client.load_clip(args.video, np.asarray(grid["frame_list"]).tolist())
+        RAY_CLIENT = (client, args.video, np.asarray(grid["anchor_c2w"], dtype=np.float64))
+        print(f"[ray] GT mesh raycast gate ON  {RAY_GATE}", flush=True)
     num_frames = int(graph["num_frames"])
     nodes = {n["id"]: n for n in graph["nodes"]}
 
@@ -1144,6 +1183,11 @@ def main(args):
                                                   subject_points=(_subject if occl_on else None),
                                                   metric_only=not occl_on,
                                                   gate_check=gate_check)
+                    if RAY_CLIENT is not None:
+                        # D277. 이 손잡이의 궤적(뱅크 world) 을 blend world 로 옮겨 서버에 묻는다.
+                        _row = RAY_CLIENT[0].profile(RAY_CLIENT[1],
+                                                     [RAY_CLIENT[2] @ np.asarray(poses)])[0]
+                        stats.update({f"ray_{k}": float(v) for k, v in _row.items()})
                     if stats.get("gated"):
                         gated_probes[0] += 1
                     stats["_knob"] = float(knob)     # D275 motion 사다리의 metric (손잡이 자체)
@@ -1281,6 +1325,8 @@ def main(args):
                     status = "shape_limited"
                 # 판정은 더 촘촘히 다시 잰다 — 이분법용 5프레임은 사다리를 고르는 데만 쓴다.
                 # 충돌이 상한을 정했으면 status 로 남긴다 — hole 만 보면 "덜 큰 이유"가 안 보인다.
+                if status == "solved" and binding in ("wall", "floor", "subject", "occluded"):
+                    status = f"{binding}_limited"      # D277 raycast 게이트가 크기를 정했다
                 if status == "solved" and binding in ("collision", "clearance", "obb",
                                                       "elev", "ground", "approach", "occlusion",
                                                       "framing"):
@@ -1333,6 +1379,9 @@ def main(args):
                         "area_static": round(area_static, 5),
                         "shot_dev": (lambda d: round(d, 4) if d == d else "")(shot_dev(stats))}
                        if shot_ladder else {}),
+                    # D277. 이분법이 본 raycast 값 (그 손잡이 캐시에서). 게이트 꺼지면 키 없음.
+                    **{k: round(float(v), 4) for k, v in cache[knob][0].items()
+                       if k.startswith("ray_")},
                     "knob_floor": (round(float(lo_override), 5) if lo_override is not None
                                    else KNOB_RANGE[kind][0] if kind else 0.0),
                     # D78. 정지 preset 은 `"none"` 으로 찍는다 — None 이면 CSV 에 "None" 으로
@@ -1726,6 +1775,9 @@ def main(args):
                # `instance_desc.json` 이 갖고 있고, 그건 뱅크를 다시 안 굽고 바꿀 수 있어야 한다.
                # `--no_composition` 이면 빈 칸이고 예전 뱅크와 같다.
                "in_frame_ids", "enter_ids", "exit_ids"]
+    if RAY_GATE is not None:          # D277. 게이트를 켰을 때만 열을 늘린다 — 끄면 스키마 비트 동일
+        columns = list(columns) + ["ray_clear_frac", "ray_min_clearance",
+                                   "ray_min_subject_dist", "ray_min_floor_drop"]
     with open(path.join(folder, "bank.csv"), "w", encoding="utf-8") as file:
         file.write(",".join(columns) + "\n")
         for row in rows:
@@ -1922,6 +1974,12 @@ def build_parser():
     # D275. shot_scale 사다리에서 빼는 preset 군. targetless = 캡션 `targetless` 플래그
     # (pan/tilt/roll/free_pedestal) → 이동량 사다리 `--motion_ladder` (τ; 회전은 ×60°). none = 옛 동작.
     parser.add_argument("--shot_exempt", default="none", choices=("none", "targetless"))
+    # D277. fitting 중 GT mesh raycast 게이트 (Blender 상주 서버). off = 옛 동작.
+    parser.add_argument("--ray_gate", default="off", choices=("off", "server"))
+    parser.add_argument("--ray_min_clearance", default=0.20, type=float)
+    parser.add_argument("--ray_min_floor_drop", default=0.30, type=float)
+    parser.add_argument("--ray_min_subject_dist", default=0.80, type=float)
+    parser.add_argument("--ray_min_clear_frac", default=0.90, type=float)
     parser.add_argument("--motion_ladder", default=[0.20, 0.35, 0.60], nargs="+", type=float)
     # D266. subject 중심이 중앙 박스(`--center_box`) 안이던 프레임 비율의 하한. 0 = 끔(기본,
     # 예전과 비트 동일). 가림(`--min_subject_visible`)과 달리 렌더가 안 늘어난다.

@@ -11,6 +11,23 @@ Follows [Keep a Changelog](https://keepachangelog.com/).
 
 ### Added
 
+- **D277 — Blender raycast 상주 서버 + fitting 중 GT mesh 게이트 (2026-09-24, R37).** 사용자 지시
+  "blender 서버 연결 만들어줘봐".
+  - `fit/ingest/blender_raycast_server.py` (Blender 안에서 돈다) — recording `.blend` 를 1회 로드,
+    사람 뺀 정적 삼각형으로 BVH 1그루(1.2~4.7 s), 클립별 `body_points` 조준점 캐시(`load_clip`),
+    `profile` 은 frame_set 없이 BVH 광선만. localhost TCP JSON 한 줄 프로토콜. 연결마다 스레드 +
+    요청 단위 잠금이라 같은 recording 의 여러 fit 프로세스가 동시에 쓴다. 유휴 600 s 면 종료.
+  - `lbm/blender_raycast.py RaycastClient` — `tmp/blender_srv/<rec8>.json` 레지스트리로 recording 당
+    서버 하나를 공유(없으면 fcntl 잠금 아래 띄운다). `blend_of` 는 `<uuid> - 副本/` 사본 폴더를 뺀다.
+  - `eval/compare_mesh_gates.py --backend server` — 사후 Blender raycast 대조: **182씬 1,634 rung
+    전체 일치 98.8%** (20씬 부분집합 100%), 4.9 ms/궤적. 남은 어긋남은 시선 근사(`--body_margin`)
+    23+4, 바닥이 사람 무시 11+4. 격자판은 88.0% / 194 ms 였다.
+  - `fit_hole_ladder.py --ray_gate server` (+ `--ray_min_{clearance,floor_drop,subject_dist,clear_frac}`)
+    — approach 뒤·프레이밍 앞에 `wall/floor/subject/occluded` 게이트, 크기를 정하면
+    `<gate>_limited`. 켰을 때만 `bank.csv` 에 `ray_*` 4열. 기본 off = 옛 동작.
+  - `configs/bank/d277_trumans_raygate.json` — d273 + `--ray_gate server`. 0a761819_a02 스모크 OK
+    (87.4 → 106.7 s): free_pedestal_up Δ0.7 이 벽 0.20 m 를 지키게 0.34 로 풀림(wall_limited).
+
 - **D275 — targetless preset 은 shot scale 대신 이동량 사다리 (2026-09-24, R33).** 사용자 지시
   "static을 포함한 anchor가 의미가 없는 free-moving은 shot scale 적용을 안하는게". static 은 원래
   손잡이가 없어 사다리를 안 탄다(1단). `fit_hole_ladder.py --shot_exempt targetless

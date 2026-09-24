@@ -46,7 +46,7 @@ main session 은 컨텍스트가 압축되거나 세션이 끝나면 **자기가
 - 이상신호: Traceback / OOM / nan / 30분간 it 정지
 
 ### R49 VLM 판정 DynPose-100K 43,782편 (D282)
-- screen  : vlm_r49 (클라이언트, workers 48) + vllm_r49 (서버 GPU 3)   pid: 3116767
+- screen  : vlm_r49 (클라이언트, workers 48, 프레임당 640x360 예산) + vllm_r49 (서버 GPU 3)   pid: 3314997
 - 로그    : <repo>/tmp/r49/vlm.out, 서버 tmp/r41/vllm_r49.log
 - 살아있나: pid 존재 + GPU 3 점유
 - 나아가나: `[vlm] N/…` 200편마다 증가, out_filter/d282_dynpose100k/vlm/*.jsonl 줄 수
@@ -54,7 +54,7 @@ main session 은 컨텍스트가 압축되거나 세션이 끝나면 **자기가
 - 이상신호: fail 비율 급증 / 30분간 줄 수 정지
 
 ### R50 SAM3 9프레임 추적 (D282)
-- screen  : sam3_r49_0..2   pid: 3148546 3148557 3148561   GPU: 0
+- screen  : sam3_r49_0..2   pid: 3382156 3382169 3382177   GPU: 0
 - 로그    : <repo>/tmp/r49/sam3_{0,1,2}.out
 - 나아가나: out_filter/d282_dynpose100k/sam3/*.npz 개수 증가 (VLM 뒤를 따라간다)
 - 끝났나  : 셋 다 `ALL DONE` → judge → export → reel

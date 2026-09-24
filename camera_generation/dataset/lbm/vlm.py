@@ -128,7 +128,7 @@ class VLMClient:
 
     # ---------------------------------------------------------------- chat
     def chat(self, prompt: str, images=(), system: str | None = None, label: str = "",
-             video: str | None = None, video_fps: float | None = None):
+             video: str | None = None, video_fps: float | None = None, video_mm: dict | None = None):
         """(text, meta). 이미지는 data URL 로 실린다. 텍스트가 **이미지 뒤**에 온다.
 
         순서를 이렇게 두는 이유: contract 텍스트가 "이 board 에서 골라라"라고 지시하는데
@@ -148,7 +148,7 @@ class VLMClient:
         payload = {"model": self.model, "messages": messages,
                    "temperature": self.temperature, "max_tokens": self.max_tokens}
         if video is not None and video_fps is not None:
-            payload["mm_processor_kwargs"] = {"fps": float(video_fps)}
+            payload["mm_processor_kwargs"] = {"fps": float(video_fps), **(video_mm or {})}
 
         started = time.time()
         response = self._post("/chat/completions", payload)

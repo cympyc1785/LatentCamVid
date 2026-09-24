@@ -128,8 +128,18 @@ def stage_vlm(a):
     def one(rel):
         client = VLMClient(temperature=0.0, max_tokens=1200, timeout=600)
         try:
-            text, info = client.chat(PROMPT, video=path.join(DV, rel, "video_input.mp4"),
-                                     video_fps=a.fps)
+            vp = path.join(DV, rel, "video_input.mp4")
+            # 영상 전체 픽셀 예산을 **프레임당 640x360** 으로 맞춘다 — Qwen3-VL 비디오 프로세서의
+            # `size.longest_edge` 는 프레임당이 아니라 영상 전체 예산이다(실측: 230400 이면 139 토큰).
+            # 원본 1280x720 그대로면 중앙값 6,762 토큰이라 KV 캐시가 15 요청에서 찬다 (R49 첫 판).
+            # R41 이 검증한 640x360 clip 과 같은 해상도가 된다.
+            import cv2
+            cap = cv2.VideoCapture(vp)
+            nf, vfps = int(cap.get(cv2.CAP_PROP_FRAME_COUNT)), cap.get(cv2.CAP_PROP_FPS) or 10.0
+            cap.release()
+            n2 = max(2, int(np.ceil(nf / vfps * a.fps)))
+            budget = {"size": {"longest_edge": int(n2 * a.frame_pixels), "shortest_edge": 4096}}
+            text, info = client.chat(PROMPT, video=vp, video_fps=a.fps, video_mm=budget)
             parsed = next((c for c in parse_json_candidates(text) if isinstance(c, dict)), None)
             row = {"scene": rel, "parsed": parsed, "raw": text, "sec": info["seconds"],
                    "prompt_tokens": info.get("prompt_tokens")}
@@ -422,6 +432,7 @@ if __name__ == "__main__":
     q.add_argument("--corpus", default="dynpose-100k")
     q.add_argument("--out", default=path.join(HERE, "out_filter", "d282_dynpose100k"))
     q.add_argument("--fps", default=2.0, type=float)
+    q.add_argument("--frame_pixels", default=640 * 360, type=int)   # VLM 프레임당 픽셀 예산 (R41 과 같은 해상도)
     q.add_argument("--workers", default=24, type=int)
     q.add_argument("--k", default=9, type=int)                  # SAM3 추적 프레임 수 (영상 전체 균등)
     q.add_argument("--num_shards", default=1, type=int)

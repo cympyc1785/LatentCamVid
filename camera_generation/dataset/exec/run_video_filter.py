@@ -200,6 +200,9 @@ def stage_sam3(a):
         if pred is None:
             pred = init_sam3_video()
         for rel in todo:
+            # 다른 프로세스가 그새 끝냈으면 건너뛴다 — todo 는 라운드 시작 때 한 번만 만든다.
+            if path.exists(path.join(a.out, "sam3", scene_key(rel) + ".npz")):
+                continue
             p = (vlm[rel].get("parsed") or {})
             ms = p.get("main_subject") or {}
             noun = str(ms.get("noun") or "").strip().lower() or (

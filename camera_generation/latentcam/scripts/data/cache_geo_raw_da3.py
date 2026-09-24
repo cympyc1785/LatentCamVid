@@ -80,6 +80,11 @@ DEVICE = os.environ.get("DEVICE", "cuda:0")
 LIMIT = int(os.environ.get("LIMIT", "0"))
 SHARDS = max(1, int(os.environ.get("SHARDS", "1")))
 SHARD = int(os.environ.get("SHARD", "0"))
+# [new 2026-09-24, D274] 저장 dtype. 기본 float32 = 옛 동작. bfloat16 은 `convert_geo_raw_cache.py`
+# 가 fp32 캐시를 사후에 내리던 것과 **같은 캐스트**를 굽는 자리에서 한다 — 12 view 는 fp32 로
+# 808 GB 라 사후 변환하려면 그만큼을 잠깐 들고 있어야 한다. 학습 쪽은 `geo_raw_cache_dtype:
+# bfloat16` 으로 읽는다 (D200 bf16 캐시와 같은 규약).
+SAVE_DTYPE = getattr(torch, os.environ.get("SAVE_DTYPE", "float32"))
 assert 0 <= SHARD < SHARDS, f"SHARD {SHARD} 가 0~{SHARDS - 1} 밖이다"
 
 cfg, _ = load_cfg("config", overrides=[f"experiment={EXP}"])
@@ -134,7 +139,7 @@ def is_done(path, meta):
         return False
     old = dict(c.get('meta') or {}); old.pop('exp', None)
     new = dict(meta); new.pop('exp', None)
-    return c['raw'].dtype == torch.float32 and old == new
+    return c['raw'].dtype == SAVE_DTYPE and old == new
 
 
 def main():
@@ -193,6 +198,8 @@ def main():
                         data['geo_hw'].to(DEVICE))
                 raw = ge.encode_raw(data['images'].to(DEVICE), cam_token)   # (1,V,P,C) fp32
                 raw = raw[0].float().cpu().clone()      # bf16 로 내리면 안 된다 — docstring 참조
+                if SAVE_DTYPE != torch.float32:       # D274: 명시했을 때만 (convert 와 같은 캐스트)
+                    raw = raw.to(SAVE_DTYPE)
                 gidx = data['geo_idxs'][0].to(torch.int16).cpu().clone()
                 torch.save({'raw': raw, 'geo_idxs': gidx, 'meta': meta},
                            osp.join(OUT, f'{key}.pt'))

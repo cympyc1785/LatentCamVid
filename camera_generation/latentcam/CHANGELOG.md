@@ -4,6 +4,13 @@ All notable changes to the latentcam sub-project. Follows [Keep a Changelog](htt
 
 ## [Unreleased]
 
+### Added
+- **DA3 12 프레임 arm (2026-09-24, R31 / D274).** `conf/experiment/dynpose_d200_molmo2_l21_da3_v12.yaml`
+  — `geo_num_views: 12` + 전용 bf16 캐시 `geo_raw_cache_da3_v12_bf16` (≈432 GB).
+  `scripts/data/cache_geo_raw_da3.py SAVE_DTYPE=bfloat16` — 굽는 자리에서 bf16 으로 저장
+  (`convert_geo_raw_cache.py` 와 같은 캐스트, 12 view 는 fp32 808 GB 라 사후 변환이 부담).
+  기본 float32 = 옛 동작.
+
 ### Removed
 
 - **DA3 / Molmo2 캐시 정리 — 33건 / 1,507.1 G 삭제 (2026-09-24).** `/data1/cympyc1785/data`

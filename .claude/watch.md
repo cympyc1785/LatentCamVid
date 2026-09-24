@@ -45,3 +45,11 @@ main session 은 컨텍스트가 압축되거나 세션이 끝나면 **자기가
 - 끝났나  : 로그 `[render] ALL DONE` → `--stage report` → 다음: d273 bank → raycast → caption → export
 - 이상신호: Traceback / 1시간 status 정지 / complete 비율 급락
 
+### R31 학습 dynpose_d200_molmo2_l21_da3_v12 (D274)
+- screen  : train1        pid: 2670785        GPU: 1
+- 로그    : <repo>/tmp/r31/train.log
+- 살아있나: pid 존재 + GPU 1 점유 > 10 GiB
+- 나아가나: tqdm `Epoch N` 증가
+- 끝났나  : epoch_cap 50 → results/*_dynpose_d200_molmo2_l21_da3_v12/ckpts/last.pth
+- 이상신호: Traceback / OOM / nan / 30분간 it 정지
+

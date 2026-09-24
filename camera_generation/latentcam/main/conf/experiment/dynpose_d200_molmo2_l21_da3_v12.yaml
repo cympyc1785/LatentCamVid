@@ -1,0 +1,22 @@
+# @package _global_
+# D274 — `dynpose_d200_molmo2_l21_da3` 와 같되 **DA3 에 12 프레임**을 넣는 arm
+# (사용자 지시 2026-09-24: "da3_molmo2_l21 학습 da3 dense frame 넣는거 12프레임 넣는걸로 해줘봐").
+# D270(49 view on-the-fly, 4.5 s/it ≈ 15일)을 사용자 지시로 중단한 뒤의 절충이다.
+#
+# 부모와의 차이는 geo view 수와 그 캐시 두 줄뿐이다:
+#   6 view  `_even_indices(49,6)`  = [0,10,19,29,38,48]
+#   12 view `_even_indices(49,12)` = [0,4,9,13,17,22,26,31,35,39,44,48]
+# geo 토큰 6 x 576 = 3456 -> 12 x 576 = 6912 (전량, 풀링·resampler 없음).
+#
+# ═══ 캐시 ══════════════════════════════════════════════════════════════════════════════════
+# 12 view bf16 raw 캐시를 새로 굽는다 (`scripts/data/cache_geo_raw_da3.py SAVE_DTYPE=bfloat16`,
+# 씬당 12*576*3072*2 B = 42.5 MB, 10,169 씬 ≈ 432 GB). 부모의 6-view 캐시와 디렉토리를 나눈다 —
+# meta 의 num_views 가 달라 섞이면 is_done 이 덮어쓴다.
+defaults:
+  - dynpose_d200_molmo2_l21_da3
+
+exp_name: dynpose_d200_molmo2_l21_da3_v12
+
+geo_num_views: 12
+geo_raw_cache_dir: /data1/cympyc1785/data/DynPose-LBM/latentcam_dynpose_d200/geo_raw_cache_da3_v12_bf16
+geo_raw_cache_dtype: bfloat16

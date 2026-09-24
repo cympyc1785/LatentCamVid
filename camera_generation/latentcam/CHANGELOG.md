@@ -32,9 +32,22 @@ All notable changes to the latentcam sub-project. Follows [Keep a Changelog](htt
     생존 확인). 필요하면 `scripts/data/cache_da3_depth.py` 로 되만든다. 읽는 쪽인
     `sd_whuman_*` / `mix_dl3dv_sd_*` yaml 8개는 최종 수정이 2026-08-11~17 이다.
   - **C. 은퇴한 arm 의 코퍼스 캐시 (32.5 G)** — d129 10.8 · `latentcam_dynpose`(d84/d107/d117)
-    10.5 · TRUMANS d77 6.4 · Vista4D `latentcam_da3` 2.1 · `da3_k6_d121/peav_cache` 2.1 ·
-    d157 molmo2 0.4 · d107 peav 0.2. **config 는 살아 있다** — 해당 arm 을 다시 돌리려면
-    캐시를 되굽어야 한다 (TRUMANS d77 은 task #125 가 pending).
+    10.5 · TRUMANS d77 6.4 · `da3_k6_d121/peav_cache` 2.1 · d157 molmo2 0.4 · d107 peav 0.2.
+    **config 는 살아 있다** — 해당 arm 을 다시 돌리려면 캐시를 되굽어야 한다
+    (TRUMANS d77 은 task #125 가 pending).
+  - **C 오분류 1건 — `Vista4D-Eval-Data/latentcam_da3/geo_raw_cache_da3` (2.1 G) 은 은퇴가
+    아니었다.** "은퇴한 arm" 으로 묶어 지웠으나 이 디렉토리는 vista arm **6개가 공유**하는
+    캐시이고 그중 `vista_d261_molmo2_l21_da3_startpose.yaml:81` 은 **2026-09-23 에 끝난
+    D261**(task #275) 이다. 스캔에서 atime 이 `2026-09-22` 로 찍힌 것을 보고도 근거로 안 썼다.
+    영향은 **속도뿐** — `dataset_dl3dv.py:402` 가 파일이 없으면 `continue` 하고 `:416` 이
+    `"<- 나머지는 on-the-fly DA3"` 를 찍는다 (오류가 아니다). 여섯 arm 전부
+    `da3nested-giant-large` `[252,448]` `last` `posed` `6 view` `first_view_target_s` 로
+    설정이 같고 d261 은 `da3_cam_token_per_sample: true` 라 게이지도 안 갈린다 — 한 번
+    되구우면 전부 복구된다. `scripts/data/cache_geo_raw_da3.py` (fp32, GPU 0) 로 재굽기해
+    **52 파일 / 2.1 G 로 삭제 전과 같아졌다** (로그 `tmp/cache_cleanup/rebake_vista_da3*.log`).
+    네 코퍼스를 차례로 태워 커버리지를 확인했다: d261 이 16 (그 코퍼스가 16 scene 뿐),
+    d121 이 나머지 36 → 52, d128 · d77 은 **52/52 전부 skip-done** — 즉 네 코퍼스가 같은
+    52 scene 을 보고 있고 빠진 키가 없다. `non-constant 0` (geo_idxs 가 변이 상수).
   - **안 지운 것** — `geo_raw_cache_da3_bf16`(6프레임, 202 G) · `geo_raw_cache_da3_v12_bf16`
     (12프레임, 403 G) · `molmo2_cache/{video,prefill.pt,text.pt}`(330 G) ·
     `siglip2_cache/video`(137 G) · `umt5_cache`(24 G) · SD 원본 `da3/`.

@@ -21,11 +21,6 @@
   1차 (2026-09-24): mesh_grid EDT 로 벡터판 `mesh_ray_profile` — 194 ms/궤적, Blender 판정과 20씬 175 rung
   **88.0% 일치** (grid 만 탈락 19 / Blender 만 탈락 2). 원인: 시선 10(5 cm 격자가 얇은 물체 부풂),
   subject_dist 6(조준점 정의 차이). 다음: 2.5 cm 격자 + Blender 조준점 export → fit 게이트로 배선.
-### R30. Blender render 가 느린 이유 — 조사 완료, 개선안(RGB --anim + depth 분리 job, ~2.3x) 적용 여부 사용자 확인 대기
-### R33. static·free-moving(targetless) 은 shot scale 미적용 (2026-09-24) — 작업 중
-### R34. Blender 렌더 개선안(RGB --anim + depth/index 별 job) 적용 — 사용자 채택
-### R35. 질문: mesh_grid 와 mesh 차이 / 클립마다 따로 만들어야 하나 / Blender mesh 직접 쓰면 저장공간 절약 / 같은 scene 한 번 올려 여러 클립 병렬 raycast·렌더
-### R36. 질문: DA3 12 frame 은 cache 로 학습 중인가 / Molmo2 대비 토큰 수
 ### R22. TRUMANS 데이터셋 구축 — **계획 승인됨 (2026-09-23)**
 조사: `tmp/agent/reader-r22-trumans.md` (핵심 주장 5건 직접 재확인). 사용자 결정 넷:
 ① 범위 = s3f0k6 **737 clip 전량** (191 은 prep 완료, 546 은 graph/cloud/mesh 부터)
@@ -56,6 +51,12 @@ _(비어 있음)_
 ---
 
 ## Done
+
+### R30/R34. Blender 렌더 — 원인 조사 + 2-job 분리 적용 (2026-09-24) · 커밋 `8adeb26`
+GPU 는 쓰고 있었다. 프레임마다 GPU↔CPU 전환으로 씬 재동기화(95%). A/B 단일 워커 666.9 → 343.8 s.
+8 워커 동시 재기동 직후 첫 클립은 593.7 s — 부하 아래 이득은 chunk/h 로 재확인 필요 (이전 ~9.4/h).
+### R33. targetless 은 shot scale 대신 이동량 사다리 (D275) — 완료 · 커밋 `8adeb26`
+### R35/R36. 질문 답변 — 완료 (mesh_grid vs mesh / 씬 단위 공유 제안 / DA3 캐시 확인 / 토큰 수)
 
 ### R28/R29/R32. shot scale 사진 · 격자 시각화 · 디스크 — 완료 (2026-09-24)
 그림 `tmp/r28/shot_scale_*.png`, `tmp/r29/grid_viz.png` 전송. 발견: shot_dev 는 **median 프레임** 기준이라

@@ -52,6 +52,9 @@ _(비어 있음)_
 
 ## Done
 
+### R42~R45. spp 비교 그림 · VLM prompt · 답 갈린 5개 · SAM3 속도 — 완료 (2026-09-24)
+SAM3(GPU3, 49f 640x360, 'person'): video 1프로세스 12.15 s/clip, 3프로세스 실효 6.3 s, image 8프레임 0.89 s.
+
 ### R40. Blender 렌더 속도 — depth/index animation job 적용 (D279) · 커밋 `16235b8`
 geom 197.2 → 39.4 s (산출물 일치), clip ~331 → ~173 s 예상. RGB 옵션(16spp/bounce/해상도)은 화질 트레이드오프라 사용자 결정 대기.
 ### R41. VLM 입력 방식 비교 50 clip x 5 모드 — 완료, 사용자 판단 대기 (`tmp/r41/index.html`)

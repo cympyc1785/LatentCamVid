@@ -546,6 +546,8 @@ peav_text_cache: null
 #   models/molmo2_video_connector.py. peav_video_cache_dir: null, video_latent_dim: 2560 과 같이 쓴다.
 video_onfly: null
 video_onfly_pool: 8
+# 위 arm 의 frame 캐시 디렉토리 (<scene_key>.npy uint8 49x378x378x3). null = 매번 PNG 디코드.
+video_onfly_frame_cache: null
 # [new 2026-09-18, D200] 위 두 캐시의 preload 를 **anonymous RAM 대신 mmap** 으로. false(기본) 면
 # 예전 그대로다. `geo_raw_cache_mmap` 과 같은 이유의 같은 스위치 — 주석은 그쪽에 자세히 있다.
 # 왜 필요해졌나: 위 설명의 "프레임당 토큰 1개"는 PE-AV 264 scene 기준이고, D200 의 molmo2 video

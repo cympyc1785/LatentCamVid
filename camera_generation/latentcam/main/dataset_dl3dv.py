@@ -1861,9 +1861,16 @@ class CamDataset(torch.utils.data.Dataset):
         # SigLIP2 캐시(`cache_molmo2_embeddings.py --vit_only`)가 쓴 것과 같은 창이고, 전처리는
         # Molmo2 video processor 앞단과 같다 (models/molmo2_video_connector.load_molmo2_frames).
         # 끄면 키 자체가 안 생긴다.
+        # `video_onfly_frame_cache` 에 구워 둔 uint8 배열이 있으면 mmap 으로 읽는다 (같은 함수로
+        # 구운 것이라 값이 비트 동일, scripts/data/cache_molmo2_frames.py). 없으면 PNG 에서 만든다.
         if str(getattr(self.cfg, 'video_onfly', None) or '') == 'molmo2_conn':
-            from models.molmo2_video_connector import load_molmo2_frames
-            out['video_frames'] = load_molmo2_frames(self.frame_files_list[scene_idx], s, e)
+            _fc = getattr(self.cfg, 'video_onfly_frame_cache', None)
+            _fp = osp.join(_fc, f'{self.geo_raw_key(data_name)}.npy') if _fc else None
+            if _fp and osp.exists(_fp):
+                out['video_frames'] = torch.from_numpy(np.array(np.load(_fp, mmap_mode='r')))
+            else:
+                from models.molmo2_video_connector import load_molmo2_frames
+                out['video_frames'] = load_molmo2_frames(self.frame_files_list[scene_idx], s, e)
         if self._peav_text is not None:
             _i = self._peav_text['by_name'][data_name]
             out['peav_text'] = self._peav_text['emb'][_i].float()

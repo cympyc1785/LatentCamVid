@@ -22,9 +22,9 @@
   **88.0% 일치** (grid 만 탈락 19 / Blender 만 탈락 2). 원인: 시선 10(5 cm 격자가 얇은 물체 부풂),
   subject_dist 6(조준점 정의 차이). 다음: 2.5 cm 격자 + Blender 조준점 export → fit 게이트로 배선.
 ### R52. DynPose 확장 — GPU 0,3,6,7 (6,7 은 사용자가 빼라 할 때까지). 결정(09-25): 로고 영상 탈락 유지 / bank 는 d200 설정(d185+d199). 신규 7,168: recon 완료(7,168 OK) → nouns 진행중 → SAM3 → graph → bank → export
-### R54. d200 molmo2_l21_da3 에 DA3 dense frame **24프레임** 으로 학습 — GPU 0 (2026-09-25) · D285 config 작성, 24-view bf16 캐시 굽는 중 (GPU 0, 3샤드)
+### R54. d200 molmo2_l21_da3 에 DA3 dense frame **24프레임** 으로 학습 — GPU 0 (2026-09-25) · D285 캐시 10,169 완료 (863.70 GB) → smoke rc=0 → **screen train2 GPU 0 본 학습**
 ### R57. 저장공간 부족 — 용량 큰데 불필요한 것 분석·목록 보고 (2026-09-25, 삭제는 승인 후)
-### R58. SigLIP2 arm 에 Molmo2 connector(attention pooling + projector) 를 붙이되 **새로 학습**되게 (2026-09-25)
+### R58. SigLIP2 arm 에 Molmo2 connector(attention pooling + projector) 를 붙이되 **새로 학습**되게 (2026-09-25) · D286 코드+smoke rc=0 (커밋 0df7ba7), 속도 ~3 s/it 라 본 학습 전 사용자 확인 대기
 ### R22. TRUMANS 데이터셋 구축 — **계획 승인됨 (2026-09-23)**
 조사: `tmp/agent/reader-r22-trumans.md` (핵심 주장 5건 직접 재확인). 사용자 결정 넷:
 ① 범위 = s3f0k6 **737 clip 전량** (191 은 prep 완료, 546 은 graph/cloud/mesh 부터)

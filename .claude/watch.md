@@ -53,10 +53,10 @@ main session 은 컨텍스트가 압축되거나 세션이 끝나면 **자기가
 - 끝났나  : launch 로그 `launch sam3 완료` → dynmask 는 **launch 금지**, NEW 목록만 직접 → static 명사 --merge → static SAM3+geocalib → graph → bank(d185+d199). 근거 tmp/agent/reader-d284-sam3-merge.md
 - 이상신호: Traceback / OOM / 30분간 신규 0
 
-### R54 D285 DA3 24-view bf16 캐시 굽기 → 이후 smoke → 학습 (GPU 0)
-- screen  : d285_bake0/1/2 (3 샤드 모두 GPU 0)
-- 로그    : <repo>/tmp/r54/bake_{0,1,2}.log
-- 살아있나: cache_geo_raw_da3 프로세스 + GPU 0 점유
-- 나아가나: `[train] N/3390` 증가 (~1.0 s/scene/샤드 → train ≈ 57분 + test)
-- 끝났나  : 세 로그 종료 + 캐시 디렉토리 10,169 → smoke (WANDB off) → screen train2 GPU 0 본 학습
-- 이상신호: Traceback / OOM / 10분간 N 정지
+### R54 D285 학습 dynpose_d200_molmo2_l21_da3_v24 (DA3 24 view)
+- screen  : train2        pid: 1213083 (bash) / 1213086        GPU: 0
+- 로그    : <repo>/tmp/r54/train.log (smoke tmp/r54/smoke.log rc=0, V=24, val/loss_traj 3.012646)
+- 살아있나: pid 존재 + GPU 0 점유 > 10 GiB
+- 나아가나: tqdm `Epoch N` 증가
+- 끝났나  : epoch_cap 50 → results/*_dynpose_d200_molmo2_l21_da3_v24/ckpts/last.pth
+- 이상신호: Traceback / OOM / nan / 30분간 it 정지

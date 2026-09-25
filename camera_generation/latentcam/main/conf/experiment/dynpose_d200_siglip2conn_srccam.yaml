@@ -17,3 +17,6 @@ peav_video_cache_dir: null     # 캐시 대신 on-the-fly
 video_onfly: molmo2_conn
 video_onfly_pool: 8
 video_latent_dim: 2560
+# frame 캐시 (사용자 결정 2026-09-25 "Frame cache + more workers"): 디코드만 캐시, ViT 는 on-the-fly.
+video_onfly_frame_cache: /data1/cympyc1785/data/DynPose-LBM/latentcam_dynpose_d200/molmo2_frames_378
+num_thread: 16

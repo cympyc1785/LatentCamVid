@@ -288,6 +288,15 @@ def main():
         _raw = 6 if cfg.geo_cam_embed == 'plucker' else 11
         _geo_kw = dict(geo_latent_dim=getattr(cfg, 'geo_latent_dim', 768), geo_cam_raw_dim=_raw,
                        geo_cam_embed_dim=getattr(cfg, 'geo_cam_embed_dim', 128))
+    # [FIX 2026-09-25, tasks A3] srccam_cond arm (D262/D268/D269) 의 생성자 인자가 없었다.
+    # train_latent_cam_dm.py:669-677 과 같은 블록 — 없으면 geo_proj 가 nn.Linear 로 서서
+    # `geo_proj.0/2.*` unexpected 로 strict load 가 죽는다. 소스 카메라 토큰은 dataset 이
+    # `geo_emb` 로 싣기 때문에 아래 루프의 geo_emb_from_cache 경로를 그대로 탄다.
+    # srccam_cond 가 없는 arm 은 이 블록을 안 타므로 기존 호출과 동일.
+    if getattr(cfg, 'srccam_cond', None):
+        _srd = 54 if str(cfg.srccam_cond) == 'plucker' else 11
+        _geo_kw = dict(geo_latent_dim=_srd, geo_in_mlp=True, geo_pe=True)
+        print(f"(model) srccam_cond={cfg.srccam_cond}: geo CA = 소스 카메라 토큰 x {_srd}-d")
     # [fix 2026-08-28] target_track arm(cond_dim>0)은 cam_in 이 Linear(cam_dim+4, hidden) 이라
     # cond_dim 을 안 넘기면 strict load 가 shape mismatch 로 죽는다 (b7cc928 이 이 줄을 빼먹었다).
     # target_track_dim=0 이면 cond_dim=0 = 기존 생성자 호출과 동일.

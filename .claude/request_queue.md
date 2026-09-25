@@ -22,6 +22,8 @@
   **88.0% 일치** (grid 만 탈락 19 / Blender 만 탈락 2). 원인: 시선 10(5 cm 격자가 얇은 물체 부풂),
   subject_dist 6(조준점 정의 차이). 다음: 2.5 cm 격자 + Blender 조준점 export → fit 게이트로 배선.
 ### R52. DynPose 확장 — GPU 0,3,6,7 (6,7 은 사용자가 빼라 할 때까지). 결정(09-25): 로고 영상 탈락 유지 / bank 는 d200 설정(d185+d199). 신규 7,168: recon 완료(7,168 OK) → nouns 진행중 → SAM3 → graph → bank → export
+### R54. d200 molmo2_l21_da3 에 DA3 dense frame **24프레임** 으로 학습 — GPU 0 (2026-09-25) · D285 config 작성, 24-view bf16 캐시 굽는 중 (GPU 0, 3샤드)
+### R55. molmo2_l21_srccam (d262) vs siglip2_srccam (D269) **testset eval 비교** (2026-09-25) — eval_testset srccam 수리 완료(smoke rc=0), 전량 eval GPU 6/7 진행중
 ### R22. TRUMANS 데이터셋 구축 — **계획 승인됨 (2026-09-23)**
 조사: `tmp/agent/reader-r22-trumans.md` (핵심 주장 5건 직접 재확인). 사용자 결정 넷:
 ① 범위 = s3f0k6 **737 clip 전량** (191 은 prep 완료, 546 은 graph/cloud/mesh 부터)
@@ -53,6 +55,8 @@ _(비어 있음)_
 ---
 
 ## Done
+
+### R56. 명사 추출 출력 형태 + 예시 — 완료 (2026-09-25). 신규 c7f7df9a 6프레임 그림 전송, record 구조 설명 (dynamic/static/subject/reasoning)
 
 ### R49~R51. DynPose-100K 43,782편 VLM+SAM3 필터 (D282) — 완료 (2026-09-24 22:45) · 커밋 `6bb2cd5`
 VLM 0 실패, SAM3 12샤드(GPU 0,3,6,7 — 6,7 은 사용자 허용). 9,396 통과(21.5%), pass.csv/fail.csv/summary.json,

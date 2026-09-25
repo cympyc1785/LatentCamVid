@@ -5,6 +5,8 @@ All notable changes to the latentcam sub-project. Follows [Keep a Changelog](htt
 ## [Unreleased]
 
 ### Added
+- **DA3 24 프레임 arm (2026-09-25, R54 / D285).** `conf/experiment/dynpose_d200_molmo2_l21_da3_v24.yaml`
+  — 부모 `dynpose_d200_molmo2_l21_da3` 대비 `geo_num_views 24` + 24-view bf16 raw 캐시(≈864 GB) 두 줄뿐.
 - **DA3 12 프레임 arm (2026-09-24, R31 / D274).** `conf/experiment/dynpose_d200_molmo2_l21_da3_v12.yaml`
   — `geo_num_views: 12` + 전용 bf16 캐시 `geo_raw_cache_da3_v12_bf16` (≈432 GB).
   `scripts/data/cache_geo_raw_da3.py SAVE_DTYPE=bfloat16` — 굽는 자리에서 bf16 으로 저장
@@ -367,6 +369,9 @@ All notable changes to the latentcam sub-project. Follows [Keep a Changelog](htt
   ⚠ bf16 을 고른 arm 은 fp32 on-the-fly 와 **비트 동일하지 않다** (실측 상대오차 3.3e-3).
 
 ### Fixed
+- **`scripts/eval_testset.py` srccam arm 로드 (2026-09-25, R55 / tasks A3).** `srccam_cond` 생성자 인자
+  (`geo_latent_dim` 54/11, `geo_in_mlp`, `geo_pe`)를 train 과 같게 넘긴다. 없으면 `geo_proj.0/2.*` unexpected 로
+  strict load 가 죽었다. srccam 이 아닌 arm 은 무변경.
 - **`.latentcam_index` 캐시가 코퍼스 재굽기를 못 잡아 옛 세그먼트(캡션↔변이 어긋남)를
   재사용하던 것 (2026-09-21).** `dataset_dl3dv.py _load_index()` 의 캐시 키는 **설정만** 본다
   (`meta_csv` / `nf<num_frames>` / `bo` / `k` / `cb` / `ms` / `bl` + `__ps`/`__as`/`__pf`) —

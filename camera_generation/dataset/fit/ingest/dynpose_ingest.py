@@ -336,6 +336,18 @@ def stage_metadata(args, scenes):
                 rows[r["video"]] = r["dynamic"]
                 src_counts["lbm_csv"] += 1
 
+    # --keep_metadata (D284): 지금 metadata.csv 에 있는 행도 그대로 둔다. 확장 배치에서 nouns 를
+    # 새 shard 배정으로 다시 돌리면 이미 SAM3 까지 구운 구 편이 다른 shard 파일에 중복 record 로
+    # 들어가고, noun_records 는 뒤 파일이 이겨서 구 편 명사가 구운 seg_instances 와 어긋난다.
+    out_csv = path.join(args.out_root, "metadata.csv")
+    src_counts["kept"] = 0
+    if args.keep_metadata and path.isfile(out_csv):
+        with open(out_csv, newline="", encoding="utf-8") as f:
+            for r in csv.DictReader(f):
+                if r["video"] not in rows:
+                    rows[r["video"]] = r["dynamic"]
+                    src_counts["kept"] += 1
+
     from_vlm = noun_records(args) if args.noun_source == "vlm" else {}
     for vid, scene_dir in scenes:
         if vid in rows:
@@ -358,8 +370,7 @@ def stage_metadata(args, scenes):
         rows[vid] = ", ".join(nouns)
         src_counts[key] += 1
 
-    out_csv = path.join(args.out_root, "metadata.csv")
-    print(f"  기존 LBM csv {src_counts['lbm_csv']}   "
+    print(f"  기존 LBM csv {src_counts['lbm_csv']}   기존 metadata 유지 {src_counts['kept']}   "
           f"{args.noun_source} 추가 {src_counts[args.noun_source]}   "
           f"명사 0개라 제외 {src_counts['empty']}   최종 {len(rows)}")
     if args.dry_run:
@@ -513,6 +524,7 @@ def main():
     ap.add_argument("--vlm_model", default=VLM_MODEL)
     # metadata 의 명사 출처. vlm = 우리 프롬프트(기본), category = 배포본 category.json(옛 동작).
     ap.add_argument("--noun_source", default="vlm", choices=("vlm", "category"))
+    ap.add_argument("--keep_metadata", action="store_true")         # metadata: 기존 metadata.csv 행 우선 유지 (D284)
 
     ap.add_argument("--skip_done", action="store_true", default=True)
     ap.add_argument("--no_skip_done", dest="skip_done", action="store_false")

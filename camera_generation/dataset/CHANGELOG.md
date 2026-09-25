@@ -11,6 +11,7 @@ Follows [Keep a Changelog](https://keepachangelog.com/).
 
 ### Added
 
+- **D284 — `dynpose_ingest.py --stage metadata --keep_metadata` (2026-09-25, R52).** 기존 metadata.csv 행을 vlm_nouns 보다 먼저 유지한다. 확장 배치에서 nouns 를 새 shard 배정으로 다시 돌리면 이미 SAM3 까지 구운 구 편이 다른 shard 파일에 중복 record 로 들어가고 뒤 파일이 이겨서 구 편 명사가 seg_instances 와 어긋나는 것을 막는다. 플래그 없으면 기존 동작 그대로. dry-run: LBM 875 + 유지 9,471 = 10,346.
 - **D284 — DynPose 확장 ingest: `dynpose_ingest.py --scene_list` (2026-09-25, R52).** D282 필터 pass.csv 의 uuid 만
   처리 (9,396 → 신규 7,168, 기존 recon 2,228 skip). 사용자 지시로 GPU 0,3,6,7.
   - **fix `recon_done`**: dynmask 단계가 남기는 `dynamic_mask/from_seg.json` 까지 세서 파일 수 50 ≠ 49 가 되어

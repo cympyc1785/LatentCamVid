@@ -45,11 +45,10 @@ main session 은 컨텍스트가 압축되거나 세션이 끝나면 **자기가
 - 끝났나  : epoch_cap 50 → results/*_dynpose_d200_molmo2_l21_da3_v12/ckpts/last.pth
 - 이상신호: Traceback / OOM / nan / 30분간 it 정지
 
-### R52 DynPose 확장 D284 — ① DA3 recon 7,168편 (D282 pass 중 신규)
-- screen  : d284_recon (launch)   shard pid: 2182438 2182439 2182440 2182441   GPU: 0,3,6,7 (6,7 사용자 허용)
-- 로그    : <repo>/tmp/d284/launch_recon.log, tmp/d284/recon_logs/shard{0..3}.log
-- 살아있나: shard pid 4개 + GPU 점유
-- 나아가나: DATA/DynPose-100K/eval_data/recon_and_seg 신규 폴더 수 증가 (기준 29.6 s/편/GPU)
-- 끝났나  : launch 로그 종료 + 할 일 0 → 다음: SAM3 (명사는 D282 VLM 재사용) → dynmask → geocalib → graph → bank
-- 이상신호: Traceback / OOM / 30분간 신규 0
-
+### R52 DynPose 확장 D284 — ② nouns (recon 7,168/7,168 OK 18:36 완료)
+- screen  : vlm (vLLM Qwen3-VL, GPU 3, 로그 tmp/d284/vlm_server.log) + d284_nouns (16 worker, vista4d python)
+- 로그    : <repo>/tmp/d284/launch_nouns.log, tmp/d284/nouns_logs/shard{0..15}.log
+- 살아있나: extract_nouns_vlm 프로세스 16개 + 22002 응답
+- 나아가나: 로그의 `[multi|single] <uuid>` 줄 수 증가 (기준 ~99편/분, 9,396편)
+- 끝났나  : 16 shard 종료 → vLLM 내림 → metadata → SAM3(INGEST_GPU_ALLOW=0367) → dynmask → static SAM3+geocalib → graph → bank(d185+d199)
+- 이상신호: Traceback / 10분간 증가 0

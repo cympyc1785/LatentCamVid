@@ -21,7 +21,7 @@
   1차 (2026-09-24): mesh_grid EDT 로 벡터판 `mesh_ray_profile` — 194 ms/궤적, Blender 판정과 20씬 175 rung
   **88.0% 일치** (grid 만 탈락 19 / Blender 만 탈락 2). 원인: 시선 10(5 cm 격자가 얇은 물체 부풂),
   subject_dist 6(조준점 정의 차이). 다음: 2.5 cm 격자 + Blender 조준점 export → fit 게이트로 배선.
-### R52. DynPose 확장 — 사용자 지시 "gpu 0,3,6,7로 일단 돌려놔줘" (2026-09-25): 통과 9,396 중 신규 7,168 recon → … → bank
+### R52. DynPose 확장 — GPU 0,3,6,7 (6,7 은 사용자가 빼라 할 때까지). 결정(09-25): 로고 영상 탈락 유지 / bank 는 d200 설정(d185+d199). 신규 7,168: recon 82% → nouns → SAM3 → graph → bank → export
 ### R22. TRUMANS 데이터셋 구축 — **계획 승인됨 (2026-09-23)**
 조사: `tmp/agent/reader-r22-trumans.md` (핵심 주장 5건 직접 재확인). 사용자 결정 넷:
 ① 범위 = s3f0k6 **737 clip 전량** (191 은 prep 완료, 546 은 graph/cloud/mesh 부터)

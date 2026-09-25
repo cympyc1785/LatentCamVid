@@ -37,14 +37,6 @@ main session 은 컨텍스트가 압축되거나 세션이 끝나면 **자기가
 - 끝났나  : 로그 `[render] ALL DONE` → `--stage report` → 다음: d273 bank → raycast → caption → export
 - 이상신호: Traceback / 1시간 status 정지 / complete 비율 급락
 
-### R31 학습 dynpose_d200_molmo2_l21_da3_v12 (D274)
-- screen  : train1        pid: 2670785        GPU: 1
-- 로그    : <repo>/tmp/r31/train.log
-- 살아있나: pid 존재 + GPU 1 점유 > 10 GiB
-- 나아가나: tqdm `Epoch N` 증가
-- 끝났나  : epoch_cap 50 → results/*_dynpose_d200_molmo2_l21_da3_v12/ckpts/last.pth
-- 이상신호: Traceback / OOM / nan / 30분간 it 정지
-
 ### R52 DynPose 확장 D284 — ③ 동적 SAM3 (nouns 완료 20:30, metadata 17,489 = 유지 10,346 + 신규 7,143)
 - screen  : d284_sam3 (launch)   shard pid 2635347 2635350 (GPU3) 2635351 2635352 (GPU6) 2635356 (GPU7)  + shard4 재기동 screen d284_sam3_s4 pid 1442749 (GPU7, 23:37, 로그 sam3_logs/shard4_retry.log)
 - 로그    : <repo>/tmp/d284/launch_sam3.log, tmp/d284/sam3_logs/shard{0..5}.log
@@ -61,10 +53,16 @@ main session 은 컨텍스트가 압축되거나 세션이 끝나면 **자기가
 - 끝났나  : epoch_cap 50 → results/*_dynpose_d200_molmo2_l21_da3_v24/ckpts/last.pth
 - 이상신호: Traceback / OOM / nan / 30분간 it 정지
 
-### R58 D286 frame 캐시 굽기 (CPU) → R31 종료 후 GPU 1 본 학습
-- screen  : d286_frames0..11 (CPU, 12샤드)
-- 로그    : <repo>/tmp/r58/frames_{0..11}.log → DATA d200/molmo2_frames_378/<scene_key>.npy
-- 살아있나: cache_molmo2_frames 프로세스 12개
-- 나아가나: `[train] N/848` 증가 (1.41 s/scene/샤드)
-- 끝났나  : 12 로그 `ALL DONE` + 10,169 npy → frame 캐시 경로 smoke → screen train3 GPU 1 (R31 끝난 뒤)
-- 이상신호: Traceback / 10분간 N 정지
+### R58 D286 학습 dynpose_d200_siglip2conn_srccam (frozen ViT + 랜덤 초기화 connector)
+- screen  : train3        pid: 1675228 / 1675232        GPU: 1
+- 로그    : <repo>/tmp/r58/train.log   wandb fbf4lhqi   1.88 s/it 시작 (≈3 h/epoch)
+- 살아있나: pid 존재 + GPU 1 점유
+- 나아가나: tqdm `Epoch N` 증가
+- 끝났나  : epoch_cap 50 → results/*_dynpose_d200_siglip2conn_srccam/ckpts/last.pth
+- 이상신호: Traceback / OOM / nan / 30분간 it 정지
+
+### R55b testset eval — D274 v12 → d200 da3 (6 view, 30wxp65l) 순차 (last.pth, seed 42)
+- screen  : infer2 (GPU 0, R54 와 공유)
+- 로그    : <repo>/tmp/r55/eval_{d274,d200da3}.log
+- 끝났나  : 두 로그 `[done]` + metrics.json
+- 이상신호: Traceback

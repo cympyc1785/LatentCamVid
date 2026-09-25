@@ -60,9 +60,3 @@ main session 은 컨텍스트가 압축되거나 세션이 끝나면 **자기가
 - 나아가나: tqdm `Epoch N` 증가
 - 끝났나  : epoch_cap 50 → results/*_dynpose_d200_siglip2conn_srccam/ckpts/last.pth
 - 이상신호: Traceback / OOM / nan / 30분간 it 정지
-
-### R55b testset eval — D274 v12 → d200 da3 (6 view, 30wxp65l) 순차 (last.pth, seed 42)
-- screen  : infer2 (GPU 0, R54 와 공유)
-- 로그    : <repo>/tmp/r55/eval_{d274,d200da3}.log
-- 끝났나  : 두 로그 `[done]` + metrics.json
-- 이상신호: Traceback

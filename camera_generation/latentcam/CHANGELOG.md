@@ -5,6 +5,11 @@ All notable changes to the latentcam sub-project. Follows [Keep a Changelog](htt
 ## [Unreleased]
 
 ### Added
+- **video_onfly = molmo2_conn arm (2026-09-25, R58 / D286).** `models/molmo2_video_connector.py` —
+  frozen Molmo2 SigLIP2 ViT 를 매 스텝 돌리고 Molmo2 connector 구조(3x3 attention pooling + SwiGLU
+  projector)를 **랜덤 초기화로 학습**, 9x9->8x8 평균 후 video CA 로. dataset 이 `video_frames`(49x378x378
+  uint8)를 싣고, connector 는 `model.video_connector` 로 ckpt 에 저장된다. `conf/config.yaml`
+  `video_onfly: null`(기본 = 기존 동작), config `dynpose_d200_siglip2conn_srccam.yaml`, eval_testset 도 지원.
 - **DA3 24 프레임 arm (2026-09-25, R54 / D285).** `conf/experiment/dynpose_d200_molmo2_l21_da3_v24.yaml`
   — 부모 `dynpose_d200_molmo2_l21_da3` 대비 `geo_num_views 24` + 24-view bf16 raw 캐시(≈864 GB) 두 줄뿐.
 - **DA3 12 프레임 arm (2026-09-24, R31 / D274).** `conf/experiment/dynpose_d200_molmo2_l21_da3_v12.yaml`

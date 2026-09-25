@@ -540,6 +540,12 @@ geo_resampler_layers: 1
 #                           캡션 중복이 심해서 dedup 후 인덱스로 참조한다.
 peav_video_cache_dir: null
 peav_text_cache: null
+# [new 2026-09-25, R58/D286] 캐시 대신 **on-the-fly** video 스트림. null(기본) = 예전 그대로.
+#   'molmo2_conn' -> dataset 이 frame 49장(378x378 uint8)을 싣고, frozen Molmo2 SigLIP2 ViT ->
+#   **랜덤 초기화** Molmo2 connector(3x3 attn pooling + SwiGLU, 학습) -> 9x9->8x8 평균 -> 2560-d.
+#   models/molmo2_video_connector.py. peav_video_cache_dir: null, video_latent_dim: 2560 과 같이 쓴다.
+video_onfly: null
+video_onfly_pool: 8
 # [new 2026-09-18, D200] 위 두 캐시의 preload 를 **anonymous RAM 대신 mmap** 으로. false(기본) 면
 # 예전 그대로다. `geo_raw_cache_mmap` 과 같은 이유의 같은 스위치 — 주석은 그쪽에 자세히 있다.
 # 왜 필요해졌나: 위 설명의 "프레임당 토큰 1개"는 PE-AV 264 scene 기준이고, D200 의 molmo2 video

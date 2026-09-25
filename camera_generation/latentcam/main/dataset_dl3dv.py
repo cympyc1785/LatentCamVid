@@ -1857,6 +1857,13 @@ class CamDataset(torch.utils.data.Dataset):
         # (text_encoder=PEAV) 가 `.float()` 없이 text CA 로 바로 넣기 때문에 dtype 을 바꾸면 안 된다.
         if self._peav_video_mem:
             out['peav_video'] = self._peav_video_mem[self.geo_raw_key(data_name)]
+        # [new 2026-09-25, R58/D286] video_onfly='molmo2_conn': 캐시 대신 frame [s, e) 를 싣는다.
+        # SigLIP2 캐시(`cache_molmo2_embeddings.py --vit_only`)가 쓴 것과 같은 창이고, 전처리는
+        # Molmo2 video processor 앞단과 같다 (models/molmo2_video_connector.load_molmo2_frames).
+        # 끄면 키 자체가 안 생긴다.
+        if str(getattr(self.cfg, 'video_onfly', None) or '') == 'molmo2_conn':
+            from models.molmo2_video_connector import load_molmo2_frames
+            out['video_frames'] = load_molmo2_frames(self.frame_files_list[scene_idx], s, e)
         if self._peav_text is not None:
             _i = self._peav_text['by_name'][data_name]
             out['peav_text'] = self._peav_text['emb'][_i].float()

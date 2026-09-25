@@ -424,6 +424,11 @@ def aim_loss(cfg, camera_vae, noise_scheduler, noisy_x, noise_pred, timesteps, d
     return loss, deg, n
 
 
+# [new 2026-09-25, R58/D286] cfg.video_onfly 의 frozen ViT + 학습 connector. main()/eval_testset 이
+# `models.molmo2_video_connector.build_video_onfly` 로 채운다. None(기본)이면 아래 분기가 안 돈다.
+VIDEO_ONFLY = None
+
+
 def build_video_cond(data, device):
     """[new 2026-09-03] PE-AV 스트림(D117 video CA) 을 모델 kwargs dict 로 만든다.
 
@@ -435,6 +440,14 @@ def build_video_cond(data, device):
     kw = {}
     if 'peav_video' in data:
         kw['video_emb'] = data['peav_video'].to(device).float()
+    elif 'video_frames' in data and VIDEO_ONFLY is not None:
+        # frozen ViT 는 no_grad, connector 는 학습 모드일 때만 graph 를 만든다 — 호출부(학습 루프)가
+        # `with torch.no_grad()` 안이라 set_grad_enabled 로 다시 켠다. val/sample 은 model.eval()
+        # 이 connector 도 eval 로 내리므로 graph 가 안 생긴다.
+        _feat = VIDEO_ONFLY['vit'](data['video_frames'].to(device, non_blocking=True))
+        _conn = VIDEO_ONFLY['conn']
+        with torch.set_grad_enabled(_conn.training):
+            kw['video_emb'] = _conn(_feat).float()
     if kw and getattr(cfg, 'video_text_in_stream', False) and 'peav_text' in data:
         kw['video_text_emb'] = data['peav_text'].to(device).float()
         kw['video_text_mask'] = data['peav_text_mask'].to(device).bool()
@@ -766,6 +779,15 @@ def train():
         model = CameraDiffusionModel(cam_dim=cfg.cam_dim, cond_dim=_track_dim,
                                      pc_encoder=pc_encoder, **_geo_kw, **_vid_kw, **_sp_kw)
     
+    # [new 2026-09-25, R58/D286] video_onfly: connector 를 model submodule 로 붙인다 (resume/opt/ckpt
+    # 가 그대로 따라온다). null 이면 None 이고 모델은 예전과 동일하다.
+    global VIDEO_ONFLY
+    from models.molmo2_video_connector import build_video_onfly
+    VIDEO_ONFLY = build_video_onfly(cfg, model, device)
+    if VIDEO_ONFLY is not None:
+        assert accelerator.num_processes == 1, \
+            "video_onfly connector 는 forward 밖에서 불려서 DDP 다중 프로세스를 지원하지 않는다"
+
     # Load weights from the (peeked) resume checkpoint. Optimizer/step/epoch are
     # restored after accelerator.prepare() below (full resume only).
     if _resume is not None:

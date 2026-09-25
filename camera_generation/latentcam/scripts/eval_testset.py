@@ -320,6 +320,11 @@ def main():
               f"in_ln={_vid_kw['peav_in_ln']} gate={_vid_kw['video_gate']} "
               f"fuse={_vid_kw['video_text_fuse']}")
     model = CameraDiffusionModel(cam_dim=cfg.cam_dim, cond_dim=_track_dim, **_geo_kw, **_vid_kw)
+    # [new 2026-09-25, R58/D286] video_onfly arm: 학습된 connector 는 ckpt 의 `video_connector.*` 로
+    # 들어 있으므로 load 전에 같은 submodule 을 붙인다. frozen ViT 는 Molmo2 체크포인트에서 온다.
+    # video_onfly 가 null 이면 None 이고 모델은 기존과 동일.
+    from models.molmo2_video_connector import build_video_onfly
+    T.VIDEO_ONFLY = build_video_onfly(cfg, model, device)
     sd = torch.load(ckpt_path, map_location='cpu')
     sd = sd['model'] if isinstance(sd, dict) and 'model' in sd else sd
     model.load_state_dict(sd, strict=True)              # strict: a shape/name drift must not pass silently

@@ -1,0 +1,19 @@
+# @package _global_
+# D286 (R58) — siglip2_srccam (D269) 에 Molmo2 connector 를 **랜덤 초기화로 새로 학습**해 붙인 arm.
+# 사용자 지시 (2026-09-25): "molmo2 connector를 쓰되 새로 학습되게해줘", "ViT 자체는 freeze야",
+# 입력은 on-the-fly (27x27 bf16 캐시 ≈ 1.67 TB 라 캐시 안 함).
+#
+#   D269 siglip2_srccam : ViT 27x27x2304 -> **고정 평균** 8x8 -> video CA (2304-d)
+#   D286 (이것)          : ViT 27x27x2304 -> connector(3x3 attn pooling + SwiGLU, 학습) 9x9x2560
+#                          -> 8x8 평균 -> video CA (2560-d)
+#   d262 molmo2_l21     : ViT -> Molmo2 connector(원래 가중치) -> LM layer 21 -> 8x8 평균 (2560-d)
+# 토큰 수는 셋 다 49 x 64 = 3136. text = umt5 CA, camera = srccam plucker (부모 그대로).
+defaults:
+  - dynpose_d200_siglip2_srccam
+
+exp_name: dynpose_d200_siglip2conn_srccam
+
+peav_video_cache_dir: null     # 캐시 대신 on-the-fly
+video_onfly: molmo2_conn
+video_onfly_pool: 8
+video_latent_dim: 2560

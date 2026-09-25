@@ -45,13 +45,13 @@ main session 은 컨텍스트가 압축되거나 세션이 끝나면 **자기가
 - 끝났나  : epoch_cap 50 → results/*_dynpose_d200_molmo2_l21_da3_v12/ckpts/last.pth
 - 이상신호: Traceback / OOM / nan / 30분간 it 정지
 
-### R52 DynPose 확장 D284 — ② nouns (recon 7,168/7,168 OK 18:36 완료)
-- screen  : vlm (vLLM Qwen3-VL, GPU 3, 로그 tmp/d284/vlm_server.log) + d284_nouns (16 worker, vista4d python)
-- 로그    : <repo>/tmp/d284/launch_nouns.log, tmp/d284/nouns_logs/shard{0..15}.log
-- 살아있나: extract_nouns_vlm 프로세스 16개 + 22002 응답
-- 나아가나: 로그의 `[multi|single] <uuid>` 줄 수 증가 (기준 ~99편/분, 9,396편)
-- 끝났나  : 16 shard 종료 → vLLM 내림 → metadata **--keep_metadata** → SAM3(INGEST_GPU_ALLOW=0367) → dynmask 는 **launch 금지**(구 10,346 덮어씀) — NEW 목록만 직접 → static 명사 --merge → static SAM3+geocalib → graph → bank(d185+d199). 근거 tmp/agent/reader-d284-sam3-merge.md
-- 이상신호: Traceback / 10분간 증가 0
+### R52 DynPose 확장 D284 — ③ 동적 SAM3 (nouns 완료 20:30, metadata 17,489 = 유지 10,346 + 신규 7,143)
+- screen  : d284_sam3 (launch)   shard pid 2635347 2635350 (GPU3) 2635351 2635352 (GPU6) 2635353 2635356 (GPU7)
+- 로그    : <repo>/tmp/d284/launch_sam3.log, tmp/d284/sam3_logs/shard{0..5}.log
+- 살아있나: shard pid 6개 + GPU 3/6/7 점유 (~13~25 GB)
+- 나아가나: DATA/DynPose-100K/eval_data/seg_instances/*/masks.npz 신규 증가 (20:50 이후 mtime)
+- 끝났나  : launch 로그 `launch sam3 완료` → dynmask 는 **launch 금지**, NEW 목록만 직접 → static 명사 --merge → static SAM3+geocalib → graph → bank(d185+d199). 근거 tmp/agent/reader-d284-sam3-merge.md
+- 이상신호: Traceback / OOM / 30분간 신규 0
 
 ### R54 D285 DA3 24-view bf16 캐시 굽기 → 이후 smoke → 학습 (GPU 0)
 - screen  : d285_bake0/1/2 (3 샤드 모두 GPU 0)
@@ -60,11 +60,3 @@ main session 은 컨텍스트가 압축되거나 세션이 끝나면 **자기가
 - 나아가나: `[train] N/3390` 증가 (~1.0 s/scene/샤드 → train ≈ 57분 + test)
 - 끝났나  : 세 로그 종료 + 캐시 디렉토리 10,169 → smoke (WANDB off) → screen train2 GPU 0 본 학습
 - 이상신호: Traceback / OOM / 10분간 N 정지
-
-### R55 testset eval — d262 molmo2_l21_srccam vs D269 siglip2_srccam (last.pth, seed 42)
-- screen  : infer2 (d262, GPU 6)   infer3 (D269, GPU 7)
-- 로그    : <repo>/tmp/r55/eval_{d262,d269}.log → 산출 camera_generation/latentcam/eval_my/<run>__last__seed42/
-- 살아있나: eval_testset 프로세스 + GPU 6/7 점유
-- 나아가나: tqdm N/643 증가
-- 끝났나  : `[done]` + metrics.json
-- 이상신호: Traceback / 10분간 N 정지

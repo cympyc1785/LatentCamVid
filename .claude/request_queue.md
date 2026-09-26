@@ -25,6 +25,7 @@
 ### R54. d200 molmo2_l21_da3 에 DA3 dense frame **24프레임** 으로 학습 — GPU 0 (2026-09-25) · D285 캐시 10,169 완료 (863.70 GB) → smoke rc=0 → **screen train2 GPU 0 본 학습**
 ### R58. SigLIP2 arm 에 Molmo2 connector(attention pooling + projector) 를 붙이되 **새로 학습**되게 (2026-09-25) · D286 frame 캐시+worker16 → **screen train3 GPU 1 본 학습** (fbf4lhqi, 1.88 s/it ≈ 6.2일)
 ### R59. molmo2_l21 + da3 에서 **DA3 에 source camera 를 안 넣고** 학습 — GPU 2 (2026-09-26) · D287 unposed 캐시 10,169 → smoke rc=0 → **screen train1 GPU 2 본 학습** (faq38efm)
+### R60. R58 을 ViT 출력 캐시로 굽고 이어서 학습 (2026-09-27) — 사용자 지시로 R54/R58/R59 전부 중단(01:15) → GPU 1 ViT 캐시 굽는 중(0.74 s/scene/샤드, 동일성 확인) → R58 resume. R54/R59 는 tasks.md A5 todo, 빈 GPU 0/2 는 D284 정적 SAM3
 ### R22. TRUMANS 데이터셋 구축 — **계획 승인됨 (2026-09-23)**
 조사: `tmp/agent/reader-r22-trumans.md` (핵심 주장 5건 직접 재확인). 사용자 결정 넷:
 ① 범위 = s3f0k6 **737 clip 전량** (191 은 prep 완료, 546 은 graph/cloud/mesh 부터)

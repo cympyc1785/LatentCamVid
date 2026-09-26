@@ -56,6 +56,17 @@ subject-in-frame fraction, collision도 포함해서". 두 건 다 **eval 이 �
 
 ---
 
+### A5. [TODO] 사용자 지시로 **중단**한 학습 2건 — 재개 대기 (2026-09-27 01:15 Ctrl+C)
+사용자 지시: "R54, R59, R58학습은 멈춰두고 R58만 caching 끝나면 이어서 학습해주고 나머진 todo로 기록만 해놔줘".
+재개 명령 (cwd `camera_generation/latentcam/main`, `PYTHONPATH=<latentcam>:.`, GPU 는 0~3 중 빈 곳):
+- **R54 / D285** `dynpose_d200_molmo2_l21_da3_v24` (wandb 1p2s0n8b) — resume.pth epoch 21 저장 → epoch 22 부터.
+  `train_latent_cam_dm.py experiment=dynpose_d200_molmo2_l21_da3_v24 load_ckpt_path=../results/20260925_224958_dynpose_d200_molmo2_l21_da3_v24/ckpts/resume.pth`
+  (중단 시 epoch 22 38% 진행분은 버려짐. 캐시 geo_raw_cache_da3_v24_bf16 863.70 GB 유지 필요)
+- **R59 / D287** `dynpose_d200_molmo2_l21_da3_unposed` (wandb faq38efm) — resume.pth epoch 0 저장 → epoch 1 부터.
+  `train_latent_cam_dm.py experiment=dynpose_d200_molmo2_l21_da3_unposed load_ckpt_path=../results/20260927_000831_dynpose_d200_molmo2_l21_da3_unposed/ckpts/resume.pth`
+  (중단 시 epoch 1 91% 진행분 버려짐. 캐시 geo_raw_cache_da3_unposed_bf16 유지 필요)
+- R58 / D286 은 ViT 캐시 굽기 후 바로 재개 (A5 대상 아님, request_queue R60).
+
 ## B. 승인·결정 대기
 
 | # | 건 | 필요한 답 |

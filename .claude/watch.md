@@ -38,32 +38,16 @@ main session 은 컨텍스트가 압축되거나 세션이 끝나면 **자기가
 - 이상신호: Traceback / 1시간 status 정지 / complete 비율 급락
 
 ### R52 DynPose 확장 D284 — ⑤ 정적 SAM3 + geocalib (dynmask 7,143 완료 21:21)
-- screen  : d284_s3s0/1 (GPU 3) → 끝나면 d284_s3s_chainA(샤드 2→4)/chainB(3→5) 가 GPU 3 에서 이어 돈다 (GPU 6,7 사용 금지 2026-09-27; 샤드 2~5 는 ~280편에서 중단, --skip_done 재개). geocalib 완료
+- screen  : d284_s3s0/1 (GPU 3), d284_s3s2/3 (GPU 0), d284_s3s4/5 (GPU 2) — 01:20 재배치 (학습 중단으로 빈 GPU). geocalib 완료
 - 로그    : <repo>/tmp/d284/sam3s_logs/shard{0..5}.log (GPU6/7 1차), shard{2..5}_gpu3.log, s3s_chain{A,B}.log
 - 나아가나: eval_data/seg_instances_static/*/meta.json 신규 (21:20 이후) · out_dynpose/*/geocalib_gravity.json 신규
 - 끝났나  : s3s screen 0 + static 7,139 / geo screen 0 + 7,143 → graph (run_bank d182, CPU) → dynmask --demote_static_objects → bank (d185+d199)
 - 이상신호: Traceback / OutOfMemoryError (→ 그 샤드만 --skip_done 단독 재실행) / 30분간 증가 0
 
-### R54 D285 학습 dynpose_d200_molmo2_l21_da3_v24 (DA3 24 view)
-- screen  : train2        pid: 1213083 (bash) / 1213086        GPU: 0
-- 로그    : <repo>/tmp/r54/train.log (smoke tmp/r54/smoke.log rc=0, V=24, val/loss_traj 3.012646)
-- 살아있나: pid 존재 + GPU 0 점유 > 10 GiB
-- 나아가나: tqdm `Epoch N` 증가
-- 끝났나  : epoch_cap 50 → results/*_dynpose_d200_molmo2_l21_da3_v24/ckpts/last.pth
-- 이상신호: Traceback / OOM / nan / 30분간 it 정지
-
-### R58 D286 학습 dynpose_d200_siglip2conn_srccam (frozen ViT + 랜덤 초기화 connector)
-- screen  : train3        pid: 1675228 / 1675232        GPU: 1
-- 로그    : <repo>/tmp/r58/train.log   wandb fbf4lhqi   1.88 s/it 시작 (≈3 h/epoch)
-- 살아있나: pid 존재 + GPU 1 점유
-- 나아가나: tqdm `Epoch N` 증가
-- 끝났나  : epoch_cap 50 → results/*_dynpose_d200_siglip2conn_srccam/ckpts/last.pth
-- 이상신호: Traceback / OOM / nan / 30분간 it 정지
-
-### R59 D287 학습 dynpose_d200_molmo2_l21_da3_unposed (DA3 에 소스 카메라 없음)
-- screen  : train1        pid: 1955311 / 1955312        GPU: 2
-- 로그    : <repo>/tmp/r59/train.log   wandb faq38efm   ~3.3 it/s 시작 (≈30 분/epoch)
-- 살아있나: pid 존재 + GPU 2 점유
-- 나아가나: tqdm `Epoch N` 증가
-- 끝났나  : epoch_cap 50 → results/*_dynpose_d200_molmo2_l21_da3_unposed/ckpts/last.pth
-- 이상신호: Traceback / OOM / nan / 30분간 it 정지
+### R60 R58 ViT 출력 캐시 굽기 (GPU 1) → R58 resume (epoch 7 부터)
+- screen  : d288_vitfeat0/1/2 (GPU 1)
+- 로그    : <repo>/tmp/r58/vitfeat_{0,1,2}.log → d200/molmo2_vitfeat_27/<scene_key>.npy (uint16=bf16 49x729x2304)
+- 나아가나: `[train] N/3390` (0.74 s/scene/샤드)
+- 끝났나  : 3 로그 `[feat] ALL DONE` + 10,169 npy → smoke → screen train3 GPU 1 resume
+            (`load_ckpt_path=../results/20260926_011215_dynpose_d200_siglip2conn_srccam/ckpts/resume.pth`)
+- 이상신호: Traceback / 10분간 N 정지

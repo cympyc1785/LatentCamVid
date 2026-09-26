@@ -38,8 +38,8 @@ main session 은 컨텍스트가 압축되거나 세션이 끝나면 **자기가
 - 이상신호: Traceback / 1시간 status 정지 / complete 비율 급락
 
 ### R52 DynPose 확장 D284 — ⑤ 정적 SAM3 + geocalib (dynmask 7,143 완료 21:21)
-- screen  : d284_s3s0..5 (GPU 3,3,6,6,7,7, expandable_segments)  ·  d284_geo0..2 (GPU 3/6/7)
-- 로그    : <repo>/tmp/d284/sam3s_logs/shard{0..5}.log · tmp/d284/geocalib_logs/shard{0..2}.log
+- screen  : d284_s3s0/1 (GPU 3) → 끝나면 d284_s3s_chainA(샤드 2→4)/chainB(3→5) 가 GPU 3 에서 이어 돈다 (GPU 6,7 사용 금지 2026-09-27; 샤드 2~5 는 ~280편에서 중단, --skip_done 재개). geocalib 완료
+- 로그    : <repo>/tmp/d284/sam3s_logs/shard{0..5}.log (GPU6/7 1차), shard{2..5}_gpu3.log, s3s_chain{A,B}.log
 - 나아가나: eval_data/seg_instances_static/*/meta.json 신규 (21:20 이후) · out_dynpose/*/geocalib_gravity.json 신규
 - 끝났나  : s3s screen 0 + static 7,139 / geo screen 0 + 7,143 → graph (run_bank d182, CPU) → dynmask --demote_static_objects → bank (d185+d199)
 - 이상신호: Traceback / OutOfMemoryError (→ 그 샤드만 --skip_done 단독 재실행) / 30분간 증가 0

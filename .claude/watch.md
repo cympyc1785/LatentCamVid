@@ -37,13 +37,12 @@ main session 은 컨텍스트가 압축되거나 세션이 끝나면 **자기가
 - 끝났나  : 로그 `[render] ALL DONE` → `--stage report` → 다음: d273 bank → raycast → caption → export
 - 이상신호: Traceback / 1시간 status 정지 / complete 비율 급락
 
-### R52 DynPose 확장 D284 — ③ 동적 SAM3 (nouns 완료 20:30, metadata 17,489 = 유지 10,346 + 신규 7,143)
-- screen  : d284_sam3 (launch)   shard pid 2635347 2635350 (GPU3) 2635351 2635352 (GPU6) 2635356 (GPU7)  + shard4 재기동 screen d284_sam3_s4 pid 1442749 (GPU7, 23:37, 로그 sam3_logs/shard4_retry.log)
-- 로그    : <repo>/tmp/d284/launch_sam3.log, tmp/d284/sam3_logs/shard{0..5}.log
-- 살아있나: shard pid 6개 + GPU 3/6/7 점유 (~13~25 GB)
-- 나아가나: DATA/DynPose-100K/eval_data/seg_instances/*/masks.npz 신규 증가 (20:50 이후 mtime)
-- 끝났나  : launch 로그 `launch sam3 완료` → dynmask 는 **launch 금지**, NEW 목록만 직접 → static 명사 --merge → static SAM3+geocalib → graph → bank(d185+d199). 근거 tmp/agent/reader-d284-sam3-merge.md
-- 이상신호: Traceback / OOM / 30분간 신규 0
+### R52 DynPose 확장 D284 — ⑤ 정적 SAM3 + geocalib (dynmask 7,143 완료 21:21)
+- screen  : d284_s3s0..5 (GPU 3,3,6,6,7,7, expandable_segments)  ·  d284_geo0..2 (GPU 3/6/7)
+- 로그    : <repo>/tmp/d284/sam3s_logs/shard{0..5}.log · tmp/d284/geocalib_logs/shard{0..2}.log
+- 나아가나: eval_data/seg_instances_static/*/meta.json 신규 (21:20 이후) · out_dynpose/*/geocalib_gravity.json 신규
+- 끝났나  : s3s screen 0 + static 7,139 / geo screen 0 + 7,143 → graph (run_bank d182, CPU) → dynmask --demote_static_objects → bank (d185+d199)
+- 이상신호: Traceback / OutOfMemoryError (→ 그 샤드만 --skip_done 단독 재실행) / 30분간 증가 0
 
 ### R54 D285 학습 dynpose_d200_molmo2_l21_da3_v24 (DA3 24 view)
 - screen  : train2        pid: 1213083 (bash) / 1213086        GPU: 0

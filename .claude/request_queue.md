@@ -21,7 +21,7 @@
   1차 (2026-09-24): mesh_grid EDT 로 벡터판 `mesh_ray_profile` — 194 ms/궤적, Blender 판정과 20씬 175 rung
   **88.0% 일치** (grid 만 탈락 19 / Blender 만 탈락 2). 원인: 시선 10(5 cm 격자가 얇은 물체 부풂),
   subject_dist 6(조준점 정의 차이). 다음: 2.5 cm 격자 + Blender 조준점 export → fit 게이트로 배선.
-### R52. DynPose 확장 — GPU 0,3,6,7 (6,7 은 사용자가 빼라 할 때까지). 결정(09-25): 로고 영상 탈락 유지 / bank 는 d200 설정(d185+d199). 신규 7,168: recon 완료(7,168 OK) → nouns 진행중 → SAM3 → graph → bank → export
+### R52. DynPose 확장 — GPU 0,3,6,7 (6,7 은 사용자가 빼라 할 때까지). 결정(09-25): 로고 영상 탈락 유지 / bank 는 d200 설정(d185+d199). 신규 7,143: recon ✓ nouns ✓ 동적 SAM3 ✓ dynmask ✓ 정적 명사 ✓ → 정적 SAM3·geocalib 진행중 → graph → demote → bank → export
 ### R54. d200 molmo2_l21_da3 에 DA3 dense frame **24프레임** 으로 학습 — GPU 0 (2026-09-25) · D285 캐시 10,169 완료 (863.70 GB) → smoke rc=0 → **screen train2 GPU 0 본 학습**
 ### R58. SigLIP2 arm 에 Molmo2 connector(attention pooling + projector) 를 붙이되 **새로 학습**되게 (2026-09-25) · D286 frame 캐시+worker16 → **screen train3 GPU 1 본 학습** (fbf4lhqi, 1.88 s/it ≈ 6.2일)
 ### R22. TRUMANS 데이터셋 구축 — **계획 승인됨 (2026-09-23)**

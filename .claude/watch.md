@@ -37,12 +37,12 @@ main session 은 컨텍스트가 압축되거나 세션이 끝나면 **자기가
 - 끝났나  : 로그 `[render] ALL DONE` → `--stage report` → 다음: d273 bank → raycast → caption → export
 - 이상신호: Traceback / 1시간 status 정지 / complete 비율 급락
 
-### R52 DynPose 확장 D284 — ⑤ 정적 SAM3 + geocalib (dynmask 7,143 완료 21:21)
-- screen  : d284_s3s0..9 = 10샤드 GPU 0,0,2,2,3,3,6,6,7,7 (01:44 재분배, GPU 6,7 은 10:50 까지 한정 — screen gpu67_plan 이 그때 6,7 을 내린다, 로그 tmp/d284/gpu67_deadline.log). 로그 sam3s_logs/r10_shard*.log. geocalib 완료
-- 로그    : <repo>/tmp/d284/sam3s_logs/shard{0..5}.log (GPU6/7 1차), shard{2..5}_gpu3.log, s3s_chain{A,B}.log
-- 나아가나: eval_data/seg_instances_static/*/meta.json 신규 (21:20 이후) · out_dynpose/*/geocalib_gravity.json 신규
-- 끝났나  : s3s screen 0 + static 7,139 / geo screen 0 + 7,143 → graph (run_bank d182, CPU) → dynmask --demote_static_objects → bank (d185+d199)
-- 이상신호: Traceback / OutOfMemoryError (→ 그 샤드만 --skip_done 단독 재실행) / 30분간 증가 0
+### R52 DynPose 확장 D284 — ⑥ scene graph (CPU) · 정적 SAM3 완료 09-27 07:20 (6,937 + 정적 명사 0개 202)
+- screen  : d284_graph0..11 (CPU, run_bank d182 `--stages graph --num_shards 12`, OMP 4)
+- 로그    : <repo>/tmp/d284/graph_logs/s*.out, 씬 로그 tmp/d284/graph_scene_logs/
+- 나아가나: out_dynpose/<v>/.graph_d182 신규 (smoke 1편 238 s → 12샤드 ≈ 39 h, TRUMANS prep 끝나면 24샤드로)
+- 끝났나  : 12 로그 `=== 요약 ===` → dynmask --demote_static_objects (신규 목록) → bank d185 (GPU 0~3 x2) → d199
+- 이상신호: `FAIL(` / Traceback / 30분간 증가 0
 
 ### R22 TRUMANS d277T 선행 graph+mesh (CPU, 3,440 board clip)
 - screen  : d277T_prep0..11 (CPU, run_bank --stages graph,mesh --num_shards 12, OMP/MKL 4스레드 — 01:50 24→12 축소)

@@ -67,6 +67,22 @@ subject-in-frame fraction, collision도 포함해서". 두 건 다 **eval 이 �
   (중단 시 epoch 1 91% 진행분 버려짐. 캐시 geo_raw_cache_da3_unposed_bf16 유지 필요)
 - R58 / D286 은 ViT 캐시 굽기 후 바로 재개 (A5 대상 아님, request_queue R60).
 
+### A6. 이후 실행 계획 (2026-09-27 02:30 작성, 사용자 요청 "이후 돌릴 것들도 계획 세워줘")
+GPU 0~3 (+ 6,7 은 09-27 10:50 까지). 추정치는 현재 실측 속도 기준.
+1. **D284 정적 SAM3** (GPU 0,2,3,6,7, 15편/분) → ~09-27 07:30.
+   끝나면 gpu67_plan: GPU6 d268 testset eval, GPU7 R59 resume (10:50 에 내림).
+2. **D284 scene graph** (CPU, d182 config `--stages graph`, 228 s/편) 07:30 시작 — TRUMANS prep 과 CPU 공유라
+   처음엔 12샤드, prep 끝나면 24샤드 → ~09-28 04:00. → **demote** (dynmask `--demote_static_objects`, CPU <1h).
+3. **TRUMANS d277T prep** (CPU 24샤드, 6편/분) → ~09-27 11:30 → **GPU 단계** cloud,route,tau,fit,emit
+   (BANK_GPU_ALLOW=0123, GPU 0,2,3 x2샤드) → ~09-28 04:00 (tau+fit ~100 s/편 가정). 그 사이 export 스크립트
+   board 이름 수리 (build_trumans_metadata.py:72,106 · trumans_lite_to_dl3dv.py:97-110) → caption(Qwen3-VL) → 단독 코퍼스 export.
+4. **D284 bank** d185 grid5 (GPU 0,2,3 x2샤드, 116 s/씬) 09-28 04:00 → ~09-29 18:00 → d199 frame0 anchors (~3h)
+   → desc(vLLM) → captions → export → 학습 캐시(umt5 / molmo2 l21 / siglip2 / DA3 geo raw) → d200 과 합친 새 corpus 세대.
+5. **학습**: R58 (GPU 1) ~09-29 12:00 종료 예상. R54·R59 (A5 todo) 는 GPU 가 나면 — 3·4 와 GPU 가 겹치므로 우선순위 결정 필요.
+6. **eval**: d268 (09-27 GPU6), d263 (seg-list id 수리 필요, A3), R58·R54·R59 는 끝난 뒤 → 통합 표.
+7. **정리 승인 대기**: molmo2_frames_378 (≈213 GB, feat 캐시로 대체), smoke 결과 폴더, tmp/agent 보고서, tmp/r61/agg.pkl,
+   tmp/r22b/corrupt_mesh_gt/.
+
 ## B. 승인·결정 대기
 
 | # | 건 | 필요한 답 |

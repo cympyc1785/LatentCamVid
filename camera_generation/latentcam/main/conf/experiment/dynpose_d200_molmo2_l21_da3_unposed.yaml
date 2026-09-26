@@ -1,0 +1,20 @@
+# @package _global_
+# D287 (R59) — `dynpose_d200_molmo2_l21_da3` (30wxp65l) 와 같되 **DA3 에 소스 카메라를 안 넣는다**.
+# 사용자 지시 (2026-09-26): "molmo2_l21 + da3로 학습하되 da3에 source camera가 안들어가도록해서".
+#
+# 부모는 `geo_posed: true` — dataset 이 geo view 6장의 c2w/intrinsics(= 소스 카메라)를 싣고
+# `da3_geo_encoder.build_cam_token` 이 DA3 cam_enc 로 넣는다. 여기서는 false 라 그 키가 안 생기고
+# DA3 는 이미지 6장만 본다 (카메라는 DA3 가 스스로 추정). geo_cam_embed 는 부모부터 null 이라
+# 다른 경로로 소스 카메라가 들어가는 곳은 없다.
+#
+# 캐시: pre-ln DA3 토큰이 cam token 에 의존하므로 부모 캐시(posed)를 못 쓴다 → 6 view unposed
+# bf16 를 새로 굽는다 (`cache_geo_raw_da3.py SAVE_DTYPE=bfloat16`, ≈ 201 GB). meta.geo_posed 가
+# 달라 is_done 이 섞이지 않게 디렉토리도 나눈다.
+defaults:
+  - dynpose_d200_molmo2_l21_da3
+
+exp_name: dynpose_d200_molmo2_l21_da3_unposed
+
+geo_posed: false
+geo_raw_cache_dir: /data1/cympyc1785/data/DynPose-LBM/latentcam_dynpose_d200/geo_raw_cache_da3_unposed_bf16
+geo_raw_cache_dtype: bfloat16

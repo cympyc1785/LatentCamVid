@@ -5,6 +5,8 @@ All notable changes to the latentcam sub-project. Follows [Keep a Changelog](htt
 ## [Unreleased]
 
 ### Added
+- **DA3 unposed arm (2026-09-26, R59 / D287).** `conf/experiment/dynpose_d200_molmo2_l21_da3_unposed.yaml` —
+  부모 `dynpose_d200_molmo2_l21_da3` 대비 `geo_posed: false`(DA3 에 소스 카메라 cam token 없음) + unposed 6-view bf16 캐시.
 - **video_onfly = molmo2_conn arm (2026-09-25, R58 / D286).** `models/molmo2_video_connector.py` —
   frozen Molmo2 SigLIP2 ViT 를 매 스텝 돌리고 Molmo2 connector 구조(3x3 attention pooling + SwiGLU
   projector)를 **랜덤 초기화로 학습**, 9x9->8x8 평균 후 video CA 로. dataset 이 `video_frames`(49x378x378

@@ -60,9 +60,10 @@ main session 은 컨텍스트가 압축되거나 세션이 끝나면 **자기가
 - 끝났나  : epoch_cap 50 → results/*_dynpose_d200_siglip2conn_srccam/ckpts/last.pth
 - 이상신호: Traceback / OOM / nan / 30분간 it 정지
 
-### R59 D287 DA3 unposed 6-view bf16 캐시 굽기 → smoke → 학습 (GPU 2)
-- screen  : d287_bake0/1/2 (GPU 2)
-- 로그    : <repo>/tmp/r59/bake_{0,1,2}.log  (`posed=False` 확인)
-- 나아가나: `[train] N/3390` 증가 (~0.89 s/scene/샤드)
-- 끝났나  : bake screen 0 + 10,169 → smoke (WANDB off) → screen train1 GPU 2 본 학습
-- 이상신호: Traceback / 10분간 N 정지
+### R59 D287 학습 dynpose_d200_molmo2_l21_da3_unposed (DA3 에 소스 카메라 없음)
+- screen  : train1        pid: 1955311 / 1955312        GPU: 2
+- 로그    : <repo>/tmp/r59/train.log   wandb faq38efm   ~3.3 it/s 시작 (≈30 분/epoch)
+- 살아있나: pid 존재 + GPU 2 점유
+- 나아가나: tqdm `Epoch N` 증가
+- 끝났나  : epoch_cap 50 → results/*_dynpose_d200_molmo2_l21_da3_unposed/ckpts/last.pth
+- 이상신호: Traceback / OOM / nan / 30분간 it 정지

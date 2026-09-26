@@ -44,17 +44,17 @@ main session 은 컨텍스트가 압축되거나 세션이 끝나면 **자기가
 - 끝났나  : s3s screen 0 + static 7,139 / geo screen 0 + 7,143 → graph (run_bank d182, CPU) → dynmask --demote_static_objects → bank (d185+d199)
 - 이상신호: Traceback / OutOfMemoryError (→ 그 샤드만 --skip_done 단독 재실행) / 30분간 증가 0
 
-### R60 R58 ViT 출력 캐시 굽기 (GPU 1) → R58 resume (epoch 7 부터)
-- screen  : d288_vitfeat0/1/2 (GPU 1)
-- 로그    : <repo>/tmp/r58/vitfeat_{0,1,2}.log → d200/molmo2_vitfeat_27/<scene_key>.npy (uint16=bf16 49x729x2304)
-- 나아가나: `[train] N/3390` (0.74 s/scene/샤드)
-- 끝났나  : 3 로그 `[feat] ALL DONE` + 10,169 npy → smoke → screen train3 GPU 1 resume
-            (`load_ckpt_path=../results/20260926_011215_dynpose_d200_siglip2conn_srccam/ckpts/resume.pth`)
-- 이상신호: Traceback / 10분간 N 정지
-
 ### R22 TRUMANS d277T 선행 graph+mesh (CPU, 3,440 board clip)
 - screen  : d277T_prep0..11 (CPU, run_bank --stages graph,mesh --num_shards 12, OMP/MKL 4스레드 — 01:50 24→12 축소)
 - 로그    : <repo>/tmp/r22b/banklog/d277T_prep12_s*.out, 씬 로그 tmp/r22b/banklog/d277T/
 - 나아가나: out_trumans/<clip>/{.graph_s115, mesh_grid.npz} 증가 (smoke 1편 graph 209 s + mesh 67 s → 24샤드 ≈ 11 h)
 - 끝났나  : 24 screen 종료 + 3,440 mesh_grid → GPU 단계 (cloud,route,tau,fit,emit; BANK_GPU_ALLOW=0123, 카드당 2)
 - 이상신호: `FAIL` 줄 / Traceback / 30분간 증가 0
+
+### R58 D286 학습 재개 (ViT feat 캐시, epoch 7 부터)
+- screen  : train3        GPU: 1        wandb fbf4lhqi
+- 로그    : <repo>/tmp/r58/train.log (append)   1.19 it/s (≈81 분/epoch)
+- 살아있나: train_latent_cam_dm ... siglip2conn_srccam 프로세스 + GPU 1 점유
+- 나아가나: tqdm `Epoch N` 증가
+- 끝났나  : epoch_cap 50 → results/20260926_011215_dynpose_d200_siglip2conn_srccam/ckpts/last.pth
+- 이상신호: Traceback / OOM / nan / 30분간 it 정지

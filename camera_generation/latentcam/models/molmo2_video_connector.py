@@ -137,6 +137,20 @@ class Molmo2Connector(nn.Module):
         return h.permute(0, 2, 3, 1).reshape(B, T * self.out_pool ** 2, -1)
 
 
+class _LazyViT:
+    """첫 호출 때 FrozenMolmo2ViT 를 만든다. feat 캐시가 전부 hit 이면 끝까지 안 만들어진다."""
+
+    def __init__(self, device):
+        self.device, self.vit = device, None
+        self.vit_layers = '(lazy — feat 캐시 miss 때 로드)'
+
+    def __call__(self, frames):
+        if self.vit is None:
+            print("(video_onfly) feat 캐시 miss → frozen ViT 로드", flush=True)
+            self.vit = FrozenMolmo2ViT().to(self.device)
+        return self.vit(frames)
+
+
 def build_video_onfly(cfg, model, device):
     """cfg.video_onfly 에 맞는 on-the-fly video 스트림을 만든다. 없으면 None (기존 arm 무영향).
 
@@ -151,7 +165,9 @@ def build_video_onfly(cfg, model, device):
     assert int(getattr(cfg, 'video_latent_dim', 0) or 0) == 2560, \
         "molmo2_conn 출력은 2560-d (text_hidden_size) — video_latent_dim: 2560"
     model.video_connector = Molmo2Connector(out_pool=int(getattr(cfg, 'video_onfly_pool', 8)))
-    vit = FrozenMolmo2ViT().to(device)
+    # [2026-09-27] ViT 출력 캐시(`video_onfly_feat_cache`)가 있으면 ViT 는 캐시 miss 때만 필요하다 →
+    # 첫 miss 때 올린다 (Molmo2-4B 체크포인트 로드가 디스크 경합에서 12분 걸렸다). 캐시가 없으면 예전처럼 바로.
+    vit = _LazyViT(device) if getattr(cfg, 'video_onfly_feat_cache', None) else FrozenMolmo2ViT().to(device)
     n = sum(p.numel() for p in model.video_connector.parameters())
     print(f"(model) video_onfly=molmo2_conn: frozen Molmo2 SigLIP2 ViT layers {vit.vit_layers} "
           f"(27x27x2304) -> connector 랜덤 초기화 {n / 1e6:.2f} M params (학습) -> "

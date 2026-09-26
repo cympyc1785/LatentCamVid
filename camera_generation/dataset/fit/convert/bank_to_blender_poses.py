@@ -80,6 +80,19 @@ def chunk_paths(video: str, recon_root: str):
 
     recording 은 8자리 prefix 로만 이름에 남아 있어서 full uuid 를 디렉토리에서 되찾아야 한다.
     """
+    # [new 2026-09-27, R22] board 규약은 `scene_graph.gt_trumans.board_folder` 가 해석한다 (한 곳).
+    from scene_graph.gt_trumans import board_folder
+    board = board_folder(video, recon_root)
+    if board is not None:
+        folder, key = board
+        assert folder, f"board recon 폴더(<uuid>/)를 하나로 못 찾았다: {recon_root}/{video.split('_')[1]}-*"
+        recording = path.basename(folder)
+        manifest = path.join(folder, f"manifest_{key}.json")
+        poses = path.join(folder, f"poses_{key}.npz")
+        blend = path.join(RECORDINGS, recording, f"{recording}.blend")
+        for p in (manifest, poses, blend):
+            assert path.exists(p), f"없다: {p}"
+        return manifest, poses, blend
     parts = video.split("_")
     assert parts[0] == "tru" and len(parts) >= 4, f"chunk 이름 규약이 아니다: {video}"
     rec8, action, tag = parts[1], parts[2], "_".join(parts[3:])

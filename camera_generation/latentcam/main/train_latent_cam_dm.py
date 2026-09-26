@@ -440,6 +440,11 @@ def build_video_cond(data, device):
     kw = {}
     if 'peav_video' in data:
         kw['video_emb'] = data['peav_video'].to(device).float()
+    elif 'video_feat' in data and VIDEO_ONFLY is not None:
+        # [new 2026-09-27, R58] frozen ViT 출력 캐시 — ViT 를 건너뛰고 connector 만 돈다.
+        _conn = VIDEO_ONFLY['conn']
+        with torch.set_grad_enabled(_conn.training):
+            kw['video_emb'] = _conn(data['video_feat'].to(device, non_blocking=True)).float()
     elif 'video_frames' in data and VIDEO_ONFLY is not None:
         # frozen ViT 는 no_grad, connector 는 학습 모드일 때만 graph 를 만든다 — 호출부(학습 루프)가
         # `with torch.no_grad()` 안이라 set_grad_enabled 로 다시 켠다. val/sample 은 model.eval()

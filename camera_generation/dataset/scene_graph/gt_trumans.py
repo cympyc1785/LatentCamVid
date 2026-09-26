@@ -36,6 +36,7 @@ subject 도 GT 로 준다 (D106). depth 점군 OBB 는 **보이는 면만** 있�
     s["centers_g"], s["extent_u"], s["yaw_g"]        # G frame, 단위 u
 """
 import json
+import re
 from glob import glob
 from os import path
 
@@ -43,6 +44,28 @@ import numpy as np
 
 RECON_ROOT_DEFAULT = path.join(path.dirname(path.dirname(path.abspath(__file__))),
                                "out", "trumans_recon")
+
+
+# [new 2026-09-27, R22] board 규약 (`exec/run_board_sources.py` → `trumans_to_recon.py --board`):
+# 이름 `tru_<rec8>_cNN_fNNNNN_kNNN_pN`, 작업 폴더는 **접미사 없는** `<uuid>/`, 그 안에
+# `render_<key>/` `probe_<key>.json` `manifest_<key>.json` `poses_<key>.npz` (key = `cNN_fNNNNN_kNNN_pN`).
+# 옛 규약(`tru_<rec8>_a<NN>_<suffix>` + `<uuid>_<suffix>/`)과 이름이 겹치지 않으므로 분기로 판별한다.
+_UUID_RE = re.compile(r"^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$")
+_BOARD_KEY_RE = re.compile(r"^c\d+_f\d+_k\d+_p\d+$")
+
+
+def board_folder(video: str, recon_root: str = RECON_ROOT_DEFAULT):
+    """board 이름이면 (작업 폴더 또는 None, key), 아니면 None (= 옛 규약으로 해석할 것).
+
+    `<rec8>-*` glob 은 `<uuid>_k6` `<uuid>_s3f0k6` 같은 옛 폴더도 무므로 **이름이 uuid 그대로인
+    폴더만** 고른다. 그래도 2개 이상이면 모호한 것이라 None (resolve_dirs 와 같은 원칙).
+    """
+    parts = video.split("_", 2)
+    if len(parts) != 3 or parts[0] != "tru" or not _BOARD_KEY_RE.match(parts[2]):
+        return None
+    cands = [d for d in glob(path.join(recon_root, f"{parts[1]}-*"))
+             if _UUID_RE.match(path.basename(d))]
+    return (cands[0] if len(cands) == 1 else None), parts[2]
 
 
 def parse_chunk(video: str):
@@ -60,6 +83,15 @@ def resolve_dirs(video: str, recon_root: str = RECON_ROOT_DEFAULT):
     glob 이 2개 이상 물면 **모호한 것이므로 실패로 친다** — 조용히 다른 recording 의 GT 를
     집어오는 것보다 낫다.
     """
+    board = board_folder(video, recon_root)
+    if board is not None:
+        folder, key = board
+        if folder is None:
+            return None, None
+        render = path.join(folder, f"render_{key}")
+        probe = path.join(folder, f"probe_{key}.json")
+        return (render if path.isfile(path.join(render, "cameras.json")) else None,
+                probe if path.isfile(probe) else None)
     parsed = parse_chunk(video)
     if parsed is None:
         return None, None

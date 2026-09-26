@@ -11,6 +11,10 @@ Follows [Keep a Changelog](https://keepachangelog.com/).
 
 ### Added
 
+- **R22 — TRUMANS board clip 이름 해석 (2026-09-27).** `scene_graph/gt_trumans.board_folder` 가
+  `tru_<rec8>_cNN_fNNNNN_kNNN_pN` + 접미사 없는 `<uuid>/` 폴더를 해석하고, `resolve_dirs` 와
+  `fit/convert/bank_to_blender_poses.chunk_paths` 가 이 분기를 먼저 탄다. 옛 `a<NN>_<suffix>` 규약은 그대로.
+  없으면 graph(assert)·mesh(chunk_paths) 가 board clip 3,440편 전부 실패했다. smoke 1편 graph+mesh OK.
 - **D284 — `dynpose_ingest.py --stage metadata --keep_metadata` (2026-09-25, R52).** 기존 metadata.csv 행을 vlm_nouns 보다 먼저 유지한다. 확장 배치에서 nouns 를 새 shard 배정으로 다시 돌리면 이미 SAM3 까지 구운 구 편이 다른 shard 파일에 중복 record 로 들어가고 뒤 파일이 이겨서 구 편 명사가 seg_instances 와 어긋나는 것을 막는다. 플래그 없으면 기존 동작 그대로. dry-run: LBM 875 + 유지 9,471 = 10,346.
 - **D284 — DynPose 확장 ingest: `dynpose_ingest.py --scene_list` (2026-09-25, R52).** D282 필터 pass.csv 의 uuid 만
   처리 (9,396 → 신규 7,168, 기존 recon 2,228 skip). 사용자 지시로 GPU 0,3,6,7.

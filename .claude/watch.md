@@ -38,7 +38,7 @@ main session 은 컨텍스트가 압축되거나 세션이 끝나면 **자기가
 - 이상신호: Traceback / 1시간 status 정지 / complete 비율 급락
 
 ### R52 DynPose 확장 D284 — ⑤ 정적 SAM3 + geocalib (dynmask 7,143 완료 21:21)
-- screen  : d284_s3s0/1 (GPU 3), d284_s3s2/3 (GPU 0), d284_s3s4/5 (GPU 2) — 01:20 재배치 (학습 중단으로 빈 GPU). geocalib 완료
+- screen  : d284_s3s0..9 = 10샤드 GPU 0,0,2,2,3,3,6,6,7,7 (01:44 재분배, GPU 6,7 은 10:50 까지 한정 — screen gpu67_plan 이 그때 6,7 을 내린다, 로그 tmp/d284/gpu67_deadline.log). 로그 sam3s_logs/r10_shard*.log. geocalib 완료
 - 로그    : <repo>/tmp/d284/sam3s_logs/shard{0..5}.log (GPU6/7 1차), shard{2..5}_gpu3.log, s3s_chain{A,B}.log
 - 나아가나: eval_data/seg_instances_static/*/meta.json 신규 (21:20 이후) · out_dynpose/*/geocalib_gravity.json 신규
 - 끝났나  : s3s screen 0 + static 7,139 / geo screen 0 + 7,143 → graph (run_bank d182, CPU) → dynmask --demote_static_objects → bank (d185+d199)
@@ -51,3 +51,10 @@ main session 은 컨텍스트가 압축되거나 세션이 끝나면 **자기가
 - 끝났나  : 3 로그 `[feat] ALL DONE` + 10,169 npy → smoke → screen train3 GPU 1 resume
             (`load_ckpt_path=../results/20260926_011215_dynpose_d200_siglip2conn_srccam/ckpts/resume.pth`)
 - 이상신호: Traceback / 10분간 N 정지
+
+### R22 TRUMANS d277T 선행 graph+mesh (CPU, 3,440 board clip)
+- screen  : d277T_prep0..23 (CPU, run_bank --stages graph,mesh --num_shards 24)
+- 로그    : <repo>/tmp/r22b/banklog/d277T_prep_s*.out, 씬 로그 tmp/r22b/banklog/d277T/
+- 나아가나: out_trumans/<clip>/{.graph_s115, mesh_grid.npz} 증가 (smoke 1편 graph 209 s + mesh 67 s → 24샤드 ≈ 11 h)
+- 끝났나  : 24 screen 종료 + 3,440 mesh_grid → GPU 단계 (cloud,route,tau,fit,emit; BANK_GPU_ALLOW=0123, 카드당 2)
+- 이상신호: `FAIL` 줄 / Traceback / 30분간 증가 0

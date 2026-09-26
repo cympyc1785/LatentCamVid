@@ -5,6 +5,9 @@ All notable changes to the latentcam sub-project. Follows [Keep a Changelog](htt
 ## [Unreleased]
 
 ### Added
+- **molmo2_conn ViT 출력 캐시 (2026-09-27, R60).** `video_onfly_feat_cache` (<scene_key>.npy uint16=bf16 49x729x2304) —
+  dataset 이 `video_feat` 를 싣고 학습이 frozen ViT 를 건너뛴다. `cache_molmo2_frames.py MODE=feat` 로 굽는다
+  (on-the-fly 출력과 비트 동일 확인). null 이면 기존 frame 경로 그대로.
 - **DA3 unposed arm (2026-09-26, R59 / D287).** `conf/experiment/dynpose_d200_molmo2_l21_da3_unposed.yaml` —
   부모 `dynpose_d200_molmo2_l21_da3` 대비 `geo_posed: false`(DA3 에 소스 카메라 cam token 없음) + unposed 6-view bf16 캐시.
 - **video_onfly = molmo2_conn arm (2026-09-25, R58 / D286).** `models/molmo2_video_connector.py` —

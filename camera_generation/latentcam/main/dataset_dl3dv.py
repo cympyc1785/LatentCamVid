@@ -1863,7 +1863,16 @@ class CamDataset(torch.utils.data.Dataset):
         # 끄면 키 자체가 안 생긴다.
         # `video_onfly_frame_cache` 에 구워 둔 uint8 배열이 있으면 mmap 으로 읽는다 (같은 함수로
         # 구운 것이라 값이 비트 동일, scripts/data/cache_molmo2_frames.py). 없으면 PNG 에서 만든다.
-        if str(getattr(self.cfg, 'video_onfly', None) or '') == 'molmo2_conn':
+        # [new 2026-09-27, R58] `video_onfly_feat_cache`: frozen ViT 출력(49x729x2304 bf16, uint16 로
+        # 저장)까지 구워 둔 게 있으면 frame 대신 그걸 싣는다 — 학습 루프가 ViT 를 건너뛴다. 없으면
+        # 아래 frame 경로 그대로.
+        _vfc = getattr(self.cfg, 'video_onfly_feat_cache', None) \
+            if str(getattr(self.cfg, 'video_onfly', None) or '') == 'molmo2_conn' else None
+        _vfp = osp.join(_vfc, f'{self.geo_raw_key(data_name)}.npy') if _vfc else None
+        if _vfp and osp.exists(_vfp):
+            out['video_feat'] = torch.from_numpy(
+                np.array(np.load(_vfp, mmap_mode='r'))).view(torch.bfloat16)
+        elif str(getattr(self.cfg, 'video_onfly', None) or '') == 'molmo2_conn':
             _fc = getattr(self.cfg, 'video_onfly_frame_cache', None)
             _fp = osp.join(_fc, f'{self.geo_raw_key(data_name)}.npy') if _fc else None
             if _fp and osp.exists(_fp):

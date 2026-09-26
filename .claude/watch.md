@@ -53,8 +53,8 @@ main session 은 컨텍스트가 압축되거나 세션이 끝나면 **자기가
 - 이상신호: Traceback / 10분간 N 정지
 
 ### R22 TRUMANS d277T 선행 graph+mesh (CPU, 3,440 board clip)
-- screen  : d277T_prep0..23 (CPU, run_bank --stages graph,mesh --num_shards 24)
-- 로그    : <repo>/tmp/r22b/banklog/d277T_prep_s*.out, 씬 로그 tmp/r22b/banklog/d277T/
+- screen  : d277T_prep0..11 (CPU, run_bank --stages graph,mesh --num_shards 12, OMP/MKL 4스레드 — 01:50 24→12 축소)
+- 로그    : <repo>/tmp/r22b/banklog/d277T_prep12_s*.out, 씬 로그 tmp/r22b/banklog/d277T/
 - 나아가나: out_trumans/<clip>/{.graph_s115, mesh_grid.npz} 증가 (smoke 1편 graph 209 s + mesh 67 s → 24샤드 ≈ 11 h)
 - 끝났나  : 24 screen 종료 + 3,440 mesh_grid → GPU 단계 (cloud,route,tau,fit,emit; BANK_GPU_ALLOW=0123, 카드당 2)
 - 이상신호: `FAIL` 줄 / Traceback / 30분간 증가 0

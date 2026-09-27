@@ -100,6 +100,10 @@ gitignore 대상이며, 작업이 끝나면 남길 것만 `results/` 로 옮기�
 `CLAUDE.md`(Claude Code 가 최상위에서 읽는다) · `README.md` · `pipeline.md` 처럼 사람이
 보는 문서뿐이다.
 
+`.claude/plans.md` 는 목표(goals.md)별 **실시간 계획**이다 (2026-09-27 사용자 지시 "plans.md 써놓고
+업데이트하면서 진행하자"). 작업이 시작·끝·막힐 때, GPU 배치가 바뀔 때마다 해당 행의 상태·ETA·다음을
+고친다.
+
 ### Agent 위임
 
 subagent 정의는 `.claude/agents/*.md`, **보고 규약은 `.claude/agent-report-protocol.md` 가

@@ -129,7 +129,7 @@ Vista 4씬 (snow-dog/hike/martian-flag/mountain-hike, R64) 진단 (2026-09-27):
 | 다음 실험 (싼 순) | |
 |---|---|
 | 코퍼스 카운트: 가까운 dolly 중 tiny/후진 행 비율 (무비용) | 대기 |
-| VAE 왕복 floor 실측: vae_roundtrip_val.py 를 가까운 dolly 199개에 + d200 latent std (H1 이 VAE 탓인지 diffusion 탓인지) | 대기 (GPU 소량) |
+| VAE 왕복 floor 실측 (R65, test dolly_in_look_at n=479): VAE |rt−gt 전진| med 0.0039 vs diffusion 0.1025; GT<0.0675 구간 0.0018 vs 0.0443, 역행 VAE 1.7% vs diff 10.2% | ✓ **VAE 무죄 → diffusion 쪽** (tmp/r65/cmp.py) |
 | D201-A 크기 캡션 ckpt(prompts_mag.json)로 같은 199개 재추론 (H2) | 대기 |
 | 데이터 수정: tiny(<floor)·후진 dolly 행 제외 또는 "slowly/slightly" 정도부사 캡션, 가까운 씬 clamp 재fit | 결정 필요 |
 

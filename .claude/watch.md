@@ -37,12 +37,13 @@ main session 은 컨텍스트가 압축되거나 세션이 끝나면 **자기가
 - 끝났나  : 로그 `[render] ALL DONE` → `--stage report` → 다음: d273 bank → raycast → caption → export
 - 이상신호: Traceback / 1시간 status 정지 / complete 비율 급락
 
-### R52 DynPose 확장 D284 — ⑥ scene graph (CPU) · 정적 SAM3 완료 09-27 07:20 (6,937 + 정적 명사 0개 202)
-- screen  : d284_graph0..11 (CPU, run_bank d182 `--stages graph --num_shards 12`, OMP 4)
-- 로그    : <repo>/tmp/d284/graph_logs/s*.out, 씬 로그 tmp/d284/graph_scene_logs/
-- 나아가나: out_dynpose/<v>/.graph_d182 신규 (smoke 1편 238 s → 12샤드 ≈ 39 h, TRUMANS prep 끝나면 24샤드로)
-- 끝났나  : 12 로그 `=== 요약 ===` → dynmask --demote_static_objects (신규 목록) → bank d185 (GPU 0~3 x2) → d199
-- 이상신호: `FAIL(` / Traceback / 30분간 증가 0
+### R52 DynPose 확장 D284 — ⑥ scene graph (CPU) + ⑦ 뒤따르는 강등·뱅크 d185 (GPU 0,2,3)
+- screen  : d284_graph0..35 (CPU, d182 `--stages graph --num_shards 36`, OMP 2 — 09:35 12→36)
+            d284_chain (exec/chain_bank_rounds.py d185, --gpus 0,2,3 --bank_shards 6 inproc, round_cap 400, poll 300)
+- 로그    : <repo>/tmp/d284/graph_logs/g36_s*.out · tmp/d284/chain_d185/chain.out, bank_logs_rNN/, demote_logs_rNN/
+- 나아가나: out_dynpose/<v>/.graph_d182 신규 (12샤드 때 ~3편/분) · hole_bank_d185/canonical 신규
+- 끝났나  : chain.out 이 graph 드라이버 종료 + ready 0 으로 끝남 → d199 frame0 anchors → desc → captions → export
+- 이상신호: `FAIL(` / Traceback / OOM / chain 라운드 실패 수
 
 ### R22 TRUMANS d277T 선행 graph+mesh (CPU, 3,440 board clip)
 - screen  : d277T_prep0..11 (CPU, run_bank --stages graph,mesh --num_shards 12, OMP/MKL 4스레드 — 01:50 24→12 축소)

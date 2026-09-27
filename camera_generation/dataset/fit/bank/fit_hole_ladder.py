@@ -305,6 +305,19 @@ def knob_kind(preset: str):
     return "pan_deg" if preset in ROTATION_ONLY_PRESETS else "tau"
 
 
+def write_start_screen(folder: str, rows: list):
+    """`--start_screen` 결과 → `<bank_dir>/start_screen.csv` (시작 pose 마다 한 행: ok/reason + 게이트 측정값)."""
+    if not rows:
+        return
+    makedirs(folder, exist_ok=True)
+    cols = list(rows[0].keys())
+    with open(path.join(folder, "start_screen.csv"), "w", encoding="utf-8") as f:
+        f.write(",".join(cols) + "\n")
+        for r in rows:
+            f.write(",".join(str(r[c]) for c in cols) + "\n")
+    print(f"[start_screen] {sum(r['ok'] for r in rows)}/{len(rows)} 시작 pose 통과 → {folder}/start_screen.csv")
+
+
 def start_cands_for(tau_bank: dict, anchor: str, preset: str) -> list:
     """이 (anchor, preset) 의 시작 pose 후보 목록 (D259). 격자 없는 뱅크는 `[None]` 하나다.
 
@@ -921,6 +934,10 @@ def main(args):
     # 프레이밍 하한. 가림 게이트와 **다른 양**이다 — 이건 subject 중심이 중앙 박스 안이었나다.
     min_in_frame = (float(args.min_subject_in_frame) if args.min_subject_in_frame > 0.0
                     else float("-inf"))
+    # [new 2026-09-27, R62] `--start_screen`: 시작 pose(격자 후보)의 **frame 0 카메라만** 같은 게이트로
+    # 먼저 판정한다 (사용자 "애초에 시작 카메라가 gate 위반이면 fitting을 할 필요가 없잖아").
+    # frame 0 은 손잡이·preset 과 무관하게 시작 pose 이므로 (anchor, cand_id) 마다 한 번만 잰다.
+    start_verdicts, start_screen_rows = {}, []
     # F5. τ 손잡이 하한을 여기서 **한 번만** 갈아끼운다. 아래 전부가 `KNOB_RANGE` 를 읽으므로
     # (탐색 경계 `solve_knob:554` / `lo_override` / `knob_floor` 열 / `bank.json`) 값의 출처가
     # 하나로 남는다. 기본값이면 튜플이 그대로라 예전 뱅크와 비트 동일이다.
@@ -1212,6 +1229,40 @@ def main(args):
                         stats.get("approach_gap", float("nan")),
                         stats.get("subject_visible_frac", float("nan")))
 
+            # [new 2026-09-27, R62] 시작 카메라 선판정. `off`(기본)면 이 블록이 안 돌아 예전과 비트 동일.
+            #   only   : 판정만 하고 fit 은 전부 건너뛴다 → start_screen.csv
+            #   filter : 탈락한 시작 pose 는 fit 을 건너뛰고(행 없음), 통과한 것만 예전처럼 fit
+            if args.start_screen != "off" and start_cand is not None:
+                _key = (anchor, cand_id)
+                if _key not in start_verdicts:
+                    probe(0.0, force_render=True)          # 손잡이 0 = 시작 pose 에 얼린 궤적
+                    _pose0 = np.asarray(cache[0.0][1])[:1]  # frame 0 카메라 하나
+                    _st, _ = measure_trajectory(renderer, _pose0, 1, 1, args.tile_height,
+                                                args.tile_width, args.center_box, behind=behind,
+                                                subject_points=(subject_points if occl_on else None),
+                                                metric_only=not occl_on)
+                    _why = physical_verdict(_st, max_behind, min_obb, max_elev, min_ground,
+                                            min_approach, max_behind_dyn)
+                    _vis = float(_st.get("subject_visible_frac", float("nan")))
+                    if _why is None and _vis == _vis and _vis < min_seen:
+                        _why = "occlusion"
+                    _inf = float(_st.get("subject_in_frame", float("nan")))
+                    if _why is None and _inf == _inf and _inf < min_in_frame:
+                        _why = "framing"
+                    start_verdicts[_key] = _why
+                    start_screen_rows.append({
+                        "anchor_id": anchor, "cand_id": cand_id, "ok": int(_why is None),
+                        "reason": _why or "", "subject_visible": _vis,
+                        "subject_area": _st.get("subject_area_med", float("nan")),
+                        "obb_slack": _st.get("obb_slack", float("nan")),
+                        "obb_node": _st.get("obb_node", ""),
+                        "ground_clear": _st.get("ground_clear", float("nan")),
+                        "elev_abs": _st.get("elev_abs_max", float("nan")),
+                        "behind_static": _st.get("behind_static_frac", float("nan")),
+                        "behind_dyn": _st.get("behind_dyn_frac", float("nan")),
+                        "hole": _st.get("hole_fraction", float("nan"))})
+                if args.start_screen == "only" or start_verdicts[_key] is not None:
+                    continue
             # D53. 사다리의 바닥을 먼저 실측한다. 손잡이 0 은 `fit_tau` 의 "예산을 이미 다 썼다"
             # 가지를 그대로 타서 **시작 pose 에 얼린** 궤적을 준다 — 그게 정지 hole 이고, 같은
             # 호출에서 `tau_start`(씬 상수, 소스 자신의 시차)도 나온다. 렌더 1회.
@@ -1472,6 +1523,9 @@ def main(args):
         #     예전처럼 죽어야 한다. 둘을 가르는 건 "τ 뱅크에 생존 변이가 있었나"다.
         filtered = [r for r in tau_bank["variants"]
                     if r["anchor_id"] in anchors and r["preset"] in presets]
+        if args.start_screen == "only":       # [new 2026-09-27, R62] 판정만 — fit 행이 0 인 게 정상
+            write_start_screen(folder, start_screen_rows)
+            return
         assert not filtered, (
             f"푼 게 0 인데 τ 뱅크에는 조합이 {len(filtered)} 개 남아 있다 — "
             "anchors/presets 필터가 아니라 이분법 쪽을 볼 것")
@@ -1785,6 +1839,7 @@ def main(args):
     if RAY_GATE is not None:          # D277. 게이트를 켰을 때만 열을 늘린다 — 끄면 스키마 비트 동일
         columns = list(columns) + ["ray_clear_frac", "ray_min_clearance",
                                    "ray_min_subject_dist", "ray_min_floor_drop"]
+    write_start_screen(folder, start_screen_rows)   # [new 2026-09-27, R62] --start_screen 일 때만 파일이 생긴다
     with open(path.join(folder, "bank.csv"), "w", encoding="utf-8") as file:
         file.write(",".join(columns) + "\n")
         for row in rows:
@@ -2318,6 +2373,8 @@ def build_parser():
     # 주석의 3,205행 실측). 위반하면 `status = f"{사유}_blocked"` 가 되므로
     # `--retry_status collision_blocked obb_blocked ...` 로 사다리와 pick 에서 뺄 수 있다.
     # 기본 off = 옛 동작 비트 동일.
+    # [new 2026-09-27, R62] 시작 pose 선판정 (frame 0 카메라만, fit 과 같은 게이트). off = 기존 동작.
+    parser.add_argument("--start_screen", default="off", choices=["off", "only", "filter"])
     parser.add_argument("--gate_static", dest="gate_static", action="store_true", default=False)
     parser.add_argument("--no_gate_static", dest="gate_static", action="store_false")
     # ── D168 (사용자 지시 2026-09-08). **게이트는 한 개도 안 늘린다** — 이분법(`solve_knob`)과

@@ -11,6 +11,10 @@ Follows [Keep a Changelog](https://keepachangelog.com/).
 
 ### Added
 
+- **R62 — `fit_hole_ladder.py --start_screen {off,only,filter}` (2026-09-27).** 시작 pose(격자 후보)의 **frame 0
+  카메라만** fit 과 같은 게이트(물리 G1/G5/G6/G7 + 가림 + 프레이밍)로 한 번 판정해 `<bank_dir>/start_screen.csv`
+  (ok/reason + 측정값)에 쓴다. `only` = 판정만(fit 안 함), `filter` = 탈락한 시작 pose 는 fit 을 건너뜀. 기본 off.
+  pilot config `r62ts_*`/`r62ds_*`. 결과: snowboard 36/36, golf 24/36 (탈락 12 전부 low 고도 ground).
 - **R62 — `viz/render_bank_videos.py --label_start_status` (2026-09-27).** 타일 제목을 시작 pose 격자 이름
   (variant_id 꼬리, 예 `right_low_close`) + 판정(`OK` / `X <사유>`)으로 바꾼다. 미리보기가 막힌 행도 그려서 생기던 혼동 방지. 기본 off.
   `clamped_low*` 행(손잡이 바닥에서도 게이트 미통과)도 X 로 표시하고 사유는 binding 열 (`X clamped(occlusion)`).

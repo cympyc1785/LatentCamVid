@@ -65,7 +65,10 @@ subject-in-frame fraction, collision도 포함해서". 두 건 다 **eval 이 �
 - **R59 / D287** `dynpose_d200_molmo2_l21_da3_unposed` (wandb faq38efm) — resume.pth epoch 0 저장 → epoch 1 부터.
   `train_latent_cam_dm.py experiment=dynpose_d200_molmo2_l21_da3_unposed load_ckpt_path=../results/20260927_000831_dynpose_d200_molmo2_l21_da3_unposed/ckpts/resume.pth`
   (중단 시 epoch 1 91% 진행분 버려짐. 캐시 geo_raw_cache_da3_unposed_bf16 유지 필요)
-- R58 / D286 은 ViT 캐시 굽기 후 바로 재개 (A5 대상 아님, request_queue R60).
+- **R58 / D286** `dynpose_d200_siglip2conn_srccam` (wandb fbf4lhqi) — 2026-09-27 14:31 사용자 지시로 **중단**, resume.pth epoch 14 → epoch 15 부터.
+  `train_latent_cam_dm.py experiment=dynpose_d200_siglip2conn_srccam load_ckpt_path=../results/20260926_011215_dynpose_d200_siglip2conn_srccam/ckpts/resume.pth`
+  (ViT feat 캐시 molmo2_vitfeat_27 ≈1.67 TB 유지 필요, num_thread 32)
+- R59 는 2026-09-27 14:35 GPU 1 에서 재개됨 (이 목록에서 빠짐).
 
 ### A6. 이후 실행 계획 (2026-09-27 02:30 작성, 사용자 요청 "이후 돌릴 것들도 계획 세워줘")
 GPU 0~3 (+ 6,7 은 09-27 10:50 까지). 추정치는 현재 실측 속도 기준.

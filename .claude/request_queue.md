@@ -25,7 +25,7 @@
 ### R54. d200 molmo2_l21_da3 에 DA3 dense frame **24프레임** 으로 학습 — GPU 0 (2026-09-25) · D285 캐시 10,169 완료 (863.70 GB) → smoke rc=0 → **screen train2 GPU 0 본 학습**
 ### R58. SigLIP2 arm 에 Molmo2 connector(attention pooling + projector) 를 붙이되 **새로 학습**되게 (2026-09-25) · D286 frame 캐시+worker16 → **screen train3 GPU 1 본 학습** (fbf4lhqi, 1.88 s/it ≈ 6.2일)
 ### R59. molmo2_l21 + da3 에서 **DA3 에 source camera 를 안 넣고** 학습 — GPU 2 (2026-09-26) · D287 unposed 캐시 10,169 → smoke rc=0 → **screen train1 GPU 2 본 학습** (faq38efm)
-### R62. DynPose d185 중단 → preset 확장(D273) + start pose sampling 방식으로 전환. 먼저 **Vista pilot**: snowboard(man track), golf(man dolly in), 둘 다 36 start pose sampling (2026-09-27) · pilot 1차 완료 (r62t/r62d 36행씩, 렌더 전송) — 사용자 확인 대기
+### R62. DynPose d185 중단 → preset 확장(D273) + start pose sampling 방식으로 전환. 먼저 **Vista pilot**: snowboard(man track), golf(man dolly in), 둘 다 36 start pose sampling (2026-09-27) · pilot 1차 완료 (r62t/r62d 36행씩, 렌더 전송) — 사용자 확인 대기 · 3차(G1 끔+G3 0.6+obb_skip_flat) 확정안, 라벨 렌더, snowboard track_dolly_in 추가
 ### R22. TRUMANS 데이터셋 구축 — **계획 승인됨 (2026-09-23)**
 조사: `tmp/agent/reader-r22-trumans.md` (핵심 주장 5건 직접 재확인). 사용자 결정 넷:
 ① 범위 = s3f0k6 **737 clip 전량** (191 은 prep 완료, 546 은 graph/cloud/mesh 부터)

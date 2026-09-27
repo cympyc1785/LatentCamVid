@@ -305,10 +305,13 @@ def main(args):
             # 예 `back_low_close`) + 판정으로 바꾼다. 미리보기가 막힌 행까지 다 그려서 "안 걸러졌다"로
             # 보이던 혼동을 없앤다. 끄면(기본) 위 label 그대로.
             if args.label_start_status:
+                # `*_blocked`(정지 preset 게이트 위반) 와 `clamped_low*`(손잡이 바닥에서도 게이트를 못 넘김 —
+                # `--retry_status clamped_low` 가 버리는 행) 둘 다 실패다. 사유는 binding 열 (예 occlusion).
                 _st = str(row.get("status", "") or "")
-                _ok = "blocked" not in _st
-                label = (f"{row['variant_id'].split('__')[-1]}  "
-                         + ("OK" if _ok else "X " + _st.replace("_blocked", "")))
+                _bd = str(row.get("binding", "") or "")
+                _ok = "blocked" not in _st and not _st.startswith("clamped_low")
+                _why = _st.replace("_blocked", "") if "blocked" in _st else f"clamped({_bd or '?'})"
+                label = f"{row['variant_id'].split('__')[-1]}  " + ("OK" if _ok else "X " + _why)
             alabel = str(row.get("anchor_label", "") or "")
             target = row['anchor_id'] + (f"={alabel[:16]}" if alabel else "")
             tiles.append(label_tile(clip[f], label,

@@ -218,6 +218,23 @@ def obb_signed_distance(p_g, center, extent, R):
     return float(np.linalg.norm(np.maximum(d, 0.0)) + min(float(d.max()), 0.0))
 
 
+def local_ground_height(static_g: np.ndarray, cam_g: np.ndarray, radii=(0.02, 0.05, 0.1, 0.2),
+                        min_points: int = 20) -> tuple:
+    """카메라가 **그 자리의** 지면보다 얼마나 위인가 (G 프레임 u, 위가 +z). (height, radius, n).
+
+    R62 (2026-09-27): ground 게이트(G6)는 씬 전체 평면 하나(정적 점 2% 분위 `ground_z`)라 경사면에서
+    못 잡는다 — snowboard right_low_close 는 G6 여유 0.1931 로 통과했지만 주변 눈 표면보다 -0.010 아래다.
+    수평 반경 안의 정적 점과의 z 차 median 을 쓴다. 점이 모자라면 반경을 키우고, 끝까지 모자라면
+    (관측이 없는 자리) nan — 판정하지 않는다.
+    """
+    d = np.linalg.norm(static_g[:, :2] - cam_g[None, :2], axis=1)
+    for r in radii:
+        m = d < r
+        if int(m.sum()) >= min_points:
+            return float(np.median(cam_g[2] - static_g[m, 2])), float(r), int(m.sum())
+    return float("nan"), float(radii[-1]), 0
+
+
 def obb_gate_nodes(nodes: list, flat_ratio: float = 0.0, flat_min_extent: float = 0.0):
     """OBB 게이트(G5)·소스 OBB floor 가 볼 노드 — 바닥처럼 **넓고 납작한** 노드를 뺄지. (kept, skipped_ids)
 

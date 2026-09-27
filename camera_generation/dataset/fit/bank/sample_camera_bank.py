@@ -1028,8 +1028,9 @@ def main(args):
         span = max(float(node["obs_az_span_deg"]), 1e-6)
         span_frac = max(args.orbit_span_frac, args.min_sweep_deg / span)
         # D259. 첫 카메라 격자. `off` 면 `[None]` 이라 루프가 한 번만 돌고 예전과 비트 동일하다.
+        # [new 2026-09-27, R62] `--start_include_source`: 격자 앞에 **소스 frame0 카메라**(`None`)를 후보로 같이 넣는다.
         start_pool = ([None] if args.start_grid == "off" else
-                      build_pool_front(node, graph["cameras"]["cam_centers_g"],
+                      ([None] if args.start_include_source else []) + build_pool_front(node, graph["cameras"]["cam_centers_g"],
                                        np.asarray(graph["cameras"]["K"], dtype=float)[0],
                                        int(graph["width"]), int(graph["height"]),
                                        coverages=tuple(zip([l for l, _ in FRONT_COVERAGES],
@@ -1675,6 +1676,7 @@ def build_parser():
     parser.add_argument("--measure_standoff", action="store_true", default=False)
     parser.add_argument("--no_measure_standoff", dest="measure_standoff", action="store_false")
     # OBB clearance (G5, D49). 역시 렌더 0회. 기본은 꺼서 열 구성 유지.
+    parser.add_argument("--start_include_source", action="store_true", default=False)  # R62: 소스 frame0 카메라도 시작 후보로
     parser.add_argument("--measure_obb", action="store_true", default=False)
     parser.add_argument("--no_measure_obb", dest="measure_obb", action="store_false")
     parser.add_argument("--tile_width", default=640, type=int)

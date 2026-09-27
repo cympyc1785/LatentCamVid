@@ -210,7 +210,8 @@ from scene_graph.scale import (TAU_DENOM_MODES, assert_scale_mode,             #
                                tau_denominator)
 from scene_graph.schema import load_graph                                       # noqa: E402
 from fit.bank.build_candidate_board import subject_track_volume                  # noqa: E402
-from lbm.gates import node_margins, obb_gate_nodes                             # noqa: E402
+from scene_graph.lift import apply_transform                                  # noqa: E402
+from lbm.gates import local_ground_height, node_margins, obb_gate_nodes        # noqa: E402
 from lbm.mesh_collision import resolve_mesh_grid                               # noqa: E402
 from fit.bank.sample_camera_bank import register_external                       # noqa: E402
 from fit.bank.sample_camera_bank import (FIT_TAU_MAX_SCALE, ROTATION_ONLY_PRESETS,  # noqa: E402
@@ -938,6 +939,17 @@ def main(args):
     # 먼저 판정한다 (사용자 "애초에 시작 카메라가 gate 위반이면 fitting을 할 필요가 없잖아").
     # frame 0 은 손잡이·preset 과 무관하게 시작 pose 이므로 (anchor, cand_id) 마다 한 번만 잰다.
     start_verdicts, start_screen_rows = {}, []
+    # 국소 지면 (`--min_local_ground`, G 프레임 u). 켤 때만 정적 점을 G 로 옮겨 둔다 — 정적 = 전 프레임의
+    # 90% 이상에서 보이는 점 (동적 점은 프레임별로만 켜진다), 하늘(SKY_DEPTH 로 멀리 박힌 점)은 뺀다.
+    static_g = None
+    if args.start_screen != "off" and args.min_local_ground is not None:
+        _vis = np.asarray(renderer.visible.cpu() if hasattr(renderer.visible, "cpu") else renderer.visible)
+        _pts = np.asarray(renderer.points.cpu() if hasattr(renderer.points, "cpu") else renderer.points)
+        _keep = _vis.mean(axis=1) >= 0.9
+        _pg = apply_transform(np.asarray(graph["frames"]["T_gw"], dtype=float), _pts[_keep].astype(float))
+        _c = np.median(_pg, axis=0)
+        static_g = _pg[np.linalg.norm(_pg - _c, axis=1) < 20.0]
+        print(f"[start_screen] local ground: 정적 점 {len(static_g)}개 (min_local_ground {args.min_local_ground} u)")
     # F5. τ 손잡이 하한을 여기서 **한 번만** 갈아끼운다. 아래 전부가 `KNOB_RANGE` 를 읽으므로
     # (탐색 경계 `solve_knob:554` / `lo_override` / `knob_floor` 열 / `bank.json`) 값의 출처가
     # 하나로 남는다. 기본값이면 튜플이 그대로라 예전 뱅크와 비트 동일이다.
@@ -1232,8 +1244,8 @@ def main(args):
             # [new 2026-09-27, R62] 시작 카메라 선판정. `off`(기본)면 이 블록이 안 돌아 예전과 비트 동일.
             #   only   : 판정만 하고 fit 은 전부 건너뛴다 → start_screen.csv
             #   filter : 탈락한 시작 pose 는 fit 을 건너뛰고(행 없음), 통과한 것만 예전처럼 fit
-            if args.start_screen != "off" and start_cand is not None:
-                _key = (anchor, cand_id)
+            if args.start_screen != "off":
+                _key = (anchor, cand_id or "source")
                 if _key not in start_verdicts:
                     probe(0.0, force_render=True)          # 손잡이 0 = 시작 pose 에 얼린 궤적
                     _pose0 = np.asarray(cache[0.0][1])[:1]  # frame 0 카메라 하나
@@ -1249,9 +1261,17 @@ def main(args):
                     _inf = float(_st.get("subject_in_frame", float("nan")))
                     if _why is None and _inf == _inf and _inf < min_in_frame:
                         _why = "framing"
+                    _lg, _lg_r, _lg_n = float("nan"), float("nan"), 0
+                    if static_g is not None:
+                        _cam_g = apply_transform(np.asarray(graph["frames"]["T_gw"], dtype=float),
+                                                 _pose0[0][:3, 3][None].astype(float))[0]
+                        _lg, _lg_r, _lg_n = local_ground_height(static_g, _cam_g)
+                        if _why is None and _lg == _lg and _lg < float(args.min_local_ground):
+                            _why = "ground_local"
                     start_verdicts[_key] = _why
                     start_screen_rows.append({
-                        "anchor_id": anchor, "cand_id": cand_id, "ok": int(_why is None),
+                        "anchor_id": anchor, "cand_id": cand_id or "source", "ok": int(_why is None),
+                        "local_ground": _lg, "local_ground_radius": _lg_r, "local_ground_n": _lg_n,
                         "reason": _why or "", "subject_visible": _vis,
                         "subject_area": _st.get("subject_area_med", float("nan")),
                         "obb_slack": _st.get("obb_slack", float("nan")),
@@ -2375,6 +2395,8 @@ def build_parser():
     # 기본 off = 옛 동작 비트 동일.
     # [new 2026-09-27, R62] 시작 pose 선판정 (frame 0 카메라만, fit 과 같은 게이트). off = 기존 동작.
     parser.add_argument("--start_screen", default="off", choices=["off", "only", "filter"])
+    # 시작 카메라가 **국소** 지면(주변 정적 점)보다 이만큼(u) 아래면 탈락. None = 끔. 0 = 표면 아래면 탈락.
+    parser.add_argument("--min_local_ground", default=None, type=float)
     parser.add_argument("--gate_static", dest="gate_static", action="store_true", default=False)
     parser.add_argument("--no_gate_static", dest="gate_static", action="store_false")
     # ── D168 (사용자 지시 2026-09-08). **게이트는 한 개도 안 늘린다** — 이분법(`solve_knob`)과

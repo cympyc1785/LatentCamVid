@@ -11,6 +11,12 @@ Follows [Keep a Changelog](https://keepachangelog.com/).
 
 ### Added
 
+- **R62 — 시작 후보에 소스 카메라 + 국소 지면 게이트 + 시작 판정 시트 (2026-09-27).**
+  `sample_camera_bank.py --start_include_source` (격자 앞에 소스 frame0 카메라 후보 `source`),
+  `fit_hole_ladder.py --min_local_ground U` (`--start_screen` 판정에 **국소** 지면: 수평 반경 안 정적 점 대비 높이
+  `lbm.gates.local_ground_height`, 관측 없으면 nan=판정 안 함; G6 전역 평면은 경사면에서 못 잡는다),
+  `viz/render_start_screen.py` (후보별 frame 0 렌더 + OK/X 사유 contact sheet). 모두 기본 off.
+  결과: snowboard 35/37 (right_low_close/medium = 국소 지면 -0.010/-0.006 아래), golf 25/37.
 - **R62 — `fit_hole_ladder.py --start_screen {off,only,filter}` (2026-09-27).** 시작 pose(격자 후보)의 **frame 0
   카메라만** fit 과 같은 게이트(물리 G1/G5/G6/G7 + 가림 + 프레이밍)로 한 번 판정해 `<bank_dir>/start_screen.csv`
   (ok/reason + 측정값)에 쓴다. `only` = 판정만(fit 안 함), `filter` = 탈락한 시작 pose 는 fit 을 건너뜀. 기본 off.

@@ -88,6 +88,8 @@ GPU 0~3 (+ 6,7 은 09-27 10:50 까지). 추정치는 현재 실측 속도 기준
 
 ### A7. [계획] 후보 카메라 선평가 → 가능한 후보 중 샘플링 (사용자 2026-09-27 "나중엔 이렇게 후보 카메라들을 먼저 평가하고 가능한 후보들 중 샘플링해서 사용하도록 하고싶어")
 - 1단계 완료: `fit_hole_ladder.py --start_screen only|filter` (frame 0 카메라 판정 → start_screen.csv). R62 pilot snowboard 36/36, golf 24/36.
+- 1.5단계 완료: 후보에 소스 카메라 (`--start_include_source`) + 국소 지면 게이트 (`--min_local_ground`) + 시트 (`viz/render_start_screen.py`).
+  snowboard 35/37, golf 25/37. 사용자 지시: "판정하고 fitting 전에는 source camera와 같은 카메라도 후보군에 넣고 돌리도록" → 이후 기본값으로 켠다.
 - 다음: τ 단계(`sample_camera_bank.py`)에서 start_pool 을 만들 때 같은 판정을 먼저 돌려 **통과 후보만** 변이로 펴고,
   그 중 K 개를 샘플링 (예: 방위·shot scale 층화). 게이트 임계는 fit 과 한 곳에서 읽게 해야 한다 (지금은 fit args).
 - 확인할 것: frame 0 통과여도 궤적 중 게이트 위반(snowboard right_low track → 눈 아래)은 fit 의 궤적 판정이 계속 필요하다.

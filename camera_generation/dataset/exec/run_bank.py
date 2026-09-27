@@ -252,12 +252,16 @@ def process_video(cfg, video, stages, gpu, log_dir, skip_done, tag, threads=0, m
             return f"FAIL(마커 {marker} 없음)"
 
     route_args = []
+    ran = False                  # 실제로 돈 단계가 있었나 — recycle 카운트용 (skip 만 한 편은 안 센다)
     for stage in stages:
         spec = cfg.get(stage)
         if spec is None:
             continue
         log_path = path.join(log_dir, f"{video}.{stage}.log")
         t0 = time()
+        if not (skip_done and ((stage in ("graph", "cloud") and path.exists(path.join(root, spec["marker"])))
+                               or (stage == "mesh" and path.exists(path.join(root, "mesh_grid.npz"))))):
+            ran = True
 
         if stage in ("graph", "cloud"):
             marker = path.join(root, spec["marker"])
@@ -373,7 +377,9 @@ def process_video(cfg, video, stages, gpu, log_dir, skip_done, tag, threads=0, m
                     return "SKIP(카메라 0)"
                 return f"FAIL(emit rc={rc})"
         print(f"[{tag}] {stage.upper():5s} {video} rc=0 {time() - t0:6.1f}s  {_now()}", flush=True)
-    return "OK"
+    # 모든 단계를 skip_done 으로 건너뛴 편은 "OK(이미 완료)" — 요약에선 OK 로 세되 recycle 엔 안 센다.
+    # (d277T prep: 재실행 직후 앞의 완료 편 50개가 곧바로 recycle 을 다시 불러 5861회 무한 루프)
+    return "OK" if ran else "OK(이미 완료)"
 
 
 def load_config(config_path):
@@ -493,7 +499,7 @@ def main():
         results.append((video, status, time() - t0))
         if not status.startswith("OK"):
             print(f"[{tag}] {status:24s} {video}", flush=True)
-        if status.startswith("OK"):
+        if status == "OK":
             done += 1
         if exec_mode == "inproc" and args.inproc_recycle > 0 and done >= args.inproc_recycle:
             # 누수가 있어도 8샤드가 새벽에 OOM 으로 죽지 않게 하는 보호장치. `--skip_done` 이
@@ -509,7 +515,7 @@ def main():
     width = max([len(v) for v, _, _ in results] + [5])
     for video, status, dt in results:
         print(f"  {video:<{width}}  {status:<24s} {dt:7.1f}s", file=stderr)
-    ok = sum(1 for _, s, _ in results if s == "OK")
+    ok = sum(1 for _, s, _ in results if s.startswith("OK"))
     print(f"  ---- OK {ok} / {len(results)}  ({_now()})", file=stderr)
 
 

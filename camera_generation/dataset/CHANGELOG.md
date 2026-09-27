@@ -366,6 +366,10 @@ Follows [Keep a Changelog](https://keepachangelog.com/).
   기본값이 `zero` 라 기존 호출(D215/D224/D226/D227)은 비트 동일.
 
 ### Fixed
+
+- **`run_bank.py` inproc recycle 무한 루프 (2026-09-27, d277T prep).** 모든 단계를 `--skip_done` 으로 건너뛴 편도
+  "OK" 로 세어 재실행 직후 앞의 완료 50편이 곧바로 recycle 을 다시 불렀다 (샤드당 ~5861회, mesh 1200/3440 에서 정지).
+  이제 그런 편은 `OK(이미 완료)` 를 돌려 recycle 카운트에서 빠진다. 요약의 OK 수는 접두사 매칭이라 전과 같다.
 - **R6 재분류로 갈라진 드라이버↔피구동 스크립트 경로 5건 (R8, 2026-09-23).** R6(2026-09-22)
   이 평평한 `scripts/` 를 `exec/ fit/{ingest,graph,bank,caption,convert} eval/ viz/` 로 나눌 때,
   **드라이버와 그것이 `subprocess` 로 부르는 스크립트가 서로 다른 갈래로 떨어진 조합**에서

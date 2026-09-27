@@ -11,6 +11,9 @@ Follows [Keep a Changelog](https://keepachangelog.com/).
 
 ### Added
 
+- **R62 — Vista start-pose 36 pilot config (2026-09-27).** `configs/bank/r62t_vista_snowboard_man_track.json`
+  (d260t 상속, anchor man=dyn_0, track_look_at, fit `--gate_static`) · `r62d_vista_golf_man_dolly_in.json`
+  (d260 상속, anchor man=dyn_1, dolly_in_look_at, route→emit). 36 = `--start_grid front` 4방위 x 3고도 x 3 shot scale.
 - **R22 — TRUMANS board clip 이름 해석 (2026-09-27).** `scene_graph/gt_trumans.board_folder` 가
   `tru_<rec8>_cNN_fNNNNN_kNNN_pN` + 접미사 없는 `<uuid>/` 폴더를 해석하고, `resolve_dirs` 와
   `fit/convert/bank_to_blender_poses.chunk_paths` 가 이 분기를 먼저 탄다. 옛 `a<NN>_<suffix>` 규약은 그대로.

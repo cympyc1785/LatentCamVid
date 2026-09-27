@@ -1,0 +1,33 @@
+{
+ "extends": "d260_vista_front36_shellgates_off.json",
+ "_why": "R62 (사용자 2026-09-27 \"golf는 man dolly in만\") — D259/D260(parkour 시험)과 같은 36 격자·dolly_in_look_at, anchor 를 man(dyn_1, label human) 으로 고정. d260 은 tau 를 d259 뱅크에서 재사용했지만 golf 는 d259 뱅크가 없어 route·tau 부터 굽는다.",
+ "generation": "r62d",
+ "tau_bank_dir": "bank_r62d",
+ "bank_dir": "hole_bank_r62d",
+ "stages": [
+  "route",
+  "tau",
+  "fit",
+  "emit"
+ ],
+ "route": {
+  "out": "preset_route_r62d.json",
+  "args": [
+   "--num_external",
+   "0",
+   "--free_moving",
+   "off",
+   "--anchor_ids_file",
+   "/data1/cympyc1785/LatentCamVid/tmp/r62/anchors.json",
+   "--slot_plan",
+   "full",
+   "--slot_whitelist",
+   "advance,recede,arc,orbit,vertical,static",
+   "--track_mode",
+   "add",
+   "--track_min_drift_u",
+   "0.05",
+   "--skip_if_empty"
+  ]
+ }
+}

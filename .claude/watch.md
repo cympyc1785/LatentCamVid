@@ -51,3 +51,10 @@ main session 은 컨텍스트가 압축되거나 세션이 끝나면 **자기가
 - 나아가나: tqdm `Epoch N` 증가
 - 끝났나  : epoch_cap 50 → results/20260926_011215_dynpose_d200_siglip2conn_srccam/ckpts/last.pth
 - 이상신호: Traceback / OOM / nan / 30분간 it 정지
+
+### R52 DynPose 확장 D284 — scene graph (CPU 36) + 강등·뱅크 d185 체인 (GPU 0,2,3) — 09:55 재개 (사용자 "d200처럼 dynpose 확장 돌리던거 이어서")
+- screen  : d284_graph0..35 (d182 `--stages graph --num_shards 36`, OMP 2) · d284_chain (chain_bank_rounds d185, --gpus 0,2,3 --bank_shards 6 inproc)
+- 로그    : <repo>/tmp/d284/graph_logs/g36_s*.out (append) · tmp/d284/chain_d185/chain.out (append), bank_logs_rNN/
+- 나아가나: out_dynpose/<v>/.graph_d182 · hole_bank_d185/canonical 신규
+- 끝났나  : chain 이 graph 종료 + ready 0 으로 끝남 → d199 → desc → captions → export → 캐시
+- 이상신호: `FAIL(` / Traceback / OOM

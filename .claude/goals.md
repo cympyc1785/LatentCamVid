@@ -82,6 +82,25 @@ free-moving 으로만 넣는다.**
 
 ---
 
+## 현재 목표 목록 (사용자 지시 2026-09-27 "목표에 몇가지 적어두자")
+
+사용자가 적은 여섯 항목을 순서 그대로 둔다. 관련 요청·실험 번호는 진행하면서 옆에 붙인다.
+
+1. **DA3, Molmo2 가 실제로 도움이 되는지 판단.** encoder ablation — testset(5,144 seg) 비교표에
+   d200 da3 / D274 da3 v12 / d262 molmo2_l21_srccam / D269 siglip2_srccam / d268 umt5_srccam 까지 있음.
+   진행 중·대기: R54 da3 v24, R58 siglip2 + connector, R59 da3 unposed (EXPERIMENTS.log, tasks A5).
+2. **깔끔한 3인칭만 모아서 10k vid 데이터셋을 만들어 학습.** D282 VLM+SAM3 필터(DynPose-100K 9,396 pass) →
+   D284 확장(recon·seg·graph·bank) → d200 과 합친 새 코퍼스.
+3. **첫 카메라 생성도 포함한 데이터셋을 만들어 학습.** start pose sampling (R62: 4방위 x 3고도 x 3 shot scale
+   + source 카메라, 시작 카메라 선판정 `--start_screen`) → 가능한 후보 중 샘플링 → 학습 (tasks A7).
+4. **거리가 가까운 씬에서 dolly in 추론 시 앞뒤로 shaking 만 하는 문제 개선** — 부드럽고 느리게 앞으로
+   가야 한다.
+5. **빠르게 움직이는 물체의 track 및 framing 이 잘 안 되는 문제 개선.**
+6. **TRUMANS 및 기타 synthetic dataset 을 같이 학습해 성능 향상.** TRUMANS board source 3,440 clip →
+   d277T bank (진행 중) → caption → export.
+
+---
+
 ## 이후 목표 (중기) — 표현력과 안정성
 
 단기 목표가 "말이 되는 카메라"라면, 여기는 "**좋은** 카메라"다.

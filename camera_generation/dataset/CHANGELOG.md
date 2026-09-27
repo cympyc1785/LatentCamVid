@@ -11,6 +11,10 @@ Follows [Keep a Changelog](https://keepachangelog.com/).
 
 ### Added
 
+- **R62 — `fit_hole_ladder.py --obb_skip_flat R` (+ `--obb_skip_flat_min_extent`, 2026-09-27).** 높이 < R x 수평 최대
+  extent 이고 수평 extent >= min(기본 1.0 u) 인 노드(지면으로 분할된 노드)를 G5 OBB 게이트·소스 OBB floor 에서 뺀다
+  (`lbm.gates.obb_gate_nodes`). 기본 0 = 기존 동작. golf `dyn_0 "golf"`(2.34x1.76x0.11 u 코스 판)가 dolly 35/36 을
+  막던 것 수정. 2차 pilot config `r62t2_*` / `r62d2_*` (셸 게이트 복구 + `--obb_skip_flat 0.1`).
 - **R62 — Vista start-pose 36 pilot config (2026-09-27).** `configs/bank/r62t_vista_snowboard_man_track.json`
   (d260t 상속, anchor man=dyn_0, track_look_at, fit `--gate_static`) · `r62d_vista_golf_man_dolly_in.json`
   (d260 상속, anchor man=dyn_1, dolly_in_look_at, route→emit). 36 = `--start_grid front` 4방위 x 3고도 x 3 shot scale.

@@ -218,6 +218,29 @@ def obb_signed_distance(p_g, center, extent, R):
     return float(np.linalg.norm(np.maximum(d, 0.0)) + min(float(d.max()), 0.0))
 
 
+def obb_gate_nodes(nodes: list, flat_ratio: float = 0.0, flat_min_extent: float = 0.0):
+    """OBB 게이트(G5)·소스 OBB floor 가 볼 노드 — 바닥처럼 **넓고 납작한** 노드를 뺄지. (kept, skipped_ids)
+
+    R62 (2026-09-27): golf 의 VLM 명사 "golf" 가 SAM3 로 코스 잔디 전체를 물어 `dyn_0` OBB 가
+    2.34 x 1.76 x 0.11 u 판이 됐다. 카메라가 시작부터 그 판 안이라 dolly_in 36개 중 35개가 이
+    노드에 G5 로 막혀 손잡이 바닥(0.005)에 붙었다. 이런 노드는 물체가 아니라 지면이고, 지면은
+    ground 게이트(G6)가 따로 본다. 판정: 높이(extent[2], gravity 프레임 z) < flat_ratio x 수평 최대
+    extent **이고** 수평 최대 extent >= flat_min_extent (작은 납작 물체 — 매트·종이 — 는 남긴다).
+    flat_ratio <= 0 (기본) 이면 전부 그대로 = 기존 동작.
+    """
+    if flat_ratio <= 0.0:
+        return nodes, []
+    kept, skipped = [], []
+    for n in nodes:
+        ex = n["obb"]["extent"]
+        horiz = max(float(ex[0]), float(ex[1]))
+        if horiz >= flat_min_extent and float(ex[2]) < flat_ratio * horiz:
+            skipped.append(n["id"])
+        else:
+            kept.append(n)
+    return kept, skipped
+
+
 def node_margins(nodes: list, ratio: float = 0.0, floor: float = 0.0,
                  cap: float = float("inf")) -> dict:
     """노드별 OBB 여유 마진 `m_j = clip(ratio · max(extent_j), floor, cap)` (단위 u).

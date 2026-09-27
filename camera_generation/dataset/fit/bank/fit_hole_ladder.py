@@ -210,7 +210,7 @@ from scene_graph.scale import (TAU_DENOM_MODES, assert_scale_mode,             #
                                tau_denominator)
 from scene_graph.schema import load_graph                                       # noqa: E402
 from fit.bank.build_candidate_board import subject_track_volume                  # noqa: E402
-from lbm.gates import node_margins                                             # noqa: E402
+from lbm.gates import node_margins, obb_gate_nodes                             # noqa: E402
 from lbm.mesh_collision import resolve_mesh_grid                               # noqa: E402
 from fit.bank.sample_camera_bank import register_external                       # noqa: E402
 from fit.bank.sample_camera_bank import (FIT_TAU_MAX_SCALE, ROTATION_ONLY_PRESETS,  # noqa: E402
@@ -820,9 +820,16 @@ def main(args):
     # 삭제했다 (D57) — 셋 다 기본값에서 no-op 였고 D51 이 실측으로 기각한 축이다.
     assert not args.measure_obb or args.obb_clear_src_ratio > 0.0, \
         "--obb_clear_src_ratio 는 0 보다 커야 한다 (절대 마진 모드는 D57 에서 삭제)"
-    obb_floor = (args.obb_clear_src_ratio * source_obb_clear(graph)[2]
+    # [new 2026-09-27, R62] `--obb_skip_flat R`: 바닥처럼 넓고 납작한 노드를 G5·소스 floor 에서 뺀다
+    # (`lbm.gates.obb_gate_nodes` 주석). 0 (기본) 이면 obb_graph 가 graph 그대로 = 기존 동작.
+    _obb_nodes, _obb_skipped = obb_gate_nodes(graph["nodes"], args.obb_skip_flat,
+                                              args.obb_skip_flat_min_extent)
+    obb_graph = dict(graph, nodes=_obb_nodes) if _obb_skipped else graph
+    if _obb_skipped:
+        print(f"[obb] 납작·광역 노드 {len(_obb_skipped)}개를 G5 에서 제외: {_obb_skipped}")
+    obb_floor = (args.obb_clear_src_ratio * source_obb_clear(obb_graph)[2]
                  if args.measure_obb else 0.0)
-    obb_margins = (node_margins(graph["nodes"], 0.0, obb_floor, float("inf"))
+    obb_margins = (node_margins(obb_graph["nodes"], 0.0, obb_floor, float("inf"))
                    if args.measure_obb else None)
     # D116. G1 증거 소스. τ 뱅크(`sample_camera_bank.py`)와 **같은 규칙**으로 격자를 찾는다 —
     # 두 단계가 다른 G1 으로 굽히면 사다리가 τ 뱅크에서 이미 걸러진 변이를 되살린다.
@@ -832,7 +839,7 @@ def main(args):
                              args.behind_margin_frac, args.behind_clear_frac,
                              args.behind_radius_px, NEAR_PCT,
                              measure_standoff=True,
-                             graph=(graph if args.measure_obb else None),
+                             graph=(obb_graph if args.measure_obb else None),
                              obb_margins=obb_margins,
                              time_match=args.collision_time_match,
                              mesh_grid=mesh_grid, src_bank_c2w=renderer.cam_c2w_src,
@@ -2094,6 +2101,10 @@ def build_parser():
     # (크기 비례 `--obb_clear_ratio` · 상한 `--obb_clear_cap` · 절대 바닥 `--min_obb_clear` 는
     #  D57 에서 삭제. 셋 다 기본값에서 no-op 였고 비례항은 D51 이 실측으로 기각했다.)
     parser.add_argument("--obb_clear_src_ratio", default=0.3, type=float)
+    # [new 2026-09-27, R62] 높이 < R x 수평 최대 extent 이고 수평 extent >= min 인 노드를 G5 에서 뺀다.
+    # 0 = 끔 (기본, 기존 동작). 지면으로 분할된 노드(예 golf "golf" 코스 2.34x1.76x0.11 u) 대응.
+    parser.add_argument("--obb_skip_flat", default=0.0, type=float)
+    parser.add_argument("--obb_skip_flat_min_extent", default=1.0, type=float)
     # ── 고도 / 지면 (G6, D55). 위 게이트들이 **전부** 통과시키는 구멍이다. 수직 이동은 hole 을
     # 거의 안 늘리므로(바닥에도 천장에도 점이 있다) shape 배증이 상한 16배까지 다 돌아
     # `lateral_frac 0.35 × 16 = 5.6` → `atan(5.6) = 80°`. 실측: `rise_reveal` 고도각 p95 가

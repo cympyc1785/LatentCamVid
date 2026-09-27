@@ -41,6 +41,12 @@ cfg, _ = load_cfg("config", overrides=[f"experiment={EXP}"])
 # geo encoder 는 이 진단에 필요 없다 — 이미지 로딩을 끄면 dataset 이 훨씬 빨리 뜬다.
 cfg.geo_encoder = None
 cfg.load_points = False
+# [2026-09-27, R65] cam_param 만 쓰므로 video/text/geo 캐시 로드를 끈다 (d200 코퍼스는 molmo2 캐시 305 GB).
+# 출력에는 영향이 없다 — 이 스크립트는 cam_param/first_extrinsic/avg_scale 만 읽는다.
+for _k in ("peav_video_cache_dir", "peav_text_cache", "geo_raw_cache_dir", "geo_latent_cache_dir",
+           "text_emb_cache_path"):
+    if hasattr(cfg, _k):
+        setattr(cfg, _k, None)
 
 from dataset_dl3dv import CamDataset
 from models.vae_intr_large import CameraVAE
@@ -73,6 +79,13 @@ def local_dt(gl):
     return FPS * (np.linalg.inv(w2c[:-1]) @ w2c[1:])[:, :3, 3]
 
 
+def fwd_flips(gl, scale):
+    """[2026-09-27, R65] 첫 카메라 전방축(OpenGL -z) 위 순변위 / scale 과 그 축의 부호 변화 횟수.
+    goal 4 (가까운 dolly 떨림) 진단 — diffusion 추론 쪽 분석(tmp/r63)과 같은 정의다."""
+    c = gl[:, :3, 3]; f = -gl[0, :3, 2]; s = (c - c[0]) @ f; ds = np.diff(s)
+    return float(s[-1] / scale), int(np.sum(np.diff(np.sign(ds[np.abs(ds) > 1e-6])) != 0))
+
+
 def stats(gl):
     c = gl[:, :3, 3]
     seg = np.linalg.norm(np.diff(c, axis=0), axis=1)
@@ -101,6 +114,9 @@ with torch.no_grad():
         ppl, pnet, ptor = stats(g_rt)
         rdt, pdt = local_dt(g_ref), local_dt(g_rt)
         lat_std = float(lat.std())
+        _s = float(d['avg_scale'])
+        gfwd, gflip = fwd_flips(g_ref, _s)
+        pfwd, pflip = fwd_flips(g_rt, _s)
         rows.append(dict(
             name=d['data_name'], lat_std=lat_std, dt0=dt0, rot0_deg=rot0,
             gt_plen=rpl, rt_plen=ppl, plen_ratio=ppl / max(rpl, 1e-9),
@@ -109,10 +125,12 @@ with torch.no_grad():
             gt_static_frac=float((np.abs(rdt) < STATIC_TH).mean()),
             rt_static_frac=float((np.abs(pdt) < STATIC_TH).mean()),
             dt_l1=float(np.abs(rdt - pdt).mean()),
+            gt_fwd=gfwd, rt_fwd=pfwd, gt_flips=gflip, rt_flips=pflip,
         ))
 
 hdr = ["name", "lat_std", "dt0", "rot0_deg", "gt_plen", "plen_ratio", "gt_tor", "rt_tor",
-       "gt_dt_med", "rt_dt_med", "gt_static_frac", "rt_static_frac", "dt_l1"]
+       "gt_dt_med", "rt_dt_med", "gt_static_frac", "rt_static_frac", "dt_l1",
+       "gt_fwd", "rt_fwd", "gt_flips", "rt_flips"]
 print(f"{'target':>8s} " + " ".join(f"{h:>10s}" for h in hdr[1:]))
 for r in rows:
     print(f"{r['name'][-8:]:>8s} " + " ".join(f"{r[h]:10.4f}" for h in hdr[1:]))

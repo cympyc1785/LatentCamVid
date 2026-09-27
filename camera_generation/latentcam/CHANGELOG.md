@@ -5,6 +5,10 @@ All notable changes to the latentcam sub-project. Follows [Keep a Changelog](htt
 ## [Unreleased]
 
 ### Added
+- **VAE 왕복 전진량·부호변화 열 (2026-09-27, R65).** `scripts/vae/vae_roundtrip_val.py` 가 `gt_fwd`/`rt_fwd`
+  (첫 카메라 전방축 순변위 / avg_scale) 와 `gt_flips`/`rt_flips` 를 summary.csv 에 쓴다 (tmp/r63 diffusion 분석과 같은 정의).
+  video/geo/text 캐시 키를 null 로 내려 cam 경로만 싣는다. goal 4 진단: d200 test dolly_in_look_at n=479 에서
+  VAE |rt_fwd-gt_fwd| med 0.0039 vs diffusion 0.1025 → 떨림은 VAE 가 아니라 diffusion 쪽.
 - **molmo2_conn ViT 출력 캐시 (2026-09-27, R60).** `video_onfly_feat_cache` (<scene_key>.npy uint16=bf16 49x729x2304) —
   dataset 이 `video_feat` 를 싣고 학습이 frozen ViT 를 건너뛴다. `cache_molmo2_frames.py MODE=feat` 로 굽는다
   (on-the-fly 출력과 비트 동일 확인). null 이면 기존 frame 경로 그대로.

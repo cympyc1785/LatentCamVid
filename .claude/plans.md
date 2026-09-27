@@ -8,7 +8,7 @@ plans.md 써놓고 업데이트하면서 진행하자."
 - 갱신 규칙: 작업이 시작·끝·막힐 때마다 해당 행의 **상태 / ETA / 다음** 을 고친다. 맨 위 "지금 자원" 표는
   GPU 배치가 바뀔 때마다 고친다. 끝난 단계는 지우지 말고 `✓` 로 남겨 흐름을 볼 수 있게 한다.
 
-마지막 갱신: 2026-09-27 18:00
+마지막 갱신: 2026-09-27 18:10
 
 ---
 
@@ -105,13 +105,36 @@ G3 첫 학습 계획 — keeper 23편 = Vista 17 (D215, `tmp/results/d215/keeper
 
 | 단계 | 상태 |
 |---|---|
-| 원인 조사 (데이터: 가까운 dolly 의 손잡이 분포·캡션 / 정규화 / 추론 샘플) | 조사 중 (tmp/agent/reader-plan-goal45-causes.md) |
+| 원인 조사 | ✓ (tmp/agent/reader-plan-goal45-causes.md, d200 molmo2_l21_da3 test 5,144 seg ref/pred 전수) |
+
+가설 (순위순) — test dolly_in(+track) n=794, 시작 거리 d0 4분위:
+- **H1 모델 병진 noise floor ≈ 0.067 이 가까운 dolly 진폭과 같다.** static/pan 예측 path median 0.0675 (d0 무관 상수) vs
+  d0 1분위 dolly GT net median 0.1275 (39.2% 가 0.0675 미만). GT 가 floor 미만인 행에서 예측 shake 36.4% (n=118) vs 6.2% (n=676).
+  1분위 예측 부호변화 median 4회 (GT 0회), 역행 20.6%. → **떨림 = 신호가 floor 에 묻힌 것.** 정규화는 원인 아님 (분모가 scene depth 라 오히려 축소).
+- **H2 라벨 모순.** 캡션에 정도부사 0건 (0.004u 도 "dollies straight forward"), track_dolly_in 가까운 절반은 GT 자체가 후진 22.2%.
+- **H3 뱅크 clamp.** 가까운 1분위 뱅크 행 34.6% 가 clamped_low 로 export 에서 빠지고, 남은 것도 짧다 (path<0.05u 10.3%) → 가까운 dolly 학습 신호가 적다.
+| 다음 실험 (싼 순) | |
+|---|---|
+| 코퍼스 카운트: 가까운 dolly 중 tiny/후진 행 비율 (무비용) | 대기 |
+| VAE 왕복 floor 실측: vae_roundtrip_val.py 를 가까운 dolly 199개에 + d200 latent std (H1 이 VAE 탓인지 diffusion 탓인지) | 대기 (GPU 소량) |
+| D201-A 크기 캡션 ckpt(prompts_mag.json)로 같은 199개 재추론 (H2) | 대기 |
+| 데이터 수정: tiny(<floor)·후진 dolly 행 제외 또는 "slowly/slightly" 정도부사 캡션, 가까운 씬 clamp 재fit | 결정 필요 |
 
 ## G5. 빠르게 움직이는 물체 track · framing
 
 | 단계 | 상태 |
 |---|---|
-| 원인 조사 (fast subject 비율·track preset 통과율·조건 입력) | 조사 중 (위와 같은 보고서) |
+| 원인 조사 | ✓ (같은 보고서) |
+
+가설:
+- **H1 모델에 subject 궤적이 명시적으로 없다** (target_track_dim=0; video 토큰 49x64 에 1D PE 하나, 프레임·공간 분해 없음).
+  track_* test n=2,401, subject 이동량/d0 4분위: 렌더 subject-in-frame 0.8981 → 0.7526 (GT 0.9269 → 0.9131),
+  aim 오차 6.70° → 18.17° (GT 1.75° → 3.57°), 회전 크기는 유지 (pred/ref 0.82~0.88) = **방향·타이밍 오류.** d0 고정해도 재현.
+- **H2 빠른 track 데이터 과소.** 뱅크의 빠른 track 45.1% 가 clamped_low 로 버려져 코퍼스 비중 14.7% 뿐, 그중 36.6% 는 static.
+| 다음 실험 | |
+|---|---|
+| D201-C track 조건 ckpt (2gasclkz) 를 test 에서 track 넣고/빼고(--drop-track) eval, 이동량으로 분할 (H1, 기존 ckpt) | 대기 |
+| 빠른 행 가중 샘플링 짧은 fine-tune 또는 clamped_low+fast 재fit (H2) | 결정 필요 |
 
 ---
 

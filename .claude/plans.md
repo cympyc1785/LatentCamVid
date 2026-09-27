@@ -8,7 +8,7 @@ plans.md 써놓고 업데이트하면서 진행하자."
 - 갱신 규칙: 작업이 시작·끝·막힐 때마다 해당 행의 **상태 / ETA / 다음** 을 고친다. 맨 위 "지금 자원" 표는
   GPU 배치가 바뀔 때마다 고친다. 끝난 단계는 지우지 말고 `✓` 로 남겨 흐름을 볼 수 있게 한다.
 
-마지막 갱신: 2026-09-27 17:30
+마지막 갱신: 2026-09-27 18:00
 
 ---
 
@@ -42,7 +42,18 @@ plans.md 써놓고 업데이트하면서 진행하자."
 | R54 da3 24 view | 중단 (epoch 22 부터, tasks A5) | GPU 나면 재개 |
 | R58 siglip2 + 새로 학습하는 connector | 중단 (epoch 15 부터, tasks A5) | GPU 나면 재개 |
 | d263 umt5 only | eval 막힘 (seg-list id, tasks A3) | 수리 후 eval |
-| **Qwen3-VL 로 Molmo2 대체** | 조사 중 (tmp/agent/reader-plan-qwen3vl.md) | 결과 보고 arm 설계 |
+| **Qwen3-VL 로 Molmo2 대체** | 조사 완료 (tmp/agent/reader-plan-qwen3vl.md) — **가능·저렴** | 사용자 승인 후 캐시 굽기 → 2 arm |
+
+Qwen3-VL 판단 (2026-09-27):
+- 디스크 보유: **Qwen3-VL-4B** (dense 36층, hidden 2560 = Molmo2-4B 와 같은 폭·깊이 → `video_latent_dim 2560`·`peav_layer`
+  배선 그대로), 30B-A3B (bf16 62 GB, MoE — GPU 0~3 한 장 여유 최대 53.8 GB 라 지금 못 올림). 8B/2B 없음.
+- 추출: LM hidden 층 L (Molmo2 l21 대응 → l20/21) 을 video_token_id 위치에서. **temporal patch 2** 라 49장을 넣으면
+  2프레임이 토큰을 공유(25 x 12x12) → per-frame 정렬을 지키려면 프레임 2번씩 98장 입력 (49 x 12x12 = 7056 → 8x8 풀링 3136).
+  `do_sample_frames=False` 필수 (기본은 fps 2 로 솎음).
+- 비용: prefill ~2~4 s/scene 추정 → 10,169편 ~5.4~11 GPU-h, 캐시 1층 163 GB (Molmo2 l21 과 같은 크기). Molmo2 no-decode 와 같은 급.
+- 이득 근거는 약함: D167 prefill 쌍비교 LOO Qwen3-VL-4B 78.2% vs Molmo2 79.0% (n=262).
+- 위험: DeepStack(ViT 를 LM 앞 3층에 주입) 이라 "LM vs ViT" 대비가 흐림, 98장 복제는 학습 분포 밖 입력.
+- 제안 arm (molmo2_l21 vs siglip2 짝과 대칭): A `qwen4b_l20` (384x98 LM hidden, 2560-d) / B `qwen4b_vit` (ViT pre-merger 1024-d, 8x8).
 
 ---
 
@@ -68,8 +79,25 @@ plans.md 써놓고 업데이트하면서 진행하자."
 | R62 pilot: 36 격자 (4방위 x 3고도 x 3 shot) + source 카메라, snowboard/golf | ✓ (configs/bank/r62*) |
 | 시작 카메라 선판정 `--start_screen` + 국소 지면 `--min_local_ground` + 시트 `viz/render_start_screen.py` | ✓ snowboard 35/37, golf 25/37 |
 | 게이트 확정: G1 표면뒤 끔 · G3 가림 0.6 · `--obb_skip_flat 0.1` · 격자 고도는 중력 기준 유지 (context.md) | ✓ |
-| **Vista + keep 데이터로 첫 학습 계획** | 조사 중 (tmp/agent/reader-plan-startpose-train.md) |
+| **Vista + keep 데이터로 첫 학습 계획** | 계획 완료 (tmp/agent/reader-plan-startpose-train.md) — 아래 단계 |
 | τ 단계에서 통과 후보만 펴서 K 개 샘플링 (tasks A7 2단계) | 대기 |
+
+G3 첫 학습 계획 — keeper 23편 = Vista 17 (D215, `tmp/results/d215/keepers.csv`, magnifying-glass 는 뱅크 없음 → 16) +
+  DynPose 6 (D212, `camera_generation/dataset/results/20260920_d212_molmo2_l21_dyn/keepers/keepers.csv`: man/car/player/shirt/squirrel/dolphin,
+  d200 코퍼스라 out_dynpose/ 에 graph·recon 있음). 사용자 확인 2026-09-27 "keeper scene 말한건데 vista말고 dynpose에서도".
+- 과거 D261 start head 는 **상수 예측보다 못했다** (val trans 0.7737u / rot 91.34°, n=125; 코퍼스 평균 |t| 0.6512 / rot 93.00°).
+  원인 추정: 텍스트가 `Track {target}.` 뿐이라 같은 조건에 start 36개가 붙은 **다봉 타깃을 MSE 로** 풀었다.
+  → 이번엔 캡션에 **시작 구도 절**("from the back, low angle, close-up ...")을 넣는 게 핵심.
+| 단계 | 내용 | 비용 |
+|---|---|---|
+| a1 screen | keeper 22편 (Vista 16 + DynPose 6) x 37 후보 (source + 36) `--start_screen only --min_local_ground 0` | 분 단위 |
+| a2 bake | 씬별 preset(평균 6; DynPose 는 d212 preset) x 통과 후보, 게이트 = r62 3차 확정안 + `--start_screen filter` | ~11 GPU-h (상한 ~4,900행) |
+| a3 K | 파일럿은 통과 전량, 확장 시 (scene,preset)당 az4 x cov3 층화 K=12 + source (층화 코드 새로 필요) | - |
+| b caption | `build_bank_captions.py` 에 start 절 추가 (지금 az/el 어휘 없음; front = 피사체→소스 방향임에 주의) | 코드 |
+| c export | `vista4d_bank_to_dl3dv.py --bank_dirs ... --drop_status clamped_low *_blocked`, test = camel/avocado-slice/bmx-bumps (D261 과 같게) | - |
+| d train | extends `vista_d261_molmo2_l21_da3_startpose`, start_pose_w 1.0, tf_p 0. cam_param = E@inv(E[0]) 유지 (VAE 재학습 회피) | ~3~6 h |
+| d 대조 | ① D261 base ② 같은 코퍼스 + start 절 없는 캡션 ③ 상수 예측 | - |
+| e eval | start trans/rot 오차를 az/el/cov 로 분해 + world 궤적 = pred start ∘ pred traj — **start_pred 를 읽는 추론·평가 배선이 없음** → 추가 필요 | 코드 |
 
 ---
 

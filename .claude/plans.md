@@ -8,7 +8,7 @@ plans.md 써놓고 업데이트하면서 진행하자."
 - 갱신 규칙: 작업이 시작·끝·막힐 때마다 해당 행의 **상태 / ETA / 다음** 을 고친다. 맨 위 "지금 자원" 표는
   GPU 배치가 바뀔 때마다 고친다. 끝난 단계는 지우지 말고 `✓` 로 남겨 흐름을 볼 수 있게 한다.
 
-마지막 갱신: 2026-09-27 19:30
+마지막 갱신: 2026-09-27 21:40
 
 ---
 
@@ -119,6 +119,13 @@ G3 첫 학습 계획 — keeper 23편 = Vista 17 (D215, `tmp/results/d215/keeper
   corr(GT 전진, pred flips) −0.463 vs corr(log avg_scale, pred flips) 0.215.
 - 학습 train 46,278 중 dolly_in_look_at 4,379 (9.5%), track_dolly_in_look_at 2,705 (5.8%), dolly_in / track_dolly_in 0.
 - 24개 격자 (tmp/r63/dolly_in_look_at_24_by_scale.mp4): d200 test 에 **클로즈업·손·셀피 등 3인칭이 아닌 영상**이 많다 (D282 필터 이전 코퍼스).
+Vista 4씬 (snow-dog/hike/martian-flag/mountain-hike, R64) 진단 (2026-09-27):
+- GT 가 **실제 거리로는 피사체까지 24~62% 를 좁히는 dolly** 인데, 정규화 단위(1u = scene S = 장면 전체 평균 깊이)가 먼 산·숲 때문에 커서
+  피사체까지 0.02~0.17u 뿐 → 정규화 전진량 0.005~0.07 (train dolly_in_look_at 하위 10%, p10 0.066 / p50 0.314).
+  GT 는 OBB 게이트(피사체 자신 또는 옆 바위)·충돌에서 멈춤. 예측: hike/mountain-hike 방향 전환 7~10회, martian-flag 는 GT 정지(0.005)인데 0.19~0.23 전진(과주행).
+- train 12개 재추론 (tmp/r63/train_dolly_in_look_at_12.mp4): **학습 데이터에서도** GT 0.005 → pred flips 12·후진, GT 0.25 (avg_scale 1.09) → flips 6;
+  GT ≥0.3 은 대체로 재현 (flips 0~2). → 작은 정규화 전진은 학습 표본조차 못 맞춘다 = 모델 floor 문제.
+- 수정 후보: 정규화 기준을 장면 평균 깊이 → **피사체(anchor) 거리**로 (재학습), 크기 캡션, 작은 전진 표본 가중.
 | 다음 실험 (싼 순) | |
 |---|---|
 | 코퍼스 카운트: 가까운 dolly 중 tiny/후진 행 비율 (무비용) | 대기 |

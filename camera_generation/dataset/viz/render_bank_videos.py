@@ -301,6 +301,14 @@ def main(args):
             # target 이름을 자막에 같이 박는다. `anchor_id`(dyn_0/stat_4) 만으로는 어느 물체를
             # 겨냥한 카메라인지 영상만 보고 못 가른다. `anchor_label` 열이 없는 옛 뱅크는
             # `row.get` 이 빈 문자열을 돌려주므로 자막이 예전 그대로다.
+            # [new 2026-09-27, R62] `--label_start_status`: 제목을 시작 pose 격자 이름(variant_id 꼬리,
+            # 예 `back_low_close`) + 판정으로 바꾼다. 미리보기가 막힌 행까지 다 그려서 "안 걸러졌다"로
+            # 보이던 혼동을 없앤다. 끄면(기본) 위 label 그대로.
+            if args.label_start_status:
+                _st = str(row.get("status", "") or "")
+                _ok = "blocked" not in _st
+                label = (f"{row['variant_id'].split('__')[-1]}  "
+                         + ("OK" if _ok else "X " + _st.replace("_blocked", "")))
             alabel = str(row.get("anchor_label", "") or "")
             target = row['anchor_id'] + (f"={alabel[:16]}" if alabel else "")
             tiles.append(label_tile(clip[f], label,
@@ -366,6 +374,7 @@ if __name__ == "__main__":
     parser.add_argument("--pose_kind", default="auto", type=str)
     # 옛 산출물 재현용. 켜면 `bank.json` 에 적힌 문자열을 그대로 라벨에 쓴다 (= 예전 동작, 어긋난 채).
     parser.add_argument("--raw_preset_names", action="store_true", default=False)
+    parser.add_argument("--label_start_status", action="store_true", default=False)  # R62: 시작 pose 이름 + 판정
     parser.add_argument("--no_raw_preset_names", dest="raw_preset_names", action="store_false")
     parser.add_argument("--columns", default=5, type=int)
     parser.add_argument("--tile_width", default=480, type=int)

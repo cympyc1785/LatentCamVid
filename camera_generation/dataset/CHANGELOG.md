@@ -11,6 +11,8 @@ Follows [Keep a Changelog](https://keepachangelog.com/).
 
 ### Added
 
+- **R62 — `viz/render_bank_videos.py --label_start_status` (2026-09-27).** 타일 제목을 시작 pose 격자 이름
+  (variant_id 꼬리, 예 `right_low_close`) + 판정(`OK` / `X <사유>`)으로 바꾼다. 미리보기가 막힌 행도 그려서 생기던 혼동 방지. 기본 off.
 - **R62 — `fit_hole_ladder.py --obb_skip_flat R` (+ `--obb_skip_flat_min_extent`, 2026-09-27).** 높이 < R x 수평 최대
   extent 이고 수평 extent >= min(기본 1.0 u) 인 노드(지면으로 분할된 노드)를 G5 OBB 게이트·소스 OBB floor 에서 뺀다
   (`lbm.gates.obb_gate_nodes`). 기본 0 = 기존 동작. golf `dyn_0 "golf"`(2.34x1.76x0.11 u 코스 판)가 dolly 35/36 을

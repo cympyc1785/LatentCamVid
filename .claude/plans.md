@@ -40,7 +40,7 @@ plans.md 써놓고 업데이트하면서 진행하자."
 |---|---|---|
 | R59 da3 unposed (DA3 에 소스 카메라 없음) | 학습 중 GPU 1 (epoch 43, 09-28 12시) | 오늘 저녁 끝 → testset eval → 표 |
 | **R67 D288 text + molmo2_l21 (DA3·srccam 없음)** | 학습 중 GPU 0 (z2kieet6, 09-28 10:36~, ~7.4 it/s) | 끝나면 testset eval → 표 |
-| **R73 SiF 4 arm (D262/D268/D269/D274)** | 측정 중 GPU 2,3 (09-28 12시~, ~22시 예상) | 속도 구간 표 (full12 와 같은 자) |
+| **R73 SiF 4 arm (D262/D268/D269/D274)** | ✓ 09-29 02:48 (EXPERIMENTS.log R73 결과) — 전체 sif: l21+da3 0.8842 > v12 0.8762 > l21+srccam 0.8704 > siglip2+srccam 0.8281 > da3 only 0.8257 > umt5+srccam 0.7841 | Molmo2 LM 이 framing 을 가장 크게 올림, DA3→srccam 은 -0.014 |
 | R54 da3 24 view | 중단 (epoch 22 부터, tasks A5) | GPU 나면 재개 |
 | R58 siglip2 + 새로 학습하는 connector | 중단 (epoch 15 부터, tasks A5) | GPU 나면 재개 |
 | d263 umt5 only | eval 막힘 (seg-list id, tasks A3) | 수리 후 eval |

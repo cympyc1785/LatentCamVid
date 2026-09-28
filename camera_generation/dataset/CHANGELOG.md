@@ -11,6 +11,10 @@ Follows [Keep a Changelog](https://keepachangelog.com/).
 
 ### Added
 
+- **`run_video_filter.py --stage reel --reel_mode overlay` (2026-09-28, R68).** 4x4 한 장 — 위 2행 SAM3 기하 게이트
+  탈락 8편(사유별 고르게), 아래 2행 통과 8편, main subject 마스크 초록 / 나머지 인스턴스 빨강 overlay.
+  SAM3 가 추적한 K 프레임만 재생한다. 기본 `--reel_mode groups` 는 기존 사유별 reel 그대로.
+
 - **R62 — 시작 후보에 소스 카메라 + 국소 지면 게이트 + 시작 판정 시트 (2026-09-27).**
   `sample_camera_bank.py --start_include_source` (격자 앞에 소스 frame0 카메라 후보 `source`),
   `fit_hole_ladder.py --min_local_ground U` (`--start_screen` 판정에 **국소** 지면: 수평 반경 안 정적 점 대비 높이

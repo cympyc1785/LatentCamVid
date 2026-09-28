@@ -2,8 +2,8 @@
 # D296 (R89) — Vista keeper start pose 학습 (사용자 2026-09-29 "Molmo2_l21_srccam으로 학습").
 # 부모 D261 `vista_d261_molmo2_l21_da3_startpose` 의 start pose head (9-d, w 1.0, teacher forcing 없음) 를 그대로 두고
 #   ① geo CA 를 DA3 → **소스 카메라 Plücker (srccam, D262 와 같은 배선)** 로,
-#   ② 코퍼스를 latentcam_d296 (시작 후보 36칸 → frame0 게이트 선판정 → object-centric preset 당 1개,
-#      캡션 = "Starting {방위} {target} at {고도} in {shot}, the camera ...") 로 바꾼다.
+#   ② 코퍼스를 latentcam_d296 (시작 후보 36칸 → frame0 게이트 선판정 → object-centric preset,
+#      (preset 당 1개로 줄이지 않고 통과 시작 후보 전부), 캡션 = "Starting {방위} {target} at {고도} in {shot}, the camera ...") 로 바꾼다.
 # Molmo2 text 는 override 없이 **캡션 전체**(시작 절 포함) + probe (D262 와 같은 캐시 방식).
 defaults:
   - vista_d261_molmo2_l21_da3_startpose
@@ -24,7 +24,8 @@ geo_latent_cache_dir: null
 geo_posed: false
 geo_cam_embed: null
 
-# 변이 수가 ~100 이라 50 epoch 이면 ~600 step 뿐 (D290 에서 1,100 step 은 학습 부족). step ~5k 로.
-epochs: 500
-epoch_cap: 500
-ckpt_at_epochs: [250, 500]
+# 변이 = 씬 x 통과 시작 후보 x preset (사용자 정정: preset 당 1개로 줄이지 않는다). camel 66 → 16~17씬 ~1,000,
+# train ~850 = epoch 당 ~106 step. 100 epoch ≈ 1.1만 step.
+epochs: 100
+epoch_cap: 100
+ckpt_at_epochs: [50, 100]

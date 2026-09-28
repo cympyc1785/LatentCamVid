@@ -16,6 +16,8 @@ Follows [Keep a Changelog](https://keepachangelog.com/).
   v2 통과 3,133.
 - **`run_video_filter.py --stage reel --pass_list FILE` (2026-09-28, R71).** overlay/plain reel 아래 2행 통과 8편을 목록으로
   고정 (keep=False 가 섞이면 assert). 산출물 이름에 `_picked`. manual_keep 3편 → v2 통과 3,134.
+- **`run_video_filter.py --judge v3` (2026-09-28, R72).** v2 에서 `subject_too_small` · `blurry` 를 탈락 사유에서 뺀 판정
+  (`*_v3.*` 파일, v1/v2 보존). manual_keep 13편(사용자 reel 선택) 포함 D282 전량 통과 3,631행 / 3,628 id.
 
 - **`run_video_filter.py --judge v2` (2026-09-28, R69).** 판정만 다시 (VLM/SAM3 재호출 없음), 산출물은 `judge_v2.jsonl`
   `pass_v2.csv` `fail_v2.csv` `summary_v2.json` `reels_v2/` — 기존 v1 리스트 보존. 바뀐 점: main 점수 = 전 K 프레임

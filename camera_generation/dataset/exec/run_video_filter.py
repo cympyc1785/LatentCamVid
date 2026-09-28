@@ -87,6 +87,9 @@ TH = {"area_min": 0.01,        # main 면적 중앙값 하한 (화면 대비) �
 #   - main 오선택(지나가는 사람): 점수를 "보인 프레임 면적 중앙값" -> "전 K 프레임 평균 면적(없으면 0)"
 #   - synthetic_or_game 가 실제 스포츠 경기를 잡음(154 중 76 이 경기 단어): 탈락 사유에서 뺀다(기록만)
 TH_V2 = {**TH, "area_max": 0.25, "area_peak_max": 0.50, "edge_any_max": 0.5, "cut_area": 0.10}
+# [R72] v3 = v2 에서 subject_too_small · blurry 를 판정에서 뺀다 (사용자 "subject too small은 filter에서 제외",
+#       "blurry도 필터에서 빼줘").
+TH_V3 = {**TH_V2, "area_min": 0.0}
 
 
 def jpath(a, base):
@@ -323,9 +326,10 @@ def judge_one(v, s, version="v1"):
     for k, code in (("scene_cut", "scene_cut"), ("text_overlay_or_watermark", "overlay"),
                     ("letterbox_or_vertical", "letterbox"), ("synthetic_or_game", "synthetic"),
                     ("blurry", "blurry")):
-        if q.get(k) is True and not (version == "v2" and code == "synthetic"):
+        if q.get(k) is True and not (version in ("v2", "v3") and code == "synthetic") \
+                and not (version == "v3" and code == "blurry"):
             why.append(code)
-    th = TH_V2 if version == "v2" else TH
+    th = {"v2": TH_V2, "v3": TH_V3}.get(version, TH)
     if s.get("skipped"):
         why.append("sam3_" + s["skipped"].split(":")[0])
     elif s.get("n_inst", 0) == 0:
@@ -341,7 +345,7 @@ def judge_one(v, s, version="v1"):
             why.append("subject_lost_or_occluded")
         if s["rival_ratio"] >= th["rival_ratio"]:
             why.append("main_ambiguous_multi")
-        if version == "v2" and s["main_area_med"] > th["cut_area"] and s["main_edge_any_frac"] > th["edge_any_max"]:
+        if version in ("v2", "v3") and s["main_area_med"] > th["cut_area"] and s["main_edge_any_frac"] > th["edge_any_max"]:
             why.append("large_subject_cut_edge")
     # 기록용: VLM 과 SAM3 가 어긋난 것 (판정엔 안 쓰고 검토 큐 용)
     disagree = []
@@ -360,7 +364,7 @@ def stage_judge(a):
         f = path.join(a.out, "sam3", scene_key(rel) + ".npz")
         if rel not in vlm or not path.exists(f):
             continue
-        s = sam3_stats(f, "mean" if a.judge == "v2" else "median")
+        s = sam3_stats(f, "mean" if a.judge in ("v2", "v3") else "median")
         keep, why, disagree = judge_one(vlm[rel], s, a.judge)
         p = vlm[rel].get("parsed") or {}
         rows.append({"scene": rel, "keep": keep, "reasons": why, "disagree": disagree,
@@ -369,7 +373,7 @@ def stage_judge(a):
                              "num_people": g(p, "main_subject", "num_people"),
                              "fraction": g(p, "main_subject", "screen_fraction"),
                              "clean": p.get("clean_third_person_subject"), "reason": p.get("reason")},
-                     "sam3": s, "th": TH_V2 if a.judge == "v2" else TH, "judge": a.judge})
+                     "sam3": s, "th": {"v2": TH_V2, "v3": TH_V3}.get(a.judge, TH), "judge": a.judge})
     if a.manual_keep:                    # [R70] 사람이 본 영상 강제 keep — 자동 사유는 기록으로 남긴다
         want = {l.strip() for l in open(a.manual_keep) if l.strip() and not l.startswith("#")}
         for r in rows:
@@ -447,7 +451,7 @@ def stage_reel_overlay(a, rows, ffmpeg):
     import cv2
     import subprocess
     rng = np.random.default_rng(a.seed)
-    geom = SAM3_GEOM_V2 if a.judge == "v2" else SAM3_GEOM
+    geom = SAM3_GEOM_V2 if a.judge in ("v2", "v3") else SAM3_GEOM
     def strat(codes, n, only):
         """사유별로 돌아가며 한 편씩. only 면 그 계열 사유로만 탈락한 영상, 아니면 사유가 하나뿐인 영상 우선."""
         fam = set(codes)
@@ -606,7 +610,7 @@ if __name__ == "__main__":
     q.add_argument("--seed", default=0, type=int)
     q.add_argument("--pass_list", default=None)     # reel overlay/plain: 아래 2행 통과 8편을 이 목록으로
     q.add_argument("--manual_keep", default=None)   # judge: 한 줄에 scene 하나, 자동 판정과 무관하게 keep
-    q.add_argument("--judge", default="v1", choices=("v1", "v2"))   # v2 = R69 판정 (파일명 _v2, 기존 보존)               # reel overlay 표본 seed
+    q.add_argument("--judge", default="v1", choices=("v1", "v2", "v3"))   # v2 = R69 판정, v3 = v2 - subject_too_small (파일명 _v2/_v3, 기존 보존)               # reel overlay 표본 seed
     q.add_argument("--num_shards", default=1, type=int)
     q.add_argument("--shard_id", default=0, type=int)
     q.add_argument("--wait_rounds", default=600, type=int)      # sam3: VLM 결과 기다리는 최대 라운드(x120 s)

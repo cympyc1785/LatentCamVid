@@ -475,7 +475,13 @@ def stage_reel_overlay(a, rows, ffmpeg):
     else:
         pick_f = strat(geom, 8, False)
     passes = [r for r in rows if r["keep"]]
-    pick = pick_f + [passes[j] for j in rng.choice(len(passes), 8, replace=False)]
+    if a.pass_list:                      # [R71] 사람이 고른 통과 8편 (목록 순서대로)
+        by = {r["scene"]: r for r in rows}
+        pp = [by[l.strip()] for l in open(a.pass_list) if l.strip() and not l.startswith("#")][:8]
+        assert all(r["keep"] for r in pp), "pass_list 에 keep=False 인 영상이 있다 (manual_keep 먼저)"
+    else:
+        pp = [passes[j] for j in rng.choice(len(passes), 8, replace=False)]
+    pick = pick_f + pp
     TW, TH_ = 480, 270
     plain = a.reel_mode == "plain"           # [R68b] 마스크 없이 원본 영상 49프레임
     tiles = []
@@ -515,7 +521,7 @@ def stage_reel_overlay(a, rows, ffmpeg):
     for t in range(K):
         grid = np.vstack([np.hstack([tiles[r0 * 4 + c][t] for c in range(4)]) for r0 in range(4)])
         cv2.imwrite(path.join(tmpd, f"{t:03d}.jpg"), grid)
-    tag = "vlm4_sam3_4" if a.fail_rows == "vlm_sam3" else "fail8"
+    tag = ("vlm4_sam3_4" if a.fail_rows == "vlm_sam3" else "fail8") + ("_picked" if a.pass_list else "")
     dst = path.join(a.out, "reels" if a.judge == "v1" else f"reels_{a.judge}", f"{a.reel_mode}_{tag}_pass8_seed{a.seed}.mp4")
     subprocess.run([ffmpeg, "-y", "-loglevel", "error", "-framerate", "10" if plain else "2", "-i", path.join(tmpd, "%03d.jpg"),
                     "-c:v", "libx264", "-pix_fmt", "yuv420p", dst], check=True)
@@ -598,6 +604,7 @@ if __name__ == "__main__":
     q.add_argument("--reel_mode", default="groups", choices=("groups", "overlay", "plain"))   # reel: 기존 사유별 / R68 overlay / 같은 표본 원본
     q.add_argument("--fail_rows", default="sam3", choices=("sam3", "vlm_sam3"))  # reel overlay/plain 탈락 2행 구성
     q.add_argument("--seed", default=0, type=int)
+    q.add_argument("--pass_list", default=None)     # reel overlay/plain: 아래 2행 통과 8편을 이 목록으로
     q.add_argument("--manual_keep", default=None)   # judge: 한 줄에 scene 하나, 자동 판정과 무관하게 keep
     q.add_argument("--judge", default="v1", choices=("v1", "v2"))   # v2 = R69 판정 (파일명 _v2, 기존 보존)               # reel overlay 표본 seed
     q.add_argument("--num_shards", default=1, type=int)

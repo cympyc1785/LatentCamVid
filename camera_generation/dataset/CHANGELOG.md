@@ -14,6 +14,8 @@ Follows [Keep a Changelog](https://keepachangelog.com/).
 - **`run_video_filter.py --manual_keep FILE` (2026-09-28, R70).** judge 에서 목록의 scene 을 강제 keep (자동 사유는
   `auto_reasons` 로 보존, `manual_keep: true`). 안 주면 기존과 동일. `out_filter/d282_dynpose100k/manual_keep.txt` 2편 →
   v2 통과 3,133.
+- **`run_video_filter.py --stage reel --pass_list FILE` (2026-09-28, R71).** overlay/plain reel 아래 2행 통과 8편을 목록으로
+  고정 (keep=False 가 섞이면 assert). 산출물 이름에 `_picked`. manual_keep 3편 → v2 통과 3,134.
 
 - **`run_video_filter.py --judge v2` (2026-09-28, R69).** 판정만 다시 (VLM/SAM3 재호출 없음), 산출물은 `judge_v2.jsonl`
   `pass_v2.csv` `fail_v2.csv` `summary_v2.json` `reels_v2/` — 기존 v1 리스트 보존. 바뀐 점: main 점수 = 전 K 프레임

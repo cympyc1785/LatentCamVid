@@ -11,6 +11,10 @@ Follows [Keep a Changelog](https://keepachangelog.com/).
 
 ### Added
 
+- **`run_video_filter.py --manual_keep FILE` (2026-09-28, R70).** judge 에서 목록의 scene 을 강제 keep (자동 사유는
+  `auto_reasons` 로 보존, `manual_keep: true`). 안 주면 기존과 동일. `out_filter/d282_dynpose100k/manual_keep.txt` 2편 →
+  v2 통과 3,133.
+
 - **`run_video_filter.py --judge v2` (2026-09-28, R69).** 판정만 다시 (VLM/SAM3 재호출 없음), 산출물은 `judge_v2.jsonl`
   `pass_v2.csv` `fail_v2.csv` `summary_v2.json` `reels_v2/` — 기존 v1 리스트 보존. 바뀐 점: main 점수 = 전 K 프레임
   평균 면적(지나가는 인스턴스 오선택 방지), 면적 상한 0.45/0.70 -> 0.25/0.50, 신규 `large_subject_cut_edge`

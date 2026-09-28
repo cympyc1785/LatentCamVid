@@ -370,6 +370,12 @@ def stage_judge(a):
                              "fraction": g(p, "main_subject", "screen_fraction"),
                              "clean": p.get("clean_third_person_subject"), "reason": p.get("reason")},
                      "sam3": s, "th": TH_V2 if a.judge == "v2" else TH, "judge": a.judge})
+    if a.manual_keep:                    # [R70] 사람이 본 영상 강제 keep — 자동 사유는 기록으로 남긴다
+        want = {l.strip() for l in open(a.manual_keep) if l.strip() and not l.startswith("#")}
+        for r in rows:
+            if r["scene"] in want:
+                r.update(keep=True, manual_keep=True, auto_reasons=r["reasons"], reasons=[])
+        print(f"[judge] manual_keep {sum(r.get('manual_keep', False) for r in rows)} / {len(want)} <- {a.manual_keep}")
     with open(jpath(a, "judge.jsonl"), "w") as fo:
         for r in rows:
             fo.write(json.dumps(r, ensure_ascii=False) + "\n")
@@ -592,6 +598,7 @@ if __name__ == "__main__":
     q.add_argument("--reel_mode", default="groups", choices=("groups", "overlay", "plain"))   # reel: 기존 사유별 / R68 overlay / 같은 표본 원본
     q.add_argument("--fail_rows", default="sam3", choices=("sam3", "vlm_sam3"))  # reel overlay/plain 탈락 2행 구성
     q.add_argument("--seed", default=0, type=int)
+    q.add_argument("--manual_keep", default=None)   # judge: 한 줄에 scene 하나, 자동 판정과 무관하게 keep
     q.add_argument("--judge", default="v1", choices=("v1", "v2"))   # v2 = R69 판정 (파일명 _v2, 기존 보존)               # reel overlay 표본 seed
     q.add_argument("--num_shards", default=1, type=int)
     q.add_argument("--shard_id", default=0, type=int)

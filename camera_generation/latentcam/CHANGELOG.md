@@ -5,6 +5,8 @@ All notable changes to the latentcam sub-project. Follows [Keep a Changelog](htt
 ## [Unreleased]
 
 ### Added
+- **D296 `vista_d296_molmo2_l21_srccam_startpose` (2026-09-29, R89).** D261 start pose head + D262 srccam, 코퍼스
+  latentcam_d296 (시작 절 캡션), 500 epoch.
 - **D293 단일 영상 overfit config 3종 (2026-09-28, R85).** `dynpose_d200of936_{noprobe,aim_noprobe,aim_noprobe_readsrc}` —
   D291/D292 에 `seg_list_dynpose_s91_of936_{train(x800),test}` 분할, 30 epoch.
 - **D294 단일 영상 overfit config 3종 (2026-09-29, R87).** `dynpose_d200of5ec_*` — 대상만 5ec7f200_1 (D293 은 대상 오인).

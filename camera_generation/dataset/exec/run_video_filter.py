@@ -90,6 +90,15 @@ TH_V2 = {**TH, "area_max": 0.25, "area_peak_max": 0.50, "edge_any_max": 0.5, "cu
 # [R72] v3 = v2 에서 subject_too_small · blurry 를 판정에서 뺀다 (사용자 "subject too small은 filter에서 제외",
 #       "blurry도 필터에서 빼줘").
 TH_V3 = {**TH_V2, "area_min": 0.0}
+# [R76] v4 = v3 + main subject 49 프레임 연속성 (`--stage subject49` 산출물 필요). 사용자 "main subject 가 보이다
+#   안보이는 경우나 잘 보이다가 화면에 잘리거나 occlusion 이 심한 경우를 걸러내고 싶어". SAM3 9프레임이 아니라
+#   recon 단계 seg_instances(49 프레임 전량) 의 그 track 으로 잰다.
+TH_V4 = {**TH_V3,
+         "vis49_min": 0.9,       # 49 프레임 중 보이는 비율 하한 — 보이다 안 보임 / 늦게 등장
+         "gap49_max": 2,         # 처음~마지막 등장 사이 안 보이는 프레임 수 상한 — 중간 끊김
+         "edge49_max": 0.3,      # 보이는 프레임 중 화면 가장자리에 닿는 비율 상한 — 잘림
+         "occl_ratio": 0.5,      # 면적 < 중앙값 x 이 값 이면 가림 프레임 (가장자리 프레임 제외)
+         "occl49_max": 0.2}      # 가림 프레임 비율 상한
 
 
 def jpath(a, base):
@@ -258,6 +267,73 @@ def stage_sam3(a):
     print(f"[sam3/s{a.shard_id}] ALL DONE {n_done}", flush=True)
 
 
+# ───────────────────────────────────────────────────────────────── subject49
+def subject49_stats(seg, track_id, edge_px=2, occl_ratio=0.5):
+    """seg_instances track 하나의 49 프레임 연속성 — 보임/끊김/가장자리/가림(면적 급감)."""
+    F = seg.num_frames
+    area = np.zeros(F); edge = np.zeros(F, bool)
+    tr = seg.tracks[track_id]
+    for f, slot in zip(tr["frames"], tr["slots"]):
+        # frame_masks 는 그 프레임 인스턴스 전부를 푼다(~30장) — 필요한 slot 한 장만 푼다
+        m = np.unpackbits(seg._npz[f"{f:05d}"][slot], axis=-1, count=seg.width).astype(bool)
+        area[f] = m.mean()
+        edge[f] = bool(m[:edge_px].any() or m[-edge_px:].any() or m[:, :edge_px].any() or m[:, -edge_px:].any())
+    vis = area > 0
+    if not vis.any():
+        return {"vis_frac": 0.0, "gap_frames": F, "edge_frac": 0.0, "occl_frac": 0.0, "area_med": 0.0}
+    idx = np.flatnonzero(vis)
+    med = float(np.median(area[vis]))
+    inner = vis & ~edge                                    # 가장자리 잘림은 따로 세므로 가림에서 뺀다
+    occl = inner & (area < occl_ratio * med)
+    return {"vis_frac": float(vis.mean()), "gap_frames": int((~vis[idx[0]:idx[-1] + 1]).sum()),
+            "first": int(idx[0]), "last": int(idx[-1]), "edge_frac": float(edge[vis].mean()),
+            "occl_frac": float(occl.sum() / max(inner.sum(), 1)), "area_med": med}
+
+
+def main_node(graph_nodes, noun):
+    """VLM 명사와 label 이 맞는 동적 노드 중 max_area_frac 최대, 없으면 동적 노드 전체에서 (R75 와 같은 규칙)."""
+    dyn = [n for n in graph_nodes if n["id"].startswith("dyn")]
+    if not dyn:
+        return None
+    noun = (noun or "").lower()
+    hit = [n for n in dyn if noun and (noun in n["label"].lower() or n["label"].lower() in noun)]
+    return max(hit or dyn, key=lambda n: n.get("max_area_frac", 0))
+
+
+def stage_subject49(a):
+    """`--judge` 판정의 통과 영상마다 main 동적 subject 의 49 프레임 연속성 -> <out>/subject49.jsonl.
+    graph = <graph_root>/<uuid>/scene_graph.json, seg = <seg_root>/<uuid>/ (없으면 main=None)."""
+    from scene_graph.io import SegInstances
+    rows = [json.loads(l) for l in open(jpath(a, "judge.jsonl"))]
+    todo = [r for r in rows if r["keep"]]
+    done = set()
+    dst = path.join(a.out, "subject49.jsonl")
+    if path.exists(dst):
+        done = {json.loads(l)["scene"] for l in open(dst)}
+    n = 0
+    with open(dst, "a") as fo:
+        for r in todo:
+            if r["scene"] in done:
+                continue
+            u = r["scene"].split("/")[-1]
+            gp, sp = path.join(a.graph_root, u, "scene_graph.json"), path.join(a.seg_root, u)
+            out = {"scene": r["scene"], "main": None}
+            if path.isfile(gp) and path.isdir(sp):
+                nodes = json.load(open(gp))["nodes"]
+                node = main_node(nodes, r["vlm"]["noun"])
+                if node is not None and node.get("track_id") is not None:
+                    seg = SegInstances(sp, "dyn")
+                    if int(node["track_id"]) in seg.tracks:
+                        out["main"] = {"node": node["id"], "label": node["label"],
+                                       **subject49_stats(seg, int(node["track_id"]))}
+            fo.write(json.dumps(out) + "\n")
+            fo.flush()
+            n += 1
+            if n % 200 == 0:
+                print(f"[subject49] {n}/{len(todo)}", flush=True)
+    print(f"[subject49] {n} new -> {dst}")
+
+
 # ───────────────────────────────────────────────────────────────── judge
 def g(d, *ks):
     for k in ks:
@@ -326,10 +402,10 @@ def judge_one(v, s, version="v1"):
     for k, code in (("scene_cut", "scene_cut"), ("text_overlay_or_watermark", "overlay"),
                     ("letterbox_or_vertical", "letterbox"), ("synthetic_or_game", "synthetic"),
                     ("blurry", "blurry")):
-        if q.get(k) is True and not (version in ("v2", "v3") and code == "synthetic") \
-                and not (version == "v3" and code == "blurry"):
+        if q.get(k) is True and not (version in ("v2", "v3", "v4") and code == "synthetic") \
+                and not (version in ("v3", "v4") and code == "blurry"):
             why.append(code)
-    th = {"v2": TH_V2, "v3": TH_V3}.get(version, TH)
+    th = {"v2": TH_V2, "v3": TH_V3, "v4": TH_V4}.get(version, TH)
     if s.get("skipped"):
         why.append("sam3_" + s["skipped"].split(":")[0])
     elif s.get("n_inst", 0) == 0:
@@ -345,8 +421,21 @@ def judge_one(v, s, version="v1"):
             why.append("subject_lost_or_occluded")
         if s["rival_ratio"] >= th["rival_ratio"]:
             why.append("main_ambiguous_multi")
-        if version in ("v2", "v3") and s["main_area_med"] > th["cut_area"] and s["main_edge_any_frac"] > th["edge_any_max"]:
+        if version in ("v2", "v3", "v4") and s["main_area_med"] > th["cut_area"] and s["main_edge_any_frac"] > th["edge_any_max"]:
             why.append("large_subject_cut_edge")
+    if version == "v4":
+        m = s.get("subject49")
+        if m is None:
+            why.append("no_subject49")           # graph/seg_instances 없음 — recon 전 영상
+        else:
+            if m["vis_frac"] < th["vis49_min"]:
+                why.append("subject_not_always_visible")
+            if m["gap_frames"] > th["gap49_max"]:
+                why.append("subject_gap")
+            if m["edge_frac"] > th["edge49_max"]:
+                why.append("subject_edge_cut")
+            if m["occl_frac"] > th["occl49_max"]:
+                why.append("subject_occluded")
     # 기록용: VLM 과 SAM3 가 어긋난 것 (판정엔 안 쓰고 검토 큐 용)
     disagree = []
     if p.get("clean_third_person_subject") is True and any(c in why for c in ("subject_too_large", "body_part_or_cut")):
@@ -358,13 +447,20 @@ def judge_one(v, s, version="v1"):
 
 def stage_judge(a):
     vlm = load_vlm(a)
+    s49 = {}
+    if a.judge == "v4":
+        for l in open(path.join(a.out, "subject49.jsonl")):
+            r = json.loads(l)
+            s49[r["scene"]] = r.get("main")
     scenes = [l.strip() for l in open(path.join(a.out, "scenes.txt")) if l.strip()]
     rows = []
     for rel in scenes:
         f = path.join(a.out, "sam3", scene_key(rel) + ".npz")
         if rel not in vlm or not path.exists(f):
             continue
-        s = sam3_stats(f, "mean" if a.judge in ("v2", "v3") else "median")
+        s = sam3_stats(f, "mean" if a.judge in ("v2", "v3", "v4") else "median")
+        if a.judge == "v4":
+            s["subject49"] = s49.get(rel)
         keep, why, disagree = judge_one(vlm[rel], s, a.judge)
         p = vlm[rel].get("parsed") or {}
         rows.append({"scene": rel, "keep": keep, "reasons": why, "disagree": disagree,
@@ -373,7 +469,7 @@ def stage_judge(a):
                              "num_people": g(p, "main_subject", "num_people"),
                              "fraction": g(p, "main_subject", "screen_fraction"),
                              "clean": p.get("clean_third_person_subject"), "reason": p.get("reason")},
-                     "sam3": s, "th": {"v2": TH_V2, "v3": TH_V3}.get(a.judge, TH), "judge": a.judge})
+                     "sam3": s, "th": {"v2": TH_V2, "v3": TH_V3, "v4": TH_V4}.get(a.judge, TH), "judge": a.judge})
     if a.manual_keep:                    # [R70] 사람이 본 영상 강제 keep — 자동 사유는 기록으로 남긴다
         want = {l.strip() for l in open(a.manual_keep) if l.strip() and not l.startswith("#")}
         for r in rows:
@@ -415,6 +511,7 @@ def stage_export(a):
 
 SAM3_GEOM = ("subject_too_small", "subject_too_large", "body_part_or_cut", "subject_lost_or_occluded",
              "main_ambiguous_multi")
+SUBJ49 = ("subject_not_always_visible", "subject_gap", "subject_edge_cut", "subject_occluded")
 SAM3_GEOM_V2 = SAM3_GEOM[:3] + ("large_subject_cut_edge",) + SAM3_GEOM[3:]   # v1 reel 표본을 안 바꾸려고 따로 둔다
 
 
@@ -598,7 +695,7 @@ def stage_reel(a):
 
 if __name__ == "__main__":
     q = ArgumentParser()
-    q.add_argument("--stage", required=True, choices=("list", "vlm", "sam3", "judge", "export", "reel"))
+    q.add_argument("--stage", required=True, choices=("list", "vlm", "sam3", "subject49", "judge", "export", "reel"))
     q.add_argument("--corpus", default="dynpose-100k")
     q.add_argument("--out", default=path.join(HERE, "out_filter", "d282_dynpose100k"))
     q.add_argument("--fps", default=2.0, type=float)
@@ -608,12 +705,14 @@ if __name__ == "__main__":
     q.add_argument("--reel_mode", default="groups", choices=("groups", "overlay", "plain"))   # reel: 기존 사유별 / R68 overlay / 같은 표본 원본
     q.add_argument("--fail_rows", default="sam3", choices=("sam3", "vlm_sam3"))  # reel overlay/plain 탈락 2행 구성
     q.add_argument("--seed", default=0, type=int)
+    q.add_argument("--graph_root", default=path.join(HERE, "out_dynpose"))                         # subject49
+    q.add_argument("--seg_root", default="/data1/cympyc1785/data/DynPose-100K/eval_data/seg_instances")  # subject49
     q.add_argument("--pass_list", default=None)     # reel overlay/plain: 아래 2행 통과 8편을 이 목록으로
     q.add_argument("--manual_keep", default=None)   # judge: 한 줄에 scene 하나, 자동 판정과 무관하게 keep
-    q.add_argument("--judge", default="v1", choices=("v1", "v2", "v3"))   # v2 = R69 판정, v3 = v2 - subject_too_small (파일명 _v2/_v3, 기존 보존)               # reel overlay 표본 seed
+    q.add_argument("--judge", default="v1", choices=("v1", "v2", "v3", "v4"))   # v2 = R69 판정, v3 = v2 - subject_too_small , v4 = v3 + subject49 (파일명 _vN, 기존 보존)
     q.add_argument("--num_shards", default=1, type=int)
     q.add_argument("--shard_id", default=0, type=int)
     q.add_argument("--wait_rounds", default=600, type=int)      # sam3: VLM 결과 기다리는 최대 라운드(x120 s)
     a = q.parse_args()
-    {"list": stage_list, "vlm": stage_vlm, "sam3": stage_sam3, "judge": stage_judge,
+    {"list": stage_list, "vlm": stage_vlm, "sam3": stage_sam3, "subject49": stage_subject49, "judge": stage_judge,
      "export": stage_export, "reel": stage_reel}[a.stage](a)

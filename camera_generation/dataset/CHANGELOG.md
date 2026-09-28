@@ -18,6 +18,10 @@ Follows [Keep a Changelog](https://keepachangelog.com/).
   고정 (keep=False 가 섞이면 assert). 산출물 이름에 `_picked`. manual_keep 3편 → v2 통과 3,134.
 - **`run_video_filter.py --judge v3` (2026-09-28, R72).** v2 에서 `subject_too_small` · `blurry` 를 탈락 사유에서 뺀 판정
   (`*_v3.*` 파일, v1/v2 보존). manual_keep 13편(사용자 reel 선택) 포함 D282 전량 통과 3,631행 / 3,628 id.
+- **`run_video_filter.py --stage subject49` + `--judge v4` (2026-09-28, R76).** judge 통과 영상의 main 동적 subject
+  (VLM 명사와 label 이 맞는 graph 노드, 없으면 max_area_frac 최대)를 recon seg_instances **49 프레임 전량**으로 재어
+  `subject49.jsonl` (vis_frac / gap_frames / edge_frac / occl_frac). v4 = v3 + `subject_not_always_visible`(<0.9)
+  `subject_gap`(>2) `subject_edge_cut`(>0.3) `subject_occluded`(>0.2), graph 없는 영상은 `no_subject49`. D282: v3 3,631 -> v4 938.
 
 - **`run_video_filter.py --judge v2` (2026-09-28, R69).** 판정만 다시 (VLM/SAM3 재호출 없음), 산출물은 `judge_v2.jsonl`
   `pass_v2.csv` `fail_v2.csv` `summary_v2.json` `reels_v2/` — 기존 v1 리스트 보존. 바뀐 점: main 점수 = 전 K 프레임

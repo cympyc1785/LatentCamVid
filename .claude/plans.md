@@ -38,7 +38,9 @@ plans.md 써놓고 업데이트하면서 진행하자."
 **진행/대기**
 | 항목 | 상태 | 다음 |
 |---|---|---|
-| R59 da3 unposed (DA3 에 소스 카메라 없음) | 학습 중 GPU 1 | 끝나면 testset eval → 표 |
+| R59 da3 unposed (DA3 에 소스 카메라 없음) | 학습 중 GPU 1 (epoch 43, 09-28 12시) | 오늘 저녁 끝 → testset eval → 표 |
+| **R67 D288 text + molmo2_l21 (DA3·srccam 없음)** | 학습 중 GPU 0 (z2kieet6, 09-28 10:36~, ~7.4 it/s) | 끝나면 testset eval → 표 |
+| **R73 SiF 4 arm (D262/D268/D269/D274)** | 측정 중 GPU 2,3 (09-28 12시~, ~22시 예상) | 속도 구간 표 (full12 와 같은 자) |
 | R54 da3 24 view | 중단 (epoch 22 부터, tasks A5) | GPU 나면 재개 |
 | R58 siglip2 + 새로 학습하는 connector | 중단 (epoch 15 부터, tasks A5) | GPU 나면 재개 |
 | d263 umt5 only | eval 막힘 (seg-list id, tasks A3) | 수리 후 eval |
@@ -63,8 +65,9 @@ Qwen3-VL 판단 (2026-09-27):
 |---|---|
 | D282 VLM+SAM3 필터 (DynPose-100K 43,782 → pass 9,396) | ✓ |
 | D284 recon 7,168 / nouns / 동적 SAM3 7,143 / dynmask / 정적 명사 / 정적 SAM3 / geocalib | ✓ |
-| D284 scene graph (CPU 36) | 3,583 / 7,143 (graph FAIL 1편: stat_4 extent 0) |
-| D284 강등 → 뱅크 d185 (GPU 0,2,3) | 1,235 / 7,143 |
+| D284 scene graph (CPU 36) | 7,141 / 7,143 |
+| D284 강등 → 뱅크 d185 | 4,344 + skip 159 / 7,143 — **일시정지** (09-28 12시, GPU 2,3 을 R73 SiF 에 양보) |
+| **필터 재판정 (R69~R72)** v2 = main 평균면적·면적상한 0.25/0.50·한변 잘림·synthetic 제외, v3 = v2 − too_small − blurry, manual_keep 13 | v3 통과 3,628 id (v1 9,391) — **새 리스트로 가면 recon 신규 456 + graph만 14** |
 | 다음: d199 frame0 anchor 보강 → desc(VLM) → captions → export → 캐시 → d200 과 합친 새 코퍼스 → 학습 | 대기 |
 
 주의: 사용자가 "d200 이 필터링 후 얼마 안 남기도 했고 start pose sampling 도 해야" 라고 해서 한때 멈췄다가
@@ -147,6 +150,7 @@ Vista 4씬 (snow-dog/hike/martian-flag/mountain-hike, R64) 진단 (2026-09-27):
 - **H2 빠른 track 데이터 과소.** 뱅크의 빠른 track 45.1% 가 clamped_low 로 버려져 코퍼스 비중 14.7% 뿐, 그중 36.6% 는 static.
 | 다음 실험 | |
 |---|---|
+| D206 aim loss (w 0.1) test SiF: 빠른 track 0.7527 → 0.7142 로 **악화** (R66) | ✓ 기각 |
 | D201-C track 조건 ckpt (2gasclkz) 를 test 에서 track 넣고/빼고(--drop-track) eval, 이동량으로 분할 (H1, 기존 ckpt) | 대기 |
 | 빠른 행 가중 샘플링 짧은 fine-tune 또는 clamped_low+fast 재fit (H2) | 결정 필요 |
 
@@ -158,7 +162,7 @@ Vista 4씬 (snow-dog/hike/martian-flag/mountain-hike, R64) 진단 (2026-09-27):
 |---|---|
 | board source 렌더 807 chunk → 3,440 clip | ✓ |
 | 이름 해석 수리 (board 규약) | ✓ 05bcdff |
-| d277T graph+mesh (CPU 24) | 1,200 / 3,440 |
+| d277T graph+mesh (CPU 24) | ✓ 3,436 / 3,440 (graph 실패 4편) — recycle 무한루프 수리 ba6583c |
 | 다음: GPU 단계 cloud→route→tau→fit→emit (GPU 0~3, D284 뱅크와 겹침) → export 스크립트 board 이름 수리 → caption → 단독 코퍼스 | 대기 |
 
 ---

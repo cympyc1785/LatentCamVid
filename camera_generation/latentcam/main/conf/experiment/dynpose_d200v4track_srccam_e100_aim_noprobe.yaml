@@ -1,0 +1,12 @@
+# @package _global_
+# D291 (R80) — `dynpose_d200v4track_srccam_e100_aim` 에서 Molmo2 text 에 **probe 문장을 뺀** 캐시만 바꾼다
+# (사용자 2026-09-28 "probe 문장 … 안넣은거로 2-arm 다시 돌려줘"). 이제까지 모든 Molmo2 캐시는
+# "Track {target}.\nDescribe the camera trajectory implied by this instruction for the video above." 였고 여기서는
+# "Track {target}." 만 넣는다. video 캐시는 그대로 (영상 토큰이 텍스트 앞이라 causal LM 에서 probe 와 무관).
+# 캐시는 v4track 분할 씬만 구웠으므로 `peav_seg_list_only` 로 preload 를 분할 안으로 좁힌다.
+defaults:
+  - dynpose_d200v4track_srccam_e100_aim
+
+exp_name: dynpose_d200v4track_srccam_e100_aim_noprobe
+peav_text_cache: /data1/cympyc1785/data/DynPose-LBM/latentcam_dynpose_d200/molmo2_cache/prefill_noprobe_v4track.pt
+peav_seg_list_only: true

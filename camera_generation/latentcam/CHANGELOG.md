@@ -5,6 +5,8 @@ All notable changes to the latentcam sub-project. Follows [Keep a Changelog](htt
 ## [Unreleased]
 
 ### Added
+- **`cache_molmo2_embeddings.py --probe ''` (2026-09-28, R80).** probe 문장 줄 자체를 빼고 캡션만 넣는 분기
+  (template `+noprobe`). 기본값이면 기존 문자열과 비트 동일. D291 `dynpose_d200v4track_srccam_e100{,_aim}_noprobe` config.
 - **D289 track small set 2 arm (2026-09-28, R77).** `dynpose_d200{v3,v4}track_molmo2_l21_srccam` — D262 모델을
   d200 ∩ 필터 v3/v4 ∩ track_look_at ∩ anchor drift>0.05u 분할(`seg_list_dynpose_s91_{v3,v4}track_*`)로 처음부터. epochs=epoch_cap 400/1600, val_every_epochs 10/40.
 - **D290 v4track 100 epoch × {aim 없음, aim loss} (2026-09-28, R79).** `dynpose_d200v4track_srccam_e100{,_aim}` —

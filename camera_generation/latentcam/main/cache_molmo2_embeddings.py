@@ -204,7 +204,9 @@ def load_frames(root, chunk, s, e):
 
 def user_tail(caption):
     """캡션 하나에 대한 **가변 꼬리** 문자열. prefix(=영상) 뒤에 그대로 이어 붙는다."""
-    return (f'<|im_start|>user\n{caption}\n{PROBE}<|im_end|>\n'
+    # [R80] `--probe ''` 면 probe 줄 자체를 뺀다 (빈 줄 하나 남기지 않게). 기본값이면 기존 문자열과 비트 동일.
+    body = f'{caption}\n{PROBE}' if PROBE else caption
+    return (f'<|im_start|>user\n{body}<|im_end|>\n'
             f'<|im_start|>assistant\n')
 
 
@@ -212,7 +214,7 @@ def processor_inputs(proc, video, caption, fps):
     """chat template 을 통과시킨 full 입력. video_metadata 는 timestamp 문구에만 쓰인다."""
     msgs = [{'role': 'user',
              'content': [{'type': 'video'},
-                         {'type': 'text', 'text': f'{caption}\n{PROBE}'}]}]
+                         {'type': 'text', 'text': f'{caption}\n{PROBE}' if PROBE else caption}]}]
     text = proc.apply_chat_template(msgs, add_generation_prompt=True, tokenize=False)
     meta = [{'fps': fps, 'total_num_frames': int(video.shape[0]),
              'duration': video.shape[0] / fps,
@@ -941,6 +943,8 @@ def main(args):
     pre_path = shard_text_path(args, args.prefill_out) if args.joint else None
     if not args.limit_scenes:
         tpl = 'molmo2_override+probe' if args.text_override_json else 'molmo2_concise+probe'
+        if not PROBE:
+            tpl = tpl.replace('+probe', '+noprobe')
         common = {'text': [f'{sk}\t{c}' for sk, c in pairs],
                   'text_override_json': args.text_override_json,
                   'extra_layer': args.extra_layer, 'probe': PROBE,

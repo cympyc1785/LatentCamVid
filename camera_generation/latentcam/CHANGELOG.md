@@ -478,6 +478,7 @@ All notable changes to the latentcam sub-project. Follows [Keep a Changelog](htt
   같이 1스레드가 된다. numpy 경로는 이 함수 안에서만 닫힌다.
 
 ### Changed
+- **`cache_molmo2_embeddings.py --probe` 기본값을 `''`(noprobe)로 (2026-09-29, 사용자 지시).** 옛 probe 문장은 `--probe legacy`. 기존 캐시 파일은 그대로.
 - **학습 상한을 100 → 50 epoch 으로 (2026-09-19, 사용자 지시 "학습 50epoch까지만 돌려도 될
   것 같아").** `conf/config.yaml` 의 `epoch_cap: 100 -> 50`. 루프가 `range(start_epoch, 50)`
   이라 **마지막 epoch 인덱스는 49**(총 50 epoch)이고, 그래서 experiment yaml 의

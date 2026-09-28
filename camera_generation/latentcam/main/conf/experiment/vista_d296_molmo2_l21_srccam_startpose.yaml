@@ -4,7 +4,7 @@
 #   ① geo CA 를 DA3 → **소스 카메라 Plücker (srccam, D262 와 같은 배선)** 로,
 #   ② 코퍼스를 latentcam_d296 (시작 후보 36칸 → frame0 게이트 선판정 → object-centric preset,
 #      (preset 당 1개로 줄이지 않고 통과 시작 후보 전부), 캡션 = "Starting {방위} {target} at {고도} in {shot}, the camera ...") 로 바꾼다.
-# Molmo2 text 는 override 없이 **캡션 전체**(시작 절 포함) + probe (D262 와 같은 캐시 방식).
+# Molmo2 text 는 override 없이 **캡션 전체**(시작 절 포함), probe 없음 (2026-09-29 사용자 "앞으로는 다 noprobe를 기본값으로").
 defaults:
   - vista_d261_molmo2_l21_da3_startpose
 

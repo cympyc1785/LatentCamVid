@@ -735,7 +735,7 @@ def main_vit_only(args):
 def main(args):
     from transformers import AutoProcessor, AutoModelForImageTextToText
     global PROBE, TIMING
-    PROBE = args.probe   # 기본값은 모듈 상수 그대로 — 안 주면 D124 와 비트 동일
+    PROBE = PROBE if args.probe == 'legacy' else args.probe   # 기본 '' = noprobe (2026-09-29~). legacy = D124 문장
     if args.timing:
         TIMING = {}
     device = torch.device('cuda' if torch.cuda.is_available() else 'cpu')
@@ -1124,7 +1124,9 @@ if __name__ == '__main__':
     # D191: molmo2 가 읽는 문장을 {data_name: text} JSON 으로 갈아끼운다. 안 주면 코퍼스
     # prompts.json 의 concise 를 그대로 쓴다 (= D124 이후 전 arm 의 기존 동작).
     p.add_argument('--text_override_json', default=None)
-    p.add_argument('--probe', default=PROBE)                          # 캡션 뒤 고정 질의문
+    # [2026-09-29, 사용자 "앞으로는 다 noprobe를 기본값으로"] 기본 = probe 없음 (캡션만). 옛 동작(D124~D291 캐시)은
+    # `--probe legacy` (= 모듈 상수 PROBE) 또는 문장을 직접 준다.
+    p.add_argument('--probe', default='')                             # 캡션 뒤 고정 질의문 ('' = 없음)
     p.add_argument('--video_pool', type=int, default=8)               # 9x9 -> pool x pool
     p.add_argument('--bs', type=int, default=8)                       # 캡션 배치
     p.add_argument('--fps', type=float, default=25.0)                 # timestamp 문구용

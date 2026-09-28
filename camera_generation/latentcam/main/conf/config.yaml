@@ -610,6 +610,13 @@ peav_readout_queries: 49
 # head 출력은 DiT 로 되돌아가지 않으므로 추론에서 안 부르면 그게 곧 "MLP 를 뗀" 상태다.
 peav_readout_aux_dim: 0
 peav_readout_aux_w: 0.0       # 보조 손실 가중치. aux_dim>0 인데 0 이면 학습 진입점에서 assert.
+# [new 2026-09-28, R81/D292] aux head 의 타깃. 'target_track' (기본, 기존) = subject OBB center /
+# 'srccam' = 그 프레임의 **소스 카메라** Plücker 54-d (`_srccam_tokens` 과 같은 값, srccam_cond 없이도 만든다).
+# srccam 이면 peav_readout_aux_dim 은 54. Molmo2 feature 에서 소스 카메라 운동을 읽어내게 하는 보조 손실.
+peav_readout_aux_target: target_track
+# [new 2026-09-28, R81/D292] 'replace' (기본, 기존) = readout 요약 49 토큰이 video CA key/value 를 대신한다 /
+# 'append' = 원래 Molmo2 토큰은 그대로 두고 요약 49 토큰을 뒤에 붙인다.
+peav_readout_mode: replace
 
 # ─── [new 2026-09-20, D206] aim aux loss ─────────────────────────────────────────────────
 # 학습 스텝 안에서 예측 x0 를 **궤적 VAE 로 디코드**해, 카메라 forward 와

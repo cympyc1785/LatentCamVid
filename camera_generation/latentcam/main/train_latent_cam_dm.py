@@ -291,6 +291,14 @@ def readout_aux_loss(raw_model, data, device):
     손실이 비트 동일하다.
     """
     pred = getattr(raw_model, 'readout_aux_pred', None)
+    # [R81/D292] 타깃이 소스 카메라면 (B,T,54) Plücker 를 그대로 MSE. valid 채널 없음 (모든 프레임 유효).
+    sc = data.get('srccam_target')
+    if pred is not None and sc is not None:
+        sc = sc.to(device).float()
+        if sc.shape[1] != pred.shape[1]:
+            sc = F.interpolate(sc.transpose(1, 2), size=pred.shape[1], mode='linear',
+                               align_corners=True).transpose(1, 2)
+        return F.mse_loss(pred.float(), sc)
     tt = data.get('target_track')
     if pred is None or tt is None:
         return None
@@ -734,7 +742,8 @@ def train():
             _vid_kw.update(
                 peav_readout_layers=_rol,
                 peav_readout_queries=int(getattr(cfg, 'peav_readout_queries', 49)),
-                peav_readout_aux_dim=int(getattr(cfg, 'peav_readout_aux_dim', 0) or 0))
+                peav_readout_aux_dim=int(getattr(cfg, 'peav_readout_aux_dim', 0) or 0),
+                peav_readout_mode=str(getattr(cfg, 'peav_readout_mode', 'replace') or 'replace'))
             _auxw = float(getattr(cfg, 'peav_readout_aux_w', 0.0))
             print(f"(model) peav readout: layers={_rol} "
                   f"queries={_vid_kw['peav_readout_queries']} "

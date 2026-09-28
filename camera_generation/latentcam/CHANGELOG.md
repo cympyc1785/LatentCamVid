@@ -5,6 +5,10 @@ All notable changes to the latentcam sub-project. Follows [Keep a Changelog](htt
 ## [Unreleased]
 
 ### Added
+- **readout 소스 카메라 보조 손실 + append 모드 (2026-09-28, R81/D292).** `peav_readout_aux_target: srccam` 이면
+  readout aux head 가 프레임별 소스 카메라 Plücker 54-d 를 맞힌다 (dataset `srccam_target`, condition 에는 안 넣음).
+  `peav_readout_mode: append` 는 Molmo2 토큰을 유지하고 readout 49 토큰을 덧붙인다. 기본값(target_track / replace)은 기존과 동일.
+  config `dynpose_d200v4track_e100_aim_noprobe_readsrc`.
 - **`cache_molmo2_embeddings.py --probe ''` (2026-09-28, R80).** probe 문장 줄 자체를 빼고 캡션만 넣는 분기
   (template `+noprobe`). 기본값이면 기존 문자열과 비트 동일. D291 `dynpose_d200v4track_srccam_e100{,_aim}_noprobe` config.
 - **D289 track small set 2 arm (2026-09-28, R77).** `dynpose_d200{v3,v4}track_molmo2_l21_srccam` — D262 모델을
@@ -393,6 +397,7 @@ All notable changes to the latentcam sub-project. Follows [Keep a Changelog](htt
   ⚠ bf16 을 고른 arm 은 fp32 on-the-fly 와 **비트 동일하지 않다** (실측 상대오차 3.3e-3).
 
 ### Fixed
+- **`eval_testset.py` 가 readout arm 의 모델 kwargs 를 안 넘김 (2026-09-28, R81).** `peav_readout_layers>0` 인 run 은 strict load 에서 죽었다 — 학습 진입점과 같은 kwargs 추가.
 - **`scripts/eval_testset.py` srccam arm 로드 (2026-09-25, R55 / tasks A3).** `srccam_cond` 생성자 인자
   (`geo_latent_dim` 54/11, `geo_in_mlp`, `geo_pe`)를 train 과 같게 넘긴다. 없으면 `geo_proj.0/2.*` unexpected 로
   strict load 가 죽었다. srccam 이 아닌 arm 은 무변경.

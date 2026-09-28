@@ -319,6 +319,15 @@ def main():
         print(f"(model) video CA: video_latent_dim={_vld} video_text_dim={_vtd} "
               f"in_ln={_vid_kw['peav_in_ln']} gate={_vid_kw['video_gate']} "
               f"fuse={_vid_kw['video_text_fuse']}")
+        # [R81] readout arm (D195 / D292) — 학습 진입점과 같은 kwargs. 안 넘기면 strict load 가
+        # readout.* 키에서 죽는다. peav_readout_layers=0 이면 추가 안 함 = 기존 arm 과 동일.
+        _rol = int(getattr(cfg, 'peav_readout_layers', 0) or 0)
+        if _rol > 0:
+            _vid_kw.update(
+                peav_readout_layers=_rol,
+                peav_readout_queries=int(getattr(cfg, 'peav_readout_queries', 49)),
+                peav_readout_aux_dim=int(getattr(cfg, 'peav_readout_aux_dim', 0) or 0),
+                peav_readout_mode=str(getattr(cfg, 'peav_readout_mode', 'replace') or 'replace'))
     model = CameraDiffusionModel(cam_dim=cfg.cam_dim, cond_dim=_track_dim, **_geo_kw, **_vid_kw)
     # [new 2026-09-25, R58/D286] video_onfly arm: 학습된 connector 는 ckpt 의 `video_connector.*` 로
     # 들어 있으므로 load 전에 같은 submodule 을 붙인다. frozen ViT 는 Molmo2 체크포인트에서 온다.

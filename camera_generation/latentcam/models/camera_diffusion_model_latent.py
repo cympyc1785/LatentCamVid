@@ -154,6 +154,7 @@ class CameraDiffusionModel(nn.Module):
         peav_readout_layers=0,
         peav_readout_queries=49,
         peav_readout_aux_dim=0,
+        peav_readout_mode="replace",
         video_text_fuse="token",
         start_pose_dim=0,
         start_pose_tf_p=0.0,
@@ -255,6 +256,7 @@ class CameraDiffusionModel(nn.Module):
         # video 스트림이 꺼진 arm 에서도 속성은 존재해야 forward 분기가 성립한다.
         self.peav_readout_layers = 0
         self.readout = None
+        self.peav_readout_mode = str(peav_readout_mode)
         if self.video_latent_dim > 0:
             _fuse = self.video_text_dim > 0 and self.video_text_fuse == "frame_concat"
             self.video_ln = (nn.LayerNorm(self.video_latent_dim) if self.peav_in_ln
@@ -475,8 +477,13 @@ class CameraDiffusionModel(nn.Module):
             # 안 걸어 두었다 — video_latent_dim>0 은 표준 diffusion 경로 전용이라 학습
             # 진입점에서 이미 assert 로 막혀 있다 (train_latent_cam_dm.py).
             if self.readout is not None:
-                video_tok, self.readout_aux_pred = self.readout(video_tok, video_kpm)
-                video_kpm = None
+                _rd, self.readout_aux_pred = self.readout(video_tok, video_kpm)
+                if self.peav_readout_mode == 'append':      # [R81] 원 토큰 + 요약 49 토큰
+                    if video_kpm is not None:
+                        video_kpm = torch.cat([video_kpm, video_kpm.new_zeros(_rd.shape[:2])], dim=1)
+                    video_tok = torch.cat([video_tok, _rd], dim=1)
+                else:                                        # 'replace' (기존)
+                    video_tok, video_kpm = _rd, None
 
         for _li, (norm1, self_attn, text_cross_attn, mlp1, norm2, geo_cross_attn, mlp2) in enumerate(self.layers):
 

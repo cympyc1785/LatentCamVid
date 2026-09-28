@@ -1821,8 +1821,9 @@ class CamDataset(torch.utils.data.Dataset):
         # **손실 타깃**으로만 읽는다 (train_latent_cam_dm.aim_loss). 그래서 target_track_dim 은
         # 0 인 채로 두고(네트워크 동형) 이 조건만 켠다.
         _aim_w = float(getattr(self.cfg, 'aim_loss_w', 0.0) or 0.0)
+        _ro_src = str(getattr(self.cfg, 'peav_readout_aux_target', 'target_track') or 'target_track') == 'srccam'
         if (int(getattr(self.cfg, 'target_track_dim', 0) or 0) > 0
-                or int(getattr(self.cfg, 'peav_readout_aux_dim', 0) or 0) > 0
+                or (int(getattr(self.cfg, 'peav_readout_aux_dim', 0) or 0) > 0 and not _ro_src)
                 or _aim_w > 0):
             out['target_track'] = self._track_cond(
                 scene_idx, data_name.split('_')[-1], extrinsics, norm_scale)
@@ -1842,6 +1843,9 @@ class CamDataset(torch.utils.data.Dataset):
         # 궤적 49 프레임**으로 채우는 ablation. `geo_emb` 키를 쓰므로 학습 루프의
         # `elif 'geo_emb' in data:` 분기(geo_emb_from_cache)가 그대로 받는다 — 인코더도
         # 이미지도 없다. `geo_encoder: null` 이라 아래 geo 블록 셋은 전부 건너뛴다.
+        if _ro_src and int(getattr(self.cfg, 'peav_readout_aux_dim', 0) or 0) > 0:
+            # [R81/D292] readout aux 타깃 = 소스 카메라 Plücker (condition 으로는 안 넣는다).
+            out['srccam_target'] = self._srccam_tokens(scene_idx, s, e, extrinsics[0], norm_scale, (h, w))
         if getattr(self.cfg, 'srccam_cond', None):
             assert not self.geo_enabled, \
                 "srccam_cond 와 geo_encoder 는 같은 CA 자리를 쓴다 — geo_encoder: null 로 둘 것"

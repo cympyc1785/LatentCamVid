@@ -1,0 +1,19 @@
+# @package _global_
+# D292 (R81) — probe 없는 Molmo2 + aim loss 는 D291 aim_noprobe 와 같되, **srccam 을 condition 으로 넣지 않고**
+# Molmo2 feature 로부터 소스 카메라를 추론하는 readout 보조 손실을 준다 (사용자 2026-09-28 "srccam을 넣는게 아니라
+# molmo2 feature로부터 srccam을 추론하도록 readout layer를 사용해서 추가 loss").
+#   readout: learnable query 49 (= 프레임) x 2층 [self-attn → cross-attn(Molmo2 video+text 토큰) → MLP] (D195 모듈)
+#   aux head: query i → 프레임 i 의 소스 카메라 Plücker 54-d (srccam_cond 가 쓰던 바로 그 값), MSE x 0.1
+#   mode append: 원래 Molmo2 토큰 3136+128 은 그대로 video CA 에 두고 readout 요약 49 토큰을 뒤에 붙인다
+#     (replace 면 CA 가 49 토큰만 보게 되어 subject 정보까지 병목에 걸린다).
+defaults:
+  - dynpose_d200v4track_srccam_e100_aim_noprobe
+
+exp_name: dynpose_d200v4track_e100_aim_noprobe_readsrc
+srccam_cond: null            # condition 에서 소스 카메라 제거 (geo CA 자체가 없다)
+peav_readout_layers: 2
+peav_readout_queries: 49
+peav_readout_aux_dim: 54
+peav_readout_aux_w: 0.1
+peav_readout_aux_target: srccam
+peav_readout_mode: append

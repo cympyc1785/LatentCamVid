@@ -84,6 +84,7 @@ Qwen3-VL 판단 (2026-09-27):
 | 게이트 확정: G1 표면뒤 끔 · G3 가림 0.6 · `--obb_skip_flat 0.1` · 격자 고도는 중력 기준 유지 (context.md) | ✓ |
 | **Vista + keep 데이터로 첫 학습 계획** | 계획 완료 (tmp/agent/reader-plan-startpose-train.md) — 아래 단계 |
 | τ 단계에서 통과 후보만 펴서 K 개 샘플링 (tasks A7 2단계) | 대기 |
+| **D296 (R89) keeper 15씬 x 통과 시작 후보 x object-centric preset (1,382 변이) + 시작 절 캡션 + srccam + start head, 100 epoch** | ✓ 09-29 07:06 — val start rot 4.88° / trans 0.394u (D261 91.3° / 0.774u), val loss_traj 0.0517, cap f1 0.287 |
 
 G3 첫 학습 계획 — keeper 23편 = Vista 17 (D215, `tmp/results/d215/keepers.csv`, magnifying-glass 는 뱅크 없음 → 16) +
   DynPose 6 (D212, `camera_generation/dataset/results/20260920_d212_molmo2_l21_dyn/keepers/keepers.csv`: man/car/player/shirt/squirrel/dolphin,

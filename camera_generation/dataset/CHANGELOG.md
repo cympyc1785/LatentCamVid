@@ -22,6 +22,9 @@ Follows [Keep a Changelog](https://keepachangelog.com/).
   (VLM 명사와 label 이 맞는 graph 노드, 없으면 max_area_frac 최대)를 recon seg_instances **49 프레임 전량**으로 재어
   `subject49.jsonl` (vis_frac / gap_frames / edge_frac / occl_frac). v4 = v3 + `subject_not_always_visible`(<0.9)
   `subject_gap`(>2) `subject_edge_cut`(>0.3) `subject_occluded`(>0.2), graph 없는 영상은 `no_subject49`. D282: v3 3,631 -> v4 938.
+- **`run_video_filter.py --judge v5` + `subject49 --s49_scope all` (2026-09-28, R82).** 부분집합의 부분집합이 아니라 **전량**
+  판정: VLM(v3 규칙) + SAM3 9프레임 중 면적 상한·main 모호·인스턴스 없음만 + 49 프레임 subject 검사(v4 임계). 9 프레임
+  too_small/body_part/lost/cut_edge 는 49 프레임 검사로 대체. D282 전량 통과 1,036 (v1 9,396 과 겹침 986).
 
 - **`run_video_filter.py --judge v2` (2026-09-28, R69).** 판정만 다시 (VLM/SAM3 재호출 없음), 산출물은 `judge_v2.jsonl`
   `pass_v2.csv` `fail_v2.csv` `summary_v2.json` `reels_v2/` — 기존 v1 리스트 보존. 바뀐 점: main 점수 = 전 K 프레임

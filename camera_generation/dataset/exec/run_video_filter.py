@@ -305,7 +305,8 @@ def stage_subject49(a):
     graph = <graph_root>/<uuid>/scene_graph.json, seg = <seg_root>/<uuid>/ (없으면 main=None)."""
     from scene_graph.io import SegInstances
     rows = [json.loads(l) for l in open(jpath(a, "judge.jsonl"))]
-    todo = [r for r in rows if r["keep"]]
+    # [R82] `--s49_scope all` 이면 판정 통과 여부와 무관하게 전량 (graph/seg 없는 영상은 main=None).
+    todo = rows if a.s49_scope == "all" else [r for r in rows if r["keep"]]
     done = set()
     dst = path.join(a.out, "subject49.jsonl")
     if path.exists(dst):
@@ -402,28 +403,31 @@ def judge_one(v, s, version="v1"):
     for k, code in (("scene_cut", "scene_cut"), ("text_overlay_or_watermark", "overlay"),
                     ("letterbox_or_vertical", "letterbox"), ("synthetic_or_game", "synthetic"),
                     ("blurry", "blurry")):
-        if q.get(k) is True and not (version in ("v2", "v3", "v4") and code == "synthetic") \
-                and not (version in ("v3", "v4") and code == "blurry"):
+        if q.get(k) is True and not (version in ("v2", "v3", "v4", "v5") and code == "synthetic") \
+                and not (version in ("v3", "v4", "v5") and code == "blurry"):
             why.append(code)
-    th = {"v2": TH_V2, "v3": TH_V3, "v4": TH_V4}.get(version, TH)
+    th = {"v2": TH_V2, "v3": TH_V3, "v4": TH_V4, "v5": TH_V4}.get(version, TH)
+    # [R82] v5 = 전량 판정. 9 프레임 SAM3 의 연속성·잘림 검사(too_small/body_part/lost/cut_edge)는
+    #   49 프레임 검사가 대신하므로 끈다. 면적 상한(too_large)·main 모호·인스턴스 없음은 남긴다.
+    g9 = version != "v5"
     if s.get("skipped"):
         why.append("sam3_" + s["skipped"].split(":")[0])
     elif s.get("n_inst", 0) == 0:
         why.append("sam3_no_instance")
     else:
-        if s["main_area_med"] < th["area_min"]:
+        if g9 and s["main_area_med"] < th["area_min"]:
             why.append("subject_too_small")
         if s["main_area_med"] > th["area_max"] or s["main_area_max"] > th["area_peak_max"]:
             why.append("subject_too_large")
-        if s["main_edge_opposite_frac"] > th["edge_frac_max"]:
+        if g9 and s["main_edge_opposite_frac"] > th["edge_frac_max"]:
             why.append("body_part_or_cut")
-        if s["main_presence"] < th["presence_min"]:
+        if g9 and s["main_presence"] < th["presence_min"]:
             why.append("subject_lost_or_occluded")
         if s["rival_ratio"] >= th["rival_ratio"]:
             why.append("main_ambiguous_multi")
         if version in ("v2", "v3", "v4") and s["main_area_med"] > th["cut_area"] and s["main_edge_any_frac"] > th["edge_any_max"]:
             why.append("large_subject_cut_edge")
-    if version == "v4":
+    if version in ("v4", "v5"):
         m = s.get("subject49")
         if m is None:
             why.append("no_subject49")           # graph/seg_instances 없음 — recon 전 영상
@@ -448,7 +452,7 @@ def judge_one(v, s, version="v1"):
 def stage_judge(a):
     vlm = load_vlm(a)
     s49 = {}
-    if a.judge == "v4":
+    if a.judge in ("v4", "v5"):
         for l in open(path.join(a.out, "subject49.jsonl")):
             r = json.loads(l)
             s49[r["scene"]] = r.get("main")
@@ -458,8 +462,8 @@ def stage_judge(a):
         f = path.join(a.out, "sam3", scene_key(rel) + ".npz")
         if rel not in vlm or not path.exists(f):
             continue
-        s = sam3_stats(f, "mean" if a.judge in ("v2", "v3", "v4") else "median")
-        if a.judge == "v4":
+        s = sam3_stats(f, "mean" if a.judge in ("v2", "v3", "v4", "v5") else "median")
+        if a.judge in ("v4", "v5"):
             s["subject49"] = s49.get(rel)
         keep, why, disagree = judge_one(vlm[rel], s, a.judge)
         p = vlm[rel].get("parsed") or {}
@@ -469,7 +473,7 @@ def stage_judge(a):
                              "num_people": g(p, "main_subject", "num_people"),
                              "fraction": g(p, "main_subject", "screen_fraction"),
                              "clean": p.get("clean_third_person_subject"), "reason": p.get("reason")},
-                     "sam3": s, "th": {"v2": TH_V2, "v3": TH_V3, "v4": TH_V4}.get(a.judge, TH), "judge": a.judge})
+                     "sam3": s, "th": {"v2": TH_V2, "v3": TH_V3, "v4": TH_V4, "v5": TH_V4}.get(a.judge, TH), "judge": a.judge})
     if a.manual_keep:                    # [R70] 사람이 본 영상 강제 keep — 자동 사유는 기록으로 남긴다
         want = {l.strip() for l in open(a.manual_keep) if l.strip() and not l.startswith("#")}
         for r in rows:
@@ -705,11 +709,12 @@ if __name__ == "__main__":
     q.add_argument("--reel_mode", default="groups", choices=("groups", "overlay", "plain"))   # reel: 기존 사유별 / R68 overlay / 같은 표본 원본
     q.add_argument("--fail_rows", default="sam3", choices=("sam3", "vlm_sam3"))  # reel overlay/plain 탈락 2행 구성
     q.add_argument("--seed", default=0, type=int)
+    q.add_argument("--s49_scope", default="pass", choices=("pass", "all"))                       # subject49
     q.add_argument("--graph_root", default=path.join(HERE, "out_dynpose"))                         # subject49
     q.add_argument("--seg_root", default="/data1/cympyc1785/data/DynPose-100K/eval_data/seg_instances")  # subject49
     q.add_argument("--pass_list", default=None)     # reel overlay/plain: 아래 2행 통과 8편을 이 목록으로
     q.add_argument("--manual_keep", default=None)   # judge: 한 줄에 scene 하나, 자동 판정과 무관하게 keep
-    q.add_argument("--judge", default="v1", choices=("v1", "v2", "v3", "v4"))   # v2 = R69 판정, v3 = v2 - subject_too_small , v4 = v3 + subject49 (파일명 _vN, 기존 보존)
+    q.add_argument("--judge", default="v1", choices=("v1", "v2", "v3", "v4", "v5"))   # v2 = R69 판정, v3 = v2 - subject_too_small , v4 = v3 + subject49 (파일명 _vN, 기존 보존)
     q.add_argument("--num_shards", default=1, type=int)
     q.add_argument("--shard_id", default=0, type=int)
     q.add_argument("--wait_rounds", default=600, type=int)      # sam3: VLM 결과 기다리는 최대 라운드(x120 s)

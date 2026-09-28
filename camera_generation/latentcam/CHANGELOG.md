@@ -5,6 +5,8 @@ All notable changes to the latentcam sub-project. Follows [Keep a Changelog](htt
 ## [Unreleased]
 
 ### Added
+- **D293 단일 영상 overfit config 3종 (2026-09-28, R85).** `dynpose_d200of936_{noprobe,aim_noprobe,aim_noprobe_readsrc}` —
+  D291/D292 에 `seg_list_dynpose_s91_of936_{train(x800),test}` 분할, 30 epoch.
 - **readout 소스 카메라 보조 손실 + append 모드 (2026-09-28, R81/D292).** `peav_readout_aux_target: srccam` 이면
   readout aux head 가 프레임별 소스 카메라 Plücker 54-d 를 맞힌다 (dataset `srccam_target`, condition 에는 안 넣음).
   `peav_readout_mode: append` 는 Molmo2 토큰을 유지하고 readout 49 토큰을 덧붙인다. 기본값(target_track / replace)은 기존과 동일.

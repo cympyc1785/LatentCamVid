@@ -1,0 +1,12 @@
+# @package _global_
+# D293 (R85) — 단일 영상 overfit (사용자 2026-09-28 "영상 하나에 대해서만 3-arm overfit"). 대상 = R84 train 비교 영상 첫 행
+# dynpose/936666cd-6ccc-41da-9c7c-28ca18359365/0. train 목록 = 그 한 줄 x800 (epoch 당 100 step), val = 같은 한 줄.
+# 부모 dynpose_d200v4track_srccam_e100_noprobe 와의 차이는 분할과 epoch 뿐.
+defaults:
+  - dynpose_d200v4track_srccam_e100_noprobe
+
+exp_name: dynpose_d200of936_noprobe
+train_seg_list: /data1/cympyc1785/data/DynPose-LBM/latentcam_dynpose_d200/seg_list_dynpose_s91_of936_train.txt
+test_seg_list: /data1/cympyc1785/data/DynPose-LBM/latentcam_dynpose_d200/seg_list_dynpose_s91_of936_test.txt
+epochs: 30
+epoch_cap: 30

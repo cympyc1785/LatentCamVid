@@ -1524,7 +1524,11 @@ def train():
 
         # Validation once per epoch (wandb curve). run_validation restores train mode
         # and keeps only last.pth + best.pth (by val/loss_traj).
-        run_validation(epoch, global_step)
+        # [new 2026-09-28, R77] `val_every_epochs` N: N epoch 마다 + 마지막 epoch 에만. 기본 1 = 기존과 동일.
+        # small set(86~408 seg)은 epoch 이 수 초라 매 epoch val(~1분)이 시간을 다 먹는다.
+        _ve = int(getattr(cfg, 'val_every_epochs', 1) or 1)
+        if (epoch + 1) % _ve == 0 or epoch == _epochs - 1:
+            run_validation(epoch, global_step)
 
 if __name__ == "__main__":
     train()

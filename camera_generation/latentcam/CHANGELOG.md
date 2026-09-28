@@ -6,7 +6,9 @@ All notable changes to the latentcam sub-project. Follows [Keep a Changelog](htt
 
 ### Added
 - **D289 track small set 2 arm (2026-09-28, R77).** `dynpose_d200{v3,v4}track_molmo2_l21_srccam` — D262 모델을
-  d200 ∩ 필터 v3/v4 ∩ track_look_at ∩ anchor drift>0.05u 분할(`seg_list_dynpose_s91_{v3,v4}track_*`)로 처음부터. epoch_cap 400/1600.
+  d200 ∩ 필터 v3/v4 ∩ track_look_at ∩ anchor drift>0.05u 분할(`seg_list_dynpose_s91_{v3,v4}track_*`)로 처음부터. epochs=epoch_cap 400/1600, val_every_epochs 10/40.
+- **`val_every_epochs` (2026-09-28, R77).** `train_latent_cam_dm.py` 가 N epoch 마다(+마지막 epoch) 만 validation.
+  기본 1 = 기존과 동일 (conf/config.yaml).
 - **D288 `dynpose_d200_molmo2_l21_nogeo` (2026-09-28, R67).** text + Molmo2 layer21 만 쓰는 arm — DA3·source camera
   조건 없음. `dynpose_d200_molmo2_l21_da3` 를 물려받아 geo 키 넷만 끈다 (goal 1 DA3 기여 대조군).
 - **VAE 왕복 전진량·부호변화 열 (2026-09-27, R65).** `scripts/vae/vae_roundtrip_val.py` 가 `gt_fwd`/`rt_fwd`

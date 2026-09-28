@@ -10,4 +10,6 @@ defaults:
 exp_name: dynpose_d200v4track_molmo2_l21_srccam
 train_seg_list: /data1/cympyc1785/data/DynPose-LBM/latentcam_dynpose_d200/seg_list_dynpose_s91_v4track_train.txt
 test_seg_list: /data1/cympyc1785/data/DynPose-LBM/latentcam_dynpose_d200/seg_list_dynpose_s91_v4track_test.txt
+epochs: 1600               # epoch_cap 만 올리면 min(epochs=100, cap) 로 잘린다
 epoch_cap: 1600
+val_every_epochs: 40       # 11 it/epoch

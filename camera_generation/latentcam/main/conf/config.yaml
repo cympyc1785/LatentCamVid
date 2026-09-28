@@ -741,7 +741,6 @@ ckpt_at_epochs: []
 # 두 설정이 같은 epoch 을 가리키면 같은 파일 하나가 된다. epoch 0 은 건너뛴다.
 # null 이면 기존 동작 그대로 (ckpt_at_epochs 만).
 ckpt_every_epochs: null
-val_every_epochs: 1          # [R77] N epoch 마다 val (+마지막 epoch). 1 = 매 epoch (기존)
 clip_version: ViT-B/32
 clip_max_length: 77
 # config_large.py's CLaTr ckpt. It is an architecture-identical drop-in to the

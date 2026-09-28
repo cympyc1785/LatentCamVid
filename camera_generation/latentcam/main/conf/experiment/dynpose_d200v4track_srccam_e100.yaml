@@ -1,0 +1,10 @@
+# @package _global_
+# D290 (R79) — v4track small set (d200 ∩ 필터 v4 ∩ track_look_at ∩ anchor drift>0.05u, train 86 / test 12) 으로
+# umt5 + Molmo2 l21 + srccam 처음부터 **100 epoch** (사용자 2026-09-28 "train set을 v4기준 track look at으로 …
+# aim loss추가한것과 아닌것 … 둘다 100epoch만"). 이 파일이 aim loss 없는 arm, `_aim` 이 aim loss arm.
+defaults:
+  - dynpose_d200v4track_molmo2_l21_srccam
+
+exp_name: dynpose_d200v4track_srccam_e100
+epochs: 100
+epoch_cap: 100

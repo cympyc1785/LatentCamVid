@@ -1,0 +1,10 @@
+# @package _global_
+# D290 (R79) aim arm — `dynpose_d200v4track_srccam_e100` + D206 aim loss (카메라 forward ↔ subject center 각,
+# look_at 변이만, t<250). 값은 D206 과 같다. 움직인 축은 aim_loss 세 줄뿐.
+defaults:
+  - dynpose_d200v4track_srccam_e100
+
+exp_name: dynpose_d200v4track_srccam_e100_aim
+aim_loss_w: 0.1
+aim_loss_max_t: 250
+aim_loss_gate: look_at

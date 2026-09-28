@@ -7,8 +7,8 @@ All notable changes to the latentcam sub-project. Follows [Keep a Changelog](htt
 ### Added
 - **D289 track small set 2 arm (2026-09-28, R77).** `dynpose_d200{v3,v4}track_molmo2_l21_srccam` — D262 모델을
   d200 ∩ 필터 v3/v4 ∩ track_look_at ∩ anchor drift>0.05u 분할(`seg_list_dynpose_s91_{v3,v4}track_*`)로 처음부터. epochs=epoch_cap 400/1600, val_every_epochs 10/40.
-- **`val_every_epochs` (2026-09-28, R77).** `train_latent_cam_dm.py` 가 N epoch 마다(+마지막 epoch) 만 validation.
-  기본 1 = 기존과 동일 (conf/config.yaml).
+- **D290 v4track 100 epoch × {aim 없음, aim loss} (2026-09-28, R79).** `dynpose_d200v4track_srccam_e100{,_aim}` —
+  aim arm 은 D206 값(aim_loss_w 0.1, max_t 250, gate look_at).
 - **D288 `dynpose_d200_molmo2_l21_nogeo` (2026-09-28, R67).** text + Molmo2 layer21 만 쓰는 arm — DA3·source camera
   조건 없음. `dynpose_d200_molmo2_l21_da3` 를 물려받아 geo 키 넷만 끈다 (goal 1 DA3 기여 대조군).
 - **VAE 왕복 전진량·부호변화 열 (2026-09-27, R65).** `scripts/vae/vae_roundtrip_val.py` 가 `gt_fwd`/`rt_fwd`
@@ -35,6 +35,7 @@ All notable changes to the latentcam sub-project. Follows [Keep a Changelog](htt
   기본 float32 = 옛 동작.
 
 ### Removed
+- **`val_every_epochs` 되돌림 (2026-09-28, R79).** 사용자 지시로 validation 을 다시 매 epoch. D289 config 의 키도 삭제.
 
 - **DA3 / Molmo2 캐시 정리 — 33건 / 1,507.1 G 삭제 (2026-09-24).** `/data1/cympyc1785/data`
   아래 da3·molmo2·siglip2·peav·umt5 캐시 **46개 2,200.9 G 를 전수로 세고** config 참조와

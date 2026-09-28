@@ -1,0 +1,13 @@
+# @package _global_
+# D289 (R77) — umt5 + Molmo2 l21 + srccam (D262 모델) 을 **움직이는 track small set** 으로 처음부터 (사용자 2026-09-28
+# "저 small set으로 gpu 1번 써서 학습" / "threshold 넘는 움직이는 dynamic subject, track hold 기준").
+# small set = d200 s91 분할 ∩ D282 필터 judge v4 통과 씬 ∩ preset track_look_at(= track_hold_aimed, d200 엔 track_hold 없음)
+#             ∩ anchor 가 dyn 이고 scene graph center_drift_u > 0.05u.  train 86 / test 12 (70 / 7 씬).
+# epoch_cap: segment 가 적어 step 수를 ~2만으로 맞춘다 (배치 8).
+defaults:
+  - dynpose_d200_molmo2_l21_srccam
+
+exp_name: dynpose_d200v4track_molmo2_l21_srccam
+train_seg_list: /data1/cympyc1785/data/DynPose-LBM/latentcam_dynpose_d200/seg_list_dynpose_s91_v4track_train.txt
+test_seg_list: /data1/cympyc1785/data/DynPose-LBM/latentcam_dynpose_d200/seg_list_dynpose_s91_v4track_test.txt
+epoch_cap: 1600

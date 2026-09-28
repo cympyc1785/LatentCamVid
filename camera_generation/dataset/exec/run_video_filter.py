@@ -81,6 +81,20 @@ TH = {"area_min": 0.01,        # main 면적 중앙값 하한 (화면 대비) �
       "edge_frac_max": 0.5,    # 마주보는 두 변(위+아래 또는 좌+우)에 닿는 프레임 비율 상한 — 신체 일부
       "presence_min": 0.6,     # main 이 보이는 프레임 비율 하한 — 사라짐/가림
       "rival_ratio": 0.8}      # 2등/1등 점수비 이상이면 main 모호 (사람이 여럿)
+# [R69, 2026-09-28] v2 판정 (`--judge v2`). 사용자 "필터링이 좀 안좋은 것 같은데" + R68 reel 검토:
+#   - 클로즈업 통과: 면적 상한 0.45/0.70 -> 0.25/0.50
+#   - 한 변 잘림 미판정: 큰 subject(면적 med > cut_area) 가 한 변이라도 닿는 프레임 > edge_any_max 면 탈락
+#   - main 오선택(지나가는 사람): 점수를 "보인 프레임 면적 중앙값" -> "전 K 프레임 평균 면적(없으면 0)"
+#   - synthetic_or_game 가 실제 스포츠 경기를 잡음(154 중 76 이 경기 단어): 탈락 사유에서 뺀다(기록만)
+TH_V2 = {**TH, "area_max": 0.25, "area_peak_max": 0.50, "edge_any_max": 0.5, "cut_area": 0.10}
+
+
+def jpath(a, base):
+    """v1 은 기존 파일명 그대로, v2 는 `<stem>_v2.<ext>` — 기존 리스트를 덮어쓰지 않는다."""
+    if a.judge == "v1":
+        return path.join(a.out, base)
+    stem, ext = path.splitext(base)
+    return path.join(a.out, f"{stem}_{a.judge}{ext}")
 
 
 def scene_key(rel):
@@ -248,7 +262,7 @@ def g(d, *ks):
     return d
 
 
-def sam3_stats(npz_path):
+def sam3_stats(npz_path, main_score="median"):
     z = np.load(npz_path, allow_pickle=False)
     if "skipped" in z.files:
         return {"skipped": str(z["skipped"])}
@@ -266,8 +280,11 @@ def sam3_stats(npz_path):
     cy = np.nanmean((z["boxes_norm"][..., 1] + z["boxes_norm"][..., 3]) / 2, axis=1)
     center = 1.0 - np.clip(np.hypot(np.nan_to_num(cx, nan=0.5) - 0.5, np.nan_to_num(cy, nan=0.5) - 0.5) / 0.707, 0, 1)
     pres = present.mean(1)
-    score = np.array([np.median(area[j][present[j]]) if present[j].any() else 0.0 for j in range(len(ids))]) \
-        * pres * (0.75 + 0.25 * center)
+    if main_score == "mean":             # v2: 안 보인 프레임은 0 — 잠깐 크게 지나간 인스턴스가 못 이긴다
+        score = area.mean(1) * (0.75 + 0.25 * center)
+    else:
+        score = np.array([np.median(area[j][present[j]]) if present[j].any() else 0.0
+                          for j in range(len(ids))]) * pres * (0.75 + 0.25 * center)
     order = np.argsort(-score)
     m = int(order[0])
     pm = present[m]
@@ -280,7 +297,7 @@ def sam3_stats(npz_path):
             "n_inst_frame_max": int(present.sum(0).max())}
 
 
-def judge_one(v, s):
+def judge_one(v, s, version="v1"):
     """-> (keep, [사유 코드], 근거 dict). 사유는 전부 모은다 (첫 번째만이 아니라)."""
     p = (v or {}).get("parsed") or {}
     why = []
@@ -306,23 +323,26 @@ def judge_one(v, s):
     for k, code in (("scene_cut", "scene_cut"), ("text_overlay_or_watermark", "overlay"),
                     ("letterbox_or_vertical", "letterbox"), ("synthetic_or_game", "synthetic"),
                     ("blurry", "blurry")):
-        if q.get(k) is True:
+        if q.get(k) is True and not (version == "v2" and code == "synthetic"):
             why.append(code)
+    th = TH_V2 if version == "v2" else TH
     if s.get("skipped"):
         why.append("sam3_" + s["skipped"].split(":")[0])
     elif s.get("n_inst", 0) == 0:
         why.append("sam3_no_instance")
     else:
-        if s["main_area_med"] < TH["area_min"]:
+        if s["main_area_med"] < th["area_min"]:
             why.append("subject_too_small")
-        if s["main_area_med"] > TH["area_max"] or s["main_area_max"] > TH["area_peak_max"]:
+        if s["main_area_med"] > th["area_max"] or s["main_area_max"] > th["area_peak_max"]:
             why.append("subject_too_large")
-        if s["main_edge_opposite_frac"] > TH["edge_frac_max"]:
+        if s["main_edge_opposite_frac"] > th["edge_frac_max"]:
             why.append("body_part_or_cut")
-        if s["main_presence"] < TH["presence_min"]:
+        if s["main_presence"] < th["presence_min"]:
             why.append("subject_lost_or_occluded")
-        if s["rival_ratio"] >= TH["rival_ratio"]:
+        if s["rival_ratio"] >= th["rival_ratio"]:
             why.append("main_ambiguous_multi")
+        if version == "v2" and s["main_area_med"] > th["cut_area"] and s["main_edge_any_frac"] > th["edge_any_max"]:
+            why.append("large_subject_cut_edge")
     # 기록용: VLM 과 SAM3 가 어긋난 것 (판정엔 안 쓰고 검토 큐 용)
     disagree = []
     if p.get("clean_third_person_subject") is True and any(c in why for c in ("subject_too_large", "body_part_or_cut")):
@@ -340,8 +360,8 @@ def stage_judge(a):
         f = path.join(a.out, "sam3", scene_key(rel) + ".npz")
         if rel not in vlm or not path.exists(f):
             continue
-        s = sam3_stats(f)
-        keep, why, disagree = judge_one(vlm[rel], s)
+        s = sam3_stats(f, "mean" if a.judge == "v2" else "median")
+        keep, why, disagree = judge_one(vlm[rel], s, a.judge)
         p = vlm[rel].get("parsed") or {}
         rows.append({"scene": rel, "keep": keep, "reasons": why, "disagree": disagree,
                      "vlm": {"viewpoint": p.get("viewpoint"), "noun": g(p, "main_subject", "noun"),
@@ -349,21 +369,21 @@ def stage_judge(a):
                              "num_people": g(p, "main_subject", "num_people"),
                              "fraction": g(p, "main_subject", "screen_fraction"),
                              "clean": p.get("clean_third_person_subject"), "reason": p.get("reason")},
-                     "sam3": s, "th": TH})
-    with open(path.join(a.out, "judge.jsonl"), "w") as fo:
+                     "sam3": s, "th": TH_V2 if a.judge == "v2" else TH, "judge": a.judge})
+    with open(jpath(a, "judge.jsonl"), "w") as fo:
         for r in rows:
             fo.write(json.dumps(r, ensure_ascii=False) + "\n")
-    print(f"[judge] {len(rows)} scenes, keep {sum(r['keep'] for r in rows)} -> {a.out}/judge.jsonl")
+    print(f"[judge] {len(rows)} scenes, keep {sum(r['keep'] for r in rows)} -> {jpath(a, 'judge.jsonl')}")
 
 
 def stage_export(a):
     from collections import Counter
-    rows = [json.loads(l) for l in open(path.join(a.out, "judge.jsonl"))]
+    rows = [json.loads(l) for l in open(jpath(a, "judge.jsonl"))]
     cols = ["scene", "reasons", "vlm_viewpoint", "vlm_noun", "vlm_num_people", "vlm_fraction",
             "sam3_n_inst", "main_area_med", "main_area_max", "main_presence", "main_edge_opposite_frac",
             "rival_ratio", "disagree", "vlm_reason"]
     for name, keep in (("pass.csv", True), ("fail.csv", False)):
-        with open(path.join(a.out, name), "w", newline="") as f:
+        with open(jpath(a, name), "w", newline="") as f:
             w = csv.writer(f)
             w.writerow(cols)
             for r in rows:
@@ -379,12 +399,13 @@ def stage_export(a):
     summ = {"n": len(rows), "pass": sum(r["keep"] for r in rows),
             "reason_any": dict(c.most_common()), "reason_first": dict(first.most_common()),
             "disagree": dict(Counter(x for r in rows for x in r["disagree"]))}
-    json.dump(summ, open(path.join(a.out, "summary.json"), "w"), indent=1)
+    json.dump(summ, open(jpath(a, "summary.json"), "w"), indent=1)
     print(json.dumps(summ, indent=1))
 
 
 SAM3_GEOM = ("subject_too_small", "subject_too_large", "body_part_or_cut", "subject_lost_or_occluded",
              "main_ambiguous_multi")
+SAM3_GEOM_V2 = SAM3_GEOM[:3] + ("large_subject_cut_edge",) + SAM3_GEOM[3:]   # v1 reel 표본을 안 바꾸려고 따로 둔다
 
 
 def plain_tile(r, TW, TH_, nf=49):
@@ -420,6 +441,7 @@ def stage_reel_overlay(a, rows, ffmpeg):
     import cv2
     import subprocess
     rng = np.random.default_rng(a.seed)
+    geom = SAM3_GEOM_V2 if a.judge == "v2" else SAM3_GEOM
     def strat(codes, n, only):
         """사유별로 돌아가며 한 편씩. only 면 그 계열 사유로만 탈락한 영상, 아니면 사유가 하나뿐인 영상 우선."""
         fam = set(codes)
@@ -439,13 +461,13 @@ def stage_reel_overlay(a, rows, ffmpeg):
             i += 1
         return out
     if a.fail_rows == "vlm_sam3":        # [R68c] 1행 = VLM 사유로만 탈락 4, 2행 = SAM3 기하로만 탈락 4
-        vlm_codes = sorted({c for r in rows for c in r["reasons"]} - set(SAM3_GEOM)
+        vlm_codes = sorted({c for r in rows for c in r["reasons"]} - set(geom)
                            - {c for r in rows for c in r["reasons"] if c.startswith("sam3_")})
         # 4칸 < 사유 종류라 seed 마다 사유 순서를 섞는다 (알파벳순이면 늘 같은 4 사유만 나온다)
         pick_f = strat([vlm_codes[i] for i in rng.permutation(len(vlm_codes))], 4, True) + \
-            strat([SAM3_GEOM[i] for i in rng.permutation(len(SAM3_GEOM))], 4, True)
+            strat([geom[i] for i in rng.permutation(len(geom))], 4, True)
     else:
-        pick_f = strat(SAM3_GEOM, 8, False)
+        pick_f = strat(geom, 8, False)
     passes = [r for r in rows if r["keep"]]
     pick = pick_f + [passes[j] for j in rng.choice(len(passes), 8, replace=False)]
     TW, TH_ = 480, 270
@@ -482,13 +504,13 @@ def stage_reel_overlay(a, rows, ffmpeg):
         tiles.append(fr)
     K = max(len(t) for t in tiles)
     tiles = [t + [t[-1]] * (K - len(t)) for t in tiles]
-    tmpd = path.join(a.out, "reels", "_overlay")
+    tmpd = path.join(a.out, "reels" if a.judge == "v1" else f"reels_{a.judge}", "_overlay")
     os.makedirs(tmpd, exist_ok=True)
     for t in range(K):
         grid = np.vstack([np.hstack([tiles[r0 * 4 + c][t] for c in range(4)]) for r0 in range(4)])
         cv2.imwrite(path.join(tmpd, f"{t:03d}.jpg"), grid)
     tag = "vlm4_sam3_4" if a.fail_rows == "vlm_sam3" else "fail8"
-    dst = path.join(a.out, "reels", f"{a.reel_mode}_{tag}_pass8_seed{a.seed}.mp4")
+    dst = path.join(a.out, "reels" if a.judge == "v1" else f"reels_{a.judge}", f"{a.reel_mode}_{tag}_pass8_seed{a.seed}.mp4")
     subprocess.run([ffmpeg, "-y", "-loglevel", "error", "-framerate", "10" if plain else "2", "-i", path.join(tmpd, "%03d.jpg"),
                     "-c:v", "libx264", "-pix_fmt", "yuv420p", dst], check=True)
     for f in glob(path.join(tmpd, "*.jpg")):
@@ -507,7 +529,7 @@ def stage_reel(a):
     import subprocess
     ffmpeg = ("/data1/cympyc1785/miniconda3/envs/vista4d/lib/python3.12/site-packages/imageio_ffmpeg/"
               "binaries/ffmpeg-linux-x86_64-v7.0.2")
-    rows = [json.loads(l) for l in open(path.join(a.out, "judge.jsonl"))]
+    rows = [json.loads(l) for l in open(jpath(a, "judge.jsonl"))]
     if a.reel_mode in ("overlay", "plain"):
         return stage_reel_overlay(a, rows, ffmpeg)
     rng = np.random.default_rng(0)
@@ -515,7 +537,7 @@ def stage_reel(a):
     for r in rows:
         if not r["keep"]:
             groups.setdefault(r["reasons"][0], []).append(r)
-    os.makedirs(path.join(a.out, "reels"), exist_ok=True)
+    os.makedirs(path.join(a.out, "reels" if a.judge == "v1" else f"reels_{a.judge}"), exist_ok=True)
     TW, TH_, NF = 320, 180, 49
     for name, rs in groups.items():
         if not rs:
@@ -541,18 +563,18 @@ def stage_reel(a):
             tiles.append(fr)
         while len(tiles) < 16:
             tiles.append([np.zeros((TH_, TW, 3), np.uint8)] * NF)
-        tmpd = path.join(a.out, "reels", f"_{name}")
+        tmpd = path.join(a.out, "reels" if a.judge == "v1" else f"reels_{a.judge}", f"_{name}")
         os.makedirs(tmpd, exist_ok=True)
         for t in range(NF):
             grid = np.vstack([np.hstack([tiles[r0 * 4 + c][t] for c in range(4)]) for r0 in range(4)])
             cv2.imwrite(path.join(tmpd, f"{t:03d}.jpg"), grid)
-        dst = path.join(a.out, "reels", f"{name}_{len(rs)}.mp4")
+        dst = path.join(a.out, "reels" if a.judge == "v1" else f"reels_{a.judge}", f"{name}_{len(rs)}.mp4")
         subprocess.run([ffmpeg, "-y", "-loglevel", "error", "-framerate", "10", "-i",
                         path.join(tmpd, "%03d.jpg"), "-c:v", "libx264", "-pix_fmt", "yuv420p", dst], check=True)
         for f in glob(path.join(tmpd, "*.jpg")):
             os.remove(f)
         os.rmdir(tmpd)
-        with open(path.join(a.out, "reels", f"{name}_{len(rs)}.txt"), "w") as f:
+        with open(path.join(a.out, "reels" if a.judge == "v1" else f"reels_{a.judge}", f"{name}_{len(rs)}.txt"), "w") as f:
             for r in pick:
                 f.write(f"{r['scene']}\t{'|'.join(r['reasons']) or 'PASS'}\t{r['vlm']['reason']}\n")
         print(f"[reel] {dst}")
@@ -569,7 +591,8 @@ if __name__ == "__main__":
     q.add_argument("--k", default=9, type=int)                  # SAM3 추적 프레임 수 (영상 전체 균등)
     q.add_argument("--reel_mode", default="groups", choices=("groups", "overlay", "plain"))   # reel: 기존 사유별 / R68 overlay / 같은 표본 원본
     q.add_argument("--fail_rows", default="sam3", choices=("sam3", "vlm_sam3"))  # reel overlay/plain 탈락 2행 구성
-    q.add_argument("--seed", default=0, type=int)               # reel overlay 표본 seed
+    q.add_argument("--seed", default=0, type=int)
+    q.add_argument("--judge", default="v1", choices=("v1", "v2"))   # v2 = R69 판정 (파일명 _v2, 기존 보존)               # reel overlay 표본 seed
     q.add_argument("--num_shards", default=1, type=int)
     q.add_argument("--shard_id", default=0, type=int)
     q.add_argument("--wait_rounds", default=600, type=int)      # sam3: VLM 결과 기다리는 최대 라운드(x120 s)

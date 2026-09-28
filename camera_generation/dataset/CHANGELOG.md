@@ -11,6 +11,12 @@ Follows [Keep a Changelog](https://keepachangelog.com/).
 
 ### Added
 
+- **`run_video_filter.py --judge v2` (2026-09-28, R69).** 판정만 다시 (VLM/SAM3 재호출 없음), 산출물은 `judge_v2.jsonl`
+  `pass_v2.csv` `fail_v2.csv` `summary_v2.json` `reels_v2/` — 기존 v1 리스트 보존. 바뀐 점: main 점수 = 전 K 프레임
+  평균 면적(지나가는 인스턴스 오선택 방지), 면적 상한 0.45/0.70 -> 0.25/0.50, 신규 `large_subject_cut_edge`
+  (면적 med>0.10 인데 한 변이라도 닿는 프레임>50%), `synthetic` 은 탈락 사유에서 제외. 기본 `--judge v1` 은 비트 동일
+  (1,500편 표본 재판정 불일치 0). D282 전량: 통과 9,396 -> 3,132.
+
 - **`run_video_filter.py --stage reel --reel_mode overlay` (2026-09-28, R68).** 4x4 한 장 — 위 2행 SAM3 기하 게이트
   탈락 8편(사유별 고르게), 아래 2행 통과 8편, main subject 마스크 초록 / 나머지 인스턴스 빨강 overlay.
   SAM3 가 추적한 K 프레임만 재생한다. 기본 `--reel_mode groups` 는 기존 사유별 reel 그대로.

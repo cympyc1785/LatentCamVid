@@ -126,7 +126,7 @@ Vista 4씬 (snow-dog/hike/martian-flag/mountain-hike, R64) 진단 (2026-09-27):
 - train 12개 재추론 (tmp/r63/train_dolly_in_look_at_12.mp4): **학습 데이터에서도** GT 0.005 → pred flips 12·후진, GT 0.25 (avg_scale 1.09) → flips 6;
   GT ≥0.3 은 대체로 재현 (flips 0~2). → 작은 정규화 전진은 학습 표본조차 못 맞춘다 = 모델 floor 문제.
 - 수정 후보: ~~피사체 거리 정규화~~ (기각: test 에 VLM+SAM3 필요), ~~크기 캡션~~ (기각: D201-A 효과 미미), 작은 전진 표본 가중 (train 전용, 남음).
-- R66 (진행 중, GPU 1): D206 aim arm test sif 전량 + Vista 3씬 dolly_in_look_at/track_look_at depth warp; collision metric 타당성 검토 (reader). fine-tune 은 tasks.md A8 기록만.
+- R66 ✓ (2026-09-28): D206 aim(w0.1) test sif 0.8770 vs d200 l21 0.8842, 빠른 track(ang>=2.344) 0.7142 vs 0.7527 — **aim loss 는 framing 도 개선 못 함**. Vista 3씬: 떨림 감소는 mountain-hike 뿐, 과주행 증가. collision metric: kNN 은 GT 1% 자기 캘리브라 무의미, G1 은 time_match off 라 GT FP 2.99% (reader-collision-metric.md). fine-tune = tasks.md A8 기록만.
 | 다음 실험 (싼 순) | |
 |---|---|
 | 코퍼스 카운트: 가까운 dolly 중 tiny/후진 행 비율 (무비용) | 대기 |

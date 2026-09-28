@@ -420,16 +420,32 @@ def stage_reel_overlay(a, rows, ffmpeg):
     import cv2
     import subprocess
     rng = np.random.default_rng(a.seed)
-    fails = []
-    for code in SAM3_GEOM:                      # 사유별로 돌아가며 한 편씩 (사유가 하나뿐인 영상 우선)
-        pool = [r for r in rows if not r["keep"] and r["reasons"] == [code]] or \
-            [r for r in rows if not r["keep"] and code in r["reasons"]]
-        fails.append([pool[i] for i in rng.permutation(len(pool))])
-    pick_f, i = [], 0
-    while len(pick_f) < 8:
-        if fails[i % len(fails)]:
-            pick_f.append(fails[i % len(fails)].pop())
-        i += 1
+    def strat(codes, n, only):
+        """사유별로 돌아가며 한 편씩. only 면 그 계열 사유로만 탈락한 영상, 아니면 사유가 하나뿐인 영상 우선."""
+        fam = set(codes)
+        qs = []
+        for code in codes:
+            if only:
+                pool = [r for r in rows if not r["keep"] and r["reasons"][0] == code and set(r["reasons"]) <= fam]
+            else:
+                pool = [r for r in rows if not r["keep"] and r["reasons"] == [code]] or \
+                    [r for r in rows if not r["keep"] and code in r["reasons"]]
+            if pool:
+                qs.append([pool[i] for i in rng.permutation(len(pool))])
+        out, i = [], 0
+        while len(out) < n and any(qs):
+            if qs[i % len(qs)]:
+                out.append(qs[i % len(qs)].pop())
+            i += 1
+        return out
+    if a.fail_rows == "vlm_sam3":        # [R68c] 1행 = VLM 사유로만 탈락 4, 2행 = SAM3 기하로만 탈락 4
+        vlm_codes = sorted({c for r in rows for c in r["reasons"]} - set(SAM3_GEOM)
+                           - {c for r in rows for c in r["reasons"] if c.startswith("sam3_")})
+        # 4칸 < 사유 종류라 seed 마다 사유 순서를 섞는다 (알파벳순이면 늘 같은 4 사유만 나온다)
+        pick_f = strat([vlm_codes[i] for i in rng.permutation(len(vlm_codes))], 4, True) + \
+            strat([SAM3_GEOM[i] for i in rng.permutation(len(SAM3_GEOM))], 4, True)
+    else:
+        pick_f = strat(SAM3_GEOM, 8, False)
     passes = [r for r in rows if r["keep"]]
     pick = pick_f + [passes[j] for j in rng.choice(len(passes), 8, replace=False)]
     TW, TH_ = 480, 270
@@ -471,7 +487,8 @@ def stage_reel_overlay(a, rows, ffmpeg):
     for t in range(K):
         grid = np.vstack([np.hstack([tiles[r0 * 4 + c][t] for c in range(4)]) for r0 in range(4)])
         cv2.imwrite(path.join(tmpd, f"{t:03d}.jpg"), grid)
-    dst = path.join(a.out, "reels", f"{a.reel_mode}_fail8_pass8_seed{a.seed}.mp4")
+    tag = "vlm4_sam3_4" if a.fail_rows == "vlm_sam3" else "fail8"
+    dst = path.join(a.out, "reels", f"{a.reel_mode}_{tag}_pass8_seed{a.seed}.mp4")
     subprocess.run([ffmpeg, "-y", "-loglevel", "error", "-framerate", "10" if plain else "2", "-i", path.join(tmpd, "%03d.jpg"),
                     "-c:v", "libx264", "-pix_fmt", "yuv420p", dst], check=True)
     for f in glob(path.join(tmpd, "*.jpg")):
@@ -551,6 +568,7 @@ if __name__ == "__main__":
     q.add_argument("--workers", default=24, type=int)
     q.add_argument("--k", default=9, type=int)                  # SAM3 추적 프레임 수 (영상 전체 균등)
     q.add_argument("--reel_mode", default="groups", choices=("groups", "overlay", "plain"))   # reel: 기존 사유별 / R68 overlay / 같은 표본 원본
+    q.add_argument("--fail_rows", default="sam3", choices=("sam3", "vlm_sam3"))  # reel overlay/plain 탈락 2행 구성
     q.add_argument("--seed", default=0, type=int)               # reel overlay 표본 seed
     q.add_argument("--num_shards", default=1, type=int)
     q.add_argument("--shard_id", default=0, type=int)

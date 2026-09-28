@@ -387,6 +387,30 @@ SAM3_GEOM = ("subject_too_small", "subject_too_large", "body_part_or_cut", "subj
              "main_ambiguous_multi")
 
 
+def plain_tile(r, TW, TH_, nf=49):
+    """원본 영상 앞 nf 프레임 + 사유/수치 라벨 (마스크 없음)."""
+    import cv2
+    cap = cv2.VideoCapture(path.join(DV, r["scene"], "video_input.mp4"))
+    s = r["sam3"]
+    lab = "PASS" if r["keep"] else ",".join(r["reasons"])[:52]
+    cap_ = (f"{r['vlm']['noun']} area med {s.get('main_area_med', 0):.3f} max {s.get('main_area_max', 0):.3f} "
+            f"pres {s.get('main_presence', 0):.2f} edge {s.get('main_edge_opposite_frac', 0):.2f}")
+    fr = []
+    while len(fr) < nf:
+        ok, im = cap.read()
+        if not ok:
+            break
+        im = cv2.resize(im, (TW, TH_))
+        cv2.rectangle(im, (0, 0), (TW, 18), (0, 0, 0), -1)
+        cv2.putText(im, lab, (3, 13), cv2.FONT_HERSHEY_SIMPLEX, 0.45,
+                    (80, 255, 80) if r["keep"] else (80, 80, 255), 1, cv2.LINE_AA)
+        cv2.rectangle(im, (0, TH_ - 16), (TW, TH_), (0, 0, 0), -1)
+        cv2.putText(im, cap_, (3, TH_ - 4), cv2.FONT_HERSHEY_SIMPLEX, 0.38, (255, 255, 255), 1, cv2.LINE_AA)
+        fr.append(im)
+    cap.release()
+    return fr or [np.zeros((TH_, TW, 3), np.uint8)]
+
+
 def stage_reel_overlay(a, rows, ffmpeg):
     """[R68] 4x4 한 장 — 위 2행 = SAM3 기하 게이트로 탈락 8편(사유마다 고르게), 아래 2행 = 통과 8편.
 
@@ -409,8 +433,12 @@ def stage_reel_overlay(a, rows, ffmpeg):
     passes = [r for r in rows if r["keep"]]
     pick = pick_f + [passes[j] for j in rng.choice(len(passes), 8, replace=False)]
     TW, TH_ = 480, 270
+    plain = a.reel_mode == "plain"           # [R68b] 마스크 없이 원본 영상 49프레임
     tiles = []
     for r in pick:
+        if plain:
+            tiles.append(plain_tile(r, TW, TH_))
+            continue
         z = np.load(path.join(a.out, "sam3", scene_key(r["scene"]) + ".npz"), allow_pickle=False)
         frames, _, _ = sample_frames(path.join(DV, r["scene"], "video_input.mp4"), a.k)
         hw = tuple(z["mask_hw"])
@@ -443,8 +471,8 @@ def stage_reel_overlay(a, rows, ffmpeg):
     for t in range(K):
         grid = np.vstack([np.hstack([tiles[r0 * 4 + c][t] for c in range(4)]) for r0 in range(4)])
         cv2.imwrite(path.join(tmpd, f"{t:03d}.jpg"), grid)
-    dst = path.join(a.out, "reels", f"overlay_fail8_pass8_seed{a.seed}.mp4")
-    subprocess.run([ffmpeg, "-y", "-loglevel", "error", "-framerate", "2", "-i", path.join(tmpd, "%03d.jpg"),
+    dst = path.join(a.out, "reels", f"{a.reel_mode}_fail8_pass8_seed{a.seed}.mp4")
+    subprocess.run([ffmpeg, "-y", "-loglevel", "error", "-framerate", "10" if plain else "2", "-i", path.join(tmpd, "%03d.jpg"),
                     "-c:v", "libx264", "-pix_fmt", "yuv420p", dst], check=True)
     for f in glob(path.join(tmpd, "*.jpg")):
         os.remove(f)
@@ -463,7 +491,7 @@ def stage_reel(a):
     ffmpeg = ("/data1/cympyc1785/miniconda3/envs/vista4d/lib/python3.12/site-packages/imageio_ffmpeg/"
               "binaries/ffmpeg-linux-x86_64-v7.0.2")
     rows = [json.loads(l) for l in open(path.join(a.out, "judge.jsonl"))]
-    if a.reel_mode == "overlay":
+    if a.reel_mode in ("overlay", "plain"):
         return stage_reel_overlay(a, rows, ffmpeg)
     rng = np.random.default_rng(0)
     groups = {"PASS": [r for r in rows if r["keep"]]}
@@ -522,7 +550,7 @@ if __name__ == "__main__":
     q.add_argument("--frame_pixels", default=640 * 360, type=int)   # VLM 프레임당 픽셀 예산 (R41 과 같은 해상도)
     q.add_argument("--workers", default=24, type=int)
     q.add_argument("--k", default=9, type=int)                  # SAM3 추적 프레임 수 (영상 전체 균등)
-    q.add_argument("--reel_mode", default="groups", choices=("groups", "overlay"))   # reel: 기존 사유별 / R68 overlay
+    q.add_argument("--reel_mode", default="groups", choices=("groups", "overlay", "plain"))   # reel: 기존 사유별 / R68 overlay / 같은 표본 원본
     q.add_argument("--seed", default=0, type=int)               # reel overlay 표본 seed
     q.add_argument("--num_shards", default=1, type=int)
     q.add_argument("--shard_id", default=0, type=int)

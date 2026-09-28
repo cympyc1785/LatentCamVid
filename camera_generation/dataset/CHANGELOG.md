@@ -11,6 +11,14 @@ Follows [Keep a Changelog](https://keepachangelog.com/).
 
 ### Added
 
+- **시작 카메라 캡션 절 + preset 당 1개 export (2026-09-29, R89/D296).** `build_bank_captions.py --start_clause` 가 변이의
+  `start_cand` (방위 front/back/left/right x 고도 low/mid/high x shot close/medium/wide) 를 "Starting {in front of|behind|
+  to the left of|to the right of} {target} at {a low angle|eye level|a high angle} in {a close-up|a medium shot|a wide shot},
+  the camera ..." 로 문장 머리에 붙이고 `caption.start` 에 라벨을 남긴다 (front = 피사체→소스 frame0 방향).
+  `vista4d_bank_to_dl3dv.py --one_per_preset SEED` 는 (anchor, preset) 당 수렴한 변이 하나를 무작위로 남긴다.
+  둘 다 기본 off = 기존과 비트 동일. 뱅크 config `configs/bank/d296_vista_startpose_objcentric.json`
+  (D215 object-centric route + D259 36칸 격자 + R62 확정 게이트 + `--start_screen filter`).
+
 - **`run_video_filter.py --manual_keep FILE` (2026-09-28, R70).** judge 에서 목록의 scene 을 강제 keep (자동 사유는
   `auto_reasons` 로 보존, `manual_keep: true`). 안 주면 기존과 동일. `out_filter/d282_dynpose100k/manual_keep.txt` 2편 →
   v2 통과 3,133.

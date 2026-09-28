@@ -756,6 +756,33 @@ def nl_prompt(caption: dict):
     return f"{head}, {link} {framing}" + (f" {comp}." if comp else ".")
 
 
+# [R89, 2026-09-29] 시작 카메라 절. 격자 후보(`lbm/candidates.build_pool_front`)의 세 라벨을 그대로 말로 옮긴다.
+#   az  : front = 피사체 → 소스 frame0 카메라 방향 (피사체의 '얼굴 정면'이 아니다), left = 그 기준 +90°
+#   el  : 중력 기준 고도 low / mid / high,  cov : 피사체 화면 면적 목표 close .25 / medium .10 / wide .04
+START_AZ = {"front": "in front of", "back": "behind", "left": "to the left of", "right": "to the right of"}
+START_EL = {"low": "a low angle", "mid": "eye level", "high": "a high angle"}
+START_COV = {"close": "a close-up", "medium": "a medium shot", "wide": "a wide shot"}
+
+
+def start_clause(cand: dict, target_text: str):
+    """`start_cand` → "Starting in front of the man at a low angle in a close-up, " (문장 머리). 없으면 ""."""
+    if not cand:
+        return ""
+    az, el, cov = cand.get("az_label"), cand.get("el_label"), cand.get("cov_label")
+    if az not in START_AZ or el not in START_EL or cov not in START_COV:
+        return ""
+    who = str(target_text or "").strip() or LEGACY_TARGET
+    return f"Starting {START_AZ[az]} {who} at {START_EL[el]} in {START_COV[cov]}, "
+
+
+def with_start(prompt: str, cand: dict, target_text: str):
+    """프롬프트 앞에 시작 절을 붙인다. "The camera ..." 의 첫 글자는 소문자로 내린다."""
+    head = start_clause(cand, target_text)
+    if not head or not prompt:
+        return prompt
+    return head + prompt[:1].lower() + prompt[1:]
+
+
 def prompt_of(caption: dict, fields: list, style: str = "fields"):
     """고른 필드를 `field: value.` 로 이어 붙인다 (사용자 지시: target/motion 둘만).
 
@@ -921,6 +948,11 @@ def main(args):
                                  args.framing_min_in_frame,
                                  args.framing_exit_min_in_frame, args.nl_framing)
             caption["prompt"] = prompt_of(caption, fields, args.prompt_style)
+            if args.start_clause and variant.get("start_cand"):
+                # [R89] 시작 카메라 상태(방위 4 x 고도 3 x shot 3) 를 문장 머리에. 구조 필드도 남긴다.
+                sc = variant["start_cand"]
+                caption["start"] = {k: sc.get(k) for k in ("cand_id", "az_label", "el_label", "cov_label")}
+                caption["prompt"] = with_start(caption["prompt"], sc, caption.get("target_text"))
             # 게이트가 걸린 것과 **실제로 문장이 바뀐 것**은 다르다 — 이미 targetless 인
             # preset(pan/tilt, 승격된 track_truck_*)은 원래 framing 절이 없어서 게이트가
             # 걸려도 캡션이 그대로다. camel/d128 에서 게이트 96 : 실제 변화 54 였다.
@@ -933,6 +965,9 @@ def main(args):
                                    desc_map, args.prompt_style, True, 0.0, 0.0,
                                    args.nl_framing)
                 plain["prompt"] = prompt_of(plain, fields, args.prompt_style)
+                if args.start_clause and variant.get("start_cand"):
+                    plain["start"] = caption.get("start")
+                    plain["prompt"] = with_start(plain["prompt"], variant["start_cand"], plain.get("target_text"))
                 n_framing_dropped += int(plain != caption)
             # 표에 없어서 상위어(fallback)로 떨어진 라벨. 어휘가 늘어난 걸 조용히 넘기지 않는다.
             if label_map is not None and caption["target"] == label_map.get("fallback", "object"):
@@ -1091,6 +1126,7 @@ if __name__ == "__main__":
     # ("medium shot 으로 담고 있다가")이 거짓이다. D143 동작을 그대로 쓰려면 이 값을
     # `--framing_min_in_frame` 과 같게 준다.
     parser.add_argument("--framing_exit_min_in_frame", default=0.05, type=float)
+    parser.add_argument("--start_clause", action="store_true", default=False)   # [R89] 시작 카메라 절 (기본 off = 기존 문장)
     parser.add_argument("--dry_run", action="store_true", default=False)
     parser.add_argument("--no_dry_run", dest="dry_run", action="store_false")
     main(parser.parse_args())

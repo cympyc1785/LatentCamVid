@@ -205,7 +205,7 @@ def convert_scene(job):
 
     (video, chunk, out_root, image_dir, image_scale, recon_root, cine_out, bank_dirs,
      refs, skip_done, dedup, captions_name, drop_status, drop_suspect, picked_only,
-     per_scene_cap, raycast_name) = job
+     per_scene_cap, raycast_name, one_per_preset) = job
     dst = path.join(out_root, *chunk.split("/"))
     da3, img = path.join(dst, "da3"), path.join(dst, image_dir)
     try:
@@ -263,6 +263,20 @@ def convert_scene(job):
                 dedup_keep.append(entry)
             pool = dedup_keep
         n_dup = n_pre_dedup - len(pool)
+
+        # ---- [R89] (anchor, preset) 당 1개. 시작 pose 격자 뱅크는 preset 하나에 통과한 시작 후보 수만큼
+        #    변이가 있다 — 그중 **하나를 무작위로**(seed + 씬 이름 고정) 남겨 씬당 카메라 수를 preset 수 이하로.
+        #    -1 (기본) 이면 no-op = 예전과 비트 동일.
+        if one_per_preset >= 0 and pool:
+            import zlib
+            rng = np.random.default_rng([one_per_preset, zlib.crc32(video.encode())])
+            groups = {}
+            for entry in pool:
+                groups.setdefault((entry[2].get("anchor_id"), entry[2].get("preset")), []).append(entry)
+            kept_pp = [grp[int(rng.integers(len(grp)))] for _, grp in sorted(groups.items(), key=lambda kv: str(kv[0]))]
+            drop_hist["one_per_preset"] = drop_hist.get("one_per_preset", 0) + len(pool) - len(kept_pp)
+            n_drop += len(pool) - len(kept_pp)
+            pool = kept_pp
 
         # ---- 씬당 상한 (D200). 0 이면 통째로 no-op = 예전과 비트 동일 (정렬도 안 한다).
         #    규칙은 `lbm/pick.py:pick_key` 하나뿐이고, `sort` 가 안정 정렬이라 동점은
@@ -378,6 +392,8 @@ def main():
                         help="예: --bank_dirs hole_bank_d185 hole_bank_d198 hole_bank_d199")
     # D200. 씬당 카메라 상한. 0 이면 꺼짐 = 재고 전량. 규칙은 `lbm/pick.py:pick_key`.
     parser.add_argument("--per_scene_cap", default=0, type=int)
+    # [R89] (anchor, preset) 당 변이 1개만 (seed). -1 = 끔 (기존). 시작 pose 격자 뱅크 용.
+    parser.add_argument("--one_per_preset", default=-1, type=int)
     # 뱅크 안의 캡션 파일. 궤적은 그대로 두고 **텍스트만** 바꿔 대조군을 만들 때 쓴다
     # (`build_bank_captions.py --out_name`). 기본값이 예전 하드코딩 이름이라 동작은 그대로다.
     parser.add_argument("--captions_name", default="captions.json", type=str)
@@ -482,7 +498,7 @@ def main():
                      args.recon_root, args.cine_out, avail, args.avg_scale_refs,
                      args.skip_done, args.dedup, args.captions_name, list(args.drop_status),
                      list(args.drop_suspect), args.picked_only, args.per_scene_cap,
-                     args.raycast_name))
+                     args.raycast_name, args.one_per_preset))
 
     print(f"{'bank_dir':22s} {' '.join(bank_dirs)}")
     print(f"{'per_scene_cap':22s} {args.per_scene_cap or '(없음 — 재고 전량)'}")

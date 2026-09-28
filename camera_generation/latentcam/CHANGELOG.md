@@ -5,6 +5,8 @@ All notable changes to the latentcam sub-project. Follows [Keep a Changelog](htt
 ## [Unreleased]
 
 ### Added
+- **D288 `dynpose_d200_molmo2_l21_nogeo` (2026-09-28, R67).** text + Molmo2 layer21 만 쓰는 arm — DA3·source camera
+  조건 없음. `dynpose_d200_molmo2_l21_da3` 를 물려받아 geo 키 넷만 끈다 (goal 1 DA3 기여 대조군).
 - **VAE 왕복 전진량·부호변화 열 (2026-09-27, R65).** `scripts/vae/vae_roundtrip_val.py` 가 `gt_fwd`/`rt_fwd`
   (첫 카메라 전방축 순변위 / avg_scale) 와 `gt_flips`/`rt_flips` 를 summary.csv 에 쓴다 (tmp/r63 diffusion 분석과 같은 정의).
   video/geo/text 캐시 키를 null 로 내려 cam 경로만 싣는다. goal 4 진단: d200 test dolly_in_look_at n=479 에서

@@ -1,0 +1,18 @@
+# @package _global_
+# D288 — text + Molmo2 layer21 만 (DA3 없음, source camera 조건 없음). 사용자 지시 2026-09-28
+# "srccam없이 text랑 molmo2_l21만 써서 학습". goal 1 (DA3 가 실제로 도움이 되나) 의 깨끗한 대조군.
+#
+# 대조군 `dynpose_d200_molmo2_l21_da3` 를 통째로 물려받아 코퍼스·분할·캐시·하이퍼가 같고,
+# 움직인 축은 geo CA 를 끄는 것 하나뿐이다 (d194_molmo2_nogeo 와 같은 네 줄).
+# D262 (`_srccam`) 와 달리 geo 자리에 소스 카메라도 넣지 않는다 — geo CA 블록 자체가 없다.
+defaults:
+  - dynpose_d200_molmo2_l21_da3
+
+exp_name: dynpose_d200_molmo2_l21_nogeo
+
+geo_encoder: null            # ← 대조군과의 차이. dataset/train/model 세 군데를 끈다.
+geo_raw_cache_dir: null      # 경로가 남아 있으면 캐시를 쓴다고 오독된다.
+geo_latent_cache_dir: null
+geo_posed: false
+geo_cam_embed: null
+srccam_cond: null            # 명시 (D262 는 plucker)

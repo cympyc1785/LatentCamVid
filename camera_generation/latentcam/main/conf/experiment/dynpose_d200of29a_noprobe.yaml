@@ -1,0 +1,13 @@
+# @package _global_
+# D295 (R88) — 단일 영상 overfit (사용자 2026-09-28 "영상 하나에 대해서만 3-arm overfit"). 대상 = keep 4x4 2번째 영상 1행 2열 car (D212 keeper)
+# dynpose/29a9a7d0-7b3f-4520-ab9b-baacae3ca9de/0 (track_orbit_left, dyn_0 car). train 목록 = 그 한 줄 x800 (epoch 당 100 step), val = 같은 한 줄.
+# 부모 dynpose_d200v4track_srccam_e100_noprobe 와의 차이는 분할과 epoch 뿐.
+defaults:
+  - dynpose_d200v4track_srccam_e100_noprobe
+
+exp_name: dynpose_d200of29a_noprobe
+train_seg_list: /data1/cympyc1785/data/DynPose-LBM/latentcam_dynpose_d200/seg_list_dynpose_s91_of29a_train.txt
+test_seg_list: /data1/cympyc1785/data/DynPose-LBM/latentcam_dynpose_d200/seg_list_dynpose_s91_of29a_test.txt
+epochs: 30
+epoch_cap: 30
+peav_text_cache: /data1/cympyc1785/data/DynPose-LBM/latentcam_dynpose_d200/molmo2_cache/prefill_noprobe_of29a.pt   # v4track 캐시에 이 entry 가 없어 따로 구움

@@ -1,0 +1,13 @@
+# @package _global_
+# D297 (R108) — of5ec noprobe overfit 에 cosine LR (사용자 2026-09-29 "learning rate scheduling(cosine같은거 권장 설정으로)도 추가해서 학습").
+# 부모 dynpose_d200of5ec_noprobe (constant lr 1e-4, 30 epoch → R105 에서 100 까지 이어 돌림) 와의 차이는 schedule 과 epochs 뿐.
+# 권장값: AdamW peak 1e-4 그대로, 선형 warmup 총 step 의 5% (100 epoch x 100 step = 10,000 → 500), cosine 으로 peak 의 5% 까지.
+defaults:
+  - dynpose_d200of5ec_noprobe
+
+exp_name: dynpose_d200of5ec_noprobe_cos
+epochs: 100
+epoch_cap: 100
+lr_schedule: cosine
+lr_warmup_steps: 500
+lr_min_ratio: 0.05

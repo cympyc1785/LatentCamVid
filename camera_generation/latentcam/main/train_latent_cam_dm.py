@@ -1298,6 +1298,27 @@ def train():
         torch.cuda.synchronize()
         return time.time()
 
+    # [new 2026-09-29, R108] LR schedule. `lr_schedule: constant`(기본) 이면 아래가 아무것도 안 해서 예전과 같다.
+    # `cosine` = 선형 warmup(lr_warmup_steps) 뒤 cosine 으로 cfg.lr -> cfg.lr*lr_min_ratio. 상태 없이
+    # global_step 만으로 계산하므로 resume.pth 에 scheduler 를 따로 저장할 필요가 없다 (재개해도 같은 곡선).
+    # 총 step = (epoch_cap 적용 후 epochs) x epoch 당 step — epochs 를 늘려 이어 돌리면 곡선이 다시 늘어난다.
+    _lr_sched = str(getattr(cfg, 'lr_schedule', 'constant') or 'constant')
+    _lr_total = max(1, _epochs * len(train_dataloader))
+    _lr_warm = int(getattr(cfg, 'lr_warmup_steps', 0) or 0)
+    _lr_min = float(getattr(cfg, 'lr_min_ratio', 0.0) or 0.0)
+    _real_opt_lr = getattr(opt, 'optimizer', opt)
+
+    def _lr_at(step):
+        if _lr_warm > 0 and step < _lr_warm:
+            return cfg.lr * (step + 1) / _lr_warm
+        prog = min(1.0, (step - _lr_warm) / max(1, _lr_total - _lr_warm))
+        return cfg.lr * (_lr_min + (1.0 - _lr_min) * 0.5 * (1.0 + math.cos(math.pi * prog)))
+    if _lr_sched not in ('constant', 'cosine'):
+        raise ValueError(f"lr_schedule={_lr_sched} (constant|cosine)")
+    if _lr_sched == 'cosine' and accelerator.is_main_process:
+        print(f"[lr] cosine: peak {cfg.lr} warmup {_lr_warm} total {_lr_total} min_ratio {_lr_min} "
+              f"(start step {global_step} -> lr {_lr_at(global_step):.3e})")
+
     for epoch in range(start_epoch, _epochs):
         pbar = tqdm(train_dataloader)
         model.train()
@@ -1463,12 +1484,17 @@ def train():
             t5 = time.time()
             _tD = _tick()                                # denoiser forward 끝
             accelerator.backward(loss)
+            if _lr_sched == 'cosine':
+                for _g in _real_opt_lr.param_groups:
+                    _g['lr'] = _lr_at(global_step)
             opt.step()
             opt.zero_grad(set_to_none=True)
             global_step += 1
             t6 = time.time()
             _tE = _tick()                                # backward+step 끝
             _log = {"train/loss": loss.item()}
+            if _lr_sched != 'constant':
+                _log["train/lr"] = _real_opt_lr.param_groups[0]['lr']
             if _aux is not None:
                 _log["train/readout_aux_obb"] = _aux.item()   # 가중치 곱하기 전 원 손실
             if _aim is not None:

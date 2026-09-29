@@ -7,6 +7,11 @@ load_ckpt_path: null
 embed_path: null
 random_seed: 42
 lr: 0.0001
+# [2026-09-29, R108] LR schedule. constant(기본) = 예전 동작(고정 lr). cosine = 선형 warmup(lr_warmup_steps)
+# 뒤 cosine 으로 lr -> lr*lr_min_ratio (총 step = epochs x epoch 당 step, train_latent_cam_dm.py `_lr_at`).
+lr_schedule: constant
+lr_warmup_steps: 0
+lr_min_ratio: 0.0
 batch_size: 8
 accum_steps: 1
 # [2026-09-05] 사용자 지시 "이후 돌리는 학습들도 다 100epoch만 돌도록해줘". 기본값을

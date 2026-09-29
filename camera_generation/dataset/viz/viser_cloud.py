@@ -447,6 +447,44 @@ def load_bundle(bundle_root: str, presets=(), arms=(), variant_filter=(), cx_rec
     return motions
 
 
+def load_eval_dirs(specs, entry: str, cx_recon=None):
+    """latentcam eval 폴더들 -> `load_bundle` 과 같은 모양 [(label, c2w (F,4,4), row)].
+
+    GT 와 모델 출력을 점군 위에 같이 보려는 경로다 (R103). `specs` 는 `label=<eval_dir>` 목록,
+    `entry` 는 data_name (예 `dynpose_<video>_0`). 라벨 `gt` 는 **첫 폴더**의
+    `test/<entry>_transforms_ref.json`, 나머지는 폴더마다 `test/<entry>_transforms_pred.json`.
+    변환은 번들 JSON arm 과 같은 `_bundle_arm_poses` 를 쓴다 — eval JSON 은 scene world 의
+    OpenGL c2w 라 (`render_pred_depth_warp.py` 가 같은 파일을 같은 점군 위에 렌더한다)
+    `diag(1,-1,-1,1)` 만 곱하면 cloud.npz 와 같은 OpenCV world 에 앉는다.
+    """
+    motions = []
+    for k, spec in enumerate(specs):
+        label, folder = spec.split("=", 1) if "=" in spec else (path.basename(spec.rstrip("/")), spec)
+        test = path.join(folder, "test")
+        cap = {}
+        cap_path = path.join(test, f"{entry}_caption.json")
+        if path.isfile(cap_path):
+            with open(cap_path, encoding="utf-8") as file:
+                cap = {"prompt_camera_with_scene_video": {"concise": str(next(iter(json.load(file).values()), ""))}}
+        files = ([("gt", f"{entry}_transforms_ref.json")] if k == 0 else []) + \
+            [(label, f"{entry}_transforms_pred.json")]
+        for arm, name in files:
+            fpath = path.join(test, name)
+            if not path.isfile(fpath):
+                print(f"[eval_dir] 없음: {fpath}")
+                continue
+            c2w, fx, fy = _bundle_arm_poses(fpath, cx_recon)
+            row = dict(cap)
+            row["bundle"], row["preset"], row["arm"] = True, "eval", arm
+            row["fx"], row["fy"] = fx, fy
+            row["anchor_id"] = "dyn_0"
+            row["path_len_u"] = round(float(np.linalg.norm(
+                np.diff(c2w[:, :3, 3], axis=0), axis=-1).sum()), 4)
+            motions.append((arm, c2w, row))
+    assert motions, f"eval 폴더 {list(specs)} 에서 {entry} 를 하나도 못 읽었다"
+    return motions
+
+
 def subject_tracks_world(graph_path: str):
     """scene_graph 의 `track.center_smooth` (graph frame G) -> world -> {node_id: (F,3)}.
 
@@ -655,6 +693,10 @@ def main():
                         help="이 preset 만 (기본 전부)")
     parser.add_argument("--bundle_arms", nargs="*", default=[], type=str,
                         help="이 arm 만 (gt s42 s1234 s2026 gendop, 기본 전부)")
+    # [R103] latentcam eval 폴더 (`label=<dir>`, 여러 개). 첫 폴더의 ref 가 `gt`, 폴더마다 pred.
+    # `--entry` 는 data_name (예 dynpose_<video>_0). 둘 다 없으면 예전 동작.
+    parser.add_argument("--eval_dir", nargs="*", default=[], type=str)
+    parser.add_argument("--entry", default="", type=str)
     # 기동 직후부터 **동시에** 그려둘 target 카메라. 라벨 부분일치(OR)라 `--pin orbit_left
     # dolly_in` 처럼 주면 맞는 변이를 전부 pin 한다. 띄운 뒤에는 GUI `motion > pin current`
     # 로 늘리고 줄인다. 활성 motion(주황) 은 pin 과 별개로 계속 그려진다.
@@ -905,6 +947,8 @@ def main():
     # 픽셀로 되돌려야 프러스텀 화각이 npz arm 과 같은 눈금에 앉는다.
     motions = load_bundle(bundle_root, args.bundle_presets, args.bundle_arms,
                           args.variant, float(intrinsics[0, 0, 2])) if bundle_root else []
+    motions += (load_eval_dirs(args.eval_dir, args.entry, float(intrinsics[0, 0, 2]))
+                if args.eval_dir else [])
     motions += load_motions(args.out, args.video, banks, args.variant) if banks else []
     # `scene_root` 를 쓴다 (`out/<video>` 를 직접 조립하면 안 된다) — `--bundle` 만 주고 띄우면
     # `--video` 는 기본값 그대로라 없는 경로가 나오고, OBB·subject track·지면 격자가 전부

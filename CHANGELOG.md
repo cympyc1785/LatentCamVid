@@ -35,6 +35,7 @@
 
 ### Added
 
+- **`viz/viser_cloud.py --eval_dir label=<dir> ... --entry <data_name>`** (R103). latentcam eval 폴더의 GT(ref, 첫 폴더) 와 폴더별 pred 를 cloud.npz 점군 위에 motion 슬라이더/pin 으로 올린다. 번들 JSON arm 과 같은 변환(`_bundle_arm_poses`). 인자를 안 주면 예전 동작.
 - **`eval_testset.py --init_gt_t T`** (R102). GT latent 에 t=T 수준 노이즈를 얹어 그 시점부터 denoise (SDEdit). `train_latent_cam_dm.sample()` 에 `x_init`/`t_start` 인자 추가 — 기본 None 이면 기존처럼 순수 노이즈 x_T 에서 전 스텝.
 - **`.claude/context.md` — 다음 세션이 알아야 할 것** (R14, R16 에서 최상위 → `.claude/` 이동).
   `CLAUDE.md`(규칙) · `pipeline.md`(지도) ·

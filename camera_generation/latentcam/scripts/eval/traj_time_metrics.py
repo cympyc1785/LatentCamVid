@@ -24,6 +24,18 @@
     python scripts/eval/traj_time_metrics.py --arm random=<eval_dir> --arm t250=<eval_dir2> \
         [--entries NAME ...] --out <dir>
 출력: <out>/per_entry.csv, summary.json, curve.png (arm 별 평균 ATE(t)·rot(t)·RPE1(t))
+
+[R112] **궤적이 매끄러운가 / framing 이 일정한가** (사용자 "궤적이 smooth하지 못하고 framing이 일정하지 않은게 문제").
+`--corpus_root` 를 주면 아래가 추가된다 (주지 않으면 위 지표만 = 예전 출력). 전부 렌더 없이 카메라 + subject 3D 중심만 쓴다.
+  smoothness (GT 와 pred 각각, 끝에 _gt/_ratio):
+    jerk_t     |Δ³p| 평균 / reach            위치 떨림 (3차 차분)
+    jerk_r     |Δ²ω| 평균 (deg/frame²)       회전 떨림. ω_t = R_t^T R_{t+1} 의 회전각 벡터 (카메라 좌표계)
+  framing (subject = prompts.json variant_id 앞머리 노드의 scene_graph track.center_smooth → world → 카메라 투영):
+    fr_err     |uv_pred - uv_gt| 평균         화면상 subject 위치가 GT 구도와 얼마나 다른가 (화면 폭=1)
+    fr_jit     |Δ² uv| 평균 x100              화면상 subject 가 프레임마다 흔들리는 정도 (%/frame²)
+    fr_std     uv 의 시간 표준편차              구도가 한 자리에 머무는가 (GT 가 의도적으로 움직이면 _ratio 로 본다)
+    sz_jit     |Δ² log z| 평균 x100           subject 까지 거리(=화면 크기) 떨림
+    in_box     중심이 화면 중앙 0.8 상자 안 + 카메라 앞인 프레임 비율 (SiF 의 렌더 없는 근사)
 """
 import argparse
 import csv
@@ -49,6 +61,65 @@ def rel_motion(P, d):
     inv = np.linalg.inv(P[:-d])
     M = inv @ P[d:]
     return M[:, :3, 3], M[:, :3, :3]
+
+
+GL2CV = np.diag([1.0, -1.0, -1.0, 1.0])
+
+
+def rotvec_deg(R):
+    """(n,3,3) -> 회전 벡터 (n,3) deg."""
+    ang = np.arccos(np.clip((np.trace(R, axis1=1, axis2=2) - 1) / 2, -1, 1))
+    ax = np.stack([R[:, 2, 1] - R[:, 1, 2], R[:, 0, 2] - R[:, 2, 0], R[:, 1, 0] - R[:, 0, 1]], 1)
+    n = np.linalg.norm(ax, axis=1, keepdims=True)
+    return np.where(n > 1e-9, ax / np.maximum(n, 1e-9), 0) * np.degrees(ang)[:, None]
+
+
+def smooth_framing(c2w_gl, subj, fx, fy, w, h, reach):
+    """카메라 궤적 하나 -> smoothness·framing 지표 dict + uv (T,2)."""
+    p = c2w_gl[:, :3, 3]
+    jt = np.linalg.norm(np.diff(p, n=3, axis=0), axis=1).mean() / reach
+    om = rotvec_deg(np.einsum("nji,njk->nik", c2w_gl[:-1, :3, :3], c2w_gl[1:, :3, :3]))
+    jr = np.linalg.norm(np.diff(om, n=2, axis=0), axis=1).mean()
+    out = {"jerk_t": jt, "jerk_r": jr}
+    if subj is None:
+        return out, None
+    cv = c2w_gl @ GL2CV
+    w2c = np.linalg.inv(cv)
+    pc = np.einsum("nij,nj->ni", w2c[:, :3, :3], subj) + w2c[:, :3, 3]
+    z = pc[:, 2]
+    zc = np.maximum(z, 1e-6)
+    uv = np.stack([fx * pc[:, 0] / zc / w, fy * pc[:, 1] / zc / h], 1)      # 화면 중앙 기준, 폭/높이 = 1
+    inb = (z > 0) & (np.abs(uv[:, 0]) < 0.4) & (np.abs(uv[:, 1]) < 0.4)
+    uvc = np.clip(uv, -1.5, 1.5)                                              # 뒤로 돈 프레임의 폭주 방지
+    out.update({"fr_jit": np.linalg.norm(np.diff(uvc, n=2, axis=0), axis=1).mean() * 100,
+                "fr_std": float(np.linalg.norm(uvc.std(0))),
+                "sz_jit": np.abs(np.diff(np.log(zc), n=2)).mean() * 100,
+                "in_box": inb.mean()})
+    return out, uvc
+
+
+def load_intr(p):
+    d = json.load(open(p))
+    return float(d["fl_x"]), float(d["fl_y"]), float(d["w"]), float(d["h"])
+
+
+def entry_subject_world(corpus_root, graph_root, prefix, name):
+    """data_name -> subject 중심 (T,3) world. 못 찾으면 None."""
+    body = name[len(prefix) + 1:]
+    video, idx = body.rsplit("_", 1)
+    pp = osp.join(corpus_root, prefix, video, "da3", "prompts.json")
+    gp = osp.join(graph_root, video, "scene_graph.json")
+    if not (osp.isfile(pp) and osp.isfile(gp)):
+        return None
+    vid = json.load(open(pp)).get(idx, {}).get("variant_id", "")
+    node_id = vid.split("__")[0] if "__" in vid else ""
+    G = json.load(open(gp))
+    node = next((n for n in G["nodes"] if n["id"] == node_id), None)
+    if node is None or not node.get("track", {}).get("center_smooth"):
+        return None
+    Twg = np.array(G["frames"]["T_wg"], dtype=np.float64)
+    c = np.asarray(node["track"]["center_smooth"], dtype=np.float64)
+    return (Twg[:3, :3] @ c.T).T + Twg[:3, 3]
 
 
 def entry_metrics(ref, prd):
@@ -81,6 +152,9 @@ def main():
     ap.add_argument("--arm", action="append", required=True, help="label=<eval_dir> (test/ 아래 *_ref/_pred json)")
     ap.add_argument("--entries", nargs="*", default=None, help="data_name 목록 (기본: 첫 arm 의 test/ 전부)")
     ap.add_argument("--out", required=True)
+    ap.add_argument("--corpus_root", default=None, help="[R112] 주면 smoothness·framing 지표 추가 (<root>/<prefix>/<video>/da3/prompts.json)")
+    ap.add_argument("--graph_root", default="/data1/cympyc1785/LatentCamVid/camera_generation/dataset/out_dynpose")
+    ap.add_argument("--name_prefix", default="dynpose")
     ap.add_argument("--min_reach_frac", type=float, default=0.1,
                     help="GT reach 가 첫 arm 전체 reach 중앙값 x 이 값보다 작은 entry(정지·거의 정지 궤적)는 제외 — "
                          "reach 로 나누는 정규화가 터진다. 제외 수는 summary 의 n_static")
@@ -100,13 +174,33 @@ def main():
     names = [n for n in names if n in reach0 and n not in static]
     print(f"[reach] median {np.median(list(reach0.values())):.4f}, floor {floor:.4f} -> 정지 제외 {len(static)}, 남음 {len(names)}")
     rows, curves, keys = [], {}, None
+    subj_cache = {}
     for label, d in arms:
         cs = []
         for n in names:
             pr, rf = osp.join(d, "test", f"{n}_transforms_pred.json"), osp.join(d, "test", f"{n}_transforms_ref.json")
             if not (osp.isfile(pr) and osp.isfile(rf)):
                 continue
-            m, c = entry_metrics(load(rf), load(pr))
+            R_, P_ = load(rf), load(pr)
+            m, c = entry_metrics(R_, P_)
+            if a.corpus_root:
+                subj = subj_cache.setdefault(n, entry_subject_world(a.corpus_root, a.graph_root, a.name_prefix, n))
+                if subj is not None and len(subj) != len(R_):
+                    subj = None
+                fx, fy, w_, h_ = load_intr(rf)
+                g, uvg = smooth_framing(R_, subj, fx, fy, w_, h_, m["reach"])
+                q, uvp = smooth_framing(P_, subj, *load_intr(pr), m["reach"])
+                for k_, v_ in q.items():
+                    m[k_] = float(v_)
+                    m[k_ + "_gt"] = float(g[k_])
+                if uvg is not None:
+                    m["fr_err"] = float(np.linalg.norm(uvp - uvg, axis=1).mean())
+                    m["has_subj"] = 1.0
+                else:
+                    for k_ in ("fr_jit", "fr_std", "sz_jit", "in_box", "fr_err"):
+                        m.setdefault(k_, float("nan")); m.setdefault(k_ + "_gt", float("nan"))
+                    m.pop("fr_err_gt", None)
+                    m["has_subj"] = 0.0
             keys = keys or list(m)
             rows.append({"arm": label, "entry": n, **m})
             cs.append(c)
@@ -120,7 +214,7 @@ def main():
     for label, _ in arms:
         R = [r for r in rows if r["arm"] == label]
         summ[label] = {"n": len(R), "n_static": len(static),
-                       **{k: float(np.mean([r[k] for r in R])) for k in keys if k != "reach"},
+                       **{k: float(np.nanmean([r.get(k, np.nan) for r in R])) for k in keys if k != "reach"},
                        **{f"{k}_median": float(np.median([r[k] for r in R])) for k in ("ADE", "FDE", "late_early")}}
     json.dump(summ, open(osp.join(a.out, "summary.json"), "w"), indent=1)
     import matplotlib
@@ -142,6 +236,17 @@ def main():
     fig.savefig(osp.join(a.out, "curve.png"), dpi=110)
     cols = ["n", "ADE", "ADE_median", "FDE", "FDE_median", "early", "mid", "late", "late_minus_early", "late_early_median", "drift_slope",
             "rot_early", "rot_late", "rpe1", "rpe8", "rpe1_rot"]
+    if a.corpus_root:
+        for label in summ:
+            s_ = summ[label]
+            for k_ in ("jerk_t", "jerk_r", "fr_jit", "fr_std", "sz_jit"):
+                s_[k_ + "_ratio"] = s_[k_] / max(s_[k_ + "_gt"], 1e-12)
+        json.dump(summ, open(osp.join(a.out, "summary.json"), "w"), indent=1)
+        fc = ["jerk_t", "jerk_t_gt", "jerk_r", "jerk_r_gt", "fr_err", "fr_jit", "fr_jit_gt", "fr_std", "fr_std_gt",
+              "sz_jit", "sz_jit_gt", "in_box", "in_box_gt", "has_subj"]
+        print("[smooth/framing] arm | " + " | ".join(fc))
+        for label, s_ in summ.items():
+            print(label + " | " + " | ".join(f"{s_[c]:.4f}" for c in fc))
     print("arm | " + " | ".join(cols))
     for label, s in summ.items():
         print(label + " | " + " | ".join(f"{s[c]:.4f}" if c != "n" else str(s[c]) for c in cols))

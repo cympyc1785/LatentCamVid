@@ -469,7 +469,7 @@ def build_video_cond(data, device):
 
 @torch.no_grad()
 def sample(model, scheduler, traj_len, text_emb, text_masks, point_emb, point_mask, generator=None,
-           cond=None, video_kw=None, step_cb=None):
+           cond=None, video_kw=None, step_cb=None, x_init=None, t_start=None):
     """generator: x_T 추첨용 **CPU** torch.Generator. None 이면 전역 RNG (기존 동작).
 
     step_cb: denoising 스텝 1회가 끝날 때마다 `step_cb(i)` 를 부른다 (계측용). 기본 None 이면
@@ -485,7 +485,13 @@ def sample(model, scheduler, traj_len, text_emb, text_masks, point_emb, point_ma
     x_t = torch.randn(B, traj_len, cfg.cam_dim, generator=generator).to(device)
 
     scheduler.set_timesteps(num_inference_steps=cfg.diffusion_inference_step, device=device)
-    for _i, t in enumerate(scheduler.timesteps):
+    ts = scheduler.timesteps
+    # [R102] x_init(=GT latent) + t_start 를 주면 SDEdit 식으로 x_init 에 t_start 수준 노이즈를 얹어
+    #   t<=t_start 스텝만 돈다. None 이면 기존 (순수 노이즈 x_T 에서 전 스텝).
+    if x_init is not None and t_start is not None:
+        ts = ts[ts <= int(t_start)]
+        x_t = scheduler.add_noise(x_init.to(device), x_t, ts[:1].expand(B))
+    for _i, t in enumerate(ts):
         timesteps = torch.full(
             (B,),
             t,

@@ -168,6 +168,8 @@ def main():
     # 이 플래그만 켜고 끄면 "video 스트림이 최종 궤적을 얼마나 바꾸나"가 짝지은 비교로 나온다.
     # [R91] start pose head 가 있는 run: 예측 궤적을 예측 첫 카메라 위에 놓는다 (기본 off = GT 첫 카메라, 기존 동작)
     ap.add_argument('--pred_start', action='store_true', default=False)
+    # [R102] GT latent 에 t 수준 노이즈를 얹어 거기서부터 denoise (SDEdit). 기본 None = 순수 노이즈 x_T.
+    ap.add_argument('--init_gt_t', type=int, default=None)
     ap.add_argument('--drop-video', action='store_true',
                     help='video CA 조건을 빼고 추론 (video_latent_dim=0 arm 과 같은 forward 경로)')
     # [new 2026-09-22] sampling_sec 를 prefill / decode / post 로 쪼갠다. 이 모델은 LLM 이
@@ -504,7 +506,9 @@ def main():
                         _st[0] = time.time()
                     out = T.sample(model, noise_scheduler, traj_len, text_embeds, text_masks,
                                    pc_embeds, pc_masks, generator=_g, cond=_cond, video_kw=_vkw,
-                                   step_cb=_sc)
+                                   step_cb=_sc,
+                                   x_init=(traj_latents if args.init_gt_t is not None else None),
+                                   t_start=args.init_gt_t)
                 if args.probe_video_ca and probe_fh is not None:
                     _pvkw = T.build_video_cond(data, device)
                     # [new] 배치는 seg 순서라 probe 안의 roll(1) 짝이 거의 항상 같은 scene 이다.

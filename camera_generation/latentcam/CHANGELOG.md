@@ -5,6 +5,8 @@ All notable changes to the latentcam sub-project. Follows [Keep a Changelog](htt
 ## [Unreleased]
 
 ### Added
+- **`eval_testset.py --pred_start` (2026-09-29, R91).** start pose head 가 있는 run 에서 예측 궤적을 **예측 첫 카메라** 위에 놓는다
+  (E0_pred = rel0_pred @ E_src_s, E_src_s = inv(rel0_gt) @ E0). 기본 off = GT 첫 카메라 (기존 동작).
 - **D296 `vista_d296_molmo2_l21_srccam_startpose` (2026-09-29, R89).** D261 start pose head + D262 srccam, 코퍼스
   latentcam_d296 (시작 절 캡션), 500 epoch.
 - **D293 단일 영상 overfit config 3종 (2026-09-28, R85).** `dynpose_d200of936_{noprobe,aim_noprobe,aim_noprobe_readsrc}` —
@@ -403,6 +405,7 @@ All notable changes to the latentcam sub-project. Follows [Keep a Changelog](htt
   ⚠ bf16 을 고른 arm 은 fp32 on-the-fly 와 **비트 동일하지 않다** (실측 상대오차 3.3e-3).
 
 ### Fixed
+- **`eval_testset.py` 가 start pose head kwargs 를 안 넘김 (2026-09-29, R91).** `start_pose_pred` run(D261/D296)은 strict load 에서 죽었다.
 - **`eval_testset.py` 가 readout arm 의 모델 kwargs 를 안 넘김 (2026-09-28, R81).** `peav_readout_layers>0` 인 run 은 strict load 에서 죽었다 — 학습 진입점과 같은 kwargs 추가.
 - **`scripts/eval_testset.py` srccam arm 로드 (2026-09-25, R55 / tasks A3).** `srccam_cond` 생성자 인자
   (`geo_latent_dim` 54/11, `geo_in_mlp`, `geo_pe`)를 train 과 같게 넘긴다. 없으면 `geo_proj.0/2.*` unexpected 로

@@ -166,6 +166,8 @@ def main():
                     help='프로브를 재는 확산 timestep (샘플/arm 간 비교하려면 고정해야 한다)')
     # [new 2026-09-05] video CA 를 끄고 추론한다. --drop-track 의 video 판. 같은 ckpt 로
     # 이 플래그만 켜고 끄면 "video 스트림이 최종 궤적을 얼마나 바꾸나"가 짝지은 비교로 나온다.
+    # [R91] start pose head 가 있는 run: 예측 궤적을 예측 첫 카메라 위에 놓는다 (기본 off = GT 첫 카메라, 기존 동작)
+    ap.add_argument('--pred_start', action='store_true', default=False)
     ap.add_argument('--drop-video', action='store_true',
                     help='video CA 조건을 빼고 추론 (video_latent_dim=0 arm 과 같은 forward 경로)')
     # [new 2026-09-22] sampling_sec 를 prefill / decode / post 로 쪼갠다. 이 모델은 LLM 이
@@ -328,7 +330,13 @@ def main():
                 peav_readout_queries=int(getattr(cfg, 'peav_readout_queries', 49)),
                 peav_readout_aux_dim=int(getattr(cfg, 'peav_readout_aux_dim', 0) or 0),
                 peav_readout_mode=str(getattr(cfg, 'peav_readout_mode', 'replace') or 'replace'))
-    model = CameraDiffusionModel(cam_dim=cfg.cam_dim, cond_dim=_track_dim, **_geo_kw, **_vid_kw)
+    # [R91] start pose head (D261/D296) — 학습 진입점과 같은 kwargs. 안 넘기면 strict load 가 start_query/start_out 에서 죽는다.
+    _sp_kw = {}
+    if bool(getattr(cfg, 'start_pose_pred', False)):
+        _sp_kw = dict(start_pose_dim=int(getattr(cfg, 'start_pose_dim', 9)),
+                      start_pose_tf_p=float(getattr(cfg, 'start_pose_tf_p', 0.0) or 0.0),
+                      start_pose_noise=float(getattr(cfg, 'start_pose_noise', 0.0) or 0.0))
+    model = CameraDiffusionModel(cam_dim=cfg.cam_dim, cond_dim=_track_dim, **_geo_kw, **_vid_kw, **_sp_kw)
     # [new 2026-09-25, R58/D286] video_onfly arm: 학습된 connector 는 ckpt 의 `video_connector.*` 로
     # 들어 있으므로 load 전에 같은 submodule 을 붙인다. frozen ViT 는 Molmo2 체크포인트에서 온다.
     # video_onfly 가 null 이면 None 이고 모델은 기존과 동일.
@@ -426,6 +434,8 @@ def main():
             text_prompt = data['text_prompt']
             traj = data['cam_param'].to(device)
             E0 = data['first_extrinsic'].to(device)
+            if step == 0:
+                _start_err = []
             scale = data['avg_scale'].to(device)
             width = data['width'].to(device)
             height = data['height'].to(device)
@@ -528,7 +538,26 @@ def main():
                 height = height.tolist()
 
                 traj = out_to_trajectory(traj, scale, E0, device)
-                traj_pred = out_to_trajectory(traj_pred, scale, E0, device)
+                # [R91] --pred_start: 예측 궤적을 GT 첫 카메라가 아니라 **start head 가 예측한 첫 카메라** 위에 놓는다.
+                #   GT: rel0 = E0 @ inv(E_src_s) (dataset._start_pose) → E_src_s = inv(rel0_gt) @ E0,
+                #   pred: E0_pred = rel0_pred @ E_src_s. 6D 는 rel0 의 앞 두 **열**, t 는 /avg_scale.
+                E0_pred = E0
+                if args.pred_start and getattr(model, 'start_pred', None) is not None and 'start_pose' in data:
+                    def _rel(v, sc):
+                        a, b = v[:, 0:3], v[:, 3:6]
+                        c1 = F.normalize(a, dim=-1)
+                        c2 = F.normalize(b - (c1 * b).sum(-1, keepdim=True) * c1, dim=-1)
+                        R = torch.stack([c1, c2, torch.cross(c1, c2, dim=-1)], dim=-1)
+                        M = torch.eye(4, device=v.device).repeat(v.shape[0], 1, 1)
+                        M[:, :3, :3] = R
+                        M[:, :3, 3] = v[:, 6:9] * sc.view(-1, 1)
+                        return M
+                    _sp_gt = data['start_pose'].to(device).float()
+                    _sp_pr = model.start_pred.float()
+                    E_src = torch.linalg.inv(_rel(_sp_gt, scale.float())) @ E0.float()
+                    E0_pred = (_rel(_sp_pr, scale.float()) @ E_src).to(E0.dtype)
+                    _start_err.append(torch.linalg.norm(E0_pred[:, :3, 3] - E0[:, :3, 3], dim=-1).cpu())
+                traj_pred = out_to_trajectory(traj_pred, scale, E0_pred, device)
                 m_ref = inverse_camera_matrix(traj)
                 m_pred = inverse_camera_matrix(traj_pred)
                 m_ref[:, :, :3, 1:3] *= -1

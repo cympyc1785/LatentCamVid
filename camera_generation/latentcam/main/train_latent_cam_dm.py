@@ -1524,9 +1524,8 @@ def train():
             global_step += 1
             t6 = time.time()
             _tE = _tick()                                # backward+step 끝
-            _log = {"train/loss": loss.item()}
-            if _lr_sched != 'constant':
-                _log["train/lr"] = _real_opt_lr.param_groups[0]['lr']
+            # [R108] lr 은 schedule 과 무관하게 항상 기록 (사용자 "다른 모델 학습들도 train/lr 기록되게").
+            _log = {"train/loss": loss.item(), "train/lr": _real_opt_lr.param_groups[0]['lr']}
             if _aux is not None:
                 _log["train/readout_aux_obb"] = _aux.item()   # 가중치 곱하기 전 원 손실
             if _aim is not None:

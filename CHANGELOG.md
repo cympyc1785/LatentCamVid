@@ -35,6 +35,7 @@
 
 ### Added
 
+- **`train/lr` 항상 기록** (R108). lr schedule 과 무관하게 매 step wandb 에 남긴다 (constant 이면 cfg.lr 그대로).
 - **`objective: fm` (flow matching, 선형 경로)** (R109). `objective: eps|fm`, `fm_t_sampling: logit_normal|uniform` (`main/conf/config.yaml`, 기본 eps = 예전 동작). fm 은 x_tau=(1-tau)x0+tau eps 에서 v=eps-x0 회귀 (reflow 없음 — rectified flow 아님), `sample()` 은 Euler tau 1→0 (`--init_gt_t` 도 지원). aim_loss 와는 아직 같이 못 쓴다. 실험 `dynpose_d200{of5ec,of29a}_noprobe_fm`.
 - **LR schedule 옵션** (R108). `lr_schedule: constant|cosine`, `lr_warmup_steps`, `lr_min_ratio` (`main/conf/config.yaml`, 기본 constant = 예전 동작). cosine 은 global_step 만으로 계산해 resume 에도 같은 곡선, wandb `train/lr` 기록. 실험 `dynpose_d200{of5ec,of29a}_noprobe_cos` (warmup 500, min 0.05, 100 epoch).
 - **`latentcam/scripts/eval/traj_time_metrics.py`** (R106). "궤적 후반이 GT 에서 더 벌어지는가" — eval 폴더(arm 여러 개)의 ref/pred json 으로 프레임별 ATE/rot/RPE 곡선과 ADE·FDE·구간(early/mid/late)·drift_slope·RPE1/8 을 낸다. reach(GT 최대 이동) 정규화, 정지 궤적(reach < 중앙값×0.1)은 따로.

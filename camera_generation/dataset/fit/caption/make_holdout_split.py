@@ -120,16 +120,32 @@ def main(args):
     total_cams, total_scenes = len(segs), len(scenes)
 
     legacy = {f"{args.chunk_prefix}/{v}" for v in read_lines(args.forced_test)}
-    unknown = legacy - set(n_cams)
-    assert not unknown, f"forced_test 에 코퍼스에 없는 씬 {len(unknown)}개: {sorted(unknown)[:3]}"
+    if args.keep_split_from:
+        # [R117] 기존 분할을 그대로 두고 **새 씬만** 나눈다 (d200 s91 test/val 을 새 코퍼스에서도 같은 씬으로 유지).
+        #   기존 train 씬 -> train, 기존 test 씬 -> test, val = --keep_val_scenes (기존 val 목록 그대로),
+        #   기존 목록에 없는 씬만 씬당 카메라 수 층화로 test_frac 만큼 test 로. val 은 새로 뽑지 않는다.
+        k_tr = {scene_of(x) for x in read_lines(f"{args.keep_split_from}_train.txt")}
+        k_te = {scene_of(x) for x in read_lines(f"{args.keep_split_from}_test.txt")}
+        new = sorted(set(scenes) - k_tr - k_te)
+        new_cams = sum(n_cams[x] for x in new)
+        test_new = stratified_pick(new, n_cams, round(new_cams * args.test_frac), set(), args.seed)
+        test_scenes = (k_te & set(scenes)) | test_new
+        val_scenes = {f"{args.chunk_prefix}/{v}" for v in read_lines(args.keep_val_scenes)} & test_scenes
+        val_forced = val_scenes
+        print(f"[keep_split] 기존 train {len(k_tr & set(scenes))} / test {len(k_te & set(scenes))} 씬 유지 "
+              f"(코퍼스에서 빠진 기존 씬 {len((k_tr | k_te) - set(scenes))}), 신규 {len(new)} 씬 중 test {len(test_new)}, "
+              f"val {len(val_scenes)} (기존 목록)")
+    else:
+        unknown = legacy - set(n_cams)
+        assert not unknown, f"forced_test 에 코퍼스에 없는 씬 {len(unknown)}개: {sorted(unknown)[:3]}"
 
-    # ── test 10% ────────────────────────────────────────────────────────────────
-    test_scenes = stratified_pick(scenes, n_cams, round(total_cams * args.test_frac),
-                                  legacy, args.seed)
-    # ── val 1% — test **안에서** 다시 뽑는다. train:test 가 9:1 로 유지되는 이유가 이것 ──
-    val_forced = {f"{args.chunk_prefix}/{v}" for v in read_lines(args.forced_val)} & test_scenes
-    val_scenes = stratified_pick(sorted(test_scenes), n_cams,
-                                 round(total_cams * args.val_frac), val_forced, args.seed + 1)
+        # ── test 10% ────────────────────────────────────────────────────────────────
+        test_scenes = stratified_pick(scenes, n_cams, round(total_cams * args.test_frac),
+                                      legacy, args.seed)
+        # ── val 1% — test **안에서** 다시 뽑는다. train:test 가 9:1 로 유지되는 이유가 이것 ──
+        val_forced = {f"{args.chunk_prefix}/{v}" for v in read_lines(args.forced_val)} & test_scenes
+        val_scenes = stratified_pick(sorted(test_scenes), n_cams,
+                                     round(total_cams * args.val_frac), val_forced, args.seed + 1)
     assert val_scenes <= test_scenes
 
     tr = [s for s in segs if scene_of(s) not in test_scenes]
@@ -191,6 +207,9 @@ if __name__ == "__main__":
     p.add_argument("--forced_val", default=path.join(CINE, "configs",
                                                      "dynpose_holdout_scenes.txt"), type=str)
     p.add_argument("--seed", default=200, type=int)
+    # [R117] 기존 분할 유지 모드. 예: <d200 root>/seg_list_dynpose_s91 (그 _train/_test.txt 를 읽는다). 없으면 예전 동작.
+    p.add_argument("--keep_split_from", default=None, type=str)
+    p.add_argument("--keep_val_scenes", default=path.join(CINE, "configs", "dynpose_val_scenes_102.txt"), type=str)
     p.add_argument("--dry_run", action="store_true", default=False)
     p.add_argument("--no_dry_run", dest="dry_run", action="store_false")
     main(p.parse_args())

@@ -48,7 +48,14 @@ def scan(args):
     banks = args.banks
     root = args.cine_out
     scenes, avail = [], {}
+    # [R117] --videos_file 이 있으면 그 씬만 (D284 신규분만 desc/captions 하고 d200 씬 캡션을 덮지 않으려고).
+    #   없으면 cine_out 전체 = 예전 동작. export 는 보통 목록 없이 전체로 돌려 d200 + 신규를 한 코퍼스로 낸다.
+    want = None
+    if getattr(args, "videos_file", None):
+        want = {l.strip() for l in open(args.videos_file) if l.strip() and not l.startswith("#")}
     for video in sorted(listdir(root)):
+        if want is not None and video not in want:
+            continue
         got = banks_of(root, video, banks)
         if got:
             scenes.append(video)
@@ -255,6 +262,7 @@ if __name__ == "__main__":
     # 붙고 tau/fit/emit 은 d185 를 글자 그대로 상속하므로 같은 세대로 취급한다.
     p.add_argument("--banks", nargs="+",
                    default=["hole_bank_d185", "hole_bank_d199"])
+    p.add_argument("--videos_file", default=None, type=str)   # [R117] 대상 씬 목록 (없으면 cine_out 전체)
     p.add_argument("--per_scene_cap", default=6, type=int)     # 씬당 카메라 상한. 0 이면 무제한
     p.add_argument("--captions_name", default="captions_d200.json", type=str)
     p.add_argument("--desc_name", default="instance_desc_d200.json", type=str)

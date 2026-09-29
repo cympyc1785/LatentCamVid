@@ -35,6 +35,7 @@
 
 ### Added
 
+- **zero terminal SNR 옵션** (R114). `rescale_betas_zero_snr: false`, `timestep_spacing: leading` (`main/conf/config.yaml`, 기본 = 예전 스케줄). true 면 `prediction_type: v_prediction` 필수(loss 대상 `get_velocity`), trailing 이면 추론이 t=999(순수 noise)부터. 학습·`eval_testset` 스케줄러 둘 다 반영. 실험 `dynpose_d200{of5ec,of29a}_noprobe_zsnr`.
 - **`eval_testset.py --init_gt_t 0` = 순수 VAE roundtrip** (R113). 모델을 한 번도 안 부르고 GT latent 를 그대로 decode (`sample()` 의 t_start<=0 분기, eps/fm 둘 다). 떨림이 VAE 에서 오는지 진단용.
 - **`traj_time_metrics.py --corpus_root`: smoothness·framing 지표** (R112). "궤적이 매끄러운가 / framing 이 일정한가" — 위치 jerk(|Δ³p|/reach)·회전 jerk(|Δ²ω|), subject 3D 중심(scene_graph track)을 카메라에 투영한 화면 위치의 GT 대비 오차·흔들림(|Δ²uv|)·표준편차·거리 떨림(|Δ² log z|)·중앙 0.8 상자 비율. 인자를 안 주면 예전 출력 그대로.
 - **`train/lr` 항상 기록** (R108). lr schedule 과 무관하게 매 step wandb 에 남긴다 (constant 이면 cfg.lr 그대로).

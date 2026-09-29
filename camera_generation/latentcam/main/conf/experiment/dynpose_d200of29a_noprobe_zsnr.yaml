@@ -1,0 +1,11 @@
+# @package _global_
+# D299 (R114) — of29a noprobe overfit 을 zero terminal SNR + v-prediction + trailing 으로 (사용자 2026-09-29 "2번도 옵션으로").
+# 부모 dynpose_d200of29a_noprobe_cos (D297: eps, cosine LR warmup 500 → min 0.05, 100 epoch) 와의 차이는 스케줄·예측 대상뿐.
+# 동기: of5ec 에서 순수 noise 시작(GT 0%) 만 latent 오차 7.5배 — 학습 최대 t 에도 GT 6.8% 가 남는 scaled_linear 스케줄 때문.
+defaults:
+  - dynpose_d200of29a_noprobe_cos
+
+exp_name: dynpose_d200of29a_noprobe_zsnr
+prediction_type: v_prediction
+rescale_betas_zero_snr: true
+timestep_spacing: trailing

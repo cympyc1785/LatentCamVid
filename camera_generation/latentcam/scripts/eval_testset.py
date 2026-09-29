@@ -268,6 +268,11 @@ def main():
                     beta_schedule=cfg.beta_schedule, clip_sample=cfg.clip_sample,
                     set_alpha_to_one=cfg.set_alpha_to_one, steps_offset=cfg.steps_offset,
                     beta_start=cfg.beta_start, beta_end=cfg.beta_end)
+    # [R114] zero terminal SNR / trailing spacing — 학습과 같은 스케줄 (기본값이면 인자를 안 넘겨 예전과 같다)
+    if bool(getattr(cfg, 'rescale_betas_zero_snr', False)):
+        sched_kw['rescale_betas_zero_snr'] = True
+    if str(getattr(cfg, 'timestep_spacing', 'leading') or 'leading') != 'leading':
+        sched_kw['timestep_spacing'] = str(cfg.timestep_spacing)
     noise_scheduler = (DDPMScheduler(**sched_kw) if cfg.sampling_type == 'ddpm'
                        else DDIMScheduler(**sched_kw))
 

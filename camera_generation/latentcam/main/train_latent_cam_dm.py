@@ -659,6 +659,16 @@ def train():
     # NOTE: trainer._make_model() removed — it allocated an unused DataParallel model
     # on GPU (get_model() defaults to cam_dim=11); training builds its own `model` below.
 
+    # [R114] zero terminal SNR (Lin et al. 2023). 기본 false/leading = 예전 스케줄 그대로(인자를 안 넘긴 것과 같다).
+    #   true 면 t=999 에서 alphas_cumprod=0 (입력이 순수 noise) — eps 가 정의되지 않으므로 prediction_type=v_prediction 과,
+    #   추론이 999 부터 시작하도록 timestep_spacing=trailing 을 같이 쓴다.
+    _zsnr_kw = {}
+    if bool(getattr(cfg, 'rescale_betas_zero_snr', False)):
+        _zsnr_kw['rescale_betas_zero_snr'] = True
+    if str(getattr(cfg, 'timestep_spacing', 'leading') or 'leading') != 'leading':
+        _zsnr_kw['timestep_spacing'] = str(cfg.timestep_spacing)
+    if _zsnr_kw.get('rescale_betas_zero_snr') and str(cfg.prediction_type) == 'epsilon':
+        raise ValueError("rescale_betas_zero_snr=true 는 prediction_type=v_prediction 과 같이 써야 한다 (t=999 에서 eps 불능)")
     if cfg.sampling_type == "ddpm":
         noise_scheduler = DDPMScheduler(
             num_train_timesteps=T,
@@ -669,6 +679,7 @@ def train():
             steps_offset=cfg.steps_offset,
             beta_start=cfg.beta_start,
             beta_end=cfg.beta_end,
+            **_zsnr_kw,
         )
     elif cfg.sampling_type == "ddim":
         noise_scheduler = DDIMScheduler(
@@ -680,6 +691,7 @@ def train():
             steps_offset=cfg.steps_offset,
             beta_start=cfg.beta_start,
             beta_end=cfg.beta_end,
+            **_zsnr_kw,
         )    
 
     pc_encoder = PCEncoder().to(device) if PCEncoder is not None else None
@@ -1498,7 +1510,13 @@ def train():
                          if (_sp_kw and data.get('start_pose') is not None) else None)
                 noise_pred = model(noisy_x, timesteps.float(), text_embeds, text_masks,
                                    pc_embeds, pc_masks, cond=_cond, start_pose=_spin, **_vkw)
-                loss = F.mse_loss(noise_pred, (noise - traj_latents) if _fm else noise)
+                if _fm:
+                    _target = noise - traj_latents
+                elif str(getattr(cfg, 'prediction_type', 'epsilon')) == 'v_prediction':
+                    _target = noise_scheduler.get_velocity(traj_latents, noise, timesteps)   # [R114]
+                else:
+                    _target = noise
+                loss = F.mse_loss(noise_pred, _target)
                 # [new 2026-09-22 / D261] 시작 pose 회귀. start_pose_pred=false 면 None 이라
                 # loss 가 예전과 비트 동일하다.
                 _sp = start_pose_loss(accelerator.unwrap_model(model), data, device)

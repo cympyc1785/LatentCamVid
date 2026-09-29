@@ -15,6 +15,10 @@ lr_schedule: constant
 # fm_t_sampling: logit_normal|uniform.
 objective: eps
 fm_t_sampling: logit_normal
+# [2026-09-29, R114] zero terminal SNR (Lin et al. 2023). false/leading = 예전 스케줄. true 면 prediction_type: v_prediction,
+# timestep_spacing: trailing 과 같이 쓴다 (t=999 에서 입력이 순수 noise → 추론 시작점과 학습이 일치).
+rescale_betas_zero_snr: false
+timestep_spacing: leading
 lr_warmup_steps: 0
 lr_min_ratio: 0.0
 batch_size: 8

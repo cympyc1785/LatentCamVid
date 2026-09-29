@@ -35,6 +35,7 @@
 
 ### Added
 
+- **`latentcam/scripts/eval/traj_time_metrics.py`** (R106). "궤적 후반이 GT 에서 더 벌어지는가" — eval 폴더(arm 여러 개)의 ref/pred json 으로 프레임별 ATE/rot/RPE 곡선과 ADE·FDE·구간(early/mid/late)·drift_slope·RPE1/8 을 낸다. reach(GT 최대 이동) 정규화, 정지 궤적(reach < 중앙값×0.1)은 따로.
 - **`exec/run_video_filter.py --judge v6`** (R104). v1 − synthetic, VLM 통과 영상만 SAM3 **49 프레임**(`sam3_k49/`), main 고르기 v2(평균 면적), 잘림·가림 판정 대신 main 이 안 보이는 프레임이 있으면 `subject_missing_frame`. `--k` 기본 None(=9, v6 49), `--sam3_dir` 신설, VLM 사유를 `vlm_reasons()` 로 분리 (v1~v5 판정 동일 — 3,000편 대조).
 - **`viz/viser_cloud.py --eval_dir label=<dir> ... --entry <data_name>`** (R103). latentcam eval 폴더의 GT(ref, 첫 폴더) 와 폴더별 pred 를 cloud.npz 점군 위에 motion 슬라이더/pin 으로 올린다. 번들 JSON arm 과 같은 변환(`_bundle_arm_poses`). 인자를 안 주면 예전 동작.
 - **`eval_testset.py --init_gt_t T`** (R102). GT latent 에 t=T 수준 노이즈를 얹어 그 시점부터 denoise (SDEdit). `train_latent_cam_dm.sample()` 에 `x_init`/`t_start` 인자 추가 — 기본 None 이면 기존처럼 순수 노이즈 x_T 에서 전 스텝.

@@ -35,6 +35,7 @@
 
 ### Added
 
+- **`eval_testset.py --init_gt_t 0` = 순수 VAE roundtrip** (R113). 모델을 한 번도 안 부르고 GT latent 를 그대로 decode (`sample()` 의 t_start<=0 분기, eps/fm 둘 다). 떨림이 VAE 에서 오는지 진단용.
 - **`traj_time_metrics.py --corpus_root`: smoothness·framing 지표** (R112). "궤적이 매끄러운가 / framing 이 일정한가" — 위치 jerk(|Δ³p|/reach)·회전 jerk(|Δ²ω|), subject 3D 중심(scene_graph track)을 카메라에 투영한 화면 위치의 GT 대비 오차·흔들림(|Δ²uv|)·표준편차·거리 떨림(|Δ² log z|)·중앙 0.8 상자 비율. 인자를 안 주면 예전 출력 그대로.
 - **`train/lr` 항상 기록** (R108). lr schedule 과 무관하게 매 step wandb 에 남긴다 (constant 이면 cfg.lr 그대로).
 - **`objective: fm` (flow matching, 선형 경로)** (R109). `objective: eps|fm`, `fm_t_sampling: logit_normal|uniform` (`main/conf/config.yaml`, 기본 eps = 예전 동작). fm 은 x_tau=(1-tau)x0+tau eps 에서 v=eps-x0 회귀 (reflow 없음 — rectified flow 아님), `sample()` 은 Euler tau 1→0 (`--init_gt_t` 도 지원). aim_loss 와는 아직 같이 못 쓴다. 실험 `dynpose_d200{of5ec,of29a}_noprobe_fm`.

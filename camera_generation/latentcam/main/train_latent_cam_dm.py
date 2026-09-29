@@ -491,6 +491,8 @@ def sample(model, scheduler, traj_len, text_emb, text_masks, point_emb, point_ma
         n = int(cfg.diffusion_inference_step)
         tau0 = 1.0
         if x_init is not None and t_start is not None:
+            if int(t_start) <= 0:
+                return x_init.to(device)          # [R113] 순수 VAE roundtrip
             tau0 = min(1.0, float(t_start) / 1000.0)
             x_t = (1.0 - tau0) * x_init.to(device) + tau0 * x_t
             n = max(1, int(round(n * tau0)))
@@ -508,6 +510,10 @@ def sample(model, scheduler, traj_len, text_emb, text_masks, point_emb, point_ma
     # [R102] x_init(=GT latent) + t_start 를 주면 SDEdit 식으로 x_init 에 t_start 수준 노이즈를 얹어
     #   t<=t_start 스텝만 돈다. None 이면 기존 (순수 노이즈 x_T 에서 전 스텝).
     if x_init is not None and t_start is not None:
+        if int(t_start) <= 0:
+            # [R113] t_start=0: 모델을 한 번도 안 부르고 GT latent 를 그대로 돌려준다 = 순수 VAE roundtrip
+            #   (호출부가 decode 한다). "떨림이 VAE 에서 오나" 진단용.
+            return x_init.to(device)
         ts = ts[ts <= int(t_start)]
         x_t = scheduler.add_noise(x_init.to(device), x_t, ts[:1].expand(B))
     for _i, t in enumerate(ts):

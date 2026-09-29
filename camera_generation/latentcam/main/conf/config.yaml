@@ -10,6 +10,10 @@ lr: 0.0001
 # [2026-09-29, R108] LR schedule. constant(기본) = 예전 동작(고정 lr). cosine = 선형 warmup(lr_warmup_steps)
 # 뒤 cosine 으로 lr -> lr*lr_min_ratio (총 step = epochs x epoch 당 step, train_latent_cam_dm.py `_lr_at`).
 lr_schedule: constant
+# [2026-09-29, R109] 학습 목표. eps(기본) = 기존 DDPM eps 예측 + DDIM 샘플링. rf = rectified flow
+# (x_tau=(1-tau)x0+tau eps, v=eps-x0, Euler 샘플링 diffusion_inference_step 스텝). rf_t_sampling: logit_normal|uniform.
+objective: eps
+rf_t_sampling: logit_normal
 lr_warmup_steps: 0
 lr_min_ratio: 0.0
 batch_size: 8

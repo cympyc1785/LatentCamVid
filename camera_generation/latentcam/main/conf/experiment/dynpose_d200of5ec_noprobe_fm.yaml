@@ -1,10 +1,10 @@
 # @package _global_
-# D298 (R109) — of5ec noprobe overfit 을 rectified flow 로 (사용자 2026-09-29 "rectified flow matching으로도 overfit 학습").
+# D298 (R109) — of5ec noprobe overfit 을 flow matching 으로 (사용자 2026-09-29 요청, 이름 정정 "rectified flow는 아니니까 그냥 flow matching").
 # 부모 dynpose_d200of5ec_noprobe_cos (D297: cosine LR warmup 500 → min 0.05, 100 epoch) 와의 차이는 objective 뿐:
-#   x_tau=(1-tau)x0+tau eps, v=eps-x0 회귀, tau ~ logit-normal(0,1), Euler 50 step 샘플링.
+#   선형 경로 x_tau=(1-tau)x0+tau eps, v=eps-x0 회귀, tau ~ logit-normal(0,1), Euler 50 step 샘플링 (reflow 없음).
 defaults:
   - dynpose_d200of5ec_noprobe_cos
 
-exp_name: dynpose_d200of5ec_noprobe_rf
-objective: rf
-rf_t_sampling: logit_normal
+exp_name: dynpose_d200of5ec_noprobe_fm
+objective: fm
+fm_t_sampling: logit_normal

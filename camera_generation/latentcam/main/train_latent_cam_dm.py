@@ -484,8 +484,8 @@ def sample(model, scheduler, traj_len, text_emb, text_masks, point_emb, point_ma
     device = text_emb.device
     x_t = torch.randn(B, traj_len, cfg.cam_dim, generator=generator).to(device)
 
-    if str(getattr(cfg, 'objective', 'eps')) == 'rf':
-        # [R109] rectified flow: x_tau = (1-tau) x0 + tau eps, 모델 출력 v = eps - x0.
+    if str(getattr(cfg, 'objective', 'eps')) == 'fm':
+        # [R109] flow matching (선형 경로, reflow 없음): x_tau = (1-tau) x0 + tau eps, 모델 출력 v = eps - x0.
         # Euler 로 tau 1 -> 0 (diffusion_inference_step 스텝, 모델 시간 입력 = tau*1000).
         # x_init/t_start 면 tau0 = t_start/1000 에서 (1-tau0) x_init + tau0 eps 로 시작해 남은 비율만큼 스텝.
         n = int(cfg.diffusion_inference_step)
@@ -1469,18 +1469,18 @@ def train():
                 loss = per_token_flow_loss(model, traj_latents, text_embeds, text_masks,
                                            pc_embeds, pc_masks)
             else:
-                _rf = str(getattr(cfg, 'objective', 'eps')) == 'rf'
-                if _rf:
-                    # [R109] rectified flow. tau ~ logit-normal(0,1) (SD3 권장, `rf_t_sampling: uniform` 이면 U(0,1)).
+                _fm = str(getattr(cfg, 'objective', 'eps')) == 'fm'
+                if _fm:
+                    # [R109] flow matching (선형 경로). tau ~ logit-normal(0,1) (SD3 권장, `fm_t_sampling: uniform` 이면 U(0,1)).
                     # 모델 시간 입력은 eps 경로와 같은 0~1000 눈금 (tau*1000) 이라 모델 코드는 그대로다.
-                    if str(getattr(cfg, 'rf_t_sampling', 'logit_normal')) == 'uniform':
+                    if str(getattr(cfg, 'fm_t_sampling', 'logit_normal')) == 'uniform':
                         _tau = torch.rand(traj_latents.shape[0], device=device)
                     else:
                         _tau = torch.sigmoid(torch.randn(traj_latents.shape[0], device=device))
                     noisy_x = (1.0 - _tau.view(-1, 1, 1)) * traj_latents + _tau.view(-1, 1, 1) * noise
                     timesteps = _tau * 1000.0
                     if float(getattr(cfg, 'aim_loss_w', 0.0) or 0.0) > 0:
-                        raise ValueError("objective=rf 는 aim_loss 를 아직 지원 안 한다 (x0_hat 가 eps 식)")
+                        raise ValueError("objective=fm 는 aim_loss 를 아직 지원 안 한다 (x0_hat 가 eps 식)")
                 else:
                     noisy_x = noise_scheduler.add_noise(traj_latents, noise, timesteps)
                 # target_track_dim=0 이면 _cond=None -> 기존 호출과 동일.
@@ -1492,7 +1492,7 @@ def train():
                          if (_sp_kw and data.get('start_pose') is not None) else None)
                 noise_pred = model(noisy_x, timesteps.float(), text_embeds, text_masks,
                                    pc_embeds, pc_masks, cond=_cond, start_pose=_spin, **_vkw)
-                loss = F.mse_loss(noise_pred, (noise - traj_latents) if _rf else noise)
+                loss = F.mse_loss(noise_pred, (noise - traj_latents) if _fm else noise)
                 # [new 2026-09-22 / D261] 시작 pose 회귀. start_pose_pred=false 면 None 이라
                 # loss 가 예전과 비트 동일하다.
                 _sp = start_pose_loss(accelerator.unwrap_model(model), data, device)

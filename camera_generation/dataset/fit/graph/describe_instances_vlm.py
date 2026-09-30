@@ -39,6 +39,7 @@ away from the fence"` / `"the camel facing forward"` 로 나왔는데, **둘 다
     python fit/graph/describe_instances_vlm.py --videos avocado-slice --all_nodes --dry_run
 """
 import json
+import threading
 import sys
 import time
 from argparse import ArgumentParser
@@ -440,7 +441,11 @@ def main(args):
         print(f"{'served':<14}{served}", flush=True)
 
     rows = []
-    for video in args.videos:
+    _lock = threading.Lock()
+
+    # [R118] 영상 단위 병렬 (`--workers`, 기본 1 = 예전처럼 순차). 한 영상 안의 노드는 앞 형제의 문구를
+    #   다음 형제에게 넘기므로 순서대로 두고, 영상끼리만 ThreadPool 로 동시에 vLLM 에 요청한다.
+    def one(video):
         with open(path.join(args.output_root, video, "scene_graph.json"), encoding="utf-8") as f:
             graph = json.load(f)
         dyn_folder, stat_folder = resolve_seg_folders(args.eval_data, video)
@@ -481,7 +486,8 @@ def main(args):
                                    prior_descs=tuple(prior_by_label.get(key, ())))
             prior_by_label.setdefault(key, []).append(record["description"])
             records[node["id"]] = record
-            rows.append((video, node["id"], node["label"], record))
+            with _lock:
+                rows.append((video, node["id"], node["label"], record))
             print(f"[{video:<16}] {node['id']:<7} {node['label']:<12} "
                   f"-> {record.get('description')}", flush=True)
 
@@ -494,6 +500,16 @@ def main(args):
             with open(target, "w", encoding="utf-8") as file:
                 json.dump(payload, file, ensure_ascii=False, indent=1)
             print(f"wrote {target}", flush=True)
+
+
+    if args.workers <= 1:
+        for video in args.videos:
+            one(video)
+    else:
+        from concurrent.futures import ThreadPoolExecutor
+        with ThreadPoolExecutor(args.workers) as ex:
+            for f in [ex.submit(one, v) for v in args.videos]:
+                f.result()
 
     if rows:
         header = (f"{'video':<18}{'node':<8}{'label':<12}{'conf':>5}{'rep':>4}{'sec':>6}"
@@ -526,6 +542,7 @@ if __name__ == "__main__":
     # / 2장 13). 6장이면 그 구간 손실이 줄고 방향·궤적이 갈릴 여지가 생긴다. 비용은 이미지 폭이
     # 2배(1344→2688 px) 되는 것뿐 — 호출 수는 그대로 노드당 1회다 (`build_image` 는 한 장으로 합침).
     # 참고로 DynamicVerse stage1 은 25장을 개별 이미지로 보낸다 (batch_process_qwen_pipeline.py:178).
+    parser.add_argument("--workers", default=1, type=int)       # [R118] 영상 단위 병렬 요청 수 (1 = 순차)
     parser.add_argument("--num_frames", default=6, type=int)
     parser.add_argument("--tile", default=448, type=int)          # 패널 한 칸 픽셀
     parser.add_argument("--dim", default=0.28, type=float)        # 마스크 바깥 밝기 배율

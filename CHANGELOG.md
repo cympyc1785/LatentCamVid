@@ -35,6 +35,7 @@
 
 ### Added
 
+- **VLM 지칭구 병렬 요청** (R118). `fit/graph/describe_instances_vlm.py --workers N` (영상 단위 ThreadPool, 한 영상 안 노드는 순서 유지; 기본 1 = 예전 순차), `exec/run_corpus_export.py --desc_workers N` 로 전달. 4편 실측 13.9 s (workers 4).
 - **`latentcam/scripts/data/build_molmo2_track_override.py`** (R117). "Molmo2 text override(`Track {target_text}.`) 맵을 코퍼스에서 어떻게 만드나" — 지워진 tmp/d194/build_override.py 복원. target_text 없으면 concise (`--empty_target`), `--check` 로 기존 맵 대조 (d200: aim≠free 37,645행 100% 일치, free 13,777행은 기존 맵이 빈 문자열 — 캐시가 --free_mode zero 로 0 처리).
 - **D284 후속용 분기 2개** (R117). `exec/run_corpus_export.py --videos_file` (그 씬만 desc/captions — 없으면 cine_out 전체 = 예전), `fit/caption/make_holdout_split.py --keep_split_from <root>/seg_list_dynpose_s91 [--keep_val_scenes]` (기존 train/test/val 씬 유지, 신규 씬만 층화 9:1; d200 자체에 돌리면 9,152/1,017/102 그대로 재현 확인).
 - **zero terminal SNR 옵션** (R114). `rescale_betas_zero_snr: false`, `timestep_spacing: leading` (`main/conf/config.yaml`, 기본 = 예전 스케줄). true 면 `prediction_type: v_prediction` 필수(loss 대상 `get_velocity`), trailing 이면 추론이 t=999(순수 noise)부터. 학습·`eval_testset` 스케줄러 둘 다 반영. 실험 `dynpose_d200{of5ec,of29a}_noprobe_zsnr`.

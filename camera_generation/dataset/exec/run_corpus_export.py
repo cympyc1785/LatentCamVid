@@ -84,7 +84,7 @@ def stage_desc(args, scenes, avail):
             cmd = [PY, path.join(CINE, "fit", "graph", "describe_instances_vlm.py"),
                    "--output_root", args.cine_out, "--eval_data", args.eval_data,
                    "--bank_dir", bank, "--out_name", args.desc_name,
-                   "--api_base", args.api_base, "--videos", *chunk]
+                   "--api_base", args.api_base, "--workers", str(args.desc_workers), "--videos", *chunk]
             res = run(cmd, cwd=CINE, capture_output=True, text=True)
             done = sum(1 for v in chunk
                        if path.isfile(path.join(args.cine_out, v, args.desc_name)))
@@ -302,6 +302,7 @@ if __name__ == "__main__":
     # ── VLM (desc 단계) ───────────────────────────────────────────────────────
     p.add_argument("--api_base", default="http://127.0.0.1:22002/v1", type=str)
     p.add_argument("--batch", default=20, type=int)            # subprocess 당 영상 수
+    p.add_argument("--desc_workers", default=1, type=int)      # [R118] describe_instances_vlm 영상 병렬 (1 = 예전)
     p.add_argument("--num_shards", default=1, type=int)
     p.add_argument("--shard_id", default=0, type=int)
     p.add_argument("--workers", default=8, type=int)

@@ -65,11 +65,15 @@ class CameraEncoder(nn.Module):
         return mu, logvar
 
 class CameraDecoder(nn.Module):
-    def __init__(self, latent_dim=64, hidden_dim=64, out_channels=11):
+    def __init__(self, latent_dim=64, hidden_dim=64, out_channels=11, up_mode="nearest"):
         super().__init__()
+        # [R126] up_mode: "nearest"(기본, 기존 ckpt 와 동일) | "linear". nearest x2 두 번이 주기 4 톱니를 만든다
+        #   (tmp/agent/reader-vae-latent-rf.md). linear 는 파라미터가 같아 state_dict 호환이다.
+        _up = (lambda: nn.Upsample(scale_factor=2, mode="nearest")) if up_mode == "nearest" else \
+              (lambda: nn.Upsample(scale_factor=2, mode="linear", align_corners=False))
 
         self.up1 = nn.Sequential(
-            nn.Upsample(scale_factor=2, mode="nearest"),
+            _up(),
             nn.Conv1d(latent_dim, hidden_dim, kernel_size=3, padding=1),
             nn.ReLU()
         )
@@ -86,7 +90,7 @@ class CameraDecoder(nn.Module):
         )
 
         self.up2 = nn.Sequential(
-            nn.Upsample(scale_factor=2, mode="nearest"),
+            _up(),
             nn.Conv1d(hidden_dim, hidden_dim, kernel_size=3, padding=1),
             nn.ReLU()
         )
@@ -120,10 +124,22 @@ class CameraDecoder(nn.Module):
         return x_hat.transpose(1, 2)
 
 class CameraVAE(nn.Module):
-    def __init__(self, latent_dim=64):
+    def __init__(self, latent_dim=64, up_mode="nearest", pad_end=0):
         super().__init__()
         self.encoder = CameraEncoder(latent_dim=latent_dim)
-        self.decoder = CameraDecoder(latent_dim=latent_dim)
+        self.decoder = CameraDecoder(latent_dim=latent_dim, up_mode=up_mode)
+        # [R126] pad_end>0: 입력 끝을 마지막 프레임 복제로 pad_end 만큼 늘려 encode 하고 decode 뒤 잘라낸다.
+        #   마지막 토큰이 경계에 걸려 이득이 절반인 문제 (enc 51.5 vs ~120, dec 0.84 vs ~1.6) 완화용.
+        #   49+4=53=4*13+1 → 토큰 14개. 기본 0 = 기존 동작 (토큰 13).
+        self.pad_end = int(pad_end)
+
+    def _pad(self, x):
+        if self.pad_end <= 0:
+            return x
+        return torch.cat([x, x[:, -1:].expand(-1, self.pad_end, -1)], dim=1)
+
+    def _crop(self, x):
+        return x[:, :-self.pad_end] if self.pad_end > 0 else x
 
     def reparameterize(self, mu, logvar):
         std = torch.exp(0.5 * logvar)
@@ -131,23 +147,23 @@ class CameraVAE(nn.Module):
         return mu + eps * std
 
     def forward(self, x):
-        mu, logvar = self.encoder(x)        # (B, D, T')
+        mu, logvar = self.encoder(self._pad(x))        # (B, D, T')
         z = self.reparameterize(mu, logvar)
-        x_hat = self.decoder(z)             # (B, T, 9)
+        x_hat = self._crop(self.decoder(z))            # (B, T, 11)
         return x_hat, mu, logvar
     
     def encode(self, x):
-        mu, logvar = self.encoder(x)
+        mu, logvar = self.encoder(self._pad(x))
         mu = mu.transpose(1, 2)
         return mu
     
     def encode_sample(self, x):
-        mu, logvar = self.encoder(x)        # (B, D, T')
+        mu, logvar = self.encoder(self._pad(x))        # (B, D, T')
         z = self.reparameterize(mu, logvar)
         z = z.transpose(1, 2)
         return z
 
     def decode(self, z):
         z = z.transpose(1, 2)
-        x = self.decoder(z)
+        x = self._crop(self.decoder(z))
         return x

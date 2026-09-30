@@ -175,7 +175,7 @@ def stage_train(a):
     watch = [i for i, n in enumerate(te_names) if n in a.watch.split(",")]
     print(f"[train] {a.name}: train {len(Xtr)} (v1 {len(tr[0])} + wt/포함 {len(Xtr) - len(tr[0])}), test {len(Xte)}, "
           f"watch {[te_names[i] for i in watch]}", flush=True)
-    model = CameraVAE(latent_dim=64).to(dev)
+    model = CameraVAE(latent_dim=64, up_mode=a.up_mode, pad_end=a.pad_end).to(dev)
     if a.init_ckpt:
         model.load_state_dict(torch.load(a.init_ckpt, map_location=dev))
         print(f"[train] init <- {a.init_ckpt}", flush=True)
@@ -269,6 +269,8 @@ if __name__ == "__main__":
     ap.add_argument("--batch", type=int, default=256)
     ap.add_argument("--kl_w", type=float, default=1e-4)
     ap.add_argument("--smooth_w", type=float, default=0.0)
+    ap.add_argument("--up_mode", default="nearest", choices=["nearest", "linear"])   # [R126] decoder 업샘플
+    ap.add_argument("--pad_end", type=int, default=0)                                 # [R126] 입력 끝 padding (4 → 토큰 14)
     ap.add_argument("--use_wt", type=int, default=1)
     ap.add_argument("--seed", type=int, default=0)
     ap.add_argument("--no_wandb", action="store_true")

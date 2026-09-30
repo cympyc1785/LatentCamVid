@@ -74,6 +74,16 @@ DEFS = """Definitions:
 PROMPT = ("This is a video clip.\nDescribe the clip as a JSON object with exactly these fields "
           f"(choose one value where options are listed):\n{SCHEMA}\n{DEFS}\nAnswer with the JSON only.")
 
+# [R119] 셀카·얼굴 클로즈업 2차 판정 (사용자 2026-09-30 "얼굴 가까이에서 찍은 셀카에 가까운 영상 걸러지도록").
+#   1차 PROMPT 의 viewpoint 는 84d8edd0 (팔 길이 거리에서 대머리 남성 얼굴이 화면을 채움) 을 third_person 으로 봤다.
+#   질문을 이것 하나로 좁혀 따로 묻는다. 결과는 vlm_selfie/*.jsonl, 판정은 --judge v7 (= v6 + 이 두 사유).
+PROMPT_SELFIE = """Look at this video clip and answer with a JSON object only:
+{"selfie": true|false, "face_closeup": true|false, "evidence": "<one sentence>"}
+Definitions:
+- selfie: the person holding the camera (phone, action camera, selfie stick, or at arm's length) films themselves. Typical signs: the face or upper body stays near the center at a nearly constant close distance while the background moves or swings behind them; an arm or stick may be visible; the person often looks or talks into the lens (vlog style).
+- face_closeup: whoever holds the camera, a person's head and shoulders fill most of the frame for most of the clip (the face occupies a large part of the image, the body below the chest is mostly out of frame).
+Both are false for a normal third-person shot where the camera follows or observes a person from a distance with a clear view of their body."""
+
 # ── 판정 임계 (1차값 — 손라벨로 보정 예정. 바꾸면 judge 를 다시 돌리면 된다, VLM/SAM3 재호출 없음)
 TH = {"area_min": 0.01,        # main 면적 중앙값 하한 (화면 대비) — 너무 작음
       "area_max": 0.45,        # main 면적 중앙값 상한 — 너무 큼 (closeup)
@@ -105,11 +115,12 @@ TH_V4 = {**TH_V3,
 #   ③ main 고르기는 v2 (전 프레임 평균 면적) ④ 잘림·가림 판정 제외 — main 이 **안 보이는 프레임이 하나라도** 있으면 탈락.
 #   면적 상·하한(v1 값)과 main 모호는 v1 그대로. 산출 sam3_k49/, *_v6.*
 TH_V6 = {**TH, "presence_min": 1.0}
+TH_V7 = TH_V6
 
 
 def sam3_dir(a):
     """SAM3 산출 폴더. v6 는 49 프레임판(sam3_k49) — 9 프레임판(sam3/)을 덮지 않는다."""
-    return path.join(a.out, a.sam3_dir or ("sam3_k49" if a.judge == "v6" else "sam3"))
+    return path.join(a.out, a.sam3_dir or ("sam3_k49" if a.judge in ("v6", "v7") else "sam3"))
 
 
 def jpath(a, base):
@@ -195,6 +206,66 @@ def stage_vlm(a):
     with ThreadPoolExecutor(a.workers) as ex:
         list(ex.map(one, todo))
     print(f"[vlm] ALL DONE {stat}", flush=True)
+
+
+def load_selfie(a):
+    out = {}
+    for f in glob(path.join(a.out, "vlm_selfie", "*.jsonl")):
+        for line in open(f):
+            try:
+                r = json.loads(line)
+            except ValueError:
+                continue
+            out[r["scene"]] = r
+    return out
+
+
+def stage_vlm_selfie(a):
+    """[R119] v6 통과 영상에 셀카/얼굴 클로즈업만 묻는다. `--api_bases` 여러 서버에 round-robin, `--workers` 동시 요청.
+    `--scenes_file` 이 있으면 그 목록만 (검사용)."""
+    from threading import Lock
+    from lbm.vlm import VLMClient, parse_json_candidates
+    if a.scenes_file:
+        scenes = [l.strip() for l in open(a.scenes_file) if l.strip()]
+    else:
+        scenes = [r["scene"] for r in csv.DictReader(open(path.join(a.out, "pass_v6.csv")))]
+    scenes = scenes[a.shard_id::a.num_shards] if a.num_shards > 1 else scenes
+    done = load_selfie(a)
+    todo = [s_ for s_ in scenes if s_ not in done]
+    bases = [b for b in a.api_bases.split(",") if b]
+    os.makedirs(path.join(a.out, "vlm_selfie"), exist_ok=True)
+    fout = open(path.join(a.out, "vlm_selfie", f"s{a.shard_id}_{int(time.time())}.jsonl"), "a")
+    lock, stat, t0 = Lock(), {"n": 0, "fail": 0}, time.time()
+    print(f"[selfie] todo {len(todo)} / {len(scenes)}  servers {bases}", flush=True)
+
+    def one(item):
+        i, rel = item
+        client = VLMClient(api_base=bases[i % len(bases)], temperature=0.0, max_tokens=300, timeout=600)
+        try:
+            import cv2
+            vp = path.join(DV, rel, "video_input.mp4")
+            cap = cv2.VideoCapture(vp)
+            nf, vfps = int(cap.get(cv2.CAP_PROP_FRAME_COUNT)), cap.get(cv2.CAP_PROP_FPS) or 10.0
+            cap.release()
+            n2 = max(2, int(np.ceil(nf / vfps * a.fps)))
+            budget = {"size": {"longest_edge": int(n2 * a.frame_pixels), "shortest_edge": 4096}}
+            text, info = client.chat(PROMPT_SELFIE, video=vp, video_fps=a.fps, video_mm=budget)
+            parsed = next((c for c in parse_json_candidates(text) if isinstance(c, dict)), None)
+            row = {"scene": rel, "parsed": parsed, "raw": text, "sec": info["seconds"]}
+        except Exception as exc:  # noqa: BLE001
+            row = {"scene": rel, "parsed": None, "raw": "", "error": f"{type(exc).__name__}: {exc}"[:300]}
+        with lock:
+            fout.write(json.dumps(row, ensure_ascii=False) + "\n")
+            fout.flush()
+            stat["n"] += 1
+            stat["fail"] += int(row["parsed"] is None)
+            if stat["n"] % 500 == 0:
+                el = time.time() - t0
+                print(f"[selfie] {stat['n']}/{len(todo)} fail {stat['fail']}  {el / stat['n']:.3f} s/scene", flush=True)
+
+    with ThreadPoolExecutor(a.workers) as ex:
+        list(ex.map(one, enumerate(todo)))
+    print(f"[selfie] ALL DONE {stat}", flush=True)
 
 
 # ───────────────────────────────────────────────────────────────── sam3
@@ -476,6 +547,7 @@ def judge_one(v, s, version="v1"):
 
 def stage_judge(a):
     vlm = load_vlm(a)
+    selfie = load_selfie(a) if a.judge == "v7" else {}
     s49 = {}
     if a.judge in ("v4", "v5"):
         for l in open(path.join(a.out, "subject49.jsonl")):
@@ -488,17 +560,28 @@ def stage_judge(a):
         if rel not in vlm:
             continue
         if not path.exists(f):
-            if a.judge != "v6":
+            if a.judge not in ("v6", "v7"):
                 continue
             why = vlm_reasons((vlm[rel] or {}).get("parsed") or {}, "v6", vlm[rel])
             if not why:              # VLM 통과인데 SAM3 가 아직 — 판정 보류
                 continue
             s = {"vlm_only": True}        # v6: VLM 탈락은 SAM3 를 안 돌린다 (사유는 VLM 쪽만)
         else:
-            s = sam3_stats(f, "mean" if a.judge in ("v2", "v3", "v4", "v5", "v6") else "median")
+            s = sam3_stats(f, "mean" if a.judge in ("v2", "v3", "v4", "v5", "v6", "v7") else "median")
         if a.judge in ("v4", "v5"):
             s["subject49"] = s49.get(rel)
-        keep, why, disagree = judge_one(vlm[rel], s, a.judge)
+        keep, why, disagree = judge_one(vlm[rel], s, "v6" if a.judge == "v7" else a.judge)
+        if a.judge == "v7" and not why:    # [R119] 셀카·얼굴 클로즈업 2차 판정 (v6 통과분에만 물었다)
+            if rel not in selfie:
+                continue                   # 아직 안 물어본 영상 — 판정 보류
+            sp = (selfie[rel] or {}).get("parsed") or {}
+            # face_closeup 만 탈락 사유로 쓴다. `selfie` 는 기록만 — 40편 검사에서 뒤에서 따라가는 샷(fa687bae,
+            #   caed81c1)·먼 거리 샷(84a1182f)에도 True 가 나왔다 (face_closeup 은 6/6 맞음).
+            if sp.get("face_closeup") is True:
+                why.append("face_closeup")
+            elif sp.get("selfie") is True:
+                disagree.append("selfie_only_flag")
+            keep = not why
         p = vlm[rel].get("parsed") or {}
         rows.append({"scene": rel, "keep": keep, "reasons": why, "disagree": disagree,
                      "vlm": {"viewpoint": p.get("viewpoint"), "noun": g(p, "main_subject", "noun"),
@@ -506,7 +589,7 @@ def stage_judge(a):
                              "num_people": g(p, "main_subject", "num_people"),
                              "fraction": g(p, "main_subject", "screen_fraction"),
                              "clean": p.get("clean_third_person_subject"), "reason": p.get("reason")},
-                     "sam3": s, "th": {"v2": TH_V2, "v3": TH_V3, "v4": TH_V4, "v5": TH_V4, "v6": TH_V6}.get(a.judge, TH), "judge": a.judge})
+                     "sam3": s, "th": {"v2": TH_V2, "v3": TH_V3, "v4": TH_V4, "v5": TH_V4, "v6": TH_V6, "v7": TH_V7}.get(a.judge, TH), "judge": a.judge})
     if a.manual_keep:                    # [R70] 사람이 본 영상 강제 keep — 자동 사유는 기록으로 남긴다
         want = {l.strip() for l in open(a.manual_keep) if l.strip() and not l.startswith("#")}
         for r in rows:
@@ -732,14 +815,16 @@ def stage_reel(a):
 
 if __name__ == "__main__":
     q = ArgumentParser()
-    q.add_argument("--stage", required=True, choices=("list", "vlm", "sam3", "subject49", "judge", "export", "reel"))
+    q.add_argument("--stage", required=True, choices=("list", "vlm", "vlm_selfie", "sam3", "subject49", "judge", "export", "reel"))
     q.add_argument("--corpus", default="dynpose-100k")
     q.add_argument("--out", default=path.join(HERE, "out_filter", "d282_dynpose100k"))
     q.add_argument("--fps", default=2.0, type=float)
     q.add_argument("--frame_pixels", default=640 * 360, type=int)   # VLM 프레임당 픽셀 예산 (R41 과 같은 해상도)
     q.add_argument("--workers", default=24, type=int)
     q.add_argument("--k", default=None, type=int)               # SAM3 추적 프레임 수 (영상 전체 균등). 기본 9, v6 는 49
-    q.add_argument("--sam3_dir", default=None)                  # 기본 sam3/ (v6 는 sam3_k49/)
+    q.add_argument("--sam3_dir", default=None)
+    q.add_argument("--api_bases", default="http://127.0.0.1:22002/v1")   # [R119] vlm_selfie: 쉼표로 여러 서버
+    q.add_argument("--scenes_file", default=None)                         # [R119] vlm_selfie: 검사용 목록                  # 기본 sam3/ (v6 는 sam3_k49/)
     q.add_argument("--reel_mode", default="groups", choices=("groups", "overlay", "plain"))   # reel: 기존 사유별 / R68 overlay / 같은 표본 원본
     q.add_argument("--fail_rows", default="sam3", choices=("sam3", "vlm_sam3"))  # reel overlay/plain 탈락 2행 구성
     q.add_argument("--seed", default=0, type=int)
@@ -748,10 +833,10 @@ if __name__ == "__main__":
     q.add_argument("--seg_root", default="/data1/cympyc1785/data/DynPose-100K/eval_data/seg_instances")  # subject49
     q.add_argument("--pass_list", default=None)     # reel overlay/plain: 아래 2행 통과 8편을 이 목록으로
     q.add_argument("--manual_keep", default=None)   # judge: 한 줄에 scene 하나, 자동 판정과 무관하게 keep
-    q.add_argument("--judge", default="v1", choices=("v1", "v2", "v3", "v4", "v5", "v6"))   # v2 = R69 판정, v3 = v2 - subject_too_small , v4 = v3 + subject49 (파일명 _vN, 기존 보존)
+    q.add_argument("--judge", default="v1", choices=("v1", "v2", "v3", "v4", "v5", "v6", "v7"))   # v2 = R69 판정, v3 = v2 - subject_too_small , v4 = v3 + subject49 (파일명 _vN, 기존 보존)
     q.add_argument("--num_shards", default=1, type=int)
     q.add_argument("--shard_id", default=0, type=int)
     q.add_argument("--wait_rounds", default=600, type=int)      # sam3: VLM 결과 기다리는 최대 라운드(x120 s)
     a = q.parse_args()
-    {"list": stage_list, "vlm": stage_vlm, "sam3": stage_sam3, "subject49": stage_subject49, "judge": stage_judge,
+    {"list": stage_list, "vlm": stage_vlm, "vlm_selfie": stage_vlm_selfie, "sam3": stage_sam3, "subject49": stage_subject49, "judge": stage_judge,
      "export": stage_export, "reel": stage_reel}[a.stage](a)

@@ -35,6 +35,7 @@
 
 ### Added
 
+- **필터 v7: 셀카·얼굴 클로즈업 2차 VLM 판정** (R119). `run_video_filter.py --stage vlm_selfie` (v6 통과분에 `PROMPT_SELFIE` 만 묻는다, `--api_bases` 여러 vLLM round-robin + `--workers`, `--scenes_file` 검사용) → `--judge v7` = v6 + `face_closeup` 탈락 (`selfie` 는 오탐이 있어 기록만 — `selfie_only_flag`). 결과 vlm_selfie/*.jsonl, *_v7.*.
 - **VLM 지칭구 병렬 요청** (R118). `fit/graph/describe_instances_vlm.py --workers N` (영상 단위 ThreadPool, 한 영상 안 노드는 순서 유지; 기본 1 = 예전 순차), `exec/run_corpus_export.py --desc_workers N` 로 전달. 4편 실측 13.9 s (workers 4).
 - **`latentcam/scripts/data/build_molmo2_track_override.py`** (R117). "Molmo2 text override(`Track {target_text}.`) 맵을 코퍼스에서 어떻게 만드나" — 지워진 tmp/d194/build_override.py 복원. target_text 없으면 concise (`--empty_target`), `--check` 로 기존 맵 대조 (d200: aim≠free 37,645행 100% 일치, free 13,777행은 기존 맵이 빈 문자열 — 캐시가 --free_mode zero 로 0 처리).
 - **D284 후속용 분기 2개** (R117). `exec/run_corpus_export.py --videos_file` (그 씬만 desc/captions — 없으면 cine_out 전체 = 예전), `fit/caption/make_holdout_split.py --keep_split_from <root>/seg_list_dynpose_s91 [--keep_val_scenes]` (기존 train/test/val 씬 유지, 신규 씬만 층화 9:1; d200 자체에 돌리면 9,152/1,017/102 그대로 재현 확인).

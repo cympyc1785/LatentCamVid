@@ -35,6 +35,7 @@
 
 ### Added
 
+- **필터 v8: 1차 VLM 프롬프트 개정** (R121). `PROMPT_V8` = v1 SCHEMA 에 `face_closeup` 필드 + selfie 정의 보강(뒤에서 따라가거나 멀리서 관찰은 selfie 아님). `--vlm_prompt v1|v8`, `--vlm_dir` (결과 폴더, 기본 vlm/), `stage vlm` 도 `--api_bases` 여러 서버 round-robin. `--judge v8` = v6 규칙 + face_closeup 탈락 (VLM 결과는 vlm_v8/). v1·v6 판정 동일 확인 (3,000편).
 - **필터 v7: 셀카·얼굴 클로즈업 2차 VLM 판정** (R119). `run_video_filter.py --stage vlm_selfie` (v6 통과분에 `PROMPT_SELFIE` 만 묻는다, `--api_bases` 여러 vLLM round-robin + `--workers`, `--scenes_file` 검사용) → `--judge v7` = v6 + `face_closeup` 탈락 (`selfie` 는 오탐이 있어 기록만 — `selfie_only_flag`). 결과 vlm_selfie/*.jsonl, *_v7.*.
 - **VLM 지칭구 병렬 요청** (R118). `fit/graph/describe_instances_vlm.py --workers N` (영상 단위 ThreadPool, 한 영상 안 노드는 순서 유지; 기본 1 = 예전 순차), `exec/run_corpus_export.py --desc_workers N` 로 전달. 4편 실측 13.9 s (workers 4).
 - **`latentcam/scripts/data/build_molmo2_track_override.py`** (R117). "Molmo2 text override(`Track {target_text}.`) 맵을 코퍼스에서 어떻게 만드나" — 지워진 tmp/d194/build_override.py 복원. target_text 없으면 concise (`--empty_target`), `--check` 로 기존 맵 대조 (d200: aim≠free 37,645행 100% 일치, free 13,777행은 기존 맵이 빈 문자열 — 캐시가 --free_mode zero 로 0 처리).

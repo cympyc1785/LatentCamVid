@@ -372,7 +372,7 @@ def main():
 
     camera_vae = None
     if cfg.use_vae:
-        camera_vae = CameraVAE(latent_dim=cfg.cam_dim).to(device)
+        camera_vae = CameraVAE(latent_dim=cfg.cam_dim, up_mode=str(getattr(cfg, 'vae_up_mode', 'nearest') or 'nearest'), pad_end=int(getattr(cfg, 'vae_pad_end', 0) or 0)).to(device)
         camera_vae.load_state_dict(torch.load(cfg.vae_ckpt_path, map_location=device))
         camera_vae.eval()
 

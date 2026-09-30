@@ -18,6 +18,10 @@ fm_t_sampling: logit_normal
 # [2026-09-29, R114] zero terminal SNR (Lin et al. 2023). false/leading = 예전 스케줄. true 면 prediction_type: v_prediction,
 # timestep_spacing: trailing 과 같이 쓴다 (t=999 에서 입력이 순수 noise → 추론 시작점과 학습이 일치).
 rescale_betas_zero_snr: false
+# [2026-09-30, R126] VAE 구조 옵션 (models/vae_intr_large.CameraVAE). 기본 nearest/0 = 기존 VAE ckpt 와 같은 구조.
+# linear 업샘플 / 끝 padding VAE (pad_end 4 → latent 토큰 14) 를 쓰려면 vae_ckpt_path 와 같이 바꾼다.
+vae_up_mode: nearest
+vae_pad_end: 0
 timestep_spacing: leading
 lr_warmup_steps: 0
 lr_min_ratio: 0.0

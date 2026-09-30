@@ -1,0 +1,10 @@
+# @package _global_
+# D301 (R120) — of5ec noprobe fm overfit 을 **lr schedule 없이** (constant lr 1e-4). 사용자 2026-09-30 "flow matching, zero-SNR은 lr scheduler 안썼지? 썼으면 … 안쓴거로도".
+# 부모 dynpose_d200of5ec_noprobe_fm (cosine warmup 500 → min 0.05) 와의 차이는 lr_schedule 뿐 (100 epoch 동일).
+defaults:
+  - dynpose_d200of5ec_noprobe_fm
+
+exp_name: dynpose_d200of5ec_noprobe_fm_const
+lr_schedule: constant
+lr_warmup_steps: 0
+lr_min_ratio: 0.0

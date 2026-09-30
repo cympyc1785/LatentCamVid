@@ -1,0 +1,17 @@
+# @package _global_
+# Dataset-v2 (= latentcam_dynpose_d300, R117) 기본 학습 설정 — Molmo2 l21 (noprobe) + srccam (사용자 2026-09-30
+# "앞으로 학습 기본은 Molmo2_l21 + srccam"). 부모 dynpose_d200_molmo2_l21_srccam (D262, Dataset-v1) 과의 차이는
+# 코퍼스·분할·캐시 경로뿐. split 은 Dataset-v1 의 s91 train/test/val 씬을 그대로 두고 신규 씬만 9:1 (make_holdout_split --keep_split_from).
+# Molmo2 text 캐시는 noprobe + Track override (build_molmo2_track_override) 로 새로 굽는다 → prefill.pt.
+# CLaTr 게이지는 Dataset-v1 s91 train 으로 학습한 것을 그대로 쓴다 (신규 씬은 train/test 모두 게이지가 본 적 없다).
+defaults:
+  - dynpose_d200_molmo2_l21_srccam
+
+exp_name: dsv2_molmo2_l21_srccam
+dl3dv_root: /data1/cympyc1785/data/DynPose-LBM/latentcam_dynpose_d300
+meta_csv: meta_dynpose.csv
+train_seg_list: /data1/cympyc1785/data/DynPose-LBM/latentcam_dynpose_d300/seg_list_dynpose_s91_train.txt
+test_seg_list: /data1/cympyc1785/data/DynPose-LBM/latentcam_dynpose_d300/seg_list_dynpose_s91_test.txt
+text_emb_cache_path: /data1/cympyc1785/data/DynPose-LBM/latentcam_dynpose_d300/umt5_cache/text_len128.pt
+peav_video_cache_dir: /data1/cympyc1785/data/DynPose-LBM/latentcam_dynpose_d300/molmo2_cache/video
+peav_text_cache: /data1/cympyc1785/data/DynPose-LBM/latentcam_dynpose_d300/molmo2_cache/prefill.pt

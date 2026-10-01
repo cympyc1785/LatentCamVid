@@ -11,6 +11,7 @@
 
 ### Changed
 
+- **train_camera_vae 기본 레시피 = old VAE** (R138). `--lr_schedule constant|cosine`, `--wd`, `--recon l1|mse` 추가, 기본값을 SCVideo old VAE 학습과 같게 (lr 1e-4 constant · wd 0.01 · L1 · kl_w 1e-3). R125~R137 레시피는 `--lr 1e-3 --lr_schedule cosine --wd 0 --recon mse --kl_w 1e-4`.
 - **최종 git 정리** (R15). 작업 트리의 미추적 항목을 **추적 / 닫기** 둘 중 하나로 전부 처리했다.
   - **`context.md` → `.claude/context.md`.** (R16) `CLAUDE.md` 의 "에이전트 전용 문서는 `.claude/` 에"
     규약을 따른다. 같은 절의 목록에도 `context.md` 를 넣었다.

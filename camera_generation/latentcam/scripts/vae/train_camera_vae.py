@@ -19,8 +19,8 @@ latent 64 x 13)는 이 레포 밖에서 fx/w≈1 분포로 학습됐고 학습 �
   python scripts/vae/train_camera_vae.py --stage cache_wt --wt_split test     # Dataset-v1 test 씬의 worldtraj 카메라 → wt_test.npz
   python scripts/vae/train_camera_vae.py --stage eval --eval_vaes "old=checkpoints/vae_20260302_300.pth:nearest:0,..."
   python scripts/vae/train_camera_vae.py --stage cache_v1,cache_wt
-  python scripts/vae/train_camera_vae.py --stage train --name scratch --lr 1e-3
-  python scripts/vae/train_camera_vae.py --stage train --name ft --init_ckpt checkpoints/vae_20260302_300.pth --lr 1e-4
+  python scripts/vae/train_camera_vae.py --stage train --name scratch          # 기본 = old 레시피 (lr 1e-4 constant, wd 0.01, L1, kl 1e-3)
+  python scripts/vae/train_camera_vae.py --stage train --name ft --init_ckpt checkpoints/vae_20260302_300.pth
 """
 import argparse
 import importlib.util
@@ -293,11 +293,13 @@ def stage_train(a):
     if a.init_ckpt:
         model.load_state_dict(torch.load(a.init_ckpt, map_location=dev))
         print(f"[train] init <- {a.init_ckpt}", flush=True)
-    opt = torch.optim.AdamW(model.parameters(), lr=a.lr, weight_decay=0.0)
+    opt = torch.optim.AdamW(model.parameters(), lr=a.lr, weight_decay=a.wd)
     steps_per_ep = math.ceil(len(Xtr) / a.batch)
     total = a.epochs * steps_per_ep
 
     def lr_at(step):
+        if a.lr_schedule == "constant":                # [R138] old VAE (SCVideo train_vae.py) 와 같은 고정 lr
+            return a.lr
         warm = int(0.02 * total)
         if step < warm:
             return a.lr * (step + 1) / warm
@@ -351,7 +353,7 @@ def stage_train(a):
             for g in opt.param_groups:
                 g["lr"] = lr_at(step)
             x_hat, mu, logvar = model(x)
-            rec = F.mse_loss(x_hat, x)
+            rec = F.l1_loss(x_hat, x) if a.recon == "l1" else F.mse_loss(x_hat, x)   # [R138] old VAE = L1
             kl = (-0.5 * (1 + logvar - mu ** 2 - logvar.exp())).mean()
             loss = rec + a.kl_w * kl
             if a.smooth_w > 0:        # 디코드 결과의 3차 차분이 GT 보다 큰 만큼만 벌한다
@@ -395,10 +397,15 @@ if __name__ == "__main__":
     ap.add_argument("--eval_out", default="")
     ap.add_argument("--name", default="scratch")
     ap.add_argument("--init_ckpt", default=None)
-    ap.add_argument("--lr", type=float, default=1e-3)
+    ap.add_argument("--lr", type=float, default=1e-4)            # [R138] 기본 = old VAE 레시피 (R125~R137 은 scratch 1e-3)
     ap.add_argument("--epochs", type=int, default=100)
     ap.add_argument("--batch", type=int, default=256)
-    ap.add_argument("--kl_w", type=float, default=1e-4)
+    # [R138] 기본값 = old VAE 학습 레시피 (SCVideo 0728999: AdamW lr 1e-4 고정 · wd 0.01(AdamW 기본) · L1 recon · beta 1e-3).
+    #   사용자 2026-10-01 "우리도 constant로 해야지. 변수를 통제해야해". R125~R137 레시피 = --lr 1e-3 --lr_schedule cosine --wd 0 --recon mse --kl_w 1e-4
+    ap.add_argument("--kl_w", type=float, default=1e-3)
+    ap.add_argument("--lr_schedule", default="constant", choices=["constant", "cosine"])
+    ap.add_argument("--wd", type=float, default=0.01)
+    ap.add_argument("--recon", default="l1", choices=["l1", "mse"])
     ap.add_argument("--smooth_w", type=float, default=0.0)
     ap.add_argument("--up_mode", default="nearest", choices=["nearest", "linear", "subpixel"])   # [R126] decoder 업샘플 ([R136] subpixel = WAN depth-to-time)
     ap.add_argument("--pad_mode", default="zeros", choices=["zeros", "replicate"])    # [R136] conv 시간 padding 값

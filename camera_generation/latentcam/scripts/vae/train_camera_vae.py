@@ -14,7 +14,8 @@ latent 64 x 13)는 이 레포 밖에서 fx/w≈1 분포로 학습됐고 학습 �
                  Dataset-v1 **test 씬**(dynpose-100k uuid)은 누수 방지로 뺀다.
 
 단계:
-  cache_v1 | cache_wt | train | eval
+  cache_v1 | cache_wt | split | train | eval
+  python scripts/vae/train_camera_vae.py --stage split                        # [R135] 합본 0.9/0.1 → split_joint.json (train 기본 --split joint)
   python scripts/vae/train_camera_vae.py --stage cache_wt --wt_split test     # Dataset-v1 test 씬의 worldtraj 카메라 → wt_test.npz
   python scripts/vae/train_camera_vae.py --stage eval --eval_vaes "old=checkpoints/vae_20260302_300.pth:nearest:0,..."
   python scripts/vae/train_camera_vae.py --stage cache_v1,cache_wt
@@ -158,6 +159,66 @@ def jerk(x):
     return np.abs(np.diff(x[..., :9], n=3, axis=1)).mean(axis=(1, 2))
 
 
+def stage_split(a):
+    """이 코드가 답하는 질문: VAE 학습용 worldtraj + Dataset-v1 합본을 0.9 / 0.1 로 (두 데이터 모두 test 에 들어가게) 어떻게 나누나?
+    사용자 2026-10-01: "worldtraj + Dataset_v1 합친거에서 train, test(두 데이터셋 모두 포함되게) 0.9, 0.1 비율 맞춰서 split".
+      - Dataset-v1 : 확산 학습의 train/test 분할을 그대로 쓴다 (46,278 / 5,144 = 0.900 / 0.100).
+      - worldtraj  : 클립(cameras.json) 단위. 같은 영상이 두 출처에 걸쳐 train/test 로 갈리지 않도록 dynpose-100k 클립은
+                     Dataset-v1 test uuid → test, train uuid → train 으로 고정하고, 나머지 클립을 출처별로 무작위로 뽑아
+                     출처마다 test 창 비율이 test_frac 이 되게 채운다.
+    출력: cache/split_joint.json (wt_all = wt.npz ++ wt_test.npz 순서의 창 index)."""
+    rng = np.random.default_rng(a.split_seed)
+    v1tr = {str(n)[len("dynpose_"):].rsplit("_", 1)[0] for n in np.load(osp.join(a.cache, "v1_train.npz"))["names"]}
+    v1te = {str(n)[len("dynpose_"):].rsplit("_", 1)[0] for n in np.load(osp.join(a.cache, "v1_test.npz"))["names"]}
+    names = [str(n) for f in ("wt.npz", "wt_test.npz") for n in np.load(osp.join(a.cache, f))["names"]]
+    clips = {}                                         # (src, uuid) -> [창 index]
+    for i, n in enumerate(names):
+        src, uuid, _ = n.split("/")
+        clips.setdefault((src, uuid), []).append(i)
+    test, report = [], {}
+    for src in sorted({k[0] for k in clips}):
+        ks = [k for k in clips if k[0] == src]
+        n_win = sum(len(clips[k]) for k in ks)
+        forced_te = [k for k in ks if src == "dynpose-100k" and k[1] in v1te]
+        forced_tr = {k for k in ks if src == "dynpose-100k" and k[1] in v1tr}
+        free = [k for k in ks if k not in forced_tr and k not in set(forced_te)]
+        sel, got = list(forced_te), sum(len(clips[k]) for k in forced_te)
+        for j in rng.permutation(len(free)):
+            if got >= a.test_frac * n_win:
+                break
+            sel.append(free[j])
+            got += len(clips[free[j]])
+        test += [i for k in sel for i in clips[k]]
+        report[src] = {"clips": len(ks), "windows": n_win, "test_clips": len(sel), "test_windows": got,
+                       "forced_test_clips": len(forced_te), "forced_train_clips": len(forced_tr), "test_frac": got / n_win}
+        print(f"[split] {src:16s} 클립 {len(ks):6d} 창 {n_win:6d} → test 클립 {len(sel):5d} 창 {got:6d} ({got / n_win:.4f})"
+              f"  고정 test {len(forced_te)} / 고정 train {len(forced_tr)}", flush=True)
+    test = sorted(test)
+    tset = set(test)
+    train = [i for i in range(len(names)) if i not in tset]
+    nv_tr = len(np.load(osp.join(a.cache, "v1_train.npz"))["names"])
+    nv_te = len(np.load(osp.join(a.cache, "v1_test.npz"))["names"])
+    tot_tr, tot_te = len(train) + nv_tr, len(test) + nv_te
+    print(f"[split] worldtraj train {len(train)} / test {len(test)} ({len(test) / len(names):.4f}) · Dataset-v1 {nv_tr} / {nv_te} "
+          f"({nv_te / (nv_tr + nv_te):.4f}) · 합 {tot_tr} / {tot_te} ({tot_te / (tot_tr + tot_te):.4f})", flush=True)
+    json.dump({"seed": a.split_seed, "test_frac": a.test_frac, "wt_order": ["wt.npz", "wt_test.npz"],
+               "wt_train": train, "wt_test": test, "report": report}, open(osp.join(a.cache, "split_joint.json"), "w"))
+    print(f"[split] -> {a.cache}/split_joint.json", flush=True)
+
+
+def load_joint(a):
+    """split_joint.json 기준 (wt_train, {all, wt, v1} test 세트, test 이름) 을 numpy 로."""
+    sp = json.load(open(osp.join(a.cache, "split_joint.json")))
+    wt = [np.load(osp.join(a.cache, f)) for f in sp["wt_order"]]
+    wcam = np.concatenate([d["cam"] for d in wt])
+    wnames = [str(n) for d in wt for n in d["names"]]
+    v1 = np.load(osp.join(a.cache, "v1_test.npz"))
+    te_wt, te_v1 = wcam[sp["wt_test"]], v1["cam"]
+    sets = {"all": np.concatenate([te_v1, te_wt]), "wt": te_wt, "v1": te_v1}
+    names = [str(n) for n in v1["names"]] + [wnames[i] for i in sp["wt_test"]]
+    return wcam[sp["wt_train"]], sets, names
+
+
 def roundtrip_metrics(model, X, dev="cuda"):
     """(N,49,11) 창 roundtrip -> stage_train 의 val/* 와 같은 정의의 지표 dict (+ 창별 jerk_ratio 중앙값)."""
     import torch
@@ -178,7 +239,12 @@ def stage_eval(a):
     --eval_vaes "이름=ckpt:up_mode:pad_end,..." · --eval_sets "v1_test,wt_test" (cache 의 npz 이름)."""
     import torch
     from models.vae_intr_large import CameraVAE
-    sets = {k: torch.from_numpy(np.load(osp.join(a.cache, f"{k}.npz"))["cam"]).float() for k in a.eval_sets.split(",")}
+    sets = {}
+    for k in a.eval_sets.split(","):
+        if k == "joint":                               # split_joint.json 의 test: 모두 / worldtraj / Dataset-v1
+            sets.update({f"joint_{n}": torch.from_numpy(x).float() for n, x in load_joint(a)[1].items()})
+        else:
+            sets[k] = torch.from_numpy(np.load(osp.join(a.cache, f"{k}.npz"))["cam"]).float()
     rows = []
     for spec in a.eval_vaes.split(","):
         nm, rest = spec.split("=", 1)
@@ -201,7 +267,13 @@ def stage_train(a):
     dev = "cuda"
     torch.manual_seed(a.seed)
     tr = [np.load(osp.join(a.cache, "v1_train.npz"))["cam"]]
-    if a.use_wt:
+    if a.split == "joint":
+        # [R135] worldtraj + Dataset-v1 합본 0.9/0.1 (stage_split). val/* = 합본 test, val_wt/* · val_v1/* = 출처별
+        wt_tr, jsets, _ = load_joint(a)
+        if a.use_wt:
+            tr.append(wt_tr)
+        extra_sets = {"val_wt": torch.from_numpy(jsets["wt"]).float()}
+    elif a.use_wt:
         tr.append(np.load(osp.join(a.cache, "wt.npz"))["cam"])
     te = np.load(osp.join(a.cache, "v1_test.npz"))
     Xte, te_names = torch.from_numpy(te["cam"]).float(), [str(n) for n in te["names"]]
@@ -237,6 +309,11 @@ def stage_train(a):
         import wandb
         run = wandb.init(project="camera-vae", name=osp.basename(out_dir), config=vars(a))
     gt_jerk = jerk(Xte.numpy())
+    if a.split == "joint":
+        extra_sets["val_v1"] = Xte
+        Xte = torch.cat([Xte, extra_sets["val_wt"]])   # val/* 는 합본 (v1 앞, watch index 유지)
+        gt_jerk = jerk(Xte.numpy())
+        print(f"[train] joint test 합 {len(Xte)} = Dataset-v1 {len(extra_sets['val_v1'])} + worldtraj {len(extra_sets['val_wt'])}", flush=True)
 
     def evaluate():
         model.eval()
@@ -250,6 +327,10 @@ def stage_train(a):
              "val/mse_intr": err[..., 9:].mean().item(), "val/mse_last_frame": err[:, -1].mean().item(),
              "val/jerk": float(rj.mean()), "val/jerk_gt": float(gt_jerk.mean()), "val/jerk_ratio": float(rj.mean() / gt_jerk.mean()),
              "val/latent_std": mu.std().item()}
+        if a.split == "joint":
+            for pre, X in extra_sets.items():
+                m.update({f"{pre}/{k}": v for k, v in roundtrip_metrics(model, X, dev).items() if k != "n"})
+            model.train()
         for i in watch:
             m[f"watch/{te_names[i]}/mse"] = err[i].mean().item()
             m[f"watch/{te_names[i]}/jerk_ratio"] = float(rj[i] / max(gt_jerk[i], 1e-9))
@@ -284,7 +365,8 @@ def stage_train(a):
                 run.log({"train/loss": loss.item(), "train/rec": rec.item(), "train/kl": kl.item(),
                          "train/lr": opt.param_groups[0]["lr"]}, step=step)
         m = evaluate()
-        print(f"[ep {ep}] loss {tot / steps_per_ep:.5g} " + " ".join(f"{k}={v:.5g}" for k, v in m.items() if k.startswith("val/")),
+        print(f"[ep {ep}] loss {tot / steps_per_ep:.5g} " + " ".join(f"{k}={v:.5g}" for k, v in m.items()
+                                                                  if k.split("/")[0] in ("val", "val_wt", "val_v1") and k.split("/")[1] in ("mse", "mse_last_frame", "jerk_ratio")),
               flush=True)
         if run:
             run.log({**m, "epoch": ep}, step=step)
@@ -302,6 +384,9 @@ if __name__ == "__main__":
     ap.add_argument("--cache", default="/data1/cympyc1785/LatentCamVid/tmp/r125/cache")
     ap.add_argument("--wt_windows", type=int, default=3)          # cameras.json 당 49 프레임 창 수 (균등 시작점)
     ap.add_argument("--wt_min_disp", type=float, default=1e-3)    # 창 평균 이동거리가 이보다 작으면 정지 카메라로 보고 제외
+    ap.add_argument("--split", default="joint", choices=["joint", "legacy"])   # [R135] joint = split_joint.json (기본) / legacy = v1 test 만 val (R125~R132)
+    ap.add_argument("--test_frac", type=float, default=0.1)
+    ap.add_argument("--split_seed", type=int, default=0)
     ap.add_argument("--wt_split", default="train", choices=["train", "test"])   # cache_wt: test = Dataset-v1 test 씬의 cameras.json 만 → wt_test.npz
     ap.add_argument("--eval_vaes", default="")                                    # eval: "이름=ckpt:up_mode:pad_end,..."
     ap.add_argument("--eval_sets", default="v1_test,wt_test")

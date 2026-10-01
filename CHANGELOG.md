@@ -35,6 +35,7 @@
 
 ### Added
 
+- **train_camera_vae `--stage split` / `--split joint`** (R135). worldtraj + Dataset-v1 합본을 0.9/0.1 로 나눈 `split_joint.json` (v1 은 기존 분할, worldtraj 는 클립 단위 · 같은 영상은 v1 쪽 split 을 따름 · 출처별 test 10%). 학습 기본이 joint 가 되어 val/* = 합본, val_wt/* · val_v1/* = 출처별로 기록. `--split legacy` 는 기존(R125~R132) 동작. eval 단계 `--eval_sets joint` 로 3가지 test 를 같이 잰다.
 - **train_camera_vae `--wt_split test` / `--stage eval`** (R134). cache_wt 에 Dataset-v1 test 씬의 worldtraj cameras.json 만 뽑는 분기 (→ `wt_test.npz`, 기본 train 은 기존과 동일), eval 단계는 여러 VAE ckpt 를 v1_test / wt_test 에서 같은 val/* 정의로 roundtrip 측정.
 - **scene graph `--prefer_person_label`** (R130). 사람+옷/신체부위 마스크가 병합된 dyn 노드의 대표 라벨이 옷이면 aliases 의 사람 명사로 올린다 (850c66dd 'jacket'→'man'). 기본 off = 예전 라벨. Dataset-v3 graph 용 config `configs/bank/d330_dynpose100k_graph_personlabel.json` (d182 + 이 플래그).
 - **cfg `vae_up_mode` / `vae_pad_end`** (R126). 학습·eval_testset 이 VAE 를 이 옵션으로 만든다 (기본 nearest/0 = 기존 ckpt 구조).

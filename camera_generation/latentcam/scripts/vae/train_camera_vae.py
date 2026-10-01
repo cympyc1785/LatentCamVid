@@ -164,7 +164,7 @@ def w2c_from_cam(cam):
     return R, -np.einsum("...ji,...j->...i", R, cam[..., 6:9])
 
 
-def late_errors(rec, gt, static_frac=0.1):
+def late_errors(rec, gt, static_frac=0.1, smooth_k=9):
     """[R147] 이 코드가 답하는 질문: 궤적 후반(마지막 1/3)에서 GT 와 위치·속도가 얼마나 다른가 — traj_time_metrics 의 late / rpe1_late /
     rpe1_rot_late 와 같은 정의를 cam_param 공간에서 (worldtraj test 처럼 eval JSON 이 없는 세트에도 같은 식으로 재려고).
       late       = mean_{t∈late} |c_pred - c_gt| / reach,   reach = max_t |c_gt(t) - c_gt(0)|
@@ -182,8 +182,27 @@ def late_errors(rec, gt, static_frac=0.1):
     Mp = np.einsum("ntij,ntkj->ntik", Rp[:, :-1], Rp[:, 1:]); Mg = np.einsum("ntij,ntkj->ntik", Rg[:, :-1], Rg[:, 1:])
     D = np.einsum("ntji,ntjk->ntik", Mp, Mg)
     rot = np.degrees(np.arccos(np.clip((np.trace(D, axis1=-2, axis2=-1) - 1) / 2, -1, 1)))[mv]
-    return {"late": float(ate[:, t0:].mean()), "FDE": float(ate[:, -1].mean()), "rpe1_late": float(rpe[:, t0:].mean()),
-            "rpe1_rot_late": float(rot[:, t0:].mean()), "n_moving": int(mv.sum())}
+    out = {"late": float(ate[:, t0:].mean()), "FDE": float(ate[:, -1].mean()), "rpe1_late": float(rpe[:, t0:].mean()),
+           "rpe1_rot_late": float(rot[:, t0:].mean()), "n_moving": int(mv.sum())}
+    # [R148] GT 잡음에 덜 휘둘리는 지표 (worldtraj GT 는 프레임간 떨림이 이동보다 커서 GT 와의 프레임간 차이는 "잡음 재현도" 가 된다):
+    #   *_sGT   : GT 를 시간축 이동평균 (k=smooth_k, 끝은 replicate) 한 궤적과 비교 — 바탕 궤적을 따라가는가
+    #   jerk_t_late / jerk_r_late : 복원 궤적 자체의 후반 떨림 (traj_time_metrics 와 같은 정의, GT 무관)
+    #   hf_frac : 위치 속도(Δ¹) 파워 중 f > 0.2 cycles/frame 비율 (복원 자체, 높을수록 떨림)
+    k = smooth_k; pad = k // 2
+    cgp = np.concatenate([np.repeat(cg[:, :1], pad, 1), cg, np.repeat(cg[:, -1:], pad, 1)], 1)
+    cgs = np.stack([cgp[:, i:i + T] for i in range(k)], 0).mean(0)
+    out["FDE_sGT"] = float((np.linalg.norm(cp[:, -1] - cgs[:, -1], axis=-1)[mv] / reach[mv]).mean())
+    out["vel_late_sGT"] = float((np.linalg.norm(np.diff(cp, axis=1) - np.diff(cgs, axis=1), axis=-1)[mv] / r)[:, t0:].mean())
+    out["jerk_t_late"] = float((np.linalg.norm(np.diff(cp, n=3, axis=1), axis=-1)[mv] / r)[:, t0:].mean())
+    M = Mp.reshape(-1, 3, 3)
+    ang = np.arccos(np.clip((np.trace(M, axis1=1, axis2=2) - 1) / 2, -1, 1))
+    ax = np.stack([M[:, 2, 1] - M[:, 1, 2], M[:, 0, 2] - M[:, 2, 0], M[:, 1, 0] - M[:, 0, 1]], 1)
+    nrm = np.linalg.norm(ax, axis=1, keepdims=True)
+    om = (np.where(nrm > 1e-9, ax / np.maximum(nrm, 1e-9), 0) * np.degrees(ang)[:, None]).reshape(Mp.shape[0], -1, 3)
+    out["jerk_r_late"] = float(np.linalg.norm(np.diff(om, n=2, axis=1), axis=-1)[mv][:, t0:].mean())
+    v = np.diff(cp, axis=1)[mv]; P = (np.abs(np.fft.rfft(v, axis=1)) ** 2).sum(-1); f = np.fft.rfftfreq(v.shape[1])
+    out["hf_frac"] = float((P[:, f > 0.2].sum(1) / P.sum(1).clip(1e-12)).mean())
+    return out
 
 
 def jerk(x):

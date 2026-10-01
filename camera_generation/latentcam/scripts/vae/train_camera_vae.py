@@ -200,6 +200,15 @@ def late_errors(rec, gt, static_frac=0.1, smooth_k=9):
     nrm = np.linalg.norm(ax, axis=1, keepdims=True)
     om = (np.where(nrm > 1e-9, ax / np.maximum(nrm, 1e-9), 0) * np.degrees(ang)[:, None]).reshape(Mp.shape[0], -1, 3)
     out["jerk_r_late"] = float(np.linalg.norm(np.diff(om, n=2, axis=1), axis=-1)[mv][:, t0:].mean())
+    # [R150] 후반 가속도 오차: acc_late = |Δ²c_pred - Δ²c_gt| / reach (위치), acc_rot_late = |Δω_pred - Δω_gt| deg/frame² (회전,
+    #   ω = 이웃 프레임 상대 회전의 회전 벡터 — jerk_r 과 같은 ω). 마지막 1/3 (차분 창이 그 구간 안).
+    Mg2 = Mg.reshape(-1, 3, 3)
+    angg = np.arccos(np.clip((np.trace(Mg2, axis1=1, axis2=2) - 1) / 2, -1, 1))
+    axg = np.stack([Mg2[:, 2, 1] - Mg2[:, 1, 2], Mg2[:, 0, 2] - Mg2[:, 2, 0], Mg2[:, 1, 0] - Mg2[:, 0, 1]], 1)
+    ng = np.linalg.norm(axg, axis=1, keepdims=True)
+    omg = (np.where(ng > 1e-9, axg / np.maximum(ng, 1e-9), 0) * np.degrees(angg)[:, None]).reshape(Mg.shape[0], -1, 3)
+    out["acc_late"] = float((np.linalg.norm(np.diff(cp, n=2, axis=1) - np.diff(cg, n=2, axis=1), axis=-1)[mv] / r)[:, t0:].mean())
+    out["acc_rot_late"] = float(np.linalg.norm(np.diff(om, axis=1) - np.diff(omg, axis=1), axis=-1)[mv][:, t0:].mean())
     v = np.diff(cp, axis=1)[mv]; P = (np.abs(np.fft.rfft(v, axis=1)) ** 2).sum(-1); f = np.fft.rfftfreq(v.shape[1])
     out["hf_frac"] = float((P[:, f > 0.2].sum(1) / P.sum(1).clip(1e-12)).mean())
     # [R149] jerk 가 아닌 떨림 지표 (복원 궤적 자체):

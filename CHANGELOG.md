@@ -40,6 +40,7 @@
 
 ### Added
 
+- **VAE eval 후반 가속도 오차** (R150). `acc_late` (|Δ²c_pred − Δ²c_gt| / reach) · `acc_rot_late` (|Δω_pred − Δω_gt| deg) — 마지막 1/3 구간.
 - **VAE eval 4프레임 주기 성분 · zigzag 비율** (R149). `p4_frac` (위치 속도 파워 중 f≈0.25·0.5 bin = 업샘플 톱니 세기), `zigzag_t` / `zigzag_r` (이웃 가속도가 반대 방향인 프레임 비율).
 - **VAE eval GT 잡음에 덜 휘둘리는 지표** (R148). `late_errors()` 에 `FDE_sGT` / `vel_late_sGT` (GT 를 이동평균 k=9 한 궤적과 비교), `jerk_t_late` / `jerk_r_late` (복원 자체 후반 떨림), `hf_frac` (위치 속도 파워 중 f>0.2 비율) 추가.
 - **train_camera_vae eval 후반 구간 오차** (R147). `late_errors()` — cam_param 공간에서 traj_time_metrics 와 같은 정의로 `late` / `FDE` / `rpe1_late` / `rpe1_rot_late` (정지 창 제외, `n_moving`). eval JSON 이 없는 worldtraj test 에도 같은 식으로 잰다.

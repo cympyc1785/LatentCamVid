@@ -30,6 +30,8 @@
   smoothness (GT 와 pred 각각, 끝에 _gt/_ratio):
     jerk_t     |Δ³p| 평균 / reach            위치 떨림 (3차 차분)
     jerk_r     |Δ²ω| 평균 (deg/frame²)       회전 떨림. ω_t = R_t^T R_{t+1} 의 회전각 벡터 (카메라 좌표계)
+    [R145] jerk_t_late / jerk_r_late / fr_jit_late / fr_err_late : 같은 지표를 마지막 1/3 구간 (late 와 같은 프레임) 에서만.
+           마지막 구간 위치·회전 차이는 기존 late (ATE) / rot_late / FDE.
   framing (subject = prompts.json variant_id 앞머리 노드의 scene_graph track.center_smooth → world → 카메라 투영):
     fr_err     |uv_pred - uv_gt| 평균         화면상 subject 위치가 GT 구도와 얼마나 다른가 (화면 폭=1)
     fr_jit     |Δ² uv| 평균 x100              화면상 subject 가 프레임마다 흔들리는 정도 (%/frame²)
@@ -75,12 +77,16 @@ def rotvec_deg(R):
 
 
 def smooth_framing(c2w_gl, subj, fx, fy, w, h, reach):
-    """카메라 궤적 하나 -> smoothness·framing 지표 dict + uv (T,2)."""
+    """카메라 궤적 하나 -> smoothness·framing 지표 dict + uv (T,2).
+    [R145] *_late = 마지막 1/3 구간 (entry_metrics 의 late 와 같은 프레임; 차분 창이 그 구간 안에 다 들어가는 것만)."""
     p = c2w_gl[:, :3, 3]
-    jt = np.linalg.norm(np.diff(p, n=3, axis=0), axis=1).mean() / reach
+    T = len(p)
+    t0 = np.array_split(np.arange(T), 3)[2][0]                              # 마지막 1/3 의 첫 프레임 (T=49 → 33)
+    jt_a = np.linalg.norm(np.diff(p, n=3, axis=0), axis=1) / reach          # 창 i = 프레임 i..i+3
     om = rotvec_deg(np.einsum("nji,njk->nik", c2w_gl[:-1, :3, :3], c2w_gl[1:, :3, :3]))
-    jr = np.linalg.norm(np.diff(om, n=2, axis=0), axis=1).mean()
-    out = {"jerk_t": jt, "jerk_r": jr}
+    jr_a = np.linalg.norm(np.diff(om, n=2, axis=0), axis=1)                 # 창 i = 프레임 i..i+3
+    jt, jr = jt_a.mean(), jr_a.mean()
+    out = {"jerk_t": jt, "jerk_r": jr, "jerk_t_late": jt_a[t0:].mean(), "jerk_r_late": jr_a[t0:].mean()}
     if subj is None:
         return out, None
     cv = c2w_gl @ GL2CV
@@ -91,7 +97,8 @@ def smooth_framing(c2w_gl, subj, fx, fy, w, h, reach):
     uv = np.stack([fx * pc[:, 0] / zc / w, fy * pc[:, 1] / zc / h], 1)      # 화면 중앙 기준, 폭/높이 = 1
     inb = (z > 0) & (np.abs(uv[:, 0]) < 0.4) & (np.abs(uv[:, 1]) < 0.4)
     uvc = np.clip(uv, -1.5, 1.5)                                              # 뒤로 돈 프레임의 폭주 방지
-    out.update({"fr_jit": np.linalg.norm(np.diff(uvc, n=2, axis=0), axis=1).mean() * 100,
+    fj_a = np.linalg.norm(np.diff(uvc, n=2, axis=0), axis=1) * 100          # 창 i = 프레임 i..i+2
+    out.update({"fr_jit": fj_a.mean(), "fr_jit_late": fj_a[t0:].mean(),
                 "fr_std": float(np.linalg.norm(uvc.std(0))),
                 "sz_jit": np.abs(np.diff(np.log(zc), n=2)).mean() * 100,
                 "in_box": inb.mean()})
@@ -194,12 +201,14 @@ def main():
                     m[k_] = float(v_)
                     m[k_ + "_gt"] = float(g[k_])
                 if uvg is not None:
-                    m["fr_err"] = float(np.linalg.norm(uvp - uvg, axis=1).mean())
+                    fe = np.linalg.norm(uvp - uvg, axis=1)
+                    m["fr_err"] = float(fe.mean())
+                    m["fr_err_late"] = float(fe[np.array_split(np.arange(len(fe)), 3)[2]].mean())   # [R145] 마지막 1/3
                     m["has_subj"] = 1.0
                 else:
-                    for k_ in ("fr_jit", "fr_std", "sz_jit", "in_box", "fr_err"):
+                    for k_ in ("fr_jit", "fr_std", "sz_jit", "in_box", "fr_err", "fr_jit_late", "fr_err_late"):
                         m.setdefault(k_, float("nan")); m.setdefault(k_ + "_gt", float("nan"))
-                    m.pop("fr_err_gt", None)
+                    m.pop("fr_err_gt", None); m.pop("fr_err_late_gt", None)
                     m["has_subj"] = 0.0
             keys = keys or list(m)
             rows.append({"arm": label, "entry": n, **m})
@@ -239,7 +248,7 @@ def main():
     if a.corpus_root:
         for label in summ:
             s_ = summ[label]
-            for k_ in ("jerk_t", "jerk_r", "fr_jit", "fr_std", "sz_jit"):
+            for k_ in ("jerk_t", "jerk_r", "fr_jit", "fr_std", "sz_jit", "jerk_t_late", "jerk_r_late", "fr_jit_late"):
                 s_[k_ + "_ratio"] = s_[k_] / max(s_[k_ + "_gt"], 1e-12)
         json.dump(summ, open(osp.join(a.out, "summary.json"), "w"), indent=1)
         fc = ["jerk_t", "jerk_t_gt", "jerk_r", "jerk_r_gt", "fr_err", "fr_jit", "fr_jit_gt", "fr_std", "fr_std_gt",

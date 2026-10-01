@@ -35,6 +35,7 @@
 
 ### Added
 
+- **scene graph `--prefer_person_label`** (R130). 사람+옷/신체부위 마스크가 병합된 dyn 노드의 대표 라벨이 옷이면 aliases 의 사람 명사로 올린다 (850c66dd 'jacket'→'man'). 기본 off = 예전 라벨. Dataset-v3 graph 용 config `configs/bank/d330_dynpose100k_graph_personlabel.json` (d182 + 이 플래그).
 - **cfg `vae_up_mode` / `vae_pad_end`** (R126). 학습·eval_testset 이 VAE 를 이 옵션으로 만든다 (기본 nearest/0 = 기존 ckpt 구조).
 - **VAE 구조 옵션** (R126). `models/vae_intr_large.CameraVAE(up_mode='nearest'|'linear', pad_end=0)` — decoder 업샘플 모드(파라미터 동일, state_dict 호환)와 입력 끝 복제 padding (pad_end 4 → 토큰 14, decode 뒤 crop). 기본값은 기존과 동일. `train_camera_vae.py --up_mode --pad_end`.
 - **`latentcam/scripts/vae/train_camera_vae.py`** (R125). "카메라 VAE 를 우리 카메라로 학습/finetune 하면 roundtrip 떨림이 줄어드나" — 레포에 VAE 학습 코드가 없어 신설. Dataset-v1 cam_param(데이터셋 __getitem__ 그대로) + worldtraj cameras.json (`_target_out` 으로 같은 표현, 창 평균 이동거리 / Dataset-v1 중앙값으로 스케일) 캐시 → MSE + KL (+ 선택 jerk penalty `--smooth_w`), cosine LR, wandb `camera-vae` (train/lr 포함), val = Dataset-v1 test + overfit 두 영상 watch. `--include_test_scenes` 로 overfit 두 씬을 train 에 포함.

@@ -106,10 +106,32 @@ def floor_ground_z(recon: dict, T_gw: np.ndarray, S: float, floor_seg_root: str,
     return float(np.quantile(points_g[:, 2], quantile)), len(points_g)
 
 
+# [R130] 사람 + 옷/신체부위 마스크가 합쳐진 노드의 대표 라벨 (사용자 2026-10-01). merge 가 옷 라벨을 대표로 고르고 사람은
+#   aliases 에만 남기는 경우가 있다 (850c66dd: label 'jacket', aliases ['man']) — 영역은 사람 전체라 subject 후보로는 살아
+#   있지만 지칭구·캡션이 옷을 가리킨다. `--prefer_person_label` 이면 aliases 에 사람 명사가 있을 때 그것을 대표 라벨로 올린다.
+PERSON_NOUNS = {"man", "woman", "person", "boy", "girl", "child", "kid", "people", "baby", "lady", "guy", "men", "women",
+                "player", "rider", "human", "toddler", "teenager", "dancer", "athlete", "skier", "surfer", "worker"}
+WEAR_NOUNS = {"jacket", "shirt", "t-shirt", "shorts", "pants", "jeans", "hat", "cap", "helmet", "hoodie", "dress", "skirt",
+              "coat", "sweater", "vest", "backpack", "beanie", "clothes", "clothing", "top", "uniform", "glasses", "sunglasses",
+              "shoe", "shoes", "sneakers", "boots", "gloves", "scarf", "bag", "hair", "hand", "hands", "arm", "arms", "leg", "legs",
+              "face", "head", "mask", "apron", "sock", "socks", "hood", "belt", "watch"}
+
+
+def person_label(label: str, aliases: list):
+    """옷/신체부위 라벨 + 사람 alias 면 (새 라벨, 새 aliases), 아니면 None."""
+    if str(label).lower() not in WEAR_NOUNS:
+        return None
+    hit = next((a for a in aliases if str(a).lower() in PERSON_NOUNS), None)
+    if hit is None:
+        return None
+    return hit, [a for a in aliases if a != hit] + [label]
+
+
 def build_node(inst: dict, node_id: str, num_frames: int, cam_centers_g: np.ndarray,
                view_dir_g: np.ndarray, parallax: float, deinflate: bool = False,
                min_points_per_frame: int = 30,
-               yaw_median_window: int = 5, moving_threshold_u: float = 0.05):
+               yaw_median_window: int = 5, moving_threshold_u: float = 0.05,
+               prefer_person_label: bool = False):
     """인스턴스 하나 → 노드 dict. 프레임별 OBB fit → yaw unwrap + median → 대표 OBB."""
     frames = sorted(f for f, points in inst["points_by_frame"].items()
                     if len(points) >= min_points_per_frame)
@@ -172,9 +194,14 @@ def build_node(inst: dict, node_id: str, num_frames: int, cam_centers_g: np.ndar
         f"boxes {len(inst['boxes_xyxy'])}  merged_from={inst.get('merged_from', [])}")
     bbox_by_frame = {f: box for f, box in zip(inst["frames"], inst["boxes_xyxy"])}
 
+    label, aliases = inst["label"], inst.get("aliases", [])
+    if prefer_person_label and inst["kind"] == "dyn":
+        pl = person_label(label, aliases)
+        if pl is not None:
+            label, aliases = pl
     return {
-        "id": node_id, "kind": inst["kind"], "label": inst["label"],
-        "aliases": inst.get("aliases", []), "track_id": int(inst["track_id"]),
+        "id": node_id, "kind": inst["kind"], "label": label,
+        "aliases": aliases, "track_id": int(inst["track_id"]),
         "merged_from": inst.get("merged_from", []),
         "obb": obb, "extent_inflated": bool(inflated),
         "moving": bool(inst["kind"] == "dyn" and path_len > moving_threshold_u),
@@ -346,7 +373,8 @@ def main(args):
     for inst in sorted(merged, key=lambda i: (i["kind"], -i["max_area_frac"])):
         counters[inst["kind"]] = counters.get(inst["kind"], -1) + 1
         node = build_node(inst, f"{inst['kind']}_{counters[inst['kind']]}", num_frames,
-                          cam_centers_g, view_dir_g, plx, deinflate=args.deinflate)
+                          cam_centers_g, view_dir_g, plx, deinflate=args.deinflate,
+                          prefer_person_label=args.prefer_person_label)
         if node is None:
             dropped.append({**inst, "drop_reasons": ["OBB 를 세울 프레임이 없다"]})
             counters[inst["kind"]] -= 1
@@ -610,6 +638,8 @@ if __name__ == "__main__":
     parser.add_argument("--no_deinflate", dest="deinflate", action="store_false")
 
     parser.add_argument("--merge_voxel_u", default=0.02, type=float)
+    # [R130] 사람+옷 병합 노드의 대표 라벨을 사람으로 (기본 off = 예전 라벨 그대로)
+    parser.add_argument("--prefer_person_label", action="store_true", default=False)
     parser.add_argument("--merge_iou", default=0.5, type=float)
 
     # 인스턴스 폭발 상한 (`cap_instances`). 0 이하면 상한 없음 = 예전 동작.

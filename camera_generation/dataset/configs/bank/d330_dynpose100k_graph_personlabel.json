@@ -1,0 +1,20 @@
+{
+  "extends": "d182_dynpose100k_graph.json",
+  "_why": "D330 (R130, 사용자 2026-10-01 \"그렇게 해주고\") — Dataset-v3 scene graph. d182 와의 차이는 graph args 에 --prefer_person_label 하나: 사람+옷 마스크 병합 노드의 대표 라벨을 사람 alias 로 (850c66dd 'jacket'→'man'). marker 는 d182 와 같은 .graph_d182 (뱅크 체인이 그 marker 를 본다; Dataset-v3 대상은 graph 가 없던 씬).",
+  "generation": "d330",
+  "graph": {
+    "marker": ".graph_d182",
+    "args": [
+      "--scene_scale_mode",
+      "points_first_cam",
+      "--scene_scale_stride",
+      "1",
+      "--gravity_source",
+      "geocalib",
+      "--no_skip_done",
+      "--no_overlay",
+      "--no_topdown",
+      "--prefer_person_label"
+    ]
+  }
+}

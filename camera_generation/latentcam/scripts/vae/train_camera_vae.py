@@ -14,7 +14,9 @@ latent 64 x 13)는 이 레포 밖에서 fx/w≈1 분포로 학습됐고 학습 �
                  Dataset-v1 **test 씬**(dynpose-100k uuid)은 누수 방지로 뺀다.
 
 단계:
-  cache_v1 | cache_wt | train
+  cache_v1 | cache_wt | train | eval
+  python scripts/vae/train_camera_vae.py --stage cache_wt --wt_split test     # Dataset-v1 test 씬의 worldtraj 카메라 → wt_test.npz
+  python scripts/vae/train_camera_vae.py --stage eval --eval_vaes "old=checkpoints/vae_20260302_300.pth:nearest:0,..."
   python scripts/vae/train_camera_vae.py --stage cache_v1,cache_wt
   python scripts/vae/train_camera_vae.py --stage train --name scratch --lr 1e-3
   python scripts/vae/train_camera_vae.py --stage train --name ft --init_ckpt checkpoints/vae_20260302_300.pth --lr 1e-4
@@ -104,7 +106,8 @@ def stage_cache_wt(a):
     T = 49
     for k, (sub, root) in enumerate(files):
         uuid = osp.basename(root)
-        if sub == "dynpose-100k" and uuid in test_uuid:
+        is_test = sub == "dynpose-100k" and uuid in test_uuid
+        if is_test != (a.wt_split == "test"):          # train: test 씬 제외 (기존) / test: test 씬만
             skipped["test"] += 1
             continue
         try:
@@ -145,13 +148,50 @@ def stage_cache_wt(a):
             cams.append(cam)
         if k % 5000 == 0:
             print(f"[wt] {k}/{len(files)} 창 {len(names)} skip {skipped}", flush=True)
-    np.savez(osp.join(a.cache, "wt.npz"), names=np.array(names), cam=np.stack(cams).astype(np.float32), m1=m1)
-    print(f"[wt] 창 {len(names)}  skip {skipped} -> {a.cache}/wt.npz", flush=True)
+    fn = "wt.npz" if a.wt_split == "train" else "wt_test.npz"
+    np.savez(osp.join(a.cache, fn), names=np.array(names), cam=np.stack(cams).astype(np.float32), m1=m1)
+    print(f"[wt] 창 {len(names)}  skip {skipped} -> {a.cache}/{fn}", flush=True)
 
 
 def jerk(x):
     """(B,T,C) -> 창별 평균 |Δ³x| (rot6d+trans 채널만)."""
     return np.abs(np.diff(x[..., :9], n=3, axis=1)).mean(axis=(1, 2))
+
+
+def roundtrip_metrics(model, X, dev="cuda"):
+    """(N,49,11) 창 roundtrip -> stage_train 의 val/* 와 같은 정의의 지표 dict (+ 창별 jerk_ratio 중앙값)."""
+    import torch
+    model.eval()
+    with torch.no_grad():
+        mu = torch.cat([model.encode(X[i:i + 1024].to(dev)) for i in range(0, len(X), 1024)])
+        rec = torch.cat([model.decode(mu[i:i + 1024]) for i in range(0, len(mu), 1024)]).cpu()
+    err = (rec - X) ** 2
+    rj, gj = jerk(rec.numpy()), jerk(X.numpy())
+    return {"mse": err.mean().item(), "mse_rot": err[..., :6].mean().item(), "mse_trans": err[..., 6:9].mean().item(),
+            "mse_intr": err[..., 9:].mean().item(), "mse_last_frame": err[:, -1].mean().item(),
+            "jerk": float(rj.mean()), "jerk_gt": float(gj.mean()), "jerk_ratio": float(rj.mean() / gj.mean()),
+            "jerk_ratio_med": float(np.median(rj / np.maximum(gj, 1e-9))), "latent_std": mu.std().item(), "n": len(X)}
+
+
+def stage_eval(a):
+    """이 코드가 답하는 질문: 학습된 VAE 들의 roundtrip 성능이 평가 세트(Dataset-v1 test / worldtraj test 씬)에 따라 경향이 달라지나?
+    --eval_vaes "이름=ckpt:up_mode:pad_end,..." · --eval_sets "v1_test,wt_test" (cache 의 npz 이름)."""
+    import torch
+    from models.vae_intr_large import CameraVAE
+    sets = {k: torch.from_numpy(np.load(osp.join(a.cache, f"{k}.npz"))["cam"]).float() for k in a.eval_sets.split(",")}
+    rows = []
+    for spec in a.eval_vaes.split(","):
+        nm, rest = spec.split("=", 1)
+        ck, up, pad = rest.rsplit(":", 2)
+        model = CameraVAE(latent_dim=64, up_mode=up, pad_end=int(pad)).cuda()
+        model.load_state_dict(torch.load(ck, map_location="cuda"))
+        for sk, X in sets.items():
+            m = roundtrip_metrics(model, X)
+            rows.append({"vae": nm, "set": sk, **m})
+            print(f"[eval] {nm:18s} {sk:8s} " + " ".join(f"{k}={v:.5g}" for k, v in m.items()), flush=True)
+    if a.eval_out:
+        json.dump(rows, open(a.eval_out, "w"), indent=1)
+        print(f"[eval] -> {a.eval_out}", flush=True)
 
 
 def stage_train(a):
@@ -262,6 +302,10 @@ if __name__ == "__main__":
     ap.add_argument("--cache", default="/data1/cympyc1785/LatentCamVid/tmp/r125/cache")
     ap.add_argument("--wt_windows", type=int, default=3)          # cameras.json 당 49 프레임 창 수 (균등 시작점)
     ap.add_argument("--wt_min_disp", type=float, default=1e-3)    # 창 평균 이동거리가 이보다 작으면 정지 카메라로 보고 제외
+    ap.add_argument("--wt_split", default="train", choices=["train", "test"])   # cache_wt: test = Dataset-v1 test 씬의 cameras.json 만 → wt_test.npz
+    ap.add_argument("--eval_vaes", default="")                                    # eval: "이름=ckpt:up_mode:pad_end,..."
+    ap.add_argument("--eval_sets", default="v1_test,wt_test")
+    ap.add_argument("--eval_out", default="")
     ap.add_argument("--name", default="scratch")
     ap.add_argument("--init_ckpt", default=None)
     ap.add_argument("--lr", type=float, default=1e-3)

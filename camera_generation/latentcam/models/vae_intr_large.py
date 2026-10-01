@@ -38,6 +38,17 @@ class SubpixelUp(nn.Module):
         return torch.stack((y[:, 0], y[:, 1]), dim=-1).reshape(b, self.cout, 2 * t)
 
 
+class LinearUp2x(nn.Module):
+    """[R140] nn.Upsample(scale_factor=2, mode="linear", align_corners=False) 와 같은 값을 내는 직접 구현.
+    PyTorch 의 upsample_linear1d CUDA backward 가 (B·C 큰, T 짧은) 이 모양에서 ~100배 느려 (43.6 ms vs nearest 0.41 ms) 학습 step 이 9배 느렸다.
+    align_corners=False ×2: out[2i] = 0.75·x[i] + 0.25·x[i-1], out[2i+1] = 0.75·x[i] + 0.25·x[i+1] (경계는 복제). 파라미터 없음 → ckpt 호환."""
+
+    def forward(self, x):
+        prv = torch.cat([x[..., :1], x[..., :-1]], dim=-1)
+        nxt = torch.cat([x[..., 1:], x[..., -1:]], dim=-1)
+        return torch.stack((0.75 * x + 0.25 * prv, 0.75 * x + 0.25 * nxt), dim=-1).flatten(-2)
+
+
 class CameraEncoder(nn.Module):
     def __init__(self, in_channels=11, hidden_dim=64, latent_dim=64, pad_mode="zeros"):
         super().__init__()
@@ -110,7 +121,7 @@ class CameraDecoder(nn.Module):
         # [R126] up_mode: "nearest"(기본, 기존 ckpt 와 동일) | "linear". nearest x2 두 번이 주기 4 톱니를 만든다
         #   (tmp/agent/reader-vae-latent-rf.md). linear 는 파라미터가 같아 state_dict 호환이다.
         _up = (lambda: nn.Upsample(scale_factor=2, mode="nearest")) if up_mode == "nearest" else \
-              (lambda: nn.Upsample(scale_factor=2, mode="linear", align_corners=False))
+              (lambda: LinearUp2x())                    # [R140] = nn.Upsample(linear, align_corners=False), backward 가 빠른 판
         if up_mode == "subpixel":
             self.up1 = nn.Sequential(SubpixelUp(latent_dim, hidden_dim, C), nn.ReLU())
         else:

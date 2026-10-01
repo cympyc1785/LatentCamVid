@@ -34,6 +34,10 @@
     충돌하는데 수정이 **R14·R15 두 번 다 classifier 에 막혔다.** `## Don't` 가 이긴다는 사실은
     `.claude/context.md` §2 에 적어 뒀다.
 
+### Fixed
+
+- **CameraVAE linear 업샘플 학습 9배 느림** (R140). nn.Upsample(linear) CUDA backward 대신 같은 값을 내는  (step 86 → 10.6 ms, 기존 ckpt 그대로 로드).
+
 ### Added
 
 - **train_camera_vae eval 활성 채널 통계 + `--save_epochs`** (R138/R139). roundtrip 지표에 `n_active` (채널별 posterior σ<0.5) · `mu_std_active` (latent scale 후보) · `sigma_mean` · `z_sample_std` 추가. `--save_epochs 100,200` 으로 중간 스냅샷 `epochN.pth`.

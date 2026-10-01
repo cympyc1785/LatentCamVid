@@ -302,6 +302,17 @@ def stage_train(a):
         model.load_state_dict(torch.load(a.init_ckpt, map_location=dev))
         print(f"[train] init <- {a.init_ckpt}", flush=True)
     opt = torch.optim.AdamW(model.parameters(), lr=a.lr, weight_decay=a.wd)
+    start_ep = 0
+    if a.resume_dir:                                   # [R139] 같은 결과 폴더에서 이어 학습 (resume.pth 있으면 optimizer 까지, 없으면 last.pth + 새 optimizer)
+        rp = osp.join(a.resume_dir, "resume.pth")
+        if osp.isfile(rp):
+            st = torch.load(rp, map_location=dev)
+            model.load_state_dict(st["model"]); opt.load_state_dict(st["opt"]); start_ep = st["epoch"]
+            print(f"[train] resume <- {rp} (optimizer 포함), epoch {start_ep} 부터", flush=True)
+        else:
+            assert a.start_epoch > 0, "resume.pth 가 없으면 --start_epoch (완료 epoch 수) 를 준다"
+            model.load_state_dict(torch.load(osp.join(a.resume_dir, "last.pth"), map_location=dev)); start_ep = a.start_epoch
+            print(f"[train] resume <- {a.resume_dir}/last.pth (optimizer 상태 없음 → AdamW 새로), epoch {start_ep} 부터", flush=True)
     steps_per_ep = math.ceil(len(Xtr) / a.batch)
     total = a.epochs * steps_per_ep
 
@@ -313,13 +324,14 @@ def stage_train(a):
             return a.lr * (step + 1) / warm
         return a.lr * (0.05 + 0.95 * 0.5 * (1 + math.cos(math.pi * (step - warm) / max(1, total - warm))))
 
-    out_dir = osp.join(LC, "results", f"{time.strftime('%Y%m%d_%H%M%S')}_camvae_{a.name}")
+    out_dir = a.resume_dir or osp.join(LC, "results", f"{time.strftime('%Y%m%d_%H%M%S')}_camvae_{a.name}")
     os.makedirs(out_dir, exist_ok=True)
-    json.dump(vars(a), open(osp.join(out_dir, "args.json"), "w"), indent=1)
+    json.dump(vars(a), open(osp.join(out_dir, "args_resume.json" if a.resume_dir else "args.json"), "w"), indent=1)
     run = None
     if not a.no_wandb:
         import wandb
-        run = wandb.init(project="camera-vae", name=osp.basename(out_dir), config=vars(a))
+        run = wandb.init(project="camera-vae", name=osp.basename(out_dir), config=vars(a),
+                         **({"id": a.wandb_id, "resume": "allow"} if a.wandb_id else {}))
     gt_jerk = jerk(Xte.numpy())
     if a.split == "joint":
         extra_sets["val_v1"] = Xte
@@ -348,12 +360,12 @@ def stage_train(a):
             m[f"watch/{te_names[i]}/jerk_ratio"] = float(rj[i] / max(gt_jerk[i], 1e-9))
         return m
 
-    m0 = evaluate()
+    m0 = evaluate() if not a.resume_dir else {}
     print(f"[ep -1] " + " ".join(f"{k}={v:.5g}" for k, v in m0.items() if k.startswith("val/")), flush=True)
-    if run:
+    if run and m0:
         run.log({**m0, "epoch": -1}, step=0)
-    step, best = 0, float("inf")
-    for ep in range(a.epochs):
+    step, best = start_ep * steps_per_ep, float("inf")
+    for ep in range(start_ep, a.epochs):
         perm = torch.randperm(len(Xtr))
         tot = 0.0
         for bi in range(steps_per_ep):
@@ -383,6 +395,7 @@ def stage_train(a):
         if run:
             run.log({**m, "epoch": ep}, step=step)
         torch.save(model.state_dict(), osp.join(out_dir, "last.pth"))
+        torch.save({"model": model.state_dict(), "opt": opt.state_dict(), "epoch": ep + 1}, osp.join(out_dir, "resume.pth"))
         if str(ep + 1) in a.save_epochs.split(","):   # [R139] 중간 스냅샷 (예: 300 epoch scratch 의 100 epoch 시점 → ft 100 epoch 와 대조)
             torch.save(model.state_dict(), osp.join(out_dir, f"epoch{ep + 1}.pth"))
         if m["val/mse"] < best:
@@ -407,6 +420,9 @@ if __name__ == "__main__":
     ap.add_argument("--eval_out", default="")
     ap.add_argument("--name", default="scratch")
     ap.add_argument("--init_ckpt", default=None)
+    ap.add_argument("--resume_dir", default="")       # [R139] results/<run> 에서 이어 학습 (같은 폴더에 계속 저장)
+    ap.add_argument("--start_epoch", type=int, default=0)  # resume.pth 없을 때 last.pth 의 완료 epoch 수
+    ap.add_argument("--wandb_id", default="")         # 이어 쓸 wandb run id
     ap.add_argument("--lr", type=float, default=1e-4)            # [R138] 기본 = old VAE 레시피 (R125~R137 은 scratch 1e-3)
     ap.add_argument("--epochs", type=int, default=100)
     ap.add_argument("--save_epochs", default="")                  # [R139] "100,200" → epoch100.pth, epoch200.pth

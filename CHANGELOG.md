@@ -40,6 +40,7 @@
 
 ### Added
 
+- **train_camera_vae eval 후반 구간 오차** (R147). `late_errors()` — cam_param 공간에서 traj_time_metrics 와 같은 정의로 `late` / `FDE` / `rpe1_late` / `rpe1_rot_late` (정지 창 제외, `n_moving`). eval JSON 이 없는 worldtraj test 에도 같은 식으로 잰다.
 - **traj_time_metrics 마지막 구간 지표** (R145). `--corpus_root` 때 `jerk_t_late` / `jerk_r_late` / `fr_jit_late` / `fr_err_late` (+ `_gt`, `_ratio`), `rpe1_late` / `rpe1_rot_late` (마지막 구간 프레임간 이동·회전 = 속도 오차) — 마지막 1/3 구간 (기존 `late` ATE 와 같은 프레임) 에서만 잰 떨림·구도 오차. 기존 키는 그대로.
 - **train_camera_vae `--resume_dir` / `--start_epoch` / `--wandb_id`** (R139). 같은 결과 폴더·같은 wandb run 에서 이어 학습. 매 epoch `resume.pth` (model + optimizer + epoch) 저장 — 없을 때는 last.pth + 새 AdamW.
 - **train_camera_vae eval 활성 채널 통계 + `--save_epochs`** (R138/R139). roundtrip 지표에 `n_active` (채널별 posterior σ<0.5) · `mu_std_active` (latent scale 후보) · `sigma_mean` · `z_sample_std` 추가. `--save_epochs 100,200` 으로 중간 스냅샷 `epochN.pth`.

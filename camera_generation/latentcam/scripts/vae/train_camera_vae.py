@@ -154,6 +154,38 @@ def stage_cache_wt(a):
     print(f"[wt] 창 {len(names)}  skip {skipped} -> {a.cache}/{fn}", flush=True)
 
 
+def w2c_from_cam(cam):
+    """(…,T,11) cam_param → w2c R (…,T,3,3) 와 카메라 중심 c (…,T,3). centers_from_cam 과 같은 Gram-Schmidt."""
+    a1, a2 = cam[..., 0:3], cam[..., 3:6]
+    b1 = a1 / np.linalg.norm(a1, axis=-1, keepdims=True)
+    b2 = a2 - (b1 * a2).sum(-1, keepdims=True) * b1
+    b2 = b2 / np.linalg.norm(b2, axis=-1, keepdims=True)
+    R = np.stack([b1, b2, np.cross(b1, b2)], -1)
+    return R, -np.einsum("...ji,...j->...i", R, cam[..., 6:9])
+
+
+def late_errors(rec, gt, static_frac=0.1):
+    """[R147] 이 코드가 답하는 질문: 궤적 후반(마지막 1/3)에서 GT 와 위치·속도가 얼마나 다른가 — traj_time_metrics 의 late / rpe1_late /
+    rpe1_rot_late 와 같은 정의를 cam_param 공간에서 (worldtraj test 처럼 eval JSON 이 없는 세트에도 같은 식으로 재려고).
+      late       = mean_{t∈late} |c_pred - c_gt| / reach,   reach = max_t |c_gt(t) - c_gt(0)|
+      rpe1_late  = mean |R_t (c_{t+1}-c_t) [pred] - (같은 것) [gt]| / reach     (t 시점 카메라 좌표계의 한 프레임 이동 = 속도)
+      rpe1_rot_late = mean geodesic(R_t R_{t+1}^T [pred], [gt])  deg            (한 프레임 회전 = 각속도)
+    정지 창 (reach < static_frac x 세트 중앙값) 은 reach 정규화가 터지므로 뺀다 (traj_time_metrics --min_reach_frac 와 같다)."""
+    Rp, cp = w2c_from_cam(rec); Rg, cg = w2c_from_cam(gt)
+    T = gt.shape[1]; t0 = np.array_split(np.arange(T), 3)[2][0]
+    reach = np.linalg.norm(cg - cg[:, :1], axis=-1).max(1)
+    mv = reach >= static_frac * np.median(reach)
+    r = reach[mv][:, None]
+    ate = np.linalg.norm(cp - cg, axis=-1)[mv] / r
+    vp = np.einsum("ntij,ntj->nti", Rp[:, :-1], cp[:, 1:] - cp[:, :-1]); vg = np.einsum("ntij,ntj->nti", Rg[:, :-1], cg[:, 1:] - cg[:, :-1])
+    rpe = np.linalg.norm(vp - vg, axis=-1)[mv] / r
+    Mp = np.einsum("ntij,ntkj->ntik", Rp[:, :-1], Rp[:, 1:]); Mg = np.einsum("ntij,ntkj->ntik", Rg[:, :-1], Rg[:, 1:])
+    D = np.einsum("ntji,ntjk->ntik", Mp, Mg)
+    rot = np.degrees(np.arccos(np.clip((np.trace(D, axis1=-2, axis2=-1) - 1) / 2, -1, 1)))[mv]
+    return {"late": float(ate[:, t0:].mean()), "FDE": float(ate[:, -1].mean()), "rpe1_late": float(rpe[:, t0:].mean()),
+            "rpe1_rot_late": float(rot[:, t0:].mean()), "n_moving": int(mv.sum())}
+
+
 def jerk(x):
     """(B,T,C) -> 창별 평균 |Δ³x| (rot6d+trans 채널만)."""
     return np.abs(np.diff(x[..., :9], n=3, axis=1)).mean(axis=(1, 2))
@@ -236,6 +268,7 @@ def roundtrip_metrics(model, X, dev="cuda"):
     mu_d = mu.cpu().permute(2, 0, 1).reshape(mu.shape[-1], -1)       # (D, N*T')
     extra = {"n_active": int(act.sum()), "mu_std_active": float(mu_d[act].std()) if act.any() else 0.0,
              "sigma_mean": float(sig.mean()), "z_sample_std": float((mu_d.var() + sig.pow(2).mean()).sqrt())}
+    extra.update(late_errors(rec.numpy().astype(np.float64), X.numpy().astype(np.float64)))
     return {**extra, "mse": err.mean().item(), "mse_rot": err[..., :6].mean().item(), "mse_trans": err[..., 6:9].mean().item(),
             "mse_intr": err[..., 9:].mean().item(), "mse_last_frame": err[:, -1].mean().item(),
             "jerk": float(rj.mean()), "jerk_gt": float(gj.mean()), "jerk_ratio": float(rj.mean() / gj.mean()),

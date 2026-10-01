@@ -40,6 +40,7 @@
 
 ### Added
 
+- **run_video_filter `--judge v8obj`** (R157). v8 과 같고 `subject_is_object` (main subject 가 사물) 만 탈락 사유에서 뺀 판정 — 산출 `*_v8obj.*`, v8 산출은 그대로.
 - **VAE eval 후반 가속도 오차** (R150). `acc_late` (|Δ²c_pred − Δ²c_gt| / reach) · `acc_rot_late` (|Δω_pred − Δω_gt| deg) — 마지막 1/3 구간.
 - **VAE eval 4프레임 주기 성분 · zigzag 비율** (R149). `p4_frac` (위치 속도 파워 중 f≈0.25·0.5 bin = 업샘플 톱니 세기), `zigzag_t` / `zigzag_r` (이웃 가속도가 반대 방향인 프레임 비율).
 - **VAE eval GT 잡음에 덜 휘둘리는 지표** (R148). `late_errors()` 에 `FDE_sGT` / `vel_late_sGT` (GT 를 이동평균 k=9 한 궤적과 비교), `jerk_t_late` / `jerk_r_late` (복원 자체 후반 떨림), `hf_frac` (위치 속도 파워 중 f>0.2 비율) 추가.

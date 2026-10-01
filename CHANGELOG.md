@@ -36,6 +36,7 @@
 
 ### Added
 
+- **train_camera_vae eval 활성 채널 통계 + `--save_epochs`** (R138/R139). roundtrip 지표에 `n_active` (채널별 posterior σ<0.5) · `mu_std_active` (latent scale 후보) · `sigma_mean` · `z_sample_std` 추가. `--save_epochs 100,200` 으로 중간 스냅샷 `epochN.pth`.
 - **CameraVAE `pad_mode` / `up_mode="subpixel"`** (R136). conv 시간 padding 을 zeros(기본, 기존 ckpt 와 수치 동일) | replicate(끝 프레임 복제) 로, 업샘플에 WAN 식 depth-to-time (conv 로 채널 2배 → 시간 2칸 interleave) 추가. cfg `vae_pad_mode`, `train_camera_vae --pad_mode`, eval spec `ckpt:up:pad[:pad_mode]`.
 - **models/vae_causal.py** (R136, 보류). CamVLA `cam_causal_vae_v1` / WAN 식 인과 레이아웃 VAE (토큰 0 = 프레임 0, 왼쪽만 padding). 학습·eval 배선은 아직 없음 (사용자 지시 후 진행).
 - **train_camera_vae `--stage split` / `--split joint`** (R135). worldtraj + Dataset-v1 합본을 0.9/0.1 로 나눈 `split_joint.json` (v1 은 기존 분할, worldtraj 는 클립 단위 · 같은 영상은 v1 쪽 split 을 따름 · 출처별 test 10%). 학습 기본이 joint 가 되어 val/* = 합본, val_wt/* · val_v1/* = 출처별로 기록. `--split legacy` 는 기존(R125~R132) 동작. eval 단계 `--eval_sets joint` 로 3가지 test 를 같이 잰다.

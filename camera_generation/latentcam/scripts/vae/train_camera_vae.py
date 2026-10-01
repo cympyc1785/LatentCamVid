@@ -228,7 +228,15 @@ def roundtrip_metrics(model, X, dev="cuda"):
         rec = torch.cat([model.decode(mu[i:i + 1024]) for i in range(0, len(mu), 1024)]).cpu()
     err = (rec - X) ** 2
     rj, gj = jerk(rec.numpy()), jerk(X.numpy())
-    return {"mse": err.mean().item(), "mse_rot": err[..., :6].mean().item(), "mse_trans": err[..., 6:9].mean().item(),
+    with torch.no_grad():                              # [R138] posterior σ 채널별 평균 → 활성 채널 (σ<0.5) 수·그 채널의 mu std (latent scale 후보)
+        sig = torch.cat([torch.exp(0.5 * model.encoder(model._pad(X[i:i + 1024].to(dev)))[1]).cpu()
+                         for i in range(0, len(X), 1024)])          # (N, D, T')
+    ch_sig = sig.mean((0, 2))
+    act = ch_sig < 0.5
+    mu_d = mu.cpu().permute(2, 0, 1).reshape(mu.shape[-1], -1)       # (D, N*T')
+    extra = {"n_active": int(act.sum()), "mu_std_active": float(mu_d[act].std()) if act.any() else 0.0,
+             "sigma_mean": float(sig.mean()), "z_sample_std": float((mu_d.var() + sig.pow(2).mean()).sqrt())}
+    return {**extra, "mse": err.mean().item(), "mse_rot": err[..., :6].mean().item(), "mse_trans": err[..., 6:9].mean().item(),
             "mse_intr": err[..., 9:].mean().item(), "mse_last_frame": err[:, -1].mean().item(),
             "jerk": float(rj.mean()), "jerk_gt": float(gj.mean()), "jerk_ratio": float(rj.mean() / gj.mean()),
             "jerk_ratio_med": float(np.median(rj / np.maximum(gj, 1e-9))), "latent_std": mu.std().item(), "n": len(X)}
@@ -375,6 +383,8 @@ def stage_train(a):
         if run:
             run.log({**m, "epoch": ep}, step=step)
         torch.save(model.state_dict(), osp.join(out_dir, "last.pth"))
+        if str(ep + 1) in a.save_epochs.split(","):   # [R139] 중간 스냅샷 (예: 300 epoch scratch 의 100 epoch 시점 → ft 100 epoch 와 대조)
+            torch.save(model.state_dict(), osp.join(out_dir, f"epoch{ep + 1}.pth"))
         if m["val/mse"] < best:
             best = m["val/mse"]
             torch.save(model.state_dict(), osp.join(out_dir, "best.pth"))
@@ -399,6 +409,7 @@ if __name__ == "__main__":
     ap.add_argument("--init_ckpt", default=None)
     ap.add_argument("--lr", type=float, default=1e-4)            # [R138] 기본 = old VAE 레시피 (R125~R137 은 scratch 1e-3)
     ap.add_argument("--epochs", type=int, default=100)
+    ap.add_argument("--save_epochs", default="")                  # [R139] "100,200" → epoch100.pth, epoch200.pth
     ap.add_argument("--batch", type=int, default=256)
     # [R138] 기본값 = old VAE 학습 레시피 (SCVideo 0728999: AdamW lr 1e-4 고정 · wd 0.01(AdamW 기본) · L1 recon · beta 1e-3).
     #   사용자 2026-10-01 "우리도 constant로 해야지. 변수를 통제해야해". R125~R137 레시피 = --lr 1e-3 --lr_schedule cosine --wd 0 --recon mse --kl_w 1e-4

@@ -31,7 +31,7 @@
     jerk_t     |Δ³p| 평균 / reach            위치 떨림 (3차 차분)
     jerk_r     |Δ²ω| 평균 (deg/frame²)       회전 떨림. ω_t = R_t^T R_{t+1} 의 회전각 벡터 (카메라 좌표계)
     [R145] jerk_t_late / jerk_r_late / fr_jit_late / fr_err_late : 같은 지표를 마지막 1/3 구간 (late 와 같은 프레임) 에서만.
-           마지막 구간 위치·회전 차이는 기존 late (ATE) / rot_late / FDE.
+           마지막 구간 위치·회전 차이는 기존 late (ATE) / rot_late / FDE. 속도 차이는 rpe1_late (이동) / rpe1_rot_late (회전).
   framing (subject = prompts.json variant_id 앞머리 노드의 scene_graph track.center_smooth → world → 카메라 투영):
     fr_err     |uv_pred - uv_gt| 평균         화면상 subject 위치가 GT 구도와 얼마나 다른가 (화면 폭=1)
     fr_jit     |Δ² uv| 평균 x100              화면상 subject 가 프레임마다 흔들리는 정도 (%/frame²)
@@ -150,6 +150,8 @@ def entry_metrics(ref, prd):
         out[f"rpe{d}"] = e.mean()
         if d == 1:
             out["rpe1_rot"] = geo_deg(Rp, Rg).mean()
+            out["rpe1_late"] = e[thirds[2][0]:].mean()                 # [R145] 마지막 1/3 의 프레임간 이동(=속도) 오차 / reach
+            out["rpe1_rot_late"] = geo_deg(Rp, Rg)[thirds[2][0]:].mean()   # 마지막 1/3 의 프레임간 회전(=각속도) 오차 deg
             curves["rpe1"] = np.r_[e, e[-1]]
     return {k: float(v) for k, v in out.items()}, curves
 

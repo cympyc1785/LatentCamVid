@@ -1060,7 +1060,9 @@ def train():
                 # [new 2026-09-03] video CA kwargs. 캐시가 없으면 빈 dict = 기존 호출.
                 _vkw = build_video_cond(data, device)
                 if cfg.use_vae:
-                    traj_latents = camera_vae.encode(traj) / cfg.vae_latent_scale
+                    # [R158] vae_encode_sample: posterior 에서 샘플한 z (= mu + σ·ε, CamVLA train.py 와 같은 방식). 기본 false = mu (기존)
+                    _enc = camera_vae.encode_sample if getattr(cfg, 'vae_encode_sample', False) else camera_vae.encode
+                    traj_latents = _enc(traj) / cfg.vae_latent_scale
                 else:
                     traj_latents = traj
 
@@ -1431,7 +1433,9 @@ def train():
                 # [new 2026-09-03] video CA kwargs. 캐시가 없으면 빈 dict = 기존 호출.
                 _vkw = build_video_cond(data, device)
                 if cfg.use_vae:
-                    traj_latents = camera_vae.encode(traj) / cfg.vae_latent_scale
+                    # [R158] vae_encode_sample: posterior 에서 샘플한 z (= mu + σ·ε, CamVLA train.py 와 같은 방식). 기본 false = mu (기존)
+                    _enc = camera_vae.encode_sample if getattr(cfg, 'vae_encode_sample', False) else camera_vae.encode
+                    traj_latents = _enc(traj) / cfg.vae_latent_scale
                 else:
                     traj_latents = traj
                 t4 = time.time()

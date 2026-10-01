@@ -202,6 +202,15 @@ def late_errors(rec, gt, static_frac=0.1, smooth_k=9):
     out["jerk_r_late"] = float(np.linalg.norm(np.diff(om, n=2, axis=1), axis=-1)[mv][:, t0:].mean())
     v = np.diff(cp, axis=1)[mv]; P = (np.abs(np.fft.rfft(v, axis=1)) ** 2).sum(-1); f = np.fft.rfftfreq(v.shape[1])
     out["hf_frac"] = float((P[:, f > 0.2].sum(1) / P.sum(1).clip(1e-12)).mean())
+    # [R149] jerk 가 아닌 떨림 지표 (복원 궤적 자체):
+    #   p4_frac  : 위치 속도 파워 중 업샘플 주기 성분 (f≈0.25, 0.5 cycles/frame 의 bin) 비율 — 4프레임 톱니의 세기
+    #   zigzag   : 이웃 가속도 벡터가 반대 방향 (a_t·a_{t+1} < 0) 인 프레임 비율 — 갈지자로 꺾이는 빈도 (위치 / 회전)
+    bins = [int(np.argmin(np.abs(f - 0.25))), int(np.argmin(np.abs(f - 0.5)))]
+    out["p4_frac"] = float((P[:, bins].sum(1) / P.sum(1).clip(1e-12)).mean())
+    acc = np.diff(cp, n=2, axis=1)[mv]
+    out["zigzag_t"] = float(((acc[:, 1:] * acc[:, :-1]).sum(-1) < 0).mean())
+    aom = np.diff(om, axis=1)[mv]
+    out["zigzag_r"] = float(((aom[:, 1:] * aom[:, :-1]).sum(-1) < 0).mean())
     return out
 
 

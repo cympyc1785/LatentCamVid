@@ -40,6 +40,7 @@
 
 ### Added
 
+- **bank config d340_dynpose_keep_track4** (R159). d185 상속 + `--route_preset_override` 로 track_orbit_left/right · track_pull_out_arc_left/right 4종만 굽는 config (산출 hole_bank_d340, 기존 hole_bank_d185 무관).
 - **cfg `vae_encode_sample`** (R158). true 면 확산 학습·val 에서 `camera_vae.encode_sample` (z = mu + σ·ε, CamVLA 방식) 으로 latent 를 만든다. 기본 false = mu (기존).
 - **run_video_filter `--judge v8obj`** (R157). v8 과 같고 `subject_is_object` (main subject 가 사물) 만 탈락 사유에서 뺀 판정 — 산출 `*_v8obj.*`, v8 산출은 그대로.
 - **VAE eval 후반 가속도 오차** (R150). `acc_late` (|Δ²c_pred − Δ²c_gt| / reach) · `acc_rot_late` (|Δω_pred − Δω_gt| deg) — 마지막 1/3 구간.

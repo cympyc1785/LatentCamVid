@@ -22,6 +22,7 @@ rescale_betas_zero_snr: false
 # linear 업샘플 / 끝 padding VAE (pad_end 4 → latent 토큰 14) 를 쓰려면 vae_ckpt_path 와 같이 바꾼다.
 vae_up_mode: nearest
 vae_pad_end: 0
+vae_pad_mode: zeros   # [R136] zeros | replicate
 timestep_spacing: leading
 lr_warmup_steps: 0
 lr_min_ratio: 0.0

@@ -236,7 +236,7 @@ def roundtrip_metrics(model, X, dev="cuda"):
 
 def stage_eval(a):
     """이 코드가 답하는 질문: 학습된 VAE 들의 roundtrip 성능이 평가 세트(Dataset-v1 test / worldtraj test 씬)에 따라 경향이 달라지나?
-    --eval_vaes "이름=ckpt:up_mode:pad_end,..." · --eval_sets "v1_test,wt_test" (cache 의 npz 이름)."""
+    --eval_vaes "이름=ckpt:up_mode:pad_end[:pad_mode],..." · --eval_sets "v1_test,wt_test" (cache 의 npz 이름)."""
     import torch
     from models.vae_intr_large import CameraVAE
     sets = {}
@@ -248,8 +248,10 @@ def stage_eval(a):
     rows = []
     for spec in a.eval_vaes.split(","):
         nm, rest = spec.split("=", 1)
-        ck, up, pad = rest.rsplit(":", 2)
-        model = CameraVAE(latent_dim=64, up_mode=up, pad_end=int(pad)).cuda()
+        parts = rest.split(":")                        # ckpt:up:pad[:pad_mode]
+        ck, up, pad = parts[0], parts[1], parts[2]
+        pm = parts[3] if len(parts) > 3 else "zeros"
+        model = CameraVAE(latent_dim=64, up_mode=up, pad_end=int(pad), pad_mode=pm).cuda()
         model.load_state_dict(torch.load(ck, map_location="cuda"))
         for sk, X in sets.items():
             m = roundtrip_metrics(model, X)
@@ -287,7 +289,7 @@ def stage_train(a):
     watch = [i for i, n in enumerate(te_names) if n in a.watch.split(",")]
     print(f"[train] {a.name}: train {len(Xtr)} (v1 {len(tr[0])} + wt/포함 {len(Xtr) - len(tr[0])}), test {len(Xte)}, "
           f"watch {[te_names[i] for i in watch]}", flush=True)
-    model = CameraVAE(latent_dim=64, up_mode=a.up_mode, pad_end=a.pad_end).to(dev)
+    model = CameraVAE(latent_dim=64, up_mode=a.up_mode, pad_end=a.pad_end, pad_mode=a.pad_mode).to(dev)
     if a.init_ckpt:
         model.load_state_dict(torch.load(a.init_ckpt, map_location=dev))
         print(f"[train] init <- {a.init_ckpt}", flush=True)
@@ -398,7 +400,8 @@ if __name__ == "__main__":
     ap.add_argument("--batch", type=int, default=256)
     ap.add_argument("--kl_w", type=float, default=1e-4)
     ap.add_argument("--smooth_w", type=float, default=0.0)
-    ap.add_argument("--up_mode", default="nearest", choices=["nearest", "linear"])   # [R126] decoder 업샘플
+    ap.add_argument("--up_mode", default="nearest", choices=["nearest", "linear", "subpixel"])   # [R126] decoder 업샘플 ([R136] subpixel = WAN depth-to-time)
+    ap.add_argument("--pad_mode", default="zeros", choices=["zeros", "replicate"])    # [R136] conv 시간 padding 값
     ap.add_argument("--pad_end", type=int, default=0)                                 # [R126] 입력 끝 padding (4 → 토큰 14)
     ap.add_argument("--use_wt", type=int, default=1)
     ap.add_argument("--seed", type=int, default=0)

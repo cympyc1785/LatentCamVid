@@ -903,7 +903,7 @@ def train():
                 in_dim=11, out_dim=11, hidden_size=64, latent_dim=cfg.cam_dim,
                 scale_factor=cfg.vae_latent_scale)).to(device)
         else:
-            camera_vae = CameraVAE(latent_dim=cfg.cam_dim, up_mode=str(getattr(cfg, 'vae_up_mode', 'nearest') or 'nearest'), pad_end=int(getattr(cfg, 'vae_pad_end', 0) or 0)).to(device)
+            camera_vae = CameraVAE(latent_dim=cfg.cam_dim, up_mode=str(getattr(cfg, 'vae_up_mode', 'nearest') or 'nearest'), pad_end=int(getattr(cfg, 'vae_pad_end', 0) or 0), pad_mode=str(getattr(cfg, 'vae_pad_mode', 'zeros') or 'zeros')).to(device)
         camera_vae.load_state_dict(torch.load(cfg.vae_ckpt_path, map_location=device))
         camera_vae.eval()
         if float(getattr(cfg, 'aim_loss_w', 0.0) or 0.0) > 0:

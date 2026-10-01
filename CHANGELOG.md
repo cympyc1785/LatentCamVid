@@ -36,7 +36,7 @@
 
 ### Fixed
 
-- **CameraVAE linear 업샘플 학습 9배 느림** (R140). nn.Upsample(linear) CUDA backward 대신 같은 값을 내는  (step 86 → 10.6 ms, 기존 ckpt 그대로 로드).
+- **CameraVAE linear 업샘플 학습 9배 느림** (R140). nn.Upsample(linear) CUDA backward 대신 같은 값을 내는 `LinearUp2x` (step 86 → 10.6 ms, 기존 ckpt 그대로 로드).
 
 ### Added
 

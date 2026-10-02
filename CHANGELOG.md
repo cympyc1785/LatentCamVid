@@ -40,6 +40,7 @@
 
 ### Added
 
+- **bank config d342_dynpose_cyclist_pushin_arc_strong** (R161). cyclist 2편 track_push_in_arc_right 를 sweep 90° · hole_ladder 0.35/0.50 로 (hole_bank_d342).
 - **bank config d341_dynpose_keep_pushin_arc** (R160). d340 과 같은 패턴으로 track_push_in_arc_left/right 만 굽는다 (hole_bank_d341).
 - **bank config d340_dynpose_keep_track4** (R159). d185 상속 + `--route_preset_override` 로 track_orbit_left/right · track_pull_out_arc_left/right 4종만 굽는 config (산출 hole_bank_d340, 기존 hole_bank_d185 무관).
 - **cfg `vae_encode_sample`** (R158). true 면 확산 학습·val 에서 `camera_vae.encode_sample` (z = mu + σ·ε, CamVLA 방식) 으로 latent 를 만든다. 기본 false = mu (기존).

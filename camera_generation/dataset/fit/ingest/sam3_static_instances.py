@@ -81,6 +81,8 @@ def main(args):
     assert not missing, f"static_nouns.json 에 없는 영상: {missing}"
     if args.num_shards > 1:
         videos = videos[args.shard_id::args.num_shards]
+    if args.reverse:                                   # [dsv3] 같은 shard 를 뒤에서부터 (보조 worker — 영상별 재확인으로 가운데에서 만난다)
+        videos = videos[::-1]
     print(f"{len(videos)} videos (shard {args.shard_id}/{args.num_shards}) -> {output_root}")
 
     todo = []
@@ -166,6 +168,7 @@ if __name__ == "__main__":
     parser.add_argument("--videos", nargs="*", default=None)      # None = static_nouns.json 전체
     parser.add_argument("--num_shards", default=1, type=int)
     parser.add_argument("--shard_id", default=0, type=int)
+    parser.add_argument("--reverse", action="store_true", default=False)
     parser.add_argument("--skip_done", action="store_true", default=True)
     parser.add_argument("--no_skip_done", dest="skip_done", action="store_false")
 

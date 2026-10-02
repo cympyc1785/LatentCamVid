@@ -16,6 +16,7 @@
 ### Added
 
 - **train_camera_vae `--stage scale`** (R173): 이 VAE 로 diffusion 을 학습할 때의 vae_latent_scale (학습 데이터 mu std, encode_sample 용 z std 도) — R164·R166 인라인 계산을 승격. 학습 창 구성은 `train_windows(a)` 로 뽑아 stage_train 과 공유 (동작 동일, R166 s_base 0.410282 재현).
+- **sam3_static_instances `--reverse`** (dsv3): shard 목록을 뒤에서부터 — 같은 shard 에 붙이는 보조 worker 용 (영상별 재확인과 함께 가운데에서 만난다). 기본 꺼짐.
 - **sam3_static_instances: 영상마다 처리 직전에 `masks.npz` 재확인** (dsv3). `--skip_done` 이면 시작 때 만든 todo 중 그 사이 다른 worker 가 끝낸 영상을 건너뛴다 — shard 수를 늘려 다시 띄울 때 겹침 방지. 단일 worker 동작은 그대로.
 - **plot_traj_curves `--jerk`** (R169): 위치 jerk |Δ³p|/reach · 회전 jerk |Δ²ω| 프레임별 곡선 열 2개 (traj_time_metrics 와 같은 정의, 범례에 평균).
 

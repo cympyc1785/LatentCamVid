@@ -9,6 +9,14 @@
 
 ## [Unreleased]
 
+### Fixed
+
+- **VAE worldtraj 캐시의 cameras.json 해석 c2w → w2c** (R169). `train_camera_vae.py --stage cache_wt` 가 `rotation`/`position` 을 c2w 로 읽어 worldtraj 창(학습 228,130 · test 2,846)이 전부 역궤적이었다. 레포 규약(`main/dynamicverse_shim.py`, CamVLA `data/worldtraj`)과 scene.ply 투영 (images_pc_rendered 대비 색 오차 c2w 50~63 / w2c 18~21) 모두 w2c. `--wt_pose w2c|c2w` 신설, 기본 w2c · c2w 는 R125~R168 캐시 재현용.
+
+### Added
+
+- **plot_traj_curves `--jerk`** (R169): 위치 jerk |Δ³p|/reach · 회전 jerk |Δ²ω| 프레임별 곡선 열 2개 (traj_time_metrics 와 같은 정의, 범례에 평균).
+
 ### Changed
 
 - **train_camera_vae 기본 레시피 = old VAE** (R138). `--lr_schedule constant|cosine`, `--wd`, `--recon l1|mse` 추가, 기본값을 SCVideo old VAE 학습과 같게 (lr 1e-4 constant · wd 0.01 · L1 · kl_w 1e-3). R125~R137 레시피는 `--lr 1e-3 --lr_schedule cosine --wd 0 --recon mse --kl_w 1e-4`.

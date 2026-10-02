@@ -8,7 +8,9 @@ latent 64 x 13)는 이 레포 밖에서 fx/w≈1 분포로 학습됐고 학습 �
 입력 표현은 **확산 학습과 글자 그대로 같다**: 두 데이터 모두 `dataset_dl3dv._target_out` 을 거쳐 (49, 11) cam_param
 (rot6d 6 + trans 3 (w2c, frame0 재고정, / norm_scale) + intr 2 (fx/2cx, fy/2cy, frame0 상대)).
   - Dataset-v1 : D262 run config 로 데이터셋을 만들어 __getitem__ 의 cam_param 을 그대로 캐시 (train / test 분할 그대로).
-  - worldtraj  : DATA/worldtraj/dynamicverse/*/.../cameras.json (rotation+position = c2w 로 가정, fx fy cx cy).
+  - worldtraj  : DATA/worldtraj/dynamicverse/*/.../cameras.json (rotation+position = **w2c** R, t · fx fy cx cy).
+                 [R169] R125~R168 캐시(tmp/r125/cache)는 c2w 로 잘못 읽었다 (--wt_pose c2w 로 재현). 레포 규약은 w2c
+                 (main/dynamicverse_shim.py, CamVLA data/worldtraj) 이고 scene.ply 투영도 w2c 일 때만 images_pc_rendered 와 맞는다.
                  49 프레임 창. 점군이 없어 avg_scale 을 못 만든다 → 창의 평균 카메라 이동거리 s 로 나누고,
                  Dataset-v1 train 의 같은 통계 중앙값 m1 을 곱해 크기 분포를 맞춘다 (norm_scale = s / m1).
                  Dataset-v1 **test 씬**(dynpose-100k uuid)은 누수 방지로 뺀다.
@@ -129,9 +131,14 @@ def stage_cache_wt(a):
         if n < T:
             skipped["short"] += 1
             continue
-        c2w = np.tile(np.eye(4), (n, 1, 1))
-        c2w[:, :3, :3], c2w[:, :3, 3] = Rm, pos
-        w2c = np.linalg.inv(c2w)
+        if a.wt_pose == "w2c":                      # [R169] rotation/position = R_w2c / t_w2c (레포 규약)
+            w2c = np.tile(np.eye(4), (n, 1, 1))
+            w2c[:, :3, :3], w2c[:, :3, 3] = Rm, pos
+            pos = -np.einsum("nji,nj->ni", Rm, pos)          # 카메라 중심 (정지 판정·s 용)
+        else:                                          # R125~R168 캐시 재현용 (c2w 로 잘못 읽음)
+            c2w = np.tile(np.eye(4), (n, 1, 1))
+            c2w[:, :3, :3], c2w[:, :3, 3] = Rm, pos
+            w2c = np.linalg.inv(c2w)
         starts = np.unique(np.linspace(0, n - T, min(a.wt_windows, n - T + 1)).round().astype(int))
         for s0 in starts:
             p = pos[s0:s0 + T]
@@ -484,6 +491,7 @@ if __name__ == "__main__":
     ap.add_argument("--split", default="joint", choices=["joint", "legacy"])   # [R135] joint = split_joint.json (기본) / legacy = v1 test 만 val (R125~R132)
     ap.add_argument("--test_frac", type=float, default=0.1)
     ap.add_argument("--split_seed", type=int, default=0)
+    ap.add_argument("--wt_pose", default="w2c", choices=["w2c", "c2w"])   # [R169] cameras.json 해석. c2w = R125~R168 캐시 (잘못된 해석) 재현
     ap.add_argument("--wt_split", default="train", choices=["train", "test"])   # cache_wt: test = Dataset-v1 test 씬의 cameras.json 만 → wt_test.npz
     ap.add_argument("--eval_vaes", default="")                                    # eval: "이름=ckpt:up_mode:pad_end,..."
     ap.add_argument("--eval_sets", default="v1_test,wt_test")

@@ -11,6 +11,7 @@
 
 ### Fixed
 
+- **VAE worldtraj 캐시 translation 분모를 scene scale 로** (R175). `train_camera_vae.py --wt_norm avg_scale` (기본) — 창별 mean‖R_w2c p + t_w2c‖ (scene.ply 점, Dataset-v1 transforms avg_scale · worldtraj avg_scale/{k}.json 과 같은 정의, 3창 일치 확인). 새 stage `wt_scale` (병렬, → cache/wt_avg_scale.json), cameras.json 목록은 cache/wt_files.json 에 저장해 재사용. R125~R170 은 창 카메라 이동거리 s / m1 로 나눴다 (`--wt_norm cam_disp` 로 재현).
 - **VAE worldtraj 캐시의 cameras.json 해석 c2w → w2c** (R169). `train_camera_vae.py --stage cache_wt` 가 `rotation`/`position` 을 c2w 로 읽어 worldtraj 창(학습 228,130 · test 2,846)이 전부 역궤적이었다. 레포 규약(`main/dynamicverse_shim.py`, CamVLA `data/worldtraj`)과 scene.ply 투영 (images_pc_rendered 대비 색 오차 c2w 50~63 / w2c 18~21) 모두 w2c. `--wt_pose w2c|c2w` 신설, 기본 w2c · c2w 는 R125~R168 캐시 재현용.
 
 ### Added

@@ -15,6 +15,7 @@
 
 ### Added
 
+- **sam3_static_instances: 영상마다 처리 직전에 `masks.npz` 재확인** (dsv3). `--skip_done` 이면 시작 때 만든 todo 중 그 사이 다른 worker 가 끝낸 영상을 건너뛴다 — shard 수를 늘려 다시 띄울 때 겹침 방지. 단일 worker 동작은 그대로.
 - **plot_traj_curves `--jerk`** (R169): 위치 jerk |Δ³p|/reach · 회전 jerk |Δ²ω| 프레임별 곡선 열 2개 (traj_time_metrics 와 같은 정의, 범례에 평균).
 
 ### Changed

@@ -101,6 +101,10 @@ def main(args):
 
     report = []
     for n, video in enumerate(todo, 1):
+        # [dsv3] 같은 영상을 다른 worker 가 그 사이에 끝냈으면 건너뛴다 (shard 를 늘려 다시 띄울 때 겹침 방지)
+        if args.skip_done and path.isfile(path.join(output_root, video, "masks.npz")):
+            print(f"  skip (done, 다른 worker): {video}", flush=True)
+            continue
         keywords = nouns_of[video]
         print(f"\n[{n}/{len(todo)}] {video}  keywords={keywords}", flush=True)
         frames, fps = load_video(path.join(recon_root, video, "video.mp4"))

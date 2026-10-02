@@ -13,6 +13,13 @@ class TConv1d(nn.Conv1d):
         self.pad_mode = pad_mode
 
     def forward(self, x):
+        if self.pad_mode == "extrap":
+            # [R178] 끝 2프레임으로 직선 연장 (x_{-j} = x_0 - j·(x_1 - x_0)) — 경계 밖에서도 속도를 유지한다.
+            #   replicate 는 "바깥은 정지" 를 가정해 첫·끝 프레임 속도를 ~0.5 배로 깎았다 (R176 --stage edge).
+            j = torch.arange(1, self.lp + 1, device=x.device, dtype=x.dtype)
+            left = x[..., :1] - j.flip(0) * (x[..., 1:2] - x[..., :1])
+            right = x[..., -1:] + j * (x[..., -1:] - x[..., -2:-1])
+            return super().forward(torch.cat([left, x, right], dim=-1))
         x = F.pad(x, (self.lp, self.rp), mode="replicate" if self.pad_mode == "replicate" else "constant")
         return super().forward(x)
 
@@ -52,10 +59,13 @@ class LinearUp2x(nn.Module):
 class CameraEncoder(nn.Module):
     def __init__(self, in_channels=11, hidden_dim=64, latent_dim=64, pad_mode="zeros"):
         super().__init__()
-        C = make_conv(pad_mode)
+        # [R178] pad_mode "extrap_in": **입력 궤적을 보는 첫 conv 만** 직선 연장 padding, 나머지 (latent feature) 는 zeros.
+        #   feature 맵의 끝 복제·연장은 물리적 의미가 없다 (사용자 2026-10-03 "두번째 downsample은 latent상이기도 하고").
+        C0 = make_conv("extrap") if pad_mode == "extrap_in" else make_conv(pad_mode)
+        C = make_conv("zeros") if pad_mode == "extrap_in" else make_conv(pad_mode)
 
         self.conv_init = nn.Sequential(
-            C(in_channels, hidden_dim, 3),
+            C0(in_channels, hidden_dim, 3),
             nn.ReLU(),
         )
 
@@ -115,7 +125,7 @@ class CameraEncoder(nn.Module):
 class CameraDecoder(nn.Module):
     def __init__(self, latent_dim=64, hidden_dim=64, out_channels=11, up_mode="nearest", pad_mode="zeros"):
         super().__init__()
-        C = make_conv(pad_mode)
+        C = make_conv("zeros" if pad_mode == "extrap_in" else pad_mode)     # [R178] extrap_in 은 decoder 전부 zeros
         # [R136] up_mode "subpixel" = WAN 식 depth-to-time (SubpixelUp). 세 모드 모두 2배 뒤 끝 1개 crop (L → 2L-1).
         self.up_mode = up_mode
         # [R126] up_mode: "nearest"(기본, 기존 ckpt 와 동일) | "linear". nearest x2 두 번이 주기 4 톱니를 만든다

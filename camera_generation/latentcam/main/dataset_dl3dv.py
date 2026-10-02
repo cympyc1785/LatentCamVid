@@ -1827,6 +1827,13 @@ class CamDataset(torch.utils.data.Dataset):
                 or _aim_w > 0):
             out['target_track'] = self._track_cond(
                 scene_idx, data_name.split('_')[-1], extrinsics, norm_scale)
+        # [R167] val_traj_shape_metrics: val 의 subject 화면 위치 측정용. 모델·손실이 읽는 'target_track' 과
+        #   **다른 키** 로 둔다 (build_track_cond 는 키만 있으면 concat 조건으로 쓰므로 같은 키면 네트워크 입력이 바뀐다).
+        if getattr(self.cfg, 'val_traj_shape_metrics', False):
+            try:
+                out['val_subject_track'] = self._track_cond(scene_idx, data_name.split('_')[-1], extrinsics, norm_scale)
+            except (FileNotFoundError, KeyError, AssertionError):
+                out['val_subject_track'] = torch.zeros(extrinsics.shape[0], 4)
         if _aim_w > 0 and str(getattr(self.cfg, 'aim_loss_gate', 'look_at')) == 'look_at':
             out['aim_look_at'] = torch.tensor(
                 self._aim_look_at(scene_idx, data_name.split('_')[-1]), dtype=torch.float32)

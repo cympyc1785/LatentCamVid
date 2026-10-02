@@ -23,6 +23,7 @@ rescale_betas_zero_snr: false
 vae_up_mode: nearest
 vae_pad_end: 0
 vae_pad_mode: zeros   # [R136] zeros | replicate
+val_traj_shape_metrics: false   # [R167] true = val 에 val/jerk·val/subject_screen_offset (overfit yaml 만 켬)
 wandb_project: camera-diffusion-training   # [R165] 실험군별 wandb project (overfit = camera-overfit)
 vae_encode_sample: false   # [R158] true = 학습·val 에서 encode_sample (z = mu + σ·ε) 로 latent. vae_latent_scale 도 같은 z 의 std 로 맞출 것
 timestep_spacing: leading

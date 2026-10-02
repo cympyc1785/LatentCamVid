@@ -11,3 +11,4 @@ lr_min_ratio: 0.0
 
 # [R165] 사용자 2026-10-02 "앞으로 overfitting하는건 wandb projects 기존꺼 말고 새로 파서 해줘"
 wandb_project: camera-overfit
+val_traj_shape_metrics: true   # [R167] overfit 한정 val/jerk · val/subject_screen_offset

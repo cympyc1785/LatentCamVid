@@ -259,6 +259,37 @@ def _geo_attn_figure(attn_v, grid_hw, images, stats):
     return fig
 
 
+def traj_shape_metrics(traj_pred, traj, data, width, height, intrinsics, device):
+    """[R167] val 궤적 모양 지표 (overfit 전용 cfg.val_traj_shape_metrics). cam_param (B,T,11) 공간에서 —
+      jerk     : |Δ³ x| 의 rot6d+trans 9 채널 평균 (scripts/vae/train_camera_vae.jerk 와 같은 정의)
+      subject_screen_offset : subject (data['val_subject_track'], frame-0 카메라 좌표 / norm_scale) 를 각 프레임 카메라로
+                 투영한 화면 중앙 기준 거리 |uv| (폭·높이 = 1). err = |uv_pred - uv_gt|.
+    반환: 샘플별 (B,) tensor dict. subject 가 없거나 invalid 인 샘플은 valid=0."""
+    j = lambda x: (x[:, 3:, :9] - 3 * x[:, 2:-1, :9] + 3 * x[:, 1:-2, :9] - x[:, :-3, :9]).abs().mean((1, 2))
+    out = {"jerk": j(traj_pred), "jerk_gt": j(traj)}
+    st = data.get("val_subject_track")
+    if st is None:
+        return out
+    q = st.to(device).float()
+    out["valid"] = (q[..., 3].amax(1) > 0).float()
+
+    def uv(x):
+        a1, a2 = x[..., 0:3], x[..., 3:6]
+        b1 = F.normalize(a1, dim=-1)
+        b2 = F.normalize(a2 - (b1 * a2).sum(-1, keepdim=True) * b1, dim=-1)
+        R = torch.stack([b1, b2, torch.cross(b1, b2, dim=-1)], -1)          # 열 = b1,b2,b3 (rot6d = w2c R 앞 두 열)
+        p = torch.einsum("btij,btj->bti", R, q[..., :3]) + x[..., 6:9]      # frame-0 카메라 좌표 -> frame-t 카메라 좌표
+        K = make_intrinsics(x[:, :, -2:], width, height, intrinsics)
+        z = p[..., 2].clamp(min=1e-6)
+        return torch.stack([K[..., 0, 0] * p[..., 0] / z / width, K[..., 1, 1] * p[..., 1] / z / height], -1).clamp(-1.5, 1.5)
+
+    up, ug = uv(traj_pred.float()), uv(traj.float())
+    out["off"] = up.norm(dim=-1).mean(1)
+    out["off_gt"] = ug.norm(dim=-1).mean(1)
+    out["off_err"] = (up - ug).norm(dim=-1).mean(1)
+    return out
+
+
 def build_track_cond(data, t_lat, device, dropout_p=0.0):
     """[new 2026-08-27] data['target_track'] (B,T,4)[xyz,valid] -> (B,t_lat,4) concat 조건.
 
@@ -995,6 +1026,8 @@ def train():
             # 남긴 start_pred 를 읽는다 — 그 forward 는 GT 를 안 받으므로(teacher forcing 은
             # self.training 게이트) 추론과 같은 조건이다. head 가 없으면 n=0 으로 안 찍힌다.
             sp_sum = torch.zeros(3, device=accelerator.device)
+            _tsm = bool(getattr(cfg, 'val_traj_shape_metrics', False))   # [R167] overfit 전용 궤적 모양 지표
+            tsm_sum = {k: torch.tensor(0.0, device=accelerator.device) for k in ("jerk", "jerk_gt", "off", "off_gt", "off_err", "n_off")}
             sp_cnt = torch.tensor(0, device=accelerator.device)
             data_name_list = []
             _pt = getattr(cfg, 'per_token_noise', False)   # Diffusion-Forcing val monitoring
@@ -1144,6 +1177,14 @@ def train():
                 total_loss_traj += val_loss_traj * B
                 total_samples += B
 
+                if _tsm:
+                    _m = traj_shape_metrics(traj_pred, traj, data, width, height, intrinsics, device)
+                    tsm_sum["jerk"] += _m["jerk"].sum(); tsm_sum["jerk_gt"] += _m["jerk_gt"].sum()
+                    if "valid" in _m:
+                        _v = _m["valid"]
+                        for _k in ("off", "off_gt", "off_err"):
+                            tsm_sum[_k] += (_m[_k] * _v).sum()
+                        tsm_sum["n_off"] += _v.sum()
                 ref_intrinsics = make_intrinsics(traj[:, :, -2:], width, height, intrinsics).cpu().tolist()
                 pred_intrinsics = make_intrinsics(traj_pred[:, :, -2:], width, height, intrinsics).cpu().tolist()
                 width = width.cpu().tolist()
@@ -1246,6 +1287,18 @@ def train():
                 "val/loss_traj": val_loss_traj_mean},
                 step=global_step,
             )
+            if _tsm:   # [R167] val/jerk (+_gt, _ratio) · val/subject_screen_offset (+_gt, _err)
+                _r = {k: accelerator.reduce(v, reduction='sum') for k, v in tsm_sum.items()}
+                _n = max(total_samples.item(), 1)
+                _log = {"val/jerk": _r["jerk"].item() / _n, "val/jerk_gt": _r["jerk_gt"].item() / _n,
+                        "val/jerk_ratio": _r["jerk"].item() / max(_r["jerk_gt"].item(), 1e-12)}
+                if _r["n_off"].item() > 0:
+                    _no = _r["n_off"].item()
+                    _log.update({"val/subject_screen_offset": _r["off"].item() / _no,
+                                 "val/subject_screen_offset_gt": _r["off_gt"].item() / _no,
+                                 "val/subject_screen_offset_err": _r["off_err"].item() / _no})
+                accelerator.log(_log, step=global_step)
+                print("(val shape) " + " ".join(f"{k}={v:.5g}" for k, v in _log.items()))
             # [new 2026-09-22 / D261] 시작 pose val. head 가 꺼진 arm 은 cnt=0 이라 안 찍힌다.
             _spc = accelerator.reduce(sp_cnt, reduction='sum')
             if _spc.item() > 0:

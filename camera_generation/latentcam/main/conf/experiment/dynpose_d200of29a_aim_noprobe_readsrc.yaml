@@ -11,3 +11,6 @@ test_seg_list: /data1/cympyc1785/data/DynPose-LBM/latentcam_dynpose_d200/seg_lis
 epochs: 30
 epoch_cap: 30
 peav_text_cache: /data1/cympyc1785/data/DynPose-LBM/latentcam_dynpose_d200/molmo2_cache/prefill_noprobe_of29a.pt   # v4track 캐시에 이 entry 가 없어 따로 구움
+
+# [R165] 사용자 2026-10-02 "앞으로 overfitting하는건 wandb projects 기존꺼 말고 새로 파서 해줘"
+wandb_project: camera-overfit

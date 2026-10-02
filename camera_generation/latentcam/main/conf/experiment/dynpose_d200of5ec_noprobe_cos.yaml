@@ -11,3 +11,6 @@ epoch_cap: 100
 lr_schedule: cosine
 lr_warmup_steps: 500
 lr_min_ratio: 0.05
+
+# [R165] 사용자 2026-10-02 "앞으로 overfitting하는건 wandb projects 기존꺼 말고 새로 파서 해줘"
+wandb_project: camera-overfit

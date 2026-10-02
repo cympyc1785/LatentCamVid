@@ -637,7 +637,7 @@ def train():
     if _full_resume and _resume.get('wandb_id'):           # continue the same wandb run
         _wandb_init = {"id": _resume['wandb_id'], "resume": "allow", "name": f"{exp_name}"}
     accelerator.init_trackers(
-        project_name="camera-diffusion-training",
+        project_name=str(getattr(cfg, "wandb_project", None) or "camera-diffusion-training"),   # [R165] overfit 은 camera-overfit
         config=cfg_dict,
         init_kwargs={"wandb": _wandb_init},
     )

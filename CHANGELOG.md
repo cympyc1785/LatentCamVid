@@ -40,6 +40,7 @@
 
 ### Added
 
+- **cfg `wandb_project`** (R165). 학습 wandb project 를 설정으로 (기본 camera-diffusion-training = 기존). overfit experiment yaml 16개 (dynpose_d200of{5ec,29a}*) 는 camera-overfit.
 - **scripts/eval/plot_traj_curves.py** (R162). 궤적별 trans speed / rot speed / subject 화면 offset 곡선 (GT + arm 들). R113·R123·R131 의 인라인 코드를 승격, 정의는 traj_time_metrics 함수 재사용.
 - **bank config d342_dynpose_cyclist_pushin_arc_strong** (R161). cyclist 2편 track_push_in_arc_right 를 sweep 90° · hole_ladder 0.35/0.50 로 (hole_bank_d342).
 - **bank config d341_dynpose_keep_pushin_arc** (R160). d340 과 같은 패턴으로 track_push_in_arc_left/right 만 굽는다 (hole_bank_d341).

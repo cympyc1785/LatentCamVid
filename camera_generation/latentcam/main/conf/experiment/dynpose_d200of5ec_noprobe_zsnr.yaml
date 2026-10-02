@@ -9,3 +9,6 @@ exp_name: dynpose_d200of5ec_noprobe_zsnr
 prediction_type: v_prediction
 rescale_betas_zero_snr: true
 timestep_spacing: trailing
+
+# [R165] 사용자 2026-10-02 "앞으로 overfitting하는건 wandb projects 기존꺼 말고 새로 파서 해줘"
+wandb_project: camera-overfit

@@ -16,7 +16,7 @@ latent 64 x 13)는 이 레포 밖에서 fx/w≈1 분포로 학습됐고 학습 �
                  Dataset-v1 **test 씬**(dynpose-100k uuid)은 누수 방지로 뺀다.
 
 단계:
-  cache_v1 | cache_wt | split | train | eval
+  cache_v1 | cache_wt | split | train | eval | scale ([R173] vae_latent_scale = 학습 데이터 mu std)
   python scripts/vae/train_camera_vae.py --stage split                        # [R135] 합본 0.9/0.1 → split_joint.json (train 기본 --split joint)
   python scripts/vae/train_camera_vae.py --stage cache_wt --wt_split test     # Dataset-v1 test 씬의 worldtraj 카메라 → wt_test.npz
   python scripts/vae/train_camera_vae.py --stage eval --eval_vaes "old=checkpoints/vae_20260302_300.pth:nearest:0,..."
@@ -347,12 +347,10 @@ def stage_eval(a):
         print(f"[eval] -> {a.eval_out}", flush=True)
 
 
-def stage_train(a):
+def train_windows(a):
+    """stage_train 의 학습 창 = v1_train (+ worldtraj train) (+ overfit 두 영상의 test 세그먼트). (tr 리스트, extra_sets, Xte, te_names, inc)."""
     import torch
-    import torch.nn.functional as F
-    from models.vae_intr_large import CameraVAE
-    dev = "cuda"
-    torch.manual_seed(a.seed)
+    extra_sets = {}
     tr = [np.load(osp.join(a.cache, "v1_train.npz"))["cam"]]
     if a.split == "joint":
         # [R135] worldtraj + Dataset-v1 합본 0.9/0.1 (stage_split). val/* = 합본 test, val_wt/* · val_v1/* = 출처별
@@ -369,6 +367,42 @@ def stage_train(a):
     inc = [i for i, n in enumerate(te_names) if any(u in n for u in a.include_test_scenes.split(",") if u)]
     if inc:
         tr.append(te["cam"][inc])
+    return tr, extra_sets, Xte, te_names, inc
+
+
+def stage_scale(a):
+    """이 코드가 답하는 질문: 이 VAE 로 diffusion 을 학습할 때 vae_latent_scale (= 그 VAE 학습 데이터의 latent std) 은 얼마인가?
+    R164 · R166 에서 인라인으로 두 번 계산한 것을 승격 (R173). 학습 창 = stage_train 과 같은 train_windows(a).
+      mu_std       : encode (mu) 전 원소 std  — vae_encode_sample=false (기본) 일 때 쓰는 값
+      z_sample_std : sqrt(var(mu) + mean σ²) — encode_sample 일 때
+    --eval_vaes "이름=ckpt:up:pad[:pad_mode],..." · --eval_out <json>"""
+    import torch
+    from models.vae_intr_large import CameraVAE
+    tr, *_ = train_windows(a)
+    X = torch.from_numpy(np.concatenate(tr)).float()
+    out = {}
+    for spec in a.eval_vaes.split(","):
+        nm, rest = spec.split("=", 1)
+        parts = rest.split(":")
+        model = CameraVAE(latent_dim=64, up_mode=parts[1], pad_end=int(parts[2]), pad_mode=parts[3] if len(parts) > 3 else "zeros").cuda().eval()
+        model.load_state_dict(torch.load(parts[0], map_location="cuda"))
+        with torch.no_grad():
+            ml = [model.encoder(model._pad(X[i:i + 4096].cuda())) for i in range(0, len(X), 4096)]
+        mu = torch.cat([m[0].cpu() for m in ml]); var = torch.cat([torch.exp(m[1]).cpu() for m in ml])
+        out[nm] = {"vae": parts[0], "n": len(X), "mu_std": float(mu.std()), "z_sample_std": float((mu.var() + var.mean()).sqrt())}
+        print(f"[scale] {nm:12s} n={len(X)} mu_std={out[nm]['mu_std']:.6f} z_sample_std={out[nm]['z_sample_std']:.6f}", flush=True)
+    if a.eval_out:
+        json.dump(out, open(a.eval_out, "w"), indent=1)
+        print(f"[scale] -> {a.eval_out}", flush=True)
+
+
+def stage_train(a):
+    import torch
+    import torch.nn.functional as F
+    from models.vae_intr_large import CameraVAE
+    dev = "cuda"
+    torch.manual_seed(a.seed)
+    tr, extra_sets, Xte, te_names, inc = train_windows(a)
     Xtr = torch.from_numpy(np.concatenate(tr)).float()
     print(f"[train] test→train 포함 {len(inc)} 세그먼트 ({a.include_test_scenes})", flush=True)
     watch = [i for i, n in enumerate(te_names) if n in a.watch.split(",")]

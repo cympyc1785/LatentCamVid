@@ -16,6 +16,7 @@
 
 ### Added
 
+- **train_camera_vae `--stage edge`** (R176): VAE roundtrip 의 프레임별 속도 비율 |v_pred|/|v_gt| (시작·끝 프레임 감쇠) — R169 인라인 측정 승격.
 - **bank config d343_dynpose_v3_pool** (Dataset-v3): d185 tau/fit/emit 그대로 + route 를 preset 전량 풀 (`--slot_plan pool --pool_size 12 --free_moving pool`, anchor 풀 70 + free 8, 82 중 s_curve·zoom 2·legacy 제외) + d199 의 `--anchor_require_frame0`. 3편 smoke OK (bank 5/6/13 행).
 - **train_camera_vae `--stage scale`** (R173): 이 VAE 로 diffusion 을 학습할 때의 vae_latent_scale (학습 데이터 mu std, encode_sample 용 z std 도) — R164·R166 인라인 계산을 승격. 학습 창 구성은 `train_windows(a)` 로 뽑아 stage_train 과 공유 (동작 동일, R166 s_base 0.410282 재현).
 - **sam3_static_instances `--reverse`** (dsv3): shard 목록을 뒤에서부터 — 같은 shard 에 붙이는 보조 worker 용 (영상별 재확인과 함께 가운데에서 만난다). 기본 꺼짐.

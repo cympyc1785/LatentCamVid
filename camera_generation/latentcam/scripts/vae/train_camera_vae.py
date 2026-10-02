@@ -16,7 +16,7 @@ latent 64 x 13)는 이 레포 밖에서 fx/w≈1 분포로 학습됐고 학습 �
                  Dataset-v1 **test 씬**(dynpose-100k uuid)은 누수 방지로 뺀다.
 
 단계:
-  cache_v1 | wt_scale | cache_wt | split | train | eval | scale ([R173] vae_latent_scale = 학습 데이터 mu std)
+  cache_v1 | wt_scale | cache_wt | split | train | eval | edge ([R176] 시작·끝 속도 감쇠) | scale ([R173] vae_latent_scale = 학습 데이터 mu std)
   python scripts/vae/train_camera_vae.py --stage split                        # [R135] 합본 0.9/0.1 → split_joint.json (train 기본 --split joint)
   python scripts/vae/train_camera_vae.py --stage cache_wt --wt_split test     # Dataset-v1 test 씬의 worldtraj 카메라 → wt_test.npz
   python scripts/vae/train_camera_vae.py --stage eval --eval_vaes "old=checkpoints/vae_20260302_300.pth:nearest:0,..."
@@ -470,6 +470,42 @@ def stage_scale(a):
     if a.eval_out:
         json.dump(out, open(a.eval_out, "w"), indent=1)
         print(f"[scale] -> {a.eval_out}", flush=True)
+
+
+def stage_edge(a):
+    """이 코드가 답하는 질문: VAE roundtrip 이 궤적의 시작·끝 프레임에서 속도를 얼마나 깎나 (replicate padding 끝단 감쇠)?
+    R169 의 인라인 측정(tmp/r169/edge.py, Dataset-v1 test)을 승격 (R176). 프레임별 |v_pred| / |v_gt| 의 중앙값 — 위치 (카메라 중심),
+    회전 (이웃 프레임 상대 회전각). 정지에 가까운 창 (평균 이동 < 0.1 x 중앙값 또는 평균 회전 < 1e-3 deg) 은 뺀다.
+    --eval_vaes "이름=ckpt:up:pad[:pad_mode],..." · --eval_sets (기본 v1_test) · --eval_out <json>"""
+    import torch
+    from models.vae_intr_large import CameraVAE
+
+    def speeds(cam):
+        R, c = w2c_from_cam(cam.astype(np.float64))
+        M = np.einsum("ntij,ntkj->ntik", R[:, :-1], R[:, 1:])
+        return (np.linalg.norm(np.diff(c, axis=1), axis=-1),
+                np.degrees(np.arccos(np.clip((np.trace(M, axis1=-2, axis2=-1) - 1) / 2, -1, 1))))
+    out = {}
+    for sk in a.eval_sets.split(","):
+        X = torch.from_numpy(np.load(osp.join(a.cache, f"{sk}.npz"))["cam"]).float()
+        tg, rg = speeds(X.numpy())
+        mv = (tg.mean(1) > np.median(tg.mean(1)) * 0.1) & (rg.mean(1) > 1e-3)
+        for spec in a.eval_vaes.split(","):
+            nm, rest = spec.split("=", 1)
+            parts = rest.split(":")
+            model = CameraVAE(latent_dim=64, up_mode=parts[1], pad_end=int(parts[2]),
+                              pad_mode=parts[3] if len(parts) > 3 else "zeros").cuda().eval()
+            model.load_state_dict(torch.load(parts[0], map_location="cuda"))
+            with torch.no_grad():
+                rec = torch.cat([model.decode(model.encode(X[i:i + 1024].cuda())).cpu() for i in range(0, len(X), 1024)]).numpy()
+            tp, rp = speeds(rec)
+            rt = np.median(tp[mv] / np.maximum(tg[mv], 1e-9), 0); rr = np.median(rp[mv] / np.maximum(rg[mv], 1e-9), 0)
+            out[f"{nm}@{sk}"] = {"trans": rt.tolist(), "rot": rr.tolist(), "n": int(mv.sum())}
+            f = lambda v: " ".join(f"{x:.3f}" for x in v)
+            print(f"[edge] {nm:10s} {sk:8s} trans first3 {f(rt[:3])} | mid {rt[8:40].mean():.3f} | last3 {f(rt[-3:])}"
+                  f"   rot first3 {f(rr[:3])} | mid {rr[8:40].mean():.3f} | last3 {f(rr[-3:])}", flush=True)
+    if a.eval_out:
+        json.dump(out, open(a.eval_out, "w"))
 
 
 def stage_train(a):

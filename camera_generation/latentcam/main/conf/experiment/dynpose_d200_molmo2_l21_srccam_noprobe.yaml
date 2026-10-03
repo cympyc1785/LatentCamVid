@@ -1,0 +1,11 @@
+# @package _global_
+# R186 — Dataset-v1 전체 (d200, D262 `dynpose_d200_molmo2_l21_srccam`) 에서 Molmo2 text 에 **probe 문장을 뺀** 캐시만 바꾼다
+# (사용자 2026-10-04 "그냥 v1에 probe 없는걸로 새로 캐싱해서 기준선 학습이랑 같이 돌려줘"). D291 이 v4track 분할에 한 것과 같은
+# 처방을 전체로: cache_molmo2_embeddings.py --probe '' --free_mode zero --text_len 128 --extra_layer 21 --fps 2.0
+# --text_override_json molmo2_cache/molmo2_text_track.json (prefill.pt 와 같은 인자, probe 만 뺌). video 캐시는 그대로
+# (영상 토큰이 텍스트 앞이라 probe 와 무관, D291 에서 max|diff| 0.0 확인).
+defaults:
+  - dynpose_d200_molmo2_l21_srccam
+
+exp_name: dynpose_d200_molmo2_l21_srccam_noprobe
+peav_text_cache: /data1/cympyc1785/data/DynPose-LBM/latentcam_dynpose_d200/molmo2_cache/prefill_noprobe.pt

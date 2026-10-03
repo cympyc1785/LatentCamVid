@@ -16,6 +16,7 @@
 
 ### Added
 
+- **train_camera_vae `--grad_clip` · `--amp bf16`** (R179): CamVLA `train_vae.py` 레시피 (clip_grad_norm 0.5 · bf16 autocast) 재현용. 기본 0 / off = 옛 동작.
 - **CameraVAE `pad_mode="extrap_in"`** (R178): 입력 궤적을 보는 encoder 첫 conv 만 끝 2프레임 직선 연장 padding (속도 보존), 나머지 encoder·decoder conv 는 zeros. replicate 가 첫·끝 프레임 속도를 ~0.5 배로 깎던 문제 (R176) 대안. state_dict 는 zeros/replicate 와 같은 키. `train_camera_vae --pad_mode extrap_in`.
 - **train_camera_vae `--stage edge`** (R176): VAE roundtrip 의 프레임별 속도 비율 |v_pred|/|v_gt| (시작·끝 프레임 감쇠) — R169 인라인 측정 승격.
 - **bank config d343_dynpose_v3_pool** (Dataset-v3): d185 tau/fit/emit 그대로 + route 를 preset 전량 풀 (`--slot_plan pool --pool_size 12 --free_moving pool`, anchor 풀 70 + free 8, 82 중 s_curve·zoom 2·legacy 제외) + d199 의 `--anchor_require_frame0`. 3편 smoke OK (bank 5/6/13 행).

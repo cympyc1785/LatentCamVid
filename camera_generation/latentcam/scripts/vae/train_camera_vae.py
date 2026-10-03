@@ -595,7 +595,10 @@ def stage_train(a):
             x = Xtr[perm[bi * a.batch:(bi + 1) * a.batch]].to(dev)
             for g in opt.param_groups:
                 g["lr"] = lr_at(step)
-            x_hat, mu, logvar = model(x)
+            # [R179] --amp bf16 = CamVLA train_vae.py 의 Accelerator(mixed_precision="bf16") — forward 만 autocast (기본 off = 옛 동작)
+            with torch.autocast("cuda", dtype=torch.bfloat16, enabled=a.amp == "bf16"):
+                x_hat, mu, logvar = model(x)
+            x_hat, mu, logvar = x_hat.float(), mu.float(), logvar.float()
             rec = F.l1_loss(x_hat, x) if a.recon == "l1" else F.mse_loss(x_hat, x)   # [R138] old VAE = L1
             kl = (-0.5 * (1 + logvar - mu ** 2 - logvar.exp())).mean()
             loss = rec + a.kl_w * kl
@@ -605,6 +608,8 @@ def stage_train(a):
                 loss = loss + a.smooth_w * F.relu(jh - jg).mean()
             opt.zero_grad(set_to_none=True)
             loss.backward()
+            if a.grad_clip > 0:                         # [R179] CamVLA train_vae.py clip_grad_norm_(…, 0.5). 0 = 옛 동작 (clip 없음)
+                torch.nn.utils.clip_grad_norm_(model.parameters(), a.grad_clip)
             opt.step()
             step += 1
             tot += loss.item()
@@ -659,6 +664,8 @@ if __name__ == "__main__":
     ap.add_argument("--lr_schedule", default="constant", choices=["constant", "cosine"])
     ap.add_argument("--wd", type=float, default=0.01)
     ap.add_argument("--recon", default="l1", choices=["l1", "mse"])
+    ap.add_argument("--grad_clip", type=float, default=0.0)            # [R179] CamVLA 레시피 = 0.5
+    ap.add_argument("--amp", default="off", choices=["off", "bf16"])   # [R179] CamVLA 레시피 = bf16
     ap.add_argument("--smooth_w", type=float, default=0.0)
     ap.add_argument("--up_mode", default="nearest", choices=["nearest", "linear", "subpixel"])   # [R126] decoder 업샘플 ([R136] subpixel = WAN depth-to-time)
     ap.add_argument("--pad_mode", default="zeros", choices=["zeros", "replicate", "extrap_in"])    # [R136] conv 시간 padding 값 · [R178] extrap_in = 입력 첫 conv 만 직선 연장, 나머지 zeros

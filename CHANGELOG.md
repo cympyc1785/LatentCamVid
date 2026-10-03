@@ -16,6 +16,7 @@
 
 ### Added
 
+- **train_camera_vae `--use_v1`** (R181): 0 이면 학습 창에서 Dataset-v1 train 을 뺀다 (worldtraj 만 — old VAE 와 같은 데이터 출처 비교용). test 는 그대로. 기본 1 = 옛 동작.
 - **train_camera_vae `--grad_clip` · `--amp bf16`** (R179): CamVLA `train_vae.py` 레시피 (clip_grad_norm 0.5 · bf16 autocast) 재현용. 기본 0 / off = 옛 동작.
 - **CameraVAE `pad_mode="extrap_in"`** (R178): 입력 궤적을 보는 encoder 첫 conv 만 끝 2프레임 직선 연장 padding (속도 보존), 나머지 encoder·decoder conv 는 zeros. replicate 가 첫·끝 프레임 속도를 ~0.5 배로 깎던 문제 (R176) 대안. state_dict 는 zeros/replicate 와 같은 키. `train_camera_vae --pad_mode extrap_in`.
 - **train_camera_vae `--stage edge`** (R176): VAE roundtrip 의 프레임별 속도 비율 |v_pred|/|v_gt| (시작·끝 프레임 감쇠) — R169 인라인 측정 승격.

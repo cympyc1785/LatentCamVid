@@ -427,7 +427,8 @@ def train_windows(a):
     """stage_train 의 학습 창 = v1_train (+ worldtraj train) (+ overfit 두 영상의 test 세그먼트). (tr 리스트, extra_sets, Xte, te_names, inc)."""
     import torch
     extra_sets = {}
-    tr = [np.load(osp.join(a.cache, "v1_train.npz"))["cam"]]
+    # [R181] --use_v1 0 = 학습 창에서 Dataset-v1 train 을 뺀다 (worldtraj 만, old VAE 와 공정 비교용). test 는 그대로.
+    tr = [np.load(osp.join(a.cache, "v1_train.npz"))["cam"][: (None if a.use_v1 else 0)]]
     if a.split == "joint":
         # [R135] worldtraj + Dataset-v1 합본 0.9/0.1 (stage_split). val/* = 합본 test, val_wt/* · val_v1/* = 출처별
         wt_tr, jsets, _ = load_joint(a)
@@ -671,6 +672,7 @@ if __name__ == "__main__":
     ap.add_argument("--pad_mode", default="zeros", choices=["zeros", "replicate", "extrap_in"])    # [R136] conv 시간 padding 값 · [R178] extrap_in = 입력 첫 conv 만 직선 연장, 나머지 zeros
     ap.add_argument("--pad_end", type=int, default=0)                                 # [R126] 입력 끝 padding (4 → 토큰 14)
     ap.add_argument("--use_wt", type=int, default=1)
+    ap.add_argument("--use_v1", type=int, default=1)            # [R181] 0 = Dataset-v1 train 창 제외 (worldtraj 만)
     ap.add_argument("--seed", type=int, default=0)
     ap.add_argument("--no_wandb", action="store_true")
     ap.add_argument("--include_test_scenes", default="5ec7f200-b057-41f2-b374-9dcff1e7e546,29a9a7d0-7b3f-4520-ab9b-baacae3ca9de")

@@ -669,7 +669,7 @@ if __name__ == "__main__":
     ap.add_argument("--amp", default="off", choices=["off", "bf16"])   # [R179] CamVLA 레시피 = bf16
     ap.add_argument("--smooth_w", type=float, default=0.0)
     ap.add_argument("--up_mode", default="nearest", choices=["nearest", "linear", "subpixel"])   # [R126] decoder 업샘플 ([R136] subpixel = WAN depth-to-time)
-    ap.add_argument("--pad_mode", default="zeros", choices=["zeros", "replicate", "extrap_in"])    # [R136] conv 시간 padding 값 · [R178] extrap_in = 입력 첫 conv 만 직선 연장, 나머지 zeros
+    ap.add_argument("--pad_mode", default="zeros", choices=["zeros", "replicate", "extrap_in", "rep_enc"])    # [R136] conv 시간 padding 값 · [R178] extrap_in = 입력 첫 conv 만 직선 연장, 나머지 zeros · [R187] rep_enc = encoder replicate / decoder zeros
     ap.add_argument("--pad_end", type=int, default=0)                                 # [R126] 입력 끝 padding (4 → 토큰 14)
     ap.add_argument("--use_wt", type=int, default=1)
     ap.add_argument("--use_v1", type=int, default=1)            # [R181] 0 = Dataset-v1 train 창 제외 (worldtraj 만)

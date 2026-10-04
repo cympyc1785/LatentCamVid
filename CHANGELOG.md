@@ -16,6 +16,7 @@
 
 ### Added
 
+- **CameraVAE `pad_mode="rep_enc"`** (R187): encoder 는 replicate, decoder 는 zeros — rep_lin 의 끝 프레임 속도 감쇠가 decoder 쪽 replicate 에서 오는지 가르는 변형. state_dict 호환, `train_camera_vae --pad_mode rep_enc`.
 - **experiment `dynpose_d200_molmo2_l21_srccam_noprobe`** (R186): Dataset-v1 전체 (D262) 에 Molmo2 noprobe text 캐시 `molmo2_cache/prefill_noprobe.pt` 만 바꾼 판 (prefill.pt 와 같은 인자, probe '').
 - **train_camera_vae `--use_v1`** (R181): 0 이면 학습 창에서 Dataset-v1 train 을 뺀다 (worldtraj 만 — old VAE 와 같은 데이터 출처 비교용). test 는 그대로. 기본 1 = 옛 동작.
 - **train_camera_vae `--grad_clip` · `--amp bf16`** (R179): CamVLA `train_vae.py` 레시피 (clip_grad_norm 0.5 · bf16 autocast) 재현용. 기본 0 / off = 옛 동작.

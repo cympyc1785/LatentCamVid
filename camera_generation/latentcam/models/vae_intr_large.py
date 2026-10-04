@@ -61,8 +61,11 @@ class CameraEncoder(nn.Module):
         super().__init__()
         # [R178] pad_mode "extrap_in": **입력 궤적을 보는 첫 conv 만** 직선 연장 padding, 나머지 (latent feature) 는 zeros.
         #   feature 맵의 끝 복제·연장은 물리적 의미가 없다 (사용자 2026-10-03 "두번째 downsample은 latent상이기도 하고").
-        C0 = make_conv("extrap") if pad_mode == "extrap_in" else make_conv(pad_mode)
-        C = make_conv("zeros") if pad_mode == "extrap_in" else make_conv(pad_mode)
+        # [R187] pad_mode "rep_enc": encoder 는 replicate, decoder 는 zeros — 끝 프레임 속도 감쇠가 decoder 쪽 replicate 에서
+        #   오는지 가르는 변형 (사용자 2026-10-04 "2번 같이해줘").
+        enc_pm = {"extrap_in": "zeros", "rep_enc": "replicate"}.get(pad_mode, pad_mode)
+        C0 = make_conv("extrap") if pad_mode == "extrap_in" else make_conv(enc_pm)
+        C = make_conv(enc_pm)
 
         self.conv_init = nn.Sequential(
             C0(in_channels, hidden_dim, 3),
@@ -125,7 +128,7 @@ class CameraEncoder(nn.Module):
 class CameraDecoder(nn.Module):
     def __init__(self, latent_dim=64, hidden_dim=64, out_channels=11, up_mode="nearest", pad_mode="zeros"):
         super().__init__()
-        C = make_conv("zeros" if pad_mode == "extrap_in" else pad_mode)     # [R178] extrap_in 은 decoder 전부 zeros
+        C = make_conv("zeros" if pad_mode in ("extrap_in", "rep_enc") else pad_mode)     # [R178] extrap_in · [R187] rep_enc 은 decoder 전부 zeros
         # [R136] up_mode "subpixel" = WAN 식 depth-to-time (SubpixelUp). 세 모드 모두 2배 뒤 끝 1개 crop (L → 2L-1).
         self.up_mode = up_mode
         # [R126] up_mode: "nearest"(기본, 기존 ckpt 와 동일) | "linear". nearest x2 두 번이 주기 4 톱니를 만든다

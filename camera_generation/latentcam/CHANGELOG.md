@@ -5,6 +5,8 @@ All notable changes to the latentcam sub-project. Follows [Keep a Changelog](htt
 ## [Unreleased]
 
 ### Added
+
+- **`scripts/eval/motion_magnitude_by_reach.py`** — "모델이 카메라를 GT 보다 덜 움직이는가": GT reach 4분위별 pred/GT 경로 길이·reach 비율 중앙값 + traj_time_metrics per_entry 지표 분위 평균. R191 일회성 분석을 R193 에서 다시 써서 승격.
 - **`eval_testset.py --pred_start` (2026-09-29, R91).** start pose head 가 있는 run 에서 예측 궤적을 **예측 첫 카메라** 위에 놓는다
   (E0_pred = rel0_pred @ E_src_s, E_src_s = inv(rel0_gt) @ E0). 기본 off = GT 첫 카메라 (기존 동작).
 - **D296 `vista_d296_molmo2_l21_srccam_startpose` (2026-09-29, R89).** D261 start pose head + D262 srccam, 코퍼스

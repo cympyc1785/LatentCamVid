@@ -444,6 +444,12 @@ def train_windows(a):
     inc = [i for i, n in enumerate(te_names) if any(u in n for u in a.include_test_scenes.split(",") if u)]
     if inc:
         tr.append(te["cam"][inc])
+    if getattr(a, "train_on_test", 0):
+        # [R194] in-distribution 비교: test (Dataset-v1 test + joint 의 worldtraj test) 전부를 학습 창에 넣는다. 평가는 같은 test —
+        #   일반화가 아니라 VAE 구조의 표현 용량을 본다 (사용자 2026-10-05). 기본 0 = 옛 동작.
+        tr.append(te["cam"])
+        if a.split == "joint":
+            tr.append(extra_sets["val_wt"].numpy())
     return tr, extra_sets, Xte, te_names, inc
 
 
@@ -672,6 +678,7 @@ if __name__ == "__main__":
     ap.add_argument("--pad_mode", default="zeros", choices=["zeros", "replicate", "extrap_in", "rep_enc"])    # [R136] conv 시간 padding 값 · [R178] extrap_in = 입력 첫 conv 만 직선 연장, 나머지 zeros · [R187] rep_enc = encoder replicate / decoder zeros
     ap.add_argument("--pad_end", type=int, default=0)                                 # [R126] 입력 끝 padding (4 → 토큰 14)
     ap.add_argument("--use_wt", type=int, default=1)
+    ap.add_argument("--train_on_test", type=int, default=0)   # [R194] 1 = test 창도 학습에 (in-distribution 비교)
     ap.add_argument("--use_v1", type=int, default=1)            # [R181] 0 = Dataset-v1 train 창 제외 (worldtraj 만)
     ap.add_argument("--seed", type=int, default=0)
     ap.add_argument("--no_wandb", action="store_true")

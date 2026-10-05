@@ -643,7 +643,7 @@ def stage_train(a):
 if __name__ == "__main__":
     ap = argparse.ArgumentParser()
     ap.add_argument("--stage", required=True)
-    ap.add_argument("--cache", default="/data1/cympyc1785/LatentCamVid/tmp/r125/cache")
+    ap.add_argument("--cache", default="/data1/cympyc1785/LatentCamVid/tmp/r175/cache")
     ap.add_argument("--wt_windows", type=int, default=3)          # cameras.json 당 49 프레임 창 수 (균등 시작점)
     ap.add_argument("--wt_min_disp", type=float, default=1e-3)    # 창 평균 이동거리가 이보다 작으면 정지 카메라로 보고 제외
     ap.add_argument("--split", default="joint", choices=["joint", "legacy"])   # [R135] joint = split_joint.json (기본) / legacy = v1 test 만 val (R125~R132)

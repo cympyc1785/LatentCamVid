@@ -483,6 +483,8 @@ All notable changes to the latentcam sub-project. Follows [Keep a Changelog](htt
   같이 1스레드가 된다. numpy 경로는 이 함수 안에서만 닫힌다.
 
 ### Changed
+
+- **`train_camera_vae.py --cache` 기본값 `tmp/r125/cache` → `tmp/r175/cache`** (w2c · scene-scale 캐시). r125 캐시 (c2w 로 잘못 읽은 worldtraj) 와 그 VAE 46 run · 그 VAE 로 학습한 diffusion overfit 56 run 은 사용자 지시로 삭제 (2026-10-05). `--wt_pose c2w` 재현 옵션은 그대로.
 - **`cache_molmo2_embeddings.py --probe` 기본값을 `''`(noprobe)로 (2026-09-29, 사용자 지시).** 옛 probe 문장은 `--probe legacy`. 기존 캐시 파일은 그대로.
 - **학습 상한을 100 → 50 epoch 으로 (2026-09-19, 사용자 지시 "학습 50epoch까지만 돌려도 될
   것 같아").** `conf/config.yaml` 의 `epoch_cap: 100 -> 50`. 루프가 `range(start_epoch, 50)`

@@ -1,0 +1,17 @@
+# @package _global_
+# Dataset-v3 (= latentcam_dynpose_d343, R210) 기본 학습 설정 — Molmo2 l21 noprobe + srccam. dsv2_molmo2_l21_srccam 과 같은 구조.
+# v3 = d343 뱅크 (82 preset pool) 유효 10,000편, v1 과 합치지 않는 단독 데이터셋 (사용자 2026-10-04 "v3할 때는 단독으로").
+# split: 영상 단위 (씬당 카메라 수 층화, 카메라 10% test, val = test 의 앞 1%) — 사용자 2026-10-06 "영상 단위 90/10 무작위".
+# CLaTr 게이지는 부모 (Dataset-v1 s91) 것을 그대로 상속 — v3 전용 게이지는 미정.
+defaults:
+  - dynpose_d200_molmo2_l21_srccam
+
+exp_name: dsv3_molmo2_l21_srccam
+dl3dv_root: /data1/cympyc1785/data/DynPose-LBM/latentcam_dynpose_d343
+meta_csv: meta_dynpose.csv
+train_seg_list: /data1/cympyc1785/data/DynPose-LBM/latentcam_dynpose_d343/seg_list_dynpose_s91_train.txt
+test_seg_list: /data1/cympyc1785/data/DynPose-LBM/latentcam_dynpose_d343/seg_list_dynpose_s91_test.txt
+val_max_batches: 68
+text_emb_cache_path: /data1/cympyc1785/data/DynPose-LBM/latentcam_dynpose_d343/umt5_cache/text_len128.pt
+peav_video_cache_dir: /data1/cympyc1785/data/DynPose-LBM/latentcam_dynpose_d343/molmo2_cache/video
+peav_text_cache: /data1/cympyc1785/data/DynPose-LBM/latentcam_dynpose_d343/molmo2_cache/prefill.pt

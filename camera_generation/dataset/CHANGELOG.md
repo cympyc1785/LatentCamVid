@@ -11,6 +11,8 @@ Follows [Keep a Changelog](https://keepachangelog.com/).
 
 ### Added
 
+- **`make_holdout_split.py --list_prefix`** (기본 `dynpose` = 예전 파일명) — 다른 코퍼스의 holdout/val 목록이 같은 N 으로 `configs/dynpose_*_scenes_N.txt` 를 덮지 않게 (R210, Dataset-v3 는 `dsv3`).
+
 - **시작 카메라 캡션 절 + preset 당 1개 export (2026-09-29, R89/D296).** `build_bank_captions.py --start_clause` 가 변이의
   `start_cand` (방위 front/back/left/right x 고도 low/mid/high x shot close/medium/wide) 를 "Starting {in front of|behind|
   to the left of|to the right of} {target} at {a low angle|eye level|a high angle} in {a close-up|a medium shot|a wide shot},

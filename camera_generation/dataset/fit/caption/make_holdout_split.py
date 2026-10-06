@@ -157,8 +157,9 @@ def main(args):
 
     dst_tr = path.join(args.out_root, f"{args.dst_prefix}_train.txt")
     dst_te = path.join(args.out_root, f"{args.dst_prefix}_test.txt")
-    out_hold = path.join(CINE, "configs", f"dynpose_holdout_scenes_{len(test_scenes)}.txt")
-    out_val = path.join(CINE, "configs", f"dynpose_val_scenes_{len(val_scenes)}.txt")
+    # [R210] --list_prefix: 다른 코퍼스 (Dataset-v3) 의 목록이 같은 N 으로 기존 dynpose_* 파일을 덮지 않게. 기본값은 예전 이름 그대로.
+    out_hold = path.join(CINE, "configs", f"{args.list_prefix}_holdout_scenes_{len(test_scenes)}.txt")
+    out_val = path.join(CINE, "configs", f"{args.list_prefix}_val_scenes_{len(val_scenes)}.txt")
     if not args.dry_run:
         for p, rows in ((dst_tr, tr), (dst_te, te)):
             with open(p, "w", encoding="utf-8") as fh:
@@ -209,6 +210,7 @@ if __name__ == "__main__":
     p.add_argument("--seed", default=200, type=int)
     # [R117] 기존 분할 유지 모드. 예: <d200 root>/seg_list_dynpose_s91 (그 _train/_test.txt 를 읽는다). 없으면 예전 동작.
     p.add_argument("--keep_split_from", default=None, type=str)
+    p.add_argument("--list_prefix", default="dynpose", type=str)   # [R210] configs/<prefix>_holdout_scenes_N.txt
     p.add_argument("--keep_val_scenes", default=path.join(CINE, "configs", "dynpose_val_scenes_102.txt"), type=str)
     p.add_argument("--dry_run", action="store_true", default=False)
     p.add_argument("--no_dry_run", dest="dry_run", action="store_false")

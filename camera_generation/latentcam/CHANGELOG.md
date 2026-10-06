@@ -6,6 +6,8 @@ All notable changes to the latentcam sub-project. Follows [Keep a Changelog](htt
 
 ### Added
 
+- **`train_camera_vae.py --stage edge --eval_sets joint`** — 시작·끝 프레임 속도 비율을 stage_eval 과 같은 split_joint test (joint_all / joint_wt / joint_v1) 에서도 잰다 (R201). 기존 v1_test · wt_test 이름은 그대로.
+
 - **`scripts/eval/motion_magnitude_by_reach.py`** — "모델이 카메라를 GT 보다 덜 움직이는가": GT reach 4분위별 pred/GT 경로 길이·reach 비율 중앙값 + traj_time_metrics per_entry 지표 분위 평균. R191 일회성 분석을 R193 에서 다시 써서 승격.
 - **`eval_testset.py --pred_start` (2026-09-29, R91).** start pose head 가 있는 run 에서 예측 궤적을 **예측 첫 카메라** 위에 놓는다
   (E0_pred = rel0_pred @ E_src_s, E_src_s = inv(rel0_gt) @ E0). 기본 off = GT 첫 카메라 (기존 동작).

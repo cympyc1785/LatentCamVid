@@ -493,8 +493,14 @@ def stage_edge(a):
         return (np.linalg.norm(np.diff(c, axis=1), axis=-1),
                 np.degrees(np.arccos(np.clip((np.trace(M, axis1=-2, axis2=-1) - 1) / 2, -1, 1))))
     out = {}
-    for sk in a.eval_sets.split(","):
-        X = torch.from_numpy(np.load(osp.join(a.cache, f"{sk}.npz"))["cam"]).float()
+    sets = {}
+    for k in a.eval_sets.split(","):
+        if k == "joint":                               # [R201] stage_eval 과 같은 split_joint.json test: 모두 / worldtraj / Dataset-v1
+            sets.update({f"joint_{n}": x for n, x in load_joint(a)[1].items()})
+        else:
+            sets[k] = np.load(osp.join(a.cache, f"{k}.npz"))["cam"]
+    for sk, Xn in sets.items():
+        X = torch.from_numpy(Xn).float()
         tg, rg = speeds(X.numpy())
         mv = (tg.mean(1) > np.median(tg.mean(1)) * 0.1) & (rg.mean(1) > 1e-3)
         for spec in a.eval_vaes.split(","):

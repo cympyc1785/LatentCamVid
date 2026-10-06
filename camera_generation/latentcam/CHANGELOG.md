@@ -492,6 +492,8 @@ All notable changes to the latentcam sub-project. Follows [Keep a Changelog](htt
 
 ### Changed
 
+- **`train_camera_vae.py --lr` 기본값 1e-4 → 1e-3** (R219, 사용자 2026-10-06 "lr는 그냥 1e-3으로 고정하자"). 1e-4 는 R138 에서 확산 config (config_large.py:51) 를 VAE 레시피로 잘못 읽은 값이었다. a_* 등 예전 run 재현은 `--lr 1e-4`.
+
 - **`train_camera_vae.py --cache` 기본값 `tmp/r125/cache` → `tmp/r175/cache`** (w2c · scene-scale 캐시). r125 캐시 (c2w 로 잘못 읽은 worldtraj) 와 그 VAE 46 run · 그 VAE 로 학습한 diffusion overfit 56 run 은 사용자 지시로 삭제 (2026-10-05). `--wt_pose c2w` 재현 옵션은 그대로.
 - **`cache_molmo2_embeddings.py --probe` 기본값을 `''`(noprobe)로 (2026-09-29, 사용자 지시).** 옛 probe 문장은 `--probe legacy`. 기존 캐시 파일은 그대로.
 - **학습 상한을 100 → 50 epoch 으로 (2026-09-19, 사용자 지시 "학습 50epoch까지만 돌려도 될

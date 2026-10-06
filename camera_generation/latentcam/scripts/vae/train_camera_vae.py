@@ -668,7 +668,7 @@ if __name__ == "__main__":
     ap.add_argument("--resume_dir", default="")       # [R139] results/<run> 에서 이어 학습 (같은 폴더에 계속 저장)
     ap.add_argument("--start_epoch", type=int, default=0)  # resume.pth 없을 때 last.pth 의 완료 epoch 수
     ap.add_argument("--wandb_id", default="")         # 이어 쓸 wandb run id
-    ap.add_argument("--lr", type=float, default=1e-4)            # [R138] 기본 = old VAE 레시피 (R125~R137 은 scratch 1e-3)
+    ap.add_argument("--lr", type=float, default=1e-3)            # [R219] old VAE (config_vae.py:43) · CamVLA 모두 1e-3. R138~R178 기본 1e-4 는 확산 config 를 잘못 읽은 값 (FIX.log 10-03) — 재현은 --lr 1e-4
     ap.add_argument("--epochs", type=int, default=100)
     ap.add_argument("--save_epochs", default="")                  # [R139] "100,200" → epoch100.pth, epoch200.pth
     ap.add_argument("--batch", type=int, default=256)

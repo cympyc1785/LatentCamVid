@@ -6,6 +6,8 @@ All notable changes to the latentcam sub-project. Follows [Keep a Changelog](htt
 
 ### Added
 
+- **experiment `dynpose_d200_lookat_nopull_noprobe`** (R234) — Dataset-v1 중 aim=look_at 이고 pull_out 계열이 아닌 세그먼트만 (train 26,669 / test 2,927). framing 개선 실험용. 목록 `latentcam_dynpose_d200/seg_list_dynpose_s91_lookat_nopull_{train,test}.txt`.
+
 - **diffusion val `val/jerk_t` · `val/jerk_t_gt` · `val/jerk_t_ratio`** (`train_latent_cam_dm.traj_shape_metrics`, R233) — 카메라 중심 |Δ³c| / reach, `scripts/eval/traj_time_metrics.py` jerk_t 와 같은 정의 (eval 표와 같은 숫자 체계). reach ≤ 1e-3 창은 제외 (eval 의 정지 판정 0.1×세트 중앙값과는 달라 값이 약간 다를 수 있다). 기존 val/jerk (cam_param 9채널) 은 그대로.
 
 - **CameraVAE `pad_mode="rep_dec"`** (`models/vae_intr_large.py`, `train_camera_vae.py --pad_mode rep_dec`) — encoder zeros / decoder replicate (rep_enc 의 반대). 끝 프레임 속도 감쇠가 decoder 쪽 replicate 에서 오는지 분리 (R220). 기존 pad_mode 동작은 그대로.

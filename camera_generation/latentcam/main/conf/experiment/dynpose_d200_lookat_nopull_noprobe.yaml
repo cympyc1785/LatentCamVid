@@ -1,0 +1,12 @@
+# @package _global_
+# R234 — framing 개선 실험용 Dataset-v1 부분집합 (사용자 2026-10-07 "v1에서 look_at preset 중 pull_out 계열 빼고만 학습 리스트 만들어줘.
+# 이걸로 framing 개선 실험들 진행할거야"). prompts.json aim == look_at 이고 preset 이름에 pull_out 이 없는 세그먼트만:
+# track_look_at · dolly_in_look_at · crane_up · track_orbit_left/right · track_dolly_in_look_at · track_crane_up · static_look_at · orbit_left/right.
+# train 46,278 → 26,669 (9,099 씬) · test 5,144 → 2,927 (1,014 씬). test 는 원래 s91 test 순서 그대로 걸렀다 (val 블록이 앞).
+# 나머지는 부모 (D262 + noprobe 캐시) 그대로 — VAE · objective 는 실험마다 override.
+defaults:
+  - dynpose_d200_molmo2_l21_srccam_noprobe
+
+exp_name: dynpose_d200_lookat_nopull_noprobe
+train_seg_list: /data1/cympyc1785/data/DynPose-LBM/latentcam_dynpose_d200/seg_list_dynpose_s91_lookat_nopull_train.txt
+test_seg_list: /data1/cympyc1785/data/DynPose-LBM/latentcam_dynpose_d200/seg_list_dynpose_s91_lookat_nopull_test.txt

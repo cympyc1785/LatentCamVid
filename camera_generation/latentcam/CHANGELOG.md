@@ -494,6 +494,8 @@ All notable changes to the latentcam sub-project. Follows [Keep a Changelog](htt
 
 ### Changed
 
+- **`val_traj_shape_metrics` 기본값 false → true** (`main/conf/config.yaml`, R229 사용자 "앞으로 diffusion training에 wandb logging에 jerk도 추가"). 모든 diffusion 학습이 val/jerk · val/jerk_gt · val/jerk_ratio (cam_param rot6d+trans 9채널 |Δ³x|, VAE val/jerk 와 같은 정의) 와 subject 가 있으면 val/subject_screen_offset* 을 찍는다. 예전 동작은 `val_traj_shape_metrics=false`.
+
 - **`train_camera_vae.py --lr` 기본값 1e-4 → 1e-3** (R219, 사용자 2026-10-06 "lr는 그냥 1e-3으로 고정하자"). 1e-4 는 R138 에서 확산 config (config_large.py:51) 를 VAE 레시피로 잘못 읽은 값이었다. a_* 등 예전 run 재현은 `--lr 1e-4`.
 
 - **`train_camera_vae.py --cache` 기본값 `tmp/r125/cache` → `tmp/r175/cache`** (w2c · scene-scale 캐시). r125 캐시 (c2w 로 잘못 읽은 worldtraj) 와 그 VAE 46 run · 그 VAE 로 학습한 diffusion overfit 56 run 은 사용자 지시로 삭제 (2026-10-05). `--wt_pose c2w` 재현 옵션은 그대로.

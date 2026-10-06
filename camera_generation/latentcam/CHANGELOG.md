@@ -6,6 +6,8 @@ All notable changes to the latentcam sub-project. Follows [Keep a Changelog](htt
 
 ### Added
 
+- **diffusion val `val/jerk_t` · `val/jerk_t_gt` · `val/jerk_t_ratio`** (`train_latent_cam_dm.traj_shape_metrics`, R233) — 카메라 중심 |Δ³c| / reach, `scripts/eval/traj_time_metrics.py` jerk_t 와 같은 정의 (eval 표와 같은 숫자 체계). reach ≤ 1e-3 창은 제외 (eval 의 정지 판정 0.1×세트 중앙값과는 달라 값이 약간 다를 수 있다). 기존 val/jerk (cam_param 9채널) 은 그대로.
+
 - **CameraVAE `pad_mode="rep_dec"`** (`models/vae_intr_large.py`, `train_camera_vae.py --pad_mode rep_dec`) — encoder zeros / decoder replicate (rep_enc 의 반대). 끝 프레임 속도 감쇠가 decoder 쪽 replicate 에서 오는지 분리 (R220). 기존 pad_mode 동작은 그대로.
 
 - **experiment `dsv3_molmo2_l21_srccam`** — Dataset-v3 (latentcam_dynpose_d343, d343 뱅크 유효 10,000편, 54,646 카메라) 단독 학습 설정. dsv2 와 같은 구조, split = 영상 단위 층화 9:1 (val_max_batches 68), Molmo2 noprobe (prefill.pt — 캐시는 아직 안 구움), CLaTr 게이지는 v1 상속 (R210).

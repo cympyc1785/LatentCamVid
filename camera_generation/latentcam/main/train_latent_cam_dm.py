@@ -267,6 +267,19 @@ def traj_shape_metrics(traj_pred, traj, data, width, height, intrinsics, device)
     반환: 샘플별 (B,) tensor dict. subject 가 없거나 invalid 인 샘플은 valid=0."""
     j = lambda x: (x[:, 3:, :9] - 3 * x[:, 2:-1, :9] + 3 * x[:, 1:-2, :9] - x[:, :-3, :9]).abs().mean((1, 2))
     out = {"jerk": j(traj_pred), "jerk_gt": j(traj)}
+
+    # [R233] jerk_t: 카메라 중심 c = -R^T t 의 |Δ³c| / reach (reach = GT 가 frame 0 에서 가장 멀리 간 거리) —
+    #   scripts/eval/traj_time_metrics.py 의 jerk_t 와 같은 정의 (eval 표와 같은 숫자 체계). reach 가 0 에 가까운 정지 창은 valid_t=0.
+    def centers(x):
+        a1, a2 = x[..., 0:3], x[..., 3:6]
+        b1 = F.normalize(a1, dim=-1)
+        b2 = F.normalize(a2 - (b1 * a2).sum(-1, keepdim=True) * b1, dim=-1)
+        R = torch.stack([b1, b2, torch.cross(b1, b2, dim=-1)], -1)
+        return -torch.einsum("btji,btj->bti", R, x[..., 6:9])
+    cp, cg = centers(traj_pred.float()), centers(traj.float())
+    reach = (cg - cg[:, :1]).norm(dim=-1).amax(1)
+    jt = lambda c: (c[:, 3:] - 3 * c[:, 2:-1] + 3 * c[:, 1:-2] - c[:, :-3]).norm(dim=-1).mean(1) / reach.clamp(min=1e-6)
+    out["jerk_t"], out["jerk_t_gt"], out["valid_t"] = jt(cp), jt(cg), (reach > 1e-3).float()
     st = data.get("val_subject_track")
     if st is None:
         return out
@@ -1027,7 +1040,7 @@ def train():
             # self.training 게이트) 추론과 같은 조건이다. head 가 없으면 n=0 으로 안 찍힌다.
             sp_sum = torch.zeros(3, device=accelerator.device)
             _tsm = bool(getattr(cfg, 'val_traj_shape_metrics', False))   # [R167] overfit 전용 궤적 모양 지표
-            tsm_sum = {k: torch.tensor(0.0, device=accelerator.device) for k in ("jerk", "jerk_gt", "off", "off_gt", "off_err", "n_off")}
+            tsm_sum = {k: torch.tensor(0.0, device=accelerator.device) for k in ("jerk", "jerk_gt", "off", "off_gt", "off_err", "n_off", "jerk_t", "jerk_t_gt", "n_t")}
             sp_cnt = torch.tensor(0, device=accelerator.device)
             data_name_list = []
             _pt = getattr(cfg, 'per_token_noise', False)   # Diffusion-Forcing val monitoring
@@ -1180,6 +1193,8 @@ def train():
                 if _tsm:
                     _m = traj_shape_metrics(traj_pred, traj, data, width, height, intrinsics, device)
                     tsm_sum["jerk"] += _m["jerk"].sum(); tsm_sum["jerk_gt"] += _m["jerk_gt"].sum()
+                    tsm_sum["jerk_t"] += (_m["jerk_t"] * _m["valid_t"]).sum(); tsm_sum["jerk_t_gt"] += (_m["jerk_t_gt"] * _m["valid_t"]).sum()
+                    tsm_sum["n_t"] += _m["valid_t"].sum()
                     if "valid" in _m:
                         _v = _m["valid"]
                         for _k in ("off", "off_gt", "off_err"):
@@ -1292,6 +1307,9 @@ def train():
                 _n = max(total_samples.item(), 1)
                 _log = {"val/jerk": _r["jerk"].item() / _n, "val/jerk_gt": _r["jerk_gt"].item() / _n,
                         "val/jerk_ratio": _r["jerk"].item() / max(_r["jerk_gt"].item(), 1e-12)}
+                if _r["n_t"].item() > 0:   # [R233] 위치 기준 jerk (traj_time_metrics jerk_t 와 같은 정의)
+                    _log.update({"val/jerk_t": _r["jerk_t"].item() / _r["n_t"].item(), "val/jerk_t_gt": _r["jerk_t_gt"].item() / _r["n_t"].item(),
+                                 "val/jerk_t_ratio": _r["jerk_t"].item() / max(_r["jerk_t_gt"].item(), 1e-12)})
                 if _r["n_off"].item() > 0:
                     _no = _r["n_off"].item()
                     _log.update({"val/subject_screen_offset": _r["off"].item() / _no,

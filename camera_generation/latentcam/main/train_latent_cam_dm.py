@@ -303,6 +303,37 @@ def traj_shape_metrics(traj_pred, traj, data, width, height, intrinsics, device)
     return out
 
 
+def framing_target(traj, data, t_lat, device):
+    """[R236/F6] framing 보조 채널 타깃 — 학습 때만 subject 를 쓴다 (test 에는 안 필요).
+    subject (data['val_subject_track'], frame-0 카메라 좌표 / norm_scale, R167 과 같은 키) 를 GT 카메라 (traj cam_param) 로 투영한
+    프레임별 [u, v, 0.5·log z] (u,v = 화면 중앙 기준, 폭·높이 = 1, ±1.5 clamp) 를 VAE latent 축 t_lat 으로 linear interp.
+    반환: (fr (B,t_lat,3), mask (B,t_lat)) — subject 가 없거나 카메라 뒤면 mask 0 (그 칸은 0 채움)."""
+    st = data.get("val_subject_track")
+    B = traj.shape[0]
+    if st is None:
+        return torch.zeros(B, t_lat, 3, device=device), torch.zeros(B, t_lat, device=device)
+    q = st.to(device).float()
+    x = traj.float()
+    a1, a2 = x[..., 0:3], x[..., 3:6]
+    b1 = F.normalize(a1, dim=-1)
+    b2 = F.normalize(a2 - (b1 * a2).sum(-1, keepdim=True) * b1, dim=-1)
+    R = torch.stack([b1, b2, torch.cross(b1, b2, dim=-1)], -1)
+    p = torch.einsum("btij,btj->bti", R, q[..., :3]) + x[..., 6:9]
+    W, H = data["width"].to(device), data["height"].to(device)
+    K = make_intrinsics(x[:, :, -2:], W, H, data["intrinsics"].to(device))
+    z = p[..., 2]
+    zc = z.clamp(min=1e-3)
+    Wv, Hv = W.float(), H.float()          # (B,T) — make_intrinsics 와 같은 모양
+    fr = torch.stack([(K[..., 0, 0] * p[..., 0] / zc / Wv).clamp(-1.5, 1.5),
+                      (K[..., 1, 1] * p[..., 1] / zc / Hv).clamp(-1.5, 1.5), 0.5 * zc.log()], -1)
+    m = (q[..., 3] > 0).float() * (z > 1e-3).float()
+    fr = fr * m.unsqueeze(-1)
+    if fr.shape[1] != t_lat:
+        fr = F.interpolate(fr.transpose(1, 2), size=t_lat, mode="linear", align_corners=True).transpose(1, 2)
+        m = (F.interpolate(m.unsqueeze(1), size=t_lat, mode="linear", align_corners=True).squeeze(1) > 0.999).float()
+    return fr * m.unsqueeze(-1), m
+
+
 def build_track_cond(data, t_lat, device, dropout_p=0.0):
     """[new 2026-08-27] data['target_track'] (B,T,4)[xyz,valid] -> (B,t_lat,4) concat 조건.
 
@@ -526,7 +557,10 @@ def sample(model, scheduler, traj_len, text_emb, text_masks, point_emb, point_ma
     내서, 같은 시드라도 GPU 를 바꾸면 다른 표본이 나오기 때문이다."""
     B = text_emb.size(0)
     device = text_emb.device
-    x_t = torch.randn(B, traj_len, cfg.cam_dim, generator=generator).to(device)
+    _FRs = int(getattr(cfg, 'framing_aux_dim', 0) or 0)          # [R236/F6] framing 보조 채널 (0 = 예전)
+    x_t = torch.randn(B, traj_len, cfg.cam_dim + _FRs, generator=generator).to(device)
+    if _FRs > 0 and x_init is not None and x_init.shape[-1] == cfg.cam_dim:
+        x_init = torch.cat([x_init, torch.zeros(*x_init.shape[:-1], _FRs, device=x_init.device, dtype=x_init.dtype)], -1)
 
     if str(getattr(cfg, 'objective', 'eps')) == 'fm':
         # [R109] flow matching (선형 경로, reflow 없음): x_tau = (1-tau) x0 + tau eps, 모델 출력 v = eps - x0.
@@ -536,7 +570,7 @@ def sample(model, scheduler, traj_len, text_emb, text_masks, point_emb, point_ma
         tau0 = 1.0
         if x_init is not None and t_start is not None:
             if int(t_start) <= 0:
-                return x_init.to(device)          # [R113] 순수 VAE roundtrip
+                return x_init.to(device)[..., :cfg.cam_dim]          # [R113] 순수 VAE roundtrip
             tau0 = min(1.0, float(t_start) / 1000.0)
             x_t = (1.0 - tau0) * x_init.to(device) + tau0 * x_t
             n = max(1, int(round(n * tau0)))
@@ -544,10 +578,19 @@ def sample(model, scheduler, traj_len, text_emb, text_masks, point_emb, point_ma
         for _i in range(n):
             tt = torch.full((B,), float(taus[_i]) * 1000.0, device=device)
             v = model(x_t, tt, text_emb, text_masks, point_emb, point_mask, cond=cond, **(video_kw or {}))
+            _gw = float(getattr(cfg, 'framing_guidance_w', 0.0) or 0.0)
+            if _FRs > 0 and _gw > 0:
+                # [R236/F6] framing 보정 inpainting: 모델이 예측한 x0 의 framing 채널에서 화면 밖 (|u|,|v| > box) 을 box 쪽으로 w 만큼
+                #   끌어당긴 x0' 로 v 를 다시 쓴다 (v' = (x_t - x0') / tau). 카메라 채널은 손대지 않는다 — 다음 step 에서 모델이 맞춘다.
+                _tau = float(taus[_i]); _bx = float(getattr(cfg, 'framing_guidance_box', 0.35))
+                x0 = x_t - _tau * v
+                f = x0[..., cfg.cam_dim:cfg.cam_dim + 2]
+                x0 = x0.clone(); x0[..., cfg.cam_dim:cfg.cam_dim + 2] = f + _gw * (f.clamp(-_bx, _bx) - f)
+                v = (x_t - x0) / max(_tau, 1e-4)
             x_t = x_t + (taus[_i + 1] - taus[_i]) * v
             if step_cb is not None:
                 step_cb(_i)
-        return x_t
+        return x_t[..., :cfg.cam_dim]
 
     scheduler.set_timesteps(num_inference_steps=cfg.diffusion_inference_step, device=device)
     ts = scheduler.timesteps
@@ -557,7 +600,7 @@ def sample(model, scheduler, traj_len, text_emb, text_masks, point_emb, point_ma
         if int(t_start) <= 0:
             # [R113] t_start=0: 모델을 한 번도 안 부르고 GT latent 를 그대로 돌려준다 = 순수 VAE roundtrip
             #   (호출부가 decode 한다). "떨림이 VAE 에서 오나" 진단용.
-            return x_init.to(device)
+            return x_init.to(device)[..., :cfg.cam_dim]
         ts = ts[ts <= int(t_start)]
         x_t = scheduler.add_noise(x_init.to(device), x_t, ts[:1].expand(B))
     for _i, t in enumerate(ts):
@@ -571,7 +614,7 @@ def sample(model, scheduler, traj_len, text_emb, text_masks, point_emb, point_ma
         x_t = scheduler.step(noise_pred, t, x_t).prev_sample
         if step_cb is not None:
             step_cb(_i)
-    return x_t
+    return x_t[..., :cfg.cam_dim]          # [R236/F6] framing 채널 (있으면) 은 버린다
 
 
 from tau_sampler import sample_tau
@@ -873,11 +916,20 @@ def train():
               f"w={getattr(cfg, 'start_pose_w')} tf_p={_sp_kw['start_pose_tf_p']} "
               f"noise={_sp_kw['start_pose_noise']} — 시퀀스 뒤 query 토큰 1개 (T -> T+1). "
               f"tf_p=0 이면 GT 를 안 넣는다(= 순수 예측 arm)")
+    # [R236/F6] framing 보조 채널: 0 (기본) 이면 cam_in/out 이 예전과 같은 크기 = state_dict·동작 비트 동일.
+    _FR = int(getattr(cfg, 'framing_aux_dim', 0) or 0)
+    if _FR > 0:
+        assert _FR == 3, "framing_aux_dim 은 3 ([u, v, 0.5 log z]) 만 지원"
+        assert not getattr(cfg, 'is_ar', False) and not getattr(cfg, 'per_token_noise', False), "framing_aux 는 표준 diffusion 경로 전용"
+        assert float(getattr(cfg, 'aim_loss_w', 0.0) or 0.0) == 0, "framing_aux 와 aim_loss 는 같이 못 쓴다 (x0_hat 채널 수)"
+        assert bool(getattr(cfg, 'val_traj_shape_metrics', False)), "framing_aux 는 val_subject_track (val_traj_shape_metrics=true) 이 필요"
+        print(f"(model) framing aux: cam_in/out = cam_dim {cfg.cam_dim} + {_FR} (u,v,0.5logz) · w={getattr(cfg, 'framing_aux_w', 1.0)} "
+              f"· sample guidance w={getattr(cfg, 'framing_guidance_w', 0.0)} box={getattr(cfg, 'framing_guidance_box', 0.35)}")
     if cfg.point_encoder != 'custom':
-        model = CameraDiffusionModel(cam_dim=cfg.cam_dim, cond_dim=_track_dim,
+        model = CameraDiffusionModel(cam_dim=cfg.cam_dim + _FR, cond_dim=_track_dim,
                                      **_geo_kw, **_vid_kw, **_sp_kw)
     else:
-        model = CameraDiffusionModel(cam_dim=cfg.cam_dim, cond_dim=_track_dim,
+        model = CameraDiffusionModel(cam_dim=cfg.cam_dim + _FR, cond_dim=_track_dim,
                                      pc_encoder=pc_encoder, **_geo_kw, **_vid_kw, **_sp_kw)
     
     # [new 2026-09-25, R58/D286] video_onfly: connector 를 model submodule 로 붙인다 (resume/opt/ckpt
@@ -1510,6 +1562,10 @@ def train():
                 else:
                     traj_latents = traj
                 t4 = time.time()
+                _frm = None
+                if _FR > 0:   # [R236/F6] [cam latent, framing] 를 같이 denoise
+                    _fr, _frm = framing_target(traj, data, traj_latents.shape[1], device)
+                    traj_latents = torch.cat([traj_latents, _fr.to(traj_latents.dtype)], -1)
             _tB = _tick()                                # text(umt5)+video cond+vae 끝
 
             if 'pc' in data and cfg.point_encoder == 'custom':
@@ -1591,7 +1647,14 @@ def train():
                     _target = noise_scheduler.get_velocity(traj_latents, noise, timesteps)   # [R114]
                 else:
                     _target = noise
-                loss = F.mse_loss(noise_pred, _target)
+                if _FR > 0:   # [R236/F6] 카메라 채널 손실 + framing 채널 마스크 손실 (subject 없는 칸 제외)
+                    _C = cfg.cam_dim
+                    loss = F.mse_loss(noise_pred[..., :_C], _target[..., :_C])
+                    _fe = ((noise_pred[..., _C:] - _target[..., _C:]) ** 2).mean(-1)
+                    _fl = (_fe * _frm).sum() / _frm.sum().clamp(min=1.0)
+                    loss = loss + float(getattr(cfg, 'framing_aux_w', 1.0)) * _fl
+                else:
+                    loss = F.mse_loss(noise_pred, _target)
                 # [new 2026-09-22 / D261] 시작 pose 회귀. start_pose_pred=false 면 None 이라
                 # loss 가 예전과 비트 동일하다.
                 _sp = start_pose_loss(accelerator.unwrap_model(model), data, device)

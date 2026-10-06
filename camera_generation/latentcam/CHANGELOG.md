@@ -6,6 +6,7 @@ All notable changes to the latentcam sub-project. Follows [Keep a Changelog](htt
 
 ### Added
 
+- **framing 보조 채널 + 샘플링 guidance (`framing_aux_dim` · `framing_aux_w` · `framing_guidance_w` · `framing_guidance_box`)** (R236 / F6, Pulp Motion 식) — 학습 때만 subject (`val_subject_track`) 로 GT 카메라의 subject 화면 위치 [u, v, 0.5 log z] 를 latent 축 (13) 으로 만들어 카메라 latent 옆 채널로 같이 denoise (cam_in/out = cam_dim+3, subject 없는 칸은 마스크한 framing mse × w). test 때는 subject 불필요. fm 샘플러에서 `framing_guidance_w>0` 이면 예측 x0 의 (u,v) 가 box 밖이면 box 쪽으로 당겨 v 를 다시 쓴다. `sample()` 은 framing 채널을 잘라 cam_dim 만 반환 (호출부 불변). `eval_testset.py` 도 같은 채널 수로 모델 생성. 기본값 0 = 예전과 동일. aim_loss·AR·per-token 과 같이 못 씀 (assert).
 - **`train_camera_vae.py --v1_norm_const` · `--wt_norm const --wt_norm_const`** (R235) — VAE 캐시를 scene scale (avg_scale) 대신 코퍼스 상수 하나로 나눈다 (test time 에 DA3 recon 없이 쓰는 버전). `load_dataset(overrides)` 로 dataset scale_mode=const 를 건다. const 도 avg_scale 이 있는 창만 써서 split_joint 인덱스가 그대로 맞는다. 기본값은 예전 동작.
 
 - **experiment `dynpose_d200_lookat_nopull_noprobe`** (R234) — Dataset-v1 중 aim=look_at 이고 pull_out 계열이 아닌 세그먼트만 (train 26,669 / test 2,927). framing 개선 실험용. 목록 `latentcam_dynpose_d200/seg_list_dynpose_s91_lookat_nopull_{train,test}.txt`.

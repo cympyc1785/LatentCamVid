@@ -785,3 +785,11 @@ clatr_ckpt_path: /data1/cympyc1785/LatentCamVid/camera_generation/latentcam/chec
 # num_cams 는 padding 길이라 (trajectory_dataset.py:180) 49프레임으로 학습한 CLaTr 에
 # 120 을 주면 71프레임이 zero-pad 로 따라 들어간다. d200 ckpt 는 `dynpose49_d200`.
 clatr_standardization: null
+
+# [R236/F6] framing 보조 채널 (Pulp Motion 식, plans.md G5 F6). 학습 때만 subject (val_subject_track) 를 써서 GT 카메라의 subject 화면 위치
+#   [u, v, 0.5 log z] 를 카메라 latent 옆 채널로 같이 denoise. test 때는 subject 불필요. 0 = 끔 (예전과 비트 동일).
+framing_aux_dim: 0
+framing_aux_w: 1.0
+# 샘플링 (fm 전용) framing 보정: 예측 x0 의 framing (u,v) 이 화면 밖 (|.| > box) 이면 box 쪽으로 w 만큼 당긴다. 0 = 끔.
+framing_guidance_w: 0.0
+framing_guidance_box: 0.35

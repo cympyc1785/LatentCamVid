@@ -391,6 +391,7 @@ def roundtrip_metrics(model, X, dev="cuda"):
     extra.update(late_errors(rec.numpy().astype(np.float64), X.numpy().astype(np.float64)))
     return {**extra, "mse": err.mean().item(), "mse_rot": err[..., :6].mean().item(), "mse_trans": err[..., 6:9].mean().item(),
             "mse_intr": err[..., 9:].mean().item(), "mse_last_frame": err[:, -1].mean().item(),
+            "mse_trans_last": err[:, -1, 6:9].mean().item(),   # [R209] 마지막 프레임 translation 3채널 MSE (FDE 의 MSE 판)
             "jerk": float(rj.mean()), "jerk_gt": float(gj.mean()), "jerk_ratio": float(rj.mean() / gj.mean()),
             "jerk_ratio_med": float(np.median(rj / np.maximum(gj, 1e-9))), "latent_std": mu.std().item(), "n": len(X)}
 

@@ -6,6 +6,8 @@ All notable changes to the latentcam sub-project. Follows [Keep a Changelog](htt
 
 ### Added
 
+- **CameraVAE `pad_mode="rep_dec"`** (`models/vae_intr_large.py`, `train_camera_vae.py --pad_mode rep_dec`) — encoder zeros / decoder replicate (rep_enc 의 반대). 끝 프레임 속도 감쇠가 decoder 쪽 replicate 에서 오는지 분리 (R220). 기존 pad_mode 동작은 그대로.
+
 - **experiment `dsv3_molmo2_l21_srccam`** — Dataset-v3 (latentcam_dynpose_d343, d343 뱅크 유효 10,000편, 54,646 카메라) 단독 학습 설정. dsv2 와 같은 구조, split = 영상 단위 층화 9:1 (val_max_batches 68), Molmo2 noprobe (prefill.pt — 캐시는 아직 안 구움), CLaTr 게이지는 v1 상속 (R210).
 
 - **`train_camera_vae.py --train_on_test 1 --use_wt 0`** — Dataset-v1 만 in-distribution (v1 train + v1 test 를 학습, worldtraj test 는 안 넣음). 예전엔 split joint 이면 use_wt 와 무관하게 worldtraj test 를 더했다 — use_wt 1 (id_* 등) 동작은 그대로 (R214).

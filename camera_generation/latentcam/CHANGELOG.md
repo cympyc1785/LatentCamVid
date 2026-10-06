@@ -6,6 +6,8 @@ All notable changes to the latentcam sub-project. Follows [Keep a Changelog](htt
 
 ### Added
 
+- **`train_camera_vae.py --train_on_test 1 --use_wt 0`** — Dataset-v1 만 in-distribution (v1 train + v1 test 를 학습, worldtraj test 는 안 넣음). 예전엔 split joint 이면 use_wt 와 무관하게 worldtraj test 를 더했다 — use_wt 1 (id_* 등) 동작은 그대로 (R214).
+
 - **`train_camera_vae.py` roundtrip 지표에 `mse_trans_last`** — 마지막 프레임 translation 3채널 MSE (cam_param 공간, FDE 의 MSE 판). stage eval / train val 출력에 키 하나 추가, 기존 키는 그대로 (R209).
 
 - **`train_camera_vae.py --stage edge --eval_sets joint`** — 시작·끝 프레임 속도 비율을 stage_eval 과 같은 split_joint test (joint_all / joint_wt / joint_v1) 에서도 잰다 (R201). 기존 v1_test · wt_test 이름은 그대로.

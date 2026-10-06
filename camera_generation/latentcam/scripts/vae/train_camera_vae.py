@@ -449,7 +449,7 @@ def train_windows(a):
         # [R194] in-distribution 비교: test (Dataset-v1 test + joint 의 worldtraj test) 전부를 학습 창에 넣는다. 평가는 같은 test —
         #   일반화가 아니라 VAE 구조의 표현 용량을 본다 (사용자 2026-10-05). 기본 0 = 옛 동작.
         tr.append(te["cam"])
-        if a.split == "joint":
+        if a.split == "joint" and a.use_wt:            # [R214] --use_wt 0 이면 worldtraj test 도 넣지 않는다 (v1 만 in-distribution)
             tr.append(extra_sets["val_wt"].numpy())
     return tr, extra_sets, Xte, te_names, inc
 

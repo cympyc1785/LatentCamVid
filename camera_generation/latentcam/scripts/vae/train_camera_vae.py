@@ -44,11 +44,12 @@ WT = "/data1/cympyc1785/LatentCamVid/DATA/worldtraj/dynamicverse"
 D262 = osp.join(LC, "results", "20260922_155726_dynpose_d200_molmo2_l21_srccam")
 
 
-def load_dataset():
+def load_dataset(overrides=None):
+    """[R235] overrides: D262 cfg 위에 덮을 키 (예 scale_mode=const · norm_scale_const) — 기본 None = 예전과 같음."""
     spec = importlib.util.spec_from_file_location("evt", osp.join(LC, "scripts", "eval_testset.py"))
     evt = importlib.util.module_from_spec(spec)
     spec.loader.exec_module(evt)
-    cfg, _ = evt.build_cfg(D262, {})
+    cfg, _ = evt.build_cfg(D262, dict(overrides or {}))
     os.chdir(MAIN)
     from base import Trainer
     tr = Trainer(cfg=cfg)
@@ -59,7 +60,8 @@ def load_dataset():
 def stage_cache_v1(a):
     import torch
     from torch.utils.data import DataLoader
-    cfg, tr = load_dataset()
+    # [R235] --v1_norm_const > 0: scene scale (avg_scale) 대신 코퍼스 상수 하나로 나눈다 (dataset scale_mode=const). intr_norm 은 config 의 rel 그대로.
+    cfg, tr = load_dataset({"scale_mode": "const", "norm_scale_const": a.v1_norm_const} if a.v1_norm_const > 0 else None)
     for split, sub in (("train", tr.trainset_loader), ("test", tr.validset_loader)):
         dl = DataLoader(sub, batch_size=64, num_workers=16,
                         collate_fn=lambda b: [(x["data_name"], x["cam_param"].float().numpy()) for x in b])
@@ -171,7 +173,7 @@ def stage_cache_wt(a):
     print(f"[wt] Dataset-v1 train 창 평균 이동거리 중앙값 m1 = {m1:.4f} · test uuid {len(test_uuid)} 제외", flush=True)
     files = wt_files(a)
     print(f"[wt] cameras.json {len(files)}", flush=True)
-    if a.wt_norm == "avg_scale":                       # [R175] scene scale (Dataset-v1 과 같은 정의) — stage_wt_scale 결과
+    if a.wt_norm in ("avg_scale", "const"):            # [R175] scene scale (Dataset-v1 과 같은 정의) — stage_wt_scale 결과 · [R235] const 도 창 집합용으로 읽음
         wsc = json.load(open(osp.join(a.cache, "wt_avg_scale.json")))
         print(f"[wt] norm = avg_scale (scene.ply 점 - 창 첫 카메라 평균 거리), {len(wsc)} 창", flush=True)
     names, cams, skipped = [], [], {"short": 0, "static": 0, "test": 0, "bad": 0}
@@ -215,11 +217,13 @@ def stage_cache_wt(a):
             if s < a.wt_min_disp:
                 skipped["static"] += 1
                 continue
-            if a.wt_norm == "avg_scale":
+            if a.wt_norm in ("avg_scale", "const"):
                 ns = wsc.get(f"{sub}/{uuid}/{s0}")
-                if ns is None:
+                if ns is None:                         # const 도 같은 창 집합을 쓰도록 avg_scale 없는 창은 뺀다 (split_joint 인덱스 호환)
                     skipped["noscale"] = skipped.get("noscale", 0) + 1
                     continue
+                if a.wt_norm == "const":               # [R235] scene scale 대신 코퍼스 상수
+                    ns = a.wt_norm_const
             else:                                      # R125~R170: 창 평균 카메라 이동거리 s 를 v1 중앙값 m1 에 맞춤
                 ns = s / m1
             out = ds._target_out(torch.from_numpy(w2c[s0:s0 + T]).float(), torch.from_numpy(K[s0:s0 + T]).float(),
@@ -656,7 +660,9 @@ if __name__ == "__main__":
     ap.add_argument("--split", default="joint", choices=["joint", "legacy"])   # [R135] joint = split_joint.json (기본) / legacy = v1 test 만 val (R125~R132)
     ap.add_argument("--test_frac", type=float, default=0.1)
     ap.add_argument("--split_seed", type=int, default=0)
-    ap.add_argument("--wt_norm", default="avg_scale", choices=["avg_scale", "cam_disp"])   # [R175] worldtraj translation 분모. cam_disp = R125~R170 (창 이동거리 s / m1)
+    ap.add_argument("--wt_norm", default="avg_scale", choices=["avg_scale", "cam_disp", "const"])   # [R175] worldtraj translation 분모. cam_disp = R125~R170 (창 이동거리 s / m1)
+    ap.add_argument("--wt_norm_const", type=float, default=2.3895)   # [R235] --wt_norm const 의 분모 (worldtraj 창 avg_scale 기하평균)
+    ap.add_argument("--v1_norm_const", type=float, default=0.0)      # [R235] > 0 이면 cache_v1 을 scale_mode=const (분모 = 이 값) 로. v1 avg_scale 기하평균 2.540516
     ap.add_argument("--workers", type=int, default=32)
     ap.add_argument("--wt_pose", default="w2c", choices=["w2c", "c2w"])   # [R169] cameras.json 해석. c2w = R125~R168 캐시 (잘못된 해석) 재현
     ap.add_argument("--wt_split", default="train", choices=["train", "test"])   # cache_wt: test = Dataset-v1 test 씬의 cameras.json 만 → wt_test.npz

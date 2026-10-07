@@ -11,6 +11,8 @@ Follows [Keep a Changelog](https://keepachangelog.com/).
 
 ### Added
 
+- **`fit/bank/export_target_track.py --bbox_seg_root [--only_bbox]`** (R243) — 같은 키 순서로 `<scene>/da3/subject_bbox.npz` (SAM3 instance 메타의 프레임별 box_xyxy, node.track_id 매칭, 정규화 [cx,cy,w,h] + frame_valid). d200 10,169 씬 내보냄 (frame_valid 평균 0.945).
+
 - **`eval/eval_subject_in_frame.py --entries <file>`** (R237) — entry 이름 목록으로 부분집합만 렌더 (예: aim == look_at). 씬 필터 뒤·샤딩 전에 거르고 entry 가 없는 씬은 열지 않는다. 기본 None = 전량 (기존 동작).
 
 - **`make_holdout_split.py --list_prefix`** (기본 `dynpose` = 예전 파일명) — 다른 코퍼스의 holdout/val 목록이 같은 N 으로 `configs/dynpose_*_scenes_N.txt` 를 덮지 않게 (R210, Dataset-v3 는 `dsv3`).

@@ -328,6 +328,7 @@ class CamDataset(torch.utils.data.Dataset):
         self._target_pose_cache = {}
         # target_track_dim>0: scene_idx -> {'track': (V,T,3) world, 'valid': (V,), 'keys': {str:i}}
         self._target_track_cache = {}
+        self._subject_bbox_cache = {}   # [R243] subject_bbox_cond
         # [new 2026-09-20, D206] aim_loss_w>0: scene_idx -> {seg_key: 1.0 if aim=='look_at' else 0.0}
         # prompts.json 의 `aim` 필드 하나만 뽑아 둔 것. samples 튜플에는 **안 넣는다** —
         # 그 튜플은 <root>/.latentcam_index/*.pt 에 그대로 직렬화돼 있어(_load_index) 원소 수가
@@ -1212,6 +1213,27 @@ class CamDataset(torch.utils.data.Dataset):
                            f"(scene={self.scene_dir_list[scene_idx]})")
         return cache['track'][v], bool(cache['valid'][v])
 
+    def _subject_bbox(self, scene_idx, seg_key, T):
+        """[R243] subject_bbox_cond: `<scene>/da3/subject_bbox.npz` (export_target_track.py --bbox_seg_root) 의 원본 영상 2D bbox
+        -> (T,5) [cx-0.5, cy-0.5, w, h, valid] (폭·높이 정규화). 박스 없는 프레임은 전 채널 0 (= concat 조건의 null). 파일이 없으면 터뜨린다."""
+        cache = self._subject_bbox_cache.get(scene_idx)
+        if cache is None:
+            p = osp.join(self.scene_dir_list[scene_idx], 'da3', 'subject_bbox.npz')
+            if not osp.isfile(p):
+                raise FileNotFoundError(f"subject_bbox_cond 인데 파일이 없다: {p} — export_target_track.py --bbox_seg_root 를 먼저 돌릴 것")
+            z = np.load(p, allow_pickle=True)
+            cache = {'bbox': torch.from_numpy(np.asarray(z['bbox'], dtype=np.float32)),
+                     'valid': torch.from_numpy(np.asarray(z['frame_valid'], dtype=np.float32)),
+                     'keys': {str(k): i for i, k in enumerate(z['keys'].tolist())}}
+            self._subject_bbox_cache[scene_idx] = cache
+        v = cache['keys'][str(seg_key)]
+        b, ok = cache['bbox'][v], cache['valid'][v]
+        if b.shape[0] != T:
+            idx = self._even_indices(b.shape[0], T)
+            b, ok = b[idx], ok[idx]
+        out = torch.cat([b[:, :2] - 0.5, b[:, 2:], ok[:, None]], -1)
+        return out * ok[:, None]
+
     def _track_cond(self, scene_idx, seg_key, extrinsics, norm_scale):
         """subject world 궤적 -> cam_param 과 같은 게이지의 (T,4) [x,y,z,valid].
 
@@ -1827,6 +1849,9 @@ class CamDataset(torch.utils.data.Dataset):
                 or _aim_w > 0):
             out['target_track'] = self._track_cond(
                 scene_idx, data_name.split('_')[-1], extrinsics, norm_scale)
+        # [R243] subject_bbox_cond: 원본 영상의 subject 2D bbox 를 concat 조건으로 (target_track 과 같은 경로 · 기본 off = 키 없음).
+        if getattr(self.cfg, 'subject_bbox_cond', False):
+            out['subject_bbox'] = self._subject_bbox(scene_idx, data_name.split('_')[-1], extrinsics.shape[0])
         # [R167] val_traj_shape_metrics: val 의 subject 화면 위치 측정용. 모델·손실이 읽는 'target_track' 과
         #   **다른 키** 로 둔다 (build_track_cond 는 키만 있으면 concat 조건으로 쓰므로 같은 키면 네트워크 입력이 바뀐다).
         if getattr(self.cfg, 'val_traj_shape_metrics', False):

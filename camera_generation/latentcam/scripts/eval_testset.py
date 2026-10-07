@@ -248,6 +248,7 @@ def main():
     # --drop-track 은 같은 ckpt·같은 시드로 도는 **다른 조건**이라 tag 를 갈라 두지 않으면
     # track 있는 결과를 조용히 덮어쓴다 (시드를 tag 에 박는 것과 같은 이유).
     _track_dim = int(getattr(cfg, 'target_track_dim', 0) or 0)
+    _track_dim += 5 if getattr(cfg, 'subject_bbox_cond', False) else 0   # [R243] 2D bbox 조건
     if args.drop_track:
         if _track_dim == 0:
             print("[warn] --drop-track 인데 target_track_dim=0 — 이 arm 엔 track 조건이 없다 (no-op)")

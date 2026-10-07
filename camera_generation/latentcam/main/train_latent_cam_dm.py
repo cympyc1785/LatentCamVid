@@ -343,9 +343,11 @@ def build_track_cond(data, t_lat, device, dropout_p=0.0):
     dropout_p 는 per-sample: 추론에서 track 없이 쓸 수 있게 null 조건을 학습에 남겨 두는 장치.
     """
     tt = data.get('target_track')
-    if tt is None:
+    sb = data.get('subject_bbox')          # [R243] subject_bbox_cond — (B,T,5) 2D bbox 를 track 뒤에 이어 붙인다
+    if tt is None and sb is None:
         return None
-    tt = tt.to(device).float().transpose(1, 2)                      # (B,4,T)
+    tt = torch.cat([x.to(device).float() for x in (tt, sb) if x is not None], -1)
+    tt = tt.transpose(1, 2)                                         # (B,C,T)
     cond = F.interpolate(tt, size=int(t_lat), mode='linear',
                          align_corners=True).transpose(1, 2)        # (B,t_lat,4)
     if dropout_p > 0:
@@ -834,6 +836,7 @@ def train():
     # [new 2026-08-27] cfg.target_track_dim>0: subject OBB track 을 x_t 채널에 concat.
     # 0 (기본) 이면 cond_dim=0 -> cam_in 이 기존과 동일 (state_dict/동작 비트 동일).
     _track_dim = int(getattr(cfg, 'target_track_dim', 0) or 0)
+    _track_dim += 5 if getattr(cfg, 'subject_bbox_cond', False) else 0   # [R243] 2D bbox [cx,cy,w,h,valid]
     if _track_dim > 0:
         assert not getattr(cfg, 'is_ar', False) and not getattr(cfg, 'per_token_noise', False), \
             "target_track_dim>0 은 표준 diffusion 경로에만 배선되어 있다 (is_ar/per_token_noise 미지원)"
@@ -1651,7 +1654,11 @@ def train():
                     _C = cfg.cam_dim
                     loss = F.mse_loss(noise_pred[..., :_C], _target[..., :_C])
                     _fe = ((noise_pred[..., _C:] - _target[..., _C:]) ** 2).mean(-1)
-                    _fl = (_fe * _frm).sum() / _frm.sum().clamp(min=1.0)
+                    # [R236 fix] framing 원소당 가중치를 카메라와 같게: 마스크 안 framing 제곱오차 합 / 카메라 원소 수 (B·T·C).
+                    #   예전 (마스크 평균, 3 채널) 은 원소당 ~C/3 = 21 배라 clip 된 gradient 를 framing 이 독차지해 카메라가 안 배웠다
+                    #   (smoke: w=0 이면 cam 1.33→0.37, w=1 이면 1.1 에서 멈춤).
+                    _fl = (_fe * _frm).sum() * _fe.new_tensor(float(noise_pred.shape[-1] - _C)) / float(_fe.shape[0] * _fe.shape[1] * _C)
+                    _fr_log = (loss.item(), _fl.item(), float(_frm.mean()), float(traj_latents[..., _C:].abs().max()))
                     loss = loss + float(getattr(cfg, 'framing_aux_w', 1.0)) * _fl
                 else:
                     loss = F.mse_loss(noise_pred, _target)
@@ -1688,6 +1695,11 @@ def train():
             _tE = _tick()                                # backward+step 끝
             # [R108] lr 은 schedule 과 무관하게 항상 기록 (사용자 "다른 모델 학습들도 train/lr 기록되게").
             _log = {"train/loss": loss.item(), "train/lr": _real_opt_lr.param_groups[0]['lr']}
+            if _FR > 0:   # [R236] 카메라·framing 손실을 따로 (L1 이 학습 안 되던 원인 추적)
+                _log.update({"train/cam_loss": _fr_log[0], "train/framing_loss": _fr_log[1], "train/framing_mask": _fr_log[2],
+                             "train/framing_absmax": _fr_log[3]})
+                if global_step % 100 == 0:
+                    print(f"[framing] step {global_step} cam {_fr_log[0]:.4f} framing {_fr_log[1]:.4f} mask {_fr_log[2]:.3f} absmax {_fr_log[3]:.3f}", flush=True)
             if _aux is not None:
                 _log["train/readout_aux_obb"] = _aux.item()   # 가중치 곱하기 전 원 손실
             if _aim is not None:

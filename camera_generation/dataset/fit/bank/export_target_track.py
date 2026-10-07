@@ -19,6 +19,10 @@ scene_graph 에 없는 anchor 는 valid=False + track 0 으로 남긴다 (조용
     keys        (V,)    str       target_poses.npz 의 keys 와 동일 (순서까지)
     anchor_id   (V,)    str
 
+[R243] `--bbox_seg_root <DynPose eval_data>` 를 주면 같은 키 순서로 `<scene>/da3/subject_bbox.npz` 도 쓴다:
+    bbox (V,T,4) float32 [cx, cy, w, h] 원본 영상 정규화 · frame_valid (V,T) bool · keys · anchor_id
+    (SAM3 instance 메타의 box_xyxy, node.track_id 와 id 매칭. `--only_bbox` 면 target_track.npz 는 그대로 둔다)
+
 env: 아무거나 (numpy 만 쓴다)
 
 예시:
@@ -60,6 +64,32 @@ def node_track_world(node, T_wg, num_frames):
         center_g = np.tile(np.asarray(node["obb"]["center"], dtype=np.float64), (num_frames, 1))
     homo = np.concatenate([center_g, np.ones((num_frames, 1))], axis=1)          # (T,4)
     return (homo @ T_wg.T)[:, :3]
+
+
+def node_bbox_2d(node, seg_root, video, num_frames):
+    """[R243] 노드 -> 프레임별 원본 영상 2D bbox (T,4) [cx, cy, w, h] (영상 폭·높이로 정규화, 0~1) + (T,) valid.
+    SAM3 instance 메타 (`<seg_root>/seg_instances[_static]/<video>/meta.json` 의 frames[t][*].box_xyxy) 에서
+    node.track_id (+ merged_from) 와 id 가 같은 박스들의 합집합. 그 프레임에 박스가 없으면 valid 0 · 박스 0 (지어내지 않는다)."""
+    sub = "seg_instances" if node["id"].startswith("dyn") else "seg_instances_static"
+    mp = path.join(seg_root, sub, video, "meta.json")
+    box = np.zeros((num_frames, 4), dtype=np.float32)
+    ok = np.zeros(num_frames, dtype=bool)
+    if not path.isfile(mp):
+        return box, ok
+    with open(mp, encoding="utf-8") as file:
+        meta = json.load(file)
+    W, H = float(meta["width"]), float(meta["height"])
+    ids = {node.get("track_id")} | set(node.get("merged_from") or [])
+    frames = meta["frames"]
+    for t in range(min(num_frames, len(frames))):
+        bs = [b["box_xyxy"] for b in frames[t] if b.get("id") in ids]
+        if not bs:
+            continue
+        b = np.asarray(bs, dtype=np.float64)
+        x0, y0, x1, y1 = b[:, 0].min(), b[:, 1].min(), b[:, 2].max(), b[:, 3].max()
+        box[t] = [(x0 + x1) / 2 / W, (y0 + y1) / 2 / H, (x1 - x0) / W, (y1 - y0) / H]
+        ok[t] = True
+    return box, ok
 
 
 def main(args):
@@ -113,6 +143,23 @@ def main(args):
             track[i] = cache[anchor]
             valid[i] = True
 
+        if args.bbox_seg_root:
+            # [R243] 같은 키 순서로 subject 2D bbox (SAM3) 도 내보낸다 → `<scene>/da3/subject_bbox.npz`
+            bbox = np.zeros((len(keys), T, 4), dtype=np.float32)
+            fvalid = np.zeros((len(keys), T), dtype=bool)
+            bcache = {}
+            for i, anchor in enumerate(anchors):
+                if anchor not in bcache:
+                    node = nodes.get(anchor)
+                    bcache[anchor] = None if node is None else node_bbox_2d(node, args.bbox_seg_root, video, num_frames)
+                if bcache[anchor] is not None:
+                    bbox[i], fvalid[i] = bcache[anchor]
+            if not args.dry_run:
+                np.savez(path.join(scene_dir, "da3", "subject_bbox.npz"), bbox=bbox, frame_valid=fvalid,
+                         keys=np.array(keys), anchor_id=np.array(anchors))
+            if args.only_bbox:
+                rows.append((video, len(keys), int(fvalid.any(1).sum()), sorted(missing)))
+                continue
         out_path = path.join(scene_dir, "da3", "target_track.npz")
         if not args.dry_run:
             np.savez(out_path, track_world=track, valid=valid,
@@ -154,4 +201,7 @@ if __name__ == "__main__":
     parser.add_argument("--videos", nargs="+", default=None)
     parser.add_argument("--max_rows", type=int, default=60)   # 표에 찍을 최대 행 수
     parser.add_argument("--dry_run", action="store_true")
+    # [R243] SAM3 2D bbox 도 내보내기: DynPose eval_data 루트 (seg_instances/ · seg_instances_static/ 가 있는 곳). None = 예전 동작.
+    parser.add_argument("--bbox_seg_root", default=None)
+    parser.add_argument("--only_bbox", action="store_true")      # target_track.npz 는 건드리지 않고 subject_bbox.npz 만
     main(parser.parse_args())

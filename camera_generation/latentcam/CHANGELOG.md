@@ -6,6 +6,8 @@ All notable changes to the latentcam sub-project. Follows [Keep a Changelog](htt
 
 ### Added
 
+- **`subject_bbox_cond`** (R243) — subject 의 원본 영상 2D bbox (SAM3, `[cx-0.5, cy-0.5, w, h, valid]`) 를 `target_track` 과 같은 concat 조건 경로로 (cond_dim +5, `target_track_dim` 과 같이 켜면 9). `<scene>/da3/subject_bbox.npz` 를 읽는다. 기본 false = 예전 동작.
+- **train/cam_loss · train/framing_loss 로깅** (R236) — framing_aux_dim>0 일 때 두 손실을 따로 wandb 에 (+100 step 마다 stdout).
 - **`train_camera_vae.py --recon sigma`** (R239) — σ-VAE (Rybkin et al. 2021, optimal 공유 σ): σ* = sqrt(배치 MSE) (log σ softclip -6), recon = Gaussian NLL 차원 합, KL 도 차원 합 (β = `--kl_w`, 논문대로 1 로 씀). 기본 l1 = 예전 동작.
 - **`scripts/eval/pred_roundtrip_metrics.py`** (R237) — diffusion 생성 궤적을 VAE roundtrip 비교표와 같은 지표 (mse_trans · jerk · jerk ratio · 마지막 프레임 mse_trans · late_errors 의 FDE/rpe1_late/rpe1_rot_late · 첫·끝 구간 속도비) 로 잰다. eval_testset 의 transforms (OpenGL c2w) 를 VAE 캐시 cam_param 공간으로 되돌림 (OpenCV 반전 → frame 0 상대 w2c → scene 단위 scale, 캐시와 2.9e-7 일치). 정지 entry 는 같은 scene 형제의 scale, 형제 없으면 제외.
 - **`train_camera_vae.frame_speeds` · `edge_ratios`** (R237) — `stage_edge` 안의 속도 함수를 모듈 함수로 꺼내 위 스크립트와 같이 쓴다 (stage_edge 동작 동일).
@@ -69,6 +71,10 @@ All notable changes to the latentcam sub-project. Follows [Keep a Changelog](htt
   `scripts/data/cache_geo_raw_da3.py SAVE_DTYPE=bfloat16` — 굽는 자리에서 bf16 으로 저장
   (`convert_geo_raw_cache.py` 와 같은 캐스트, 12 view 는 fp32 808 GB 라 사후 변환이 부담).
   기본 float32 = 옛 동작.
+
+### Fixed
+
+- **framing 보조 손실 정규화** (R236) — 마스크 평균 (3 채널) 이라 원소당 가중치가 카메라의 ~21 배여서 clip 된 gradient 를 framing 이 독차지, 카메라가 전혀 안 배웠다 (L1 학습 loss 2.2 고정, val jerk_t 209×). 마스크 안 제곱오차 합 / 카메라 원소 수로 바꿔 원소당 가중치를 카메라와 같게. smoke: cam loss 1.33→0.20 (1,500 step). 이전 L1 (frame3) run 은 무효.
 
 ### Removed
 - **`val_every_epochs` 되돌림 (2026-09-28, R79).** 사용자 지시로 validation 을 다시 매 epoch. D289 config 의 키도 삭제.

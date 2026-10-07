@@ -281,6 +281,9 @@ target_track_dropout: 0.1     # per-sample null 드랍 (추론에서 track 없�
 # target_track_dim=0 arm 과 같은 눈금이 되고, dropout 이 실제로 null 조건을 학습시켰는지가
 # 학습 중에 바로 보인다. target_track_dim=0 이면 조건 자체가 없어 no-op.
 target_track_val_drop: false
+# [R243] subject 2D bbox (SAM3, 원본 영상 정규화 [cx-0.5, cy-0.5, w, h, valid]) 를 target_track 과 같은 concat 조건 경로로 (cond_dim +5).
+#   <scene>/da3/subject_bbox.npz 필요 (dataset/fit/bank/export_target_track.py --bbox_seg_root). false = 예전 동작.
+subject_bbox_cond: false
 max_scenes: null              # cap #scenes loaded (null = all; small int for smoke tests)
 train_seg_list: null          # [new] explicit train segment-list file (<batch>/<hash>/<seg>); null = random 90/10 split
 test_seg_list: null           # [new] explicit val/test segment-list file; val = its first (val_max_batches×batch_size) segments

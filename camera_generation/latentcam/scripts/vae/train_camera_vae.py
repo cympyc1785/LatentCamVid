@@ -310,6 +310,23 @@ def late_errors(rec, gt, static_frac=0.1, smooth_k=9):
     return out
 
 
+def frame_speeds(cam):
+    """(N,T,11) cam_param → 프레임 간 이동 속도 |Δc| (N,T-1) 와 회전 속도 (deg, N,T-1). stage_edge 의 끝 속도비 (R176) 정의."""
+    R, c = w2c_from_cam(cam.astype(np.float64))
+    M = np.einsum("ntij,ntkj->ntik", R[:, :-1], R[:, 1:])
+    return (np.linalg.norm(np.diff(c, axis=1), axis=-1),
+            np.degrees(np.arccos(np.clip((np.trace(M, axis1=-2, axis2=-1) - 1) / 2, -1, 1))))
+
+
+def edge_ratios(rec, gt):
+    """[R237] 시작·끝 프레임 구간 속도비 (|v_rec| / |v_gt| 중앙값, 정지 창 제외) — stage_edge 와 같은 정의, 첫·마지막 구간만."""
+    tg, rg = frame_speeds(gt); tp, rp = frame_speeds(rec)
+    mv = (tg.mean(1) > np.median(tg.mean(1)) * 0.1) & (rg.mean(1) > 1e-3)
+    rt = np.median(tp[mv] / np.maximum(tg[mv], 1e-9), 0); rr = np.median(rp[mv] / np.maximum(rg[mv], 1e-9), 0)
+    return {"early_trans_vel_ratio": float(rt[0]), "late_trans_vel_ratio": float(rt[-1]),
+            "early_rot_vel_ratio": float(rr[0]), "late_rot_vel_ratio": float(rr[-1]), "n_edge": int(mv.sum())}
+
+
 def jerk(x):
     """(B,T,C) -> 창별 평균 |Δ³x| (rot6d+trans 채널만)."""
     return np.abs(np.diff(x[..., :9], n=3, axis=1)).mean(axis=(1, 2))
@@ -492,11 +509,7 @@ def stage_edge(a):
     import torch
     from models.vae_intr_large import CameraVAE
 
-    def speeds(cam):
-        R, c = w2c_from_cam(cam.astype(np.float64))
-        M = np.einsum("ntij,ntkj->ntik", R[:, :-1], R[:, 1:])
-        return (np.linalg.norm(np.diff(c, axis=1), axis=-1),
-                np.degrees(np.arccos(np.clip((np.trace(M, axis1=-2, axis2=-1) - 1) / 2, -1, 1))))
+    speeds = frame_speeds
     out = {}
     sets = {}
     for k in a.eval_sets.split(","):

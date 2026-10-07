@@ -200,6 +200,16 @@ def main(args):
         print(f"[scenes] {len(by_scene)}/{len(wanted)} 씬 선택"
               + (f"  (ref 에 없음 {len(missing)})" if missing else ""), flush=True)
 
+    # [R237] entry 부분집합 (예: aim == look_at 만). 한 줄에 entry 이름 (`dynpose_<scene>_<k>`) 하나.
+    #   씬 필터 뒤, 샤딩 전에 거른다 — entry 가 다 빠진 씬은 열지 않는다. 기본 None = 전량 = 기존 동작.
+    if args.entries:
+        with open(args.entries, encoding="utf-8") as file:
+            keep = {line.strip() for line in file if line.strip()}
+        n0 = sum(len(v) for v in by_scene.values())
+        by_scene = {s: [x for x in v if x[0] in keep] for s, v in by_scene.items()}
+        by_scene = {s: v for s, v in by_scene.items() if v}
+        print(f"[entries] {sum(len(v) for v in by_scene.values())}/{n0} entry · 씬 {len(by_scene)}", flush=True)
+
     # 샤딩은 **씬 단위**다. entry 로 자르면 같은 씬의 점군을 샤드마다 다시 올리게 되는데,
     # 씬 하나 여는 비용(unproject)이 entry 하나 렌더보다 훨씬 크다. 기본값 1/0 은 전량 =
     # 기존 동작과 비트 단위로 같다. `--scenes` 를 **먼저** 거르고 샤딩은 그 뒤다 — 순서가
@@ -457,6 +467,8 @@ if __name__ == "__main__":
     # 산출물 옆에 "어떤 표본이었나"가 남아야 해서다 (main() 주석 참조).
     # `--merge` 와 같이 주면 렌더 없이 **합치면서** 거른다 — 전량 샤드에서 표본 표를 뽑을 때.
     parser.add_argument("--scenes", default=None)
+    # [R237] 돌릴 entry 이름 파일 (한 줄에 하나). None = 전량 (기존 동작).
+    parser.add_argument("--entries", default=None)
     # 씬 단위 샤딩 (`sam3_seg_instances.py` 와 같은 패턴). 기본 1/0 = 전량, 기존 동작 그대로.
     parser.add_argument("--num_shards", type=int, default=1)
     parser.add_argument("--shard_id", type=int, default=0)

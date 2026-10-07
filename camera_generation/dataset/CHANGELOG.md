@@ -11,6 +11,8 @@ Follows [Keep a Changelog](https://keepachangelog.com/).
 
 ### Added
 
+- **`eval/eval_subject_in_frame.py --entries <file>`** (R237) — entry 이름 목록으로 부분집합만 렌더 (예: aim == look_at). 씬 필터 뒤·샤딩 전에 거르고 entry 가 없는 씬은 열지 않는다. 기본 None = 전량 (기존 동작).
+
 - **`make_holdout_split.py --list_prefix`** (기본 `dynpose` = 예전 파일명) — 다른 코퍼스의 holdout/val 목록이 같은 N 으로 `configs/dynpose_*_scenes_N.txt` 를 덮지 않게 (R210, Dataset-v3 는 `dsv3`).
 
 - **시작 카메라 캡션 절 + preset 당 1개 export (2026-09-29, R89/D296).** `build_bank_captions.py --start_clause` 가 변이의

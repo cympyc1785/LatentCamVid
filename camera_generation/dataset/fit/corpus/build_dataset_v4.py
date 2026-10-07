@@ -65,7 +65,7 @@ def stage_track(a):
         track, valid, keys, anchors = z["track_world"].copy(), z["valid"], z["keys"], [str(x) for x in z["anchor_id"]]
         T = track.shape[1]
         fvalid = np.ones(track.shape[:2], dtype=bool)
-        src = np.array(["v1"] * len(keys))
+        src = np.array(["v1"] * len(keys), dtype="<U16")   # "cotracker3" 가 잘리지 않게 (기본 <U2 면 "co")
         mv1 = np.zeros(len(keys), dtype=bool); mv2 = np.zeros(len(keys), dtype=bool)
         trk_path = np.full(len(keys), np.nan)
         gp = f"{GRAPH}/{s}/scene_graph.json"

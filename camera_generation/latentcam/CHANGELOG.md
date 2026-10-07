@@ -6,6 +6,7 @@ All notable changes to the latentcam sub-project. Follows [Keep a Changelog](htt
 
 ### Added
 
+- **`train_camera_vae.py --recon sigma`** (R239) — σ-VAE (Rybkin et al. 2021, optimal 공유 σ): σ* = sqrt(배치 MSE) (log σ softclip -6), recon = Gaussian NLL 차원 합, KL 도 차원 합 (β = `--kl_w`, 논문대로 1 로 씀). 기본 l1 = 예전 동작.
 - **`scripts/eval/pred_roundtrip_metrics.py`** (R237) — diffusion 생성 궤적을 VAE roundtrip 비교표와 같은 지표 (mse_trans · jerk · jerk ratio · 마지막 프레임 mse_trans · late_errors 의 FDE/rpe1_late/rpe1_rot_late · 첫·끝 구간 속도비) 로 잰다. eval_testset 의 transforms (OpenGL c2w) 를 VAE 캐시 cam_param 공간으로 되돌림 (OpenCV 반전 → frame 0 상대 w2c → scene 단위 scale, 캐시와 2.9e-7 일치). 정지 entry 는 같은 scene 형제의 scale, 형제 없으면 제외.
 - **`train_camera_vae.frame_speeds` · `edge_ratios`** (R237) — `stage_edge` 안의 속도 함수를 모듈 함수로 꺼내 위 스크립트와 같이 쓴다 (stage_edge 동작 동일).
 - **framing 보조 채널 + 샘플링 guidance (`framing_aux_dim` · `framing_aux_w` · `framing_guidance_w` · `framing_guidance_box`)** (R236 / F6, Pulp Motion 식) — 학습 때만 subject (`val_subject_track`) 로 GT 카메라의 subject 화면 위치 [u, v, 0.5 log z] 를 latent 축 (13) 으로 만들어 카메라 latent 옆 채널로 같이 denoise (cam_in/out = cam_dim+3, subject 없는 칸은 마스크한 framing mse × w). test 때는 subject 불필요. fm 샘플러에서 `framing_guidance_w>0` 이면 예측 x0 의 (u,v) 가 box 밖이면 box 쪽으로 당겨 v 를 다시 쓴다. `sample()` 은 framing 채널을 잘라 cam_dim 만 반환 (호출부 불변). `eval_testset.py` 도 같은 채널 수로 모델 생성. 기본값 0 = 예전과 동일. aim_loss·AR·per-token 과 같이 못 씀 (assert).

@@ -630,8 +630,16 @@ def stage_train(a):
             with torch.autocast("cuda", dtype=torch.bfloat16, enabled=a.amp == "bf16"):
                 x_hat, mu, logvar = model(x)
             x_hat, mu, logvar = x_hat.float(), mu.float(), logvar.float()
-            rec = F.l1_loss(x_hat, x) if a.recon == "l1" else F.mse_loss(x_hat, x)   # [R138] old VAE = L1
-            kl = (-0.5 * (1 + logvar - mu ** 2 - logvar.exp())).mean()
+            if a.recon == "sigma":
+                # [R239] σ-VAE (Rybkin et al. 2021, optimal σ): decoder 분산을 학습하지 않고 배치 MSE 로 해석해 정한 공유 스칼라
+                #   σ* = sqrt(MSE) (log σ 는 -6 에서 softclip). recon = Gaussian NLL 을 차원 합, KL 도 합 (β = --kl_w, 논문 1) — 둘 다 샘플 평균.
+                log_sigma = ((x - x_hat) ** 2).mean().sqrt().log()
+                log_sigma = -6 + F.softplus(log_sigma + 6)
+                rec = (0.5 * ((x - x_hat) / log_sigma.exp()) ** 2 + log_sigma + 0.5 * np.log(2 * np.pi)).sum((1, 2)).mean()
+                kl = (-0.5 * (1 + logvar - mu ** 2 - logvar.exp())).sum((1, 2)).mean()
+            else:
+                rec = F.l1_loss(x_hat, x) if a.recon == "l1" else F.mse_loss(x_hat, x)   # [R138] old VAE = L1
+                kl = (-0.5 * (1 + logvar - mu ** 2 - logvar.exp())).mean()
             loss = rec + a.kl_w * kl
             if a.smooth_w > 0:        # 디코드 결과의 3차 차분이 GT 보다 큰 만큼만 벌한다
                 jh = (x_hat[:, 3:, :9] - 3 * x_hat[:, 2:-1, :9] + 3 * x_hat[:, 1:-2, :9] - x_hat[:, :-3, :9]).abs()
@@ -696,7 +704,7 @@ if __name__ == "__main__":
     ap.add_argument("--kl_w", type=float, default=1e-3)
     ap.add_argument("--lr_schedule", default="constant", choices=["constant", "cosine"])
     ap.add_argument("--wd", type=float, default=0.01)
-    ap.add_argument("--recon", default="l1", choices=["l1", "mse"])
+    ap.add_argument("--recon", default="l1", choices=["l1", "mse", "sigma"])   # [R239] sigma = σ-VAE (optimal 공유 σ, 합 NLL + 합 KL; --kl_w 1 로)
     ap.add_argument("--grad_clip", type=float, default=0.0)            # [R179] CamVLA 레시피 = 0.5
     ap.add_argument("--amp", default="off", choices=["off", "bf16"])   # [R179] CamVLA 레시피 = bf16
     ap.add_argument("--smooth_w", type=float, default=0.0)

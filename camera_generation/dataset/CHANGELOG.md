@@ -11,6 +11,8 @@ Follows [Keep a Changelog](https://keepachangelog.com/).
 
 ### Added
 
+- **`fit/corpus/build_dataset_v4.py`** (R246) — Dataset-v4 = v1 + CoTracker3 subject 궤적. `--stage link,track,lists,report`: v1 파일은 symlink, `target_track.npz` · `subject_motion.npz` (moving_v1/v2, frame_valid, trk_path) · seg list (track 계열 중 moving_v2=False anchor 변이 제외) 만 새로 쓴다. v1 은 건드리지 않음.
+
 - **`fit/bank/export_target_track.py --bbox_seg_root [--only_bbox]`** (R243) — 같은 키 순서로 `<scene>/da3/subject_bbox.npz` (SAM3 instance 메타의 프레임별 box_xyxy, node.track_id 매칭, 정규화 [cx,cy,w,h] + frame_valid). d200 10,169 씬 내보냄 (frame_valid 평균 0.945).
 
 - **`eval/eval_subject_in_frame.py --entries <file>`** (R237) — entry 이름 목록으로 부분집합만 렌더 (예: aim == look_at). 씬 필터 뒤·샤딩 전에 거르고 entry 가 없는 씬은 열지 않는다. 기본 None = 전량 (기존 동작).

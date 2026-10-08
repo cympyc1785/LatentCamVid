@@ -851,7 +851,9 @@ def measure_trajectory(renderer, poses: np.ndarray, num_frames: int, measure_fra
              "hole_max": round(float(np.max(holes)), 4),
              "subject_area_med": round(float(np.nanmedian(areas)), 4),
              "subject_in_frame": round(float(np.mean(in_frame)), 3),
-             "measured_frames": picks.tolist()}
+             "measured_frames": picks.tolist(),
+             # [R263] 마지막 잰 프레임의 subject 면적 — pull_out 하한 게이트 (fit --min_area_end) 가 이분법 중에 읽는다.
+             "subject_area_last": round(float(areas[-1]), 4) if len(areas) else float("nan")}
     if area_timeline:
         # 접기 전 배열. `measured_frames` 와 길이가 같고 인덱스가 1:1 로 맞는다 — CSV 로 나갈 때
         # 쉼표를 못 쓰므로(`bank.csv` 는 따옴표 없는 writer 다) `|` 로 잇는다.

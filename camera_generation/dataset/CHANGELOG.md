@@ -11,6 +11,7 @@ Follows [Keep a Changelog](https://keepachangelog.com/).
 
 ### Added
 
+- **`fit/bank/fit_hole_ladder.py --min_area_end` / `--min_area_end_presets`** (R263) — pull_out 계열 subject 면적 하한. 정규식(기본 `pull_out|dolly_out`)에 맞는 변이는 끝 프레임 subject 면적 < 값 을 넘침(binding `shot_floor`)으로 보고 손잡이를 줄인다. 시작부터 아래면 하한에서도 못 넘어 clamped_low 로 남는다 (= reject). 기본 0 = 끔 (예전과 동일). `sample_camera_bank` stats 에 `subject_area_last` 추가. 파일럿 config `configs/bank/r263_areafloor.json`, `r263p_vista_{before,after}.json` (parkour).
 - **`exec/prepare_et_d200.py`** (R258) — Dataset-v1 s91 → E.T.(DIRECTOR) et-data (`et_dynpose_d200_s91`: traj KITTI c2w · char · caption · CLIP seq 심링크 · cam_segments · intrinsics · split) + 표준화 통계 `DIRECTOR/configs/dataset/standardization/d200s91.yaml`. 좌표 = char0 원점 · y-up (W=diag(1,-1,-1)). train 46,277 / test 5,144. E.T. 대조군 학습 세팅용 (학습은 아직 안 함).
 
 - **`fit/corpus/build_dataset_v4.py`** (R246) — Dataset-v4 = v1 + CoTracker3 subject 궤적. `--stage link,track,lists,report`: v1 파일은 symlink, `target_track.npz` · `subject_motion.npz` (moving_v1/v2, frame_valid, trk_path) · seg list (track 계열 중 moving_v2=False anchor 변이 제외) 만 새로 쓴다. v1 은 건드리지 않음.

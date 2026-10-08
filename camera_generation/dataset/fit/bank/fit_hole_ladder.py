@@ -186,6 +186,7 @@ env: `vista4d` (렌더러가 GPU 를 쓴다)
         --aim_anchor source_frame0 --bank_dir hole_bank_f0share
 """
 import json
+import re
 import sys
 from argparse import ArgumentParser
 from math import log
@@ -631,7 +632,8 @@ def solve_knob(probe, target_hole: float, points: list, kind: str, iterations: i
                max_elev: float = float("inf"), min_ground: float = float("-inf"),
                lo_override: float | None = None, min_approach: float = float("-inf"),
                min_seen: float = float("-inf"), max_behind_dyn: float | None = None,
-               metric_fn=None, min_in_frame: float = float("-inf")):
+               metric_fn=None, min_in_frame: float = float("-inf"),
+               min_area_end: float = float("-inf")):
     """"예산 안의 최대 크기"를 이분법으로 푼다. (k, status, binding, 실측 횟수).
 
     `max_behind < 0` 이면 예산은 hole 하나다 (기존 동작 그대로). `>= 0` 이면 **충돌 예산 두 개**가
@@ -738,6 +740,9 @@ def solve_knob(probe, target_hole: float, points: list, kind: str, iterations: i
             elif (lambda f: f == f and f < min_in_frame)(
                     geo.get("subject_in_frame", float("nan"))):
                 verdicts[knob] = (True, "framing")
+            # [R263] subject 면적 하한 (pull_out 계열): 끝 프레임 subject 면적이 이 아래면 넘친 것. 끄면 -inf.
+            elif (lambda a: a == a and a < min_area_end)(geo.get("subject_area_last", float("nan"))):
+                verdicts[knob] = (True, "shot_floor")
             elif (metric_fn(geo) if metric_fn is not None else hole) >= target_hole:
                 verdicts[knob] = (True, "hole")
             # D112. hole **뒤**. 여기 오면 hole 은 이미 예산 안이므로, 기존 뱅크에서 `(False,
@@ -1395,7 +1400,10 @@ def main(args):
                                                               max_behind_dyn,
                                                               metric_fn=(shot_dev if shot_ladder
                                                                          else None),
-                                                              min_in_frame=min_in_frame)
+                                                              min_in_frame=min_in_frame,
+                                                              min_area_end=(float(args.min_area_end)
+                                                                            if args.min_area_end > 0 and re.search(args.min_area_end_presets, preset)
+                                                                            else float("-inf")))
                 calls_total += calls
                 _, poses, info, mult, hold_from = cache[knob]
                 # 모양을 최대치까지 키우고도 max_scale 에 붙어 있으면 knob 이 아니라 **모양이 천장**이다.
@@ -2053,6 +2061,11 @@ def build_parser():
     #   `shot_scale` — Δ 는 **정지(손잡이 0) 대비 subject 화면면적 배율의 로그 절대값**이다.
     #                  Δ 0.2/0.4/0.7/1.1 ≈ ×1.22/×1.49/×2.0/×3.0. hole 은 열로만 남는다.
     parser.add_argument("--ladder_metric", default="hole", choices=("hole", "shot_scale"))
+    # [R263] subject 면적 하한 게이트 (사용자 2026-10-08 "pull out 에서 일정 이하로 안 내려가게"). 0 = 끔 (예전과 동일).
+    #   이 preset 정규식에 맞는 변이는 끝 프레임 subject 면적 (화면 비) 이 값 아래로 내려가는 크기를 "넘침" 으로 본다 (binding shot_floor).
+    #   시작부터 이미 아래면 하한에서도 걸려 clamped_low+shot_floor 로 남는다 (= reject).
+    parser.add_argument("--min_area_end", default=0.0, type=float)
+    parser.add_argument("--min_area_end_presets", default="pull_out|dolly_out", type=str)
     # D275. shot_scale 사다리에서 빼는 preset 군. targetless = 캡션 `targetless` 플래그
     # (pan/tilt/roll/free_pedestal) → 이동량 사다리 `--motion_ladder` (τ; 회전은 ×60°). none = 옛 동작.
     parser.add_argument("--shot_exempt", default="none", choices=("none", "targetless"))

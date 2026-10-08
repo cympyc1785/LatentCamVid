@@ -11,6 +11,7 @@ Follows [Keep a Changelog](https://keepachangelog.com/).
 
 ### Added
 
+- **`fit/graph/build_scene_graph.py --tracker_dir` / `--tracker_min_pairs`** (R265) — dyn 노드의 `track.center_smooth`·`center_drift_u`·`path_len_u` 를 CoTracker 궤적 (`<dir>/<video>__<id>.npz`, 첫 프레임 OBB 중심 + 누적 변위) 으로 바꾼다. 일부만 보여 OBB 중심이 떠돌던 정지 subject 가 `track_*` 로 라우팅되던 것 대책. `moving` 은 안 바꾼다 (D128). 궤적이 끊기거나 파일이 없으면 OBB 그대로 + `center_source` 기록. 기본 None = 끔. 파일럿 config `configs/bank/r265_tracker.json`.
 - **`viz/viz_tracker_vs_obb.py`** (R261) — CoTracker subject 궤적 vs scene graph OBB 중심을 소스 영상 위에 그린다 (anchor 별 타일). `--cases` 없으면 track.py 결과에서 자동 선택 (OBB moving→tracker static · 둘 다 moving · 끊김).
 - **`fit/graph/build_scene_graph.py --obb_trim_quantile`** (R264) — OBB 를 맞추기 전 프레임별로 수평 주축 2개 + 중력축의 백분위 양끝 점을 버린다 (depth 경계에서 시선 방향으로 늘어진 꼬리가 기존 필터를 일부 통과해 minAreaRect 를 부풀리던 것). 기본 0 = 끔. c619a48a 양끝 2% 에서 extent 0.68~0.93 배. 파일럿 config `configs/bank/r264_obbtrim.json` (출력 tmp/r264/out_dynpose, v3 graph 불변).
 - **`viz/render_bank_videos.py --draw_obb`** (R264) — anchor 의 scene graph OBB (그 프레임 위치·yaw) 를 렌더 카메라로 투영해 노랑으로 그린다. 기본 off.

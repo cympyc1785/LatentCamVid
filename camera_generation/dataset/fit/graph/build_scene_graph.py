@@ -140,6 +140,39 @@ def trim_obb_points(points_g: np.ndarray, quantile: float) -> np.ndarray:
     return points_g[keep] if keep.sum() >= 3 else points_g
 
 
+def apply_tracker_centers(nodes: list, video: str, tracker_dir: str, min_pairs: int = 5):
+    """[R265] dyn 노드의 위치를 CoTracker 궤적으로 바꾼다 (`tmp/r246/track.py` 의 `<video>__<id>.npz`).
+
+    일부만 보이는 물체는 마스크가 줄었다 늘며 OBB 중심이 떠돌아, 가만히 있어도 `center_drift_u` 가 커지고
+    `track_*` preset 이 붙는다 (Dataset-v3 13,489 anchor 중 OBB moving→tracker static 2,428 = 0.212).
+    tracker 는 물체 위 점을 따라가므로 보이는 면적과 무관하다.
+    바꾸는 것: `track.center_smooth` = 첫 프레임 OBB 중심 + tracker 누적 변위, `center_drift_u`, `path_len_u`.
+    `moving` 은 **안 바꾼다** — anchor split key 라 강등하면 dyn anchor 가 사라진다 (D128 사용자 판단);
+    정지 판정은 `center_drift_u` 를 보는 `--track_min_drift_u` 라우팅이 한다.
+    끊긴 궤적 (어느 프레임이든 인접 프레임 공통 가시점 < `min_pairs`) 이나 파일이 없으면 OBB 그대로 두고
+    `center_source` 에 이유를 남긴다.
+    """
+    for node in nodes:
+        if node["kind"] != "dyn":
+            continue
+        f = path.join(tracker_dir, f"{video}__{node['id']}.npz")
+        if not path.exists(f):
+            node["center_source"] = "obb(no_track)"
+            continue
+        z = np.load(f)
+        if int(z["n_pairs"][1:].min()) < min_pairs:
+            node["center_source"] = "obb(track_break)"
+            continue
+        cs = np.asarray(node["track"]["center_smooth"], dtype=float)
+        new = cs[0] + np.asarray(z["trk_disp"], dtype=float)[:len(cs)]
+        node["obb_center_drift_u"] = node.get("center_drift_u")
+        node["obb_path_len_u"] = node.get("path_len_u")
+        node["track"]["center_smooth"] = new
+        node["center_drift_u"] = float(np.linalg.norm(new[-1] - new[0]))
+        node["path_len_u"] = float(np.linalg.norm(np.diff(new, axis=0), axis=-1).sum())
+        node["center_source"] = "cotracker"
+
+
 def build_node(inst: dict, node_id: str, num_frames: int, cam_centers_g: np.ndarray,
                view_dir_g: np.ndarray, parallax: float, deinflate: bool = False,
                min_points_per_frame: int = 30,
@@ -398,6 +431,8 @@ def main(args):
             counters[inst["kind"]] -= 1
             continue
         nodes.append(node)
+    if args.tracker_dir:
+        apply_tracker_centers(nodes, args.video, args.tracker_dir, args.tracker_min_pairs)
     # `dropped=0` 은 "아무것도 안 떨어뜨렸는데 아무것도 안 남았다"로 읽혀 원인을 가린다 —
     # 실제로는 **입력 instance 가 0개**인 경우가 있다 (SAM3 가 준 명사로 아무것도 못 찾음).
     # 2026-09-13 실측: d182 graph 실패 3편이 전부 이 경우(`seg_instances/<v>/meta.json` 의
@@ -652,6 +687,9 @@ if __name__ == "__main__":
     parser.add_argument("--depth_mode_gap_frac", default=0.005, type=float)
     # [R264] OBB 를 맞추기 전 프레임별 축별 백분위 양끝 제거 (경계 꼬리). 0 = 끔 (예전과 동일). 권장 0.02.
     parser.add_argument("--obb_trim_quantile", default=0.0, type=float)
+    # [R265] dyn 노드 위치·변위를 CoTracker 궤적으로 (`<dir>/<video>__<node_id>.npz`). None = 끔 (예전과 동일).
+    parser.add_argument("--tracker_dir", default=None, type=str)
+    parser.add_argument("--tracker_min_pairs", default=5, type=int)
     # 저시차 깊이축 부풀림 보정. **기본 off** — camel dyn_1 에서 실제 몸통 길이(0.16u)를 0.05u 로
     # 날려버렸다. 부풀림 판정은 아래 표의 size_x(투영 OBB / 마스크 bbox) 로 한다.
     parser.add_argument("--deinflate", action="store_true", default=False)

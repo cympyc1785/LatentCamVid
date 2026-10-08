@@ -11,6 +11,8 @@ Follows [Keep a Changelog](https://keepachangelog.com/).
 
 ### Added
 
+- **`exec/prepare_et_d200.py`** (R258) — Dataset-v1 s91 → E.T.(DIRECTOR) et-data (`et_dynpose_d200_s91`: traj KITTI c2w · char · caption · CLIP seq 심링크 · cam_segments · intrinsics · split) + 표준화 통계 `DIRECTOR/configs/dataset/standardization/d200s91.yaml`. 좌표 = char0 원점 · y-up (W=diag(1,-1,-1)). train 46,277 / test 5,144. E.T. 대조군 학습 세팅용 (학습은 아직 안 함).
+
 - **`fit/corpus/build_dataset_v4.py`** (R246) — Dataset-v4 = v1 + CoTracker3 subject 궤적. `--stage link,track,lists,report`: v1 파일은 symlink, `target_track.npz` · `subject_motion.npz` (moving_v1/v2, frame_valid, trk_path) · seg list (track 계열 중 moving_v2=False anchor 변이 제외) 만 새로 쓴다. v1 은 건드리지 않음.
 
 - **`fit/bank/export_target_track.py --bbox_seg_root [--only_bbox]`** (R243) — 같은 키 순서로 `<scene>/da3/subject_bbox.npz` (SAM3 instance 메타의 프레임별 box_xyxy, node.track_id 매칭, 정규화 [cx,cy,w,h] + frame_valid). d200 10,169 씬 내보냄 (frame_valid 평균 0.945).

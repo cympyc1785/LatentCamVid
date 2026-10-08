@@ -155,6 +155,7 @@ class CameraDiffusionModel(nn.Module):
         peav_readout_queries=49,
         peav_readout_aux_dim=0,
         peav_readout_mode="replace",
+        peav_readout_cond_p=0.0,
         video_text_fuse="token",
         start_pose_dim=0,
         start_pose_tf_p=0.0,
@@ -300,6 +301,9 @@ class CameraDiffusionModel(nn.Module):
                                         self.peav_readout_layers, dropout,
                                         aux_dim=int(peav_readout_aux_dim))
                             if self.peav_readout_layers > 0 else None)
+            # [R253] readout aux head 의 subject 3D 예측을 **concat 조건으로** 쓴다 (test 때 GT subject 없이).
+            #   학습: 샘플마다 확률 p 로 GT target_track 대신 예측 (detach) · 추론: 항상 예측. 0 = 기존 (aux 는 손실 전용).
+            self.peav_readout_cond_p = float(peav_readout_cond_p)
 
         # [new 2026-09-22 / D261] 시작 pose 를 궤적과 **같이** 예측한다.
         #
@@ -425,6 +429,22 @@ class CameraDiffusionModel(nn.Module):
         # [new 2026-08-27] per-token concat 조건. cond=None 이면 zeros = null 조건 — 계측용
         # 호출(geo_attn_probe 등)이 cond 를 모르고 불러도 죽지 않게 하려는 것이지, 학습/샘플링
         # 경로는 반드시 cond 를 명시적으로 넘겨야 한다 (train_latent_cam_dm.build_track_cond).
+        _vid_built = None
+        if getattr(self, 'peav_readout_cond_p', 0.0) > 0 and has_video and self.readout is not None and self.cond_dim > 0:
+            # [R253] readout 을 cam_in 앞에서 먼저 돌려 그 예측 (B,Q,3) 을 조건 xyz 로 쓴다. video_tok 은 아래에서 재사용.
+            _vt, _vk = self._build_video_tok(video_emb, video_mask, video_text_emb, video_text_mask)
+            _rd, self.readout_aux_pred = self.readout(_vt, _vk)
+            _vid_built = (_vt, _vk, _rd)
+            pc = self.readout_aux_pred.detach().float().transpose(1, 2)
+            pc = F.interpolate(pc, size=T, mode='linear', align_corners=True).transpose(1, 2)        # (B,T,3)
+            pc = torch.cat([pc, pc.new_ones(B, T, 1)], -1)[..., :self.cond_dim]
+            if pc.shape[-1] < self.cond_dim:
+                pc = torch.cat([pc, pc.new_zeros(B, T, self.cond_dim - pc.shape[-1])], -1)
+            if cond is None or not self.training:
+                cond = pc
+            else:
+                use = (torch.rand(B, 1, 1, device=device) < self.peav_readout_cond_p).to(pc.dtype)
+                cond = use * pc + (1 - use) * cond.to(pc.dtype)
         if self.cond_dim > 0:
             if cond is None:
                 cond = x_t.new_zeros(B, T, self.cond_dim)
@@ -470,14 +490,20 @@ class CameraDiffusionModel(nn.Module):
             geo_tok = geo_tok * geo_mask.unsqueeze(-1)
 
         if has_video:
-            video_tok, video_kpm = self._build_video_tok(
-                video_emb, video_mask, video_text_emb, video_text_mask)
+            if _vid_built is not None:                    # [R253] 위에서 이미 만들었다
+                video_tok, video_kpm = _vid_built[0], _vid_built[1]
+            else:
+                video_tok, video_kpm = self._build_video_tok(
+                    video_emb, video_mask, video_text_emb, video_text_mask)
             # [new 2026-09-15] readout 을 거친 요약이 아래 층들의 key/value 가 된다. 요약
             # 토큰은 전부 유효하므로 padding mask 는 여기서 사라진다. AR 경로(`forward_ar`)엔
             # 안 걸어 두었다 — video_latent_dim>0 은 표준 diffusion 경로 전용이라 학습
             # 진입점에서 이미 assert 로 막혀 있다 (train_latent_cam_dm.py).
             if self.readout is not None:
-                _rd, self.readout_aux_pred = self.readout(video_tok, video_kpm)
+                if _vid_built is not None:
+                    _rd = _vid_built[2]
+                else:
+                    _rd, self.readout_aux_pred = self.readout(video_tok, video_kpm)
                 if self.peav_readout_mode == 'append':      # [R81] 원 토큰 + 요약 49 토큰
                     if video_kpm is not None:
                         video_kpm = torch.cat([video_kpm, video_kpm.new_zeros(_rd.shape[:2])], dim=1)

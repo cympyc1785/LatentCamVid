@@ -876,7 +876,8 @@ def train():
                 peav_readout_layers=_rol,
                 peav_readout_queries=int(getattr(cfg, 'peav_readout_queries', 49)),
                 peav_readout_aux_dim=int(getattr(cfg, 'peav_readout_aux_dim', 0) or 0),
-                peav_readout_mode=str(getattr(cfg, 'peav_readout_mode', 'replace') or 'replace'))
+                peav_readout_mode=str(getattr(cfg, 'peav_readout_mode', 'replace') or 'replace'),
+                peav_readout_cond_p=float(getattr(cfg, 'peav_readout_cond_p', 0.0) or 0.0))   # [R253]
             _auxw = float(getattr(cfg, 'peav_readout_aux_w', 0.0))
             print(f"(model) peav readout: layers={_rol} "
                   f"queries={_vid_kw['peav_readout_queries']} "

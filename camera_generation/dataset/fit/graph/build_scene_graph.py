@@ -140,17 +140,32 @@ def trim_obb_points(points_g: np.ndarray, quantile: float) -> np.ndarray:
     return points_g[keep] if keep.sum() >= 3 else points_g
 
 
-def apply_tracker_centers(nodes: list, video: str, tracker_dir: str, min_pairs: int = 5):
+def apply_tracker_centers(nodes: list, video: str, tracker_dir: str, min_pairs: int = 5,
+                          inst_by_id: dict | None = None, obb_trim_quantile: float = 0.0,
+                          ref_area_frac: float = 0.0, accumulate: bool = False):
     """[R265] dyn 노드의 위치를 CoTracker 궤적으로 바꾼다 (`tmp/r246/track.py` 의 `<video>__<id>.npz`).
 
     일부만 보이는 물체는 마스크가 줄었다 늘며 OBB 중심이 떠돌아, 가만히 있어도 `center_drift_u` 가 커지고
     `track_*` preset 이 붙는다 (Dataset-v3 13,489 anchor 중 OBB moving→tracker static 2,428 = 0.212).
     tracker 는 물체 위 점을 따라가므로 보이는 면적과 무관하다.
-    바꾸는 것: `track.center_smooth` = 첫 프레임 OBB 중심 + tracker 누적 변위, `center_drift_u`, `path_len_u`.
+    바꾸는 것: `track.center_smooth`, `center_drift_u`, `path_len_u`.
     `moving` 은 **안 바꾼다** — anchor split key 라 강등하면 dyn anchor 가 사라진다 (D128 사용자 판단);
     정지 판정은 `center_drift_u` 를 보는 `--track_min_drift_u` 라우팅이 한다.
     끊긴 궤적 (어느 프레임이든 인접 프레임 공통 가시점 < `min_pairs`) 이나 파일이 없으면 OBB 그대로 두고
     `center_source` 에 이유를 남긴다.
+
+    [R267] `ref_area_frac` > 0 이면 **기준점을 첫 프레임이 아니라 잘 보이는 프레임들**에서 잡는다.
+    첫 프레임에 일부만 보이면 (사용자 2026-10-08 "첫 화면에서 부분만 보이면 이후에 더 큰 부분이 보여도
+    확장이 안 된다") `cs[0] + 변위` 는 부분 OBB 중심을 끝까지 끌고 간다. 마스크 면적이 최대의
+    `ref_area_frac` 배 이상인 프레임 r 마다 `OBB중심(r) + disp(t) − disp(r)` 를 내고 축별 중앙값을 쓴다.
+    extent 도 그 프레임들의 OBB extent 중앙값으로 바꾼다 (부분만 보이는 프레임이 중앙값을 깎던 것).
+    0 = R265 그대로 (첫 프레임 기준, extent 불변).
+
+    [R267c] `accumulate` 면 **물체 좌표계에서 점을 누적**해 OBB 를 한 번 맞춘다 (사용자 "query 를 0·12·24·36·48 에서
+    주는데 왜 3D OBB 가 subject 전체를 못 담음?"). 프레임 t 의 마스크 3D 점에서 disp(t) 를 빼 기준 시점으로 되돌리고
+    49 프레임분을 합친 뒤 `fit_obb(trim)` — 한 번이라도 보인 부분은 다 상자에 들어간다. 위치 = 상자 중심 + disp(t),
+    yaw 는 그 한 값으로 고정 (회전은 변위로 보정하지 않으므로). 회전·관절 운동이 크면 상자가 커진다.
+    `ref_area_frac` 보다 우선한다.
     """
     for node in nodes:
         if node["kind"] != "dyn":
@@ -164,13 +179,48 @@ def apply_tracker_centers(nodes: list, video: str, tracker_dir: str, min_pairs: 
             node["center_source"] = "obb(track_break)"
             continue
         cs = np.asarray(node["track"]["center_smooth"], dtype=float)
-        new = cs[0] + np.asarray(z["trk_disp"], dtype=float)[:len(cs)]
+        disp = np.asarray(z["trk_disp"], dtype=float)[:len(cs)]
         node["obb_center_drift_u"] = node.get("center_drift_u")
         node["obb_path_len_u"] = node.get("path_len_u")
+        new = cs[0] + disp
+        node["center_source"] = "cotracker"
+        if accumulate and inst_by_id is not None and node["id"] in inst_by_id:
+            inst = inst_by_id[node["id"]]
+            pts = [np.asarray(p, dtype=float) - disp[fr] for fr, p in inst["points_by_frame"].items()
+                   if len(p) >= 30 and fr < len(disp)]
+            if pts:
+                P = np.concatenate(pts)
+                if len(P) > 300000:
+                    P = P[np.random.default_rng(0).choice(len(P), 300000, replace=False)]
+                ob = fit_obb(trim_obb_points(P, obb_trim_quantile))
+                new = np.asarray(ob["center"], dtype=float) + disp
+                node["obb_extent_median_all"] = node["obb"]["extent"]
+                node["obb"].update({"extent": ob["extent"], "yaw_rad": float(ob["yaw_rad"]), "R": ob["R"]})
+                c0 = new[min(node["track"]["frames"])]
+                node["obb"]["center"] = c0
+                node["obb"]["z_lo"], node["obb"]["z_hi"] = float(c0[2] - ob["extent"][2] / 2), float(c0[2] + ob["extent"][2] / 2)
+                node["track"]["yaw"] = np.full(len(new), float(ob["yaw_rad"]))
+                node["center_source"] = "cotracker+accum"
+        elif ref_area_frac > 0 and inst_by_id is not None and node["id"] in inst_by_id:
+            inst = inst_by_id[node["id"]]
+            frames = [fr for fr, pts in inst["points_by_frame"].items() if len(pts) >= 30 and fr < len(cs)]
+            areas = np.array([inst["area_frac_by_frame"].get(fr, 0.0) for fr in frames])
+            if len(frames):
+                refs = [fr for fr, a in zip(frames, areas) if a >= ref_area_frac * areas.max()]
+                obbs = {fr: fit_obb(trim_obb_points(inst["points_by_frame"][fr], obb_trim_quantile)) for fr in refs}
+                est = np.stack([np.asarray(obbs[r]["center"]) + disp - disp[r] for r in refs])   # (R, T, 3)
+                new = np.median(est, axis=0)
+                ext = np.median(np.stack([obbs[r]["extent"] for r in refs]), axis=0)
+                node["obb_extent_median_all"] = node["obb"]["extent"]
+                node["obb"]["extent"] = ext
+                c0 = new[min(node["track"]["frames"])]
+                node["obb"]["center"] = c0
+                node["obb"]["z_lo"], node["obb"]["z_hi"] = float(c0[2] - ext[2] / 2), float(c0[2] + ext[2] / 2)
+                node["center_ref_frames"] = [int(r) for r in refs]
+                node["center_source"] = "cotracker+ref"
         node["track"]["center_smooth"] = new
         node["center_drift_u"] = float(np.linalg.norm(new[-1] - new[0]))
         node["path_len_u"] = float(np.linalg.norm(np.diff(new, axis=0), axis=-1).sum())
-        node["center_source"] = "cotracker"
 
 
 def build_node(inst: dict, node_id: str, num_frames: int, cam_centers_g: np.ndarray,
@@ -419,7 +469,7 @@ def main(args):
                                    args.max_dyn_nodes, args.max_stat_nodes)
     dropped.extend(capped)
 
-    nodes, counters = [], {}
+    nodes, counters, inst_by_id = [], {}, {}
     for inst in sorted(merged, key=lambda i: (i["kind"], -i["max_area_frac"])):
         counters[inst["kind"]] = counters.get(inst["kind"], -1) + 1
         node = build_node(inst, f"{inst['kind']}_{counters[inst['kind']]}", num_frames,
@@ -431,8 +481,12 @@ def main(args):
             counters[inst["kind"]] -= 1
             continue
         nodes.append(node)
+        inst_by_id[node["id"]] = inst
     if args.tracker_dir:
-        apply_tracker_centers(nodes, args.video, args.tracker_dir, args.tracker_min_pairs)
+        apply_tracker_centers(nodes, args.video, args.tracker_dir, args.tracker_min_pairs,
+                              inst_by_id=inst_by_id, obb_trim_quantile=args.obb_trim_quantile,
+                              ref_area_frac=args.tracker_ref_area_frac,
+                              accumulate=args.tracker_accumulate)
     # `dropped=0` 은 "아무것도 안 떨어뜨렸는데 아무것도 안 남았다"로 읽혀 원인을 가린다 —
     # 실제로는 **입력 instance 가 0개**인 경우가 있다 (SAM3 가 준 명사로 아무것도 못 찾음).
     # 2026-09-13 실측: d182 graph 실패 3편이 전부 이 경우(`seg_instances/<v>/meta.json` 의
@@ -690,6 +744,10 @@ if __name__ == "__main__":
     # [R265] dyn 노드 위치·변위를 CoTracker 궤적으로 (`<dir>/<video>__<node_id>.npz`). None = 끔 (예전과 동일).
     parser.add_argument("--tracker_dir", default=None, type=str)
     parser.add_argument("--tracker_min_pairs", default=5, type=int)
+    # [R267] 기준 프레임 = 마스크 면적이 최대의 이 배 이상인 프레임들 (첫 프레임 부분 가시 대책). 0 = 첫 프레임 (R265).
+    parser.add_argument("--tracker_ref_area_frac", default=0.0, type=float)
+    # [R267c] 물체 좌표계 (disp 보정) 에서 전 프레임 점을 누적해 OBB 를 한 번 맞춘다. 기본 off.
+    parser.add_argument("--tracker_accumulate", action="store_true", default=False)
     # 저시차 깊이축 부풀림 보정. **기본 off** — camel dyn_1 에서 실제 몸통 길이(0.16u)를 0.05u 로
     # 날려버렸다. 부풀림 판정은 아래 표의 size_x(투영 OBB / 마스크 bbox) 로 한다.
     parser.add_argument("--deinflate", action="store_true", default=False)

@@ -20,6 +20,45 @@ from scene_graph.viz import PALETTE, draw_obb
 EVAL = "/data1/cympyc1785/data/DynPose-100K/eval_data"
 
 
+def grid_main(a):
+    """[R271] `--videos` 여럿 + graph 하나 → 영상마다 한 칸, `--grid` x `--grid` 격자 (사용자 "OBB overlay 영상 4x4 로").
+    anchor 는 각 영상의 `--route_name` (graph 루트 아래, 없으면 out_dynpose 의 preset_route_d343.json) 에서 1·2순위."""
+    label, root = a.graph[0].split("=", 1)
+    tiles = []
+    for v in a.videos:
+        rp = path.join(root, v, a.route_name)
+        rp = rp if path.exists(rp) else path.join("out_dynpose", v, "preset_route_d343.json")
+        anchors = json.load(open(rp))["anchor_ids"]
+        g = json.load(open(path.join(root, v, "scene_graph.json")))
+        nodes = {n["id"]: n for n in g["nodes"]}
+        T_wg = np.linalg.inv(np.asarray(g["frames"]["T_gw"], dtype=float))
+        cam = np.load(f"{EVAL}/recon_and_seg/{v}/cameras.npz")
+        C, I = cam["cam_c2w"], cam["intrinsics"]
+        frames = []
+        for t, im in enumerate(iio.get_reader(f"{EVAL}/recon_and_seg/{v}/video.mp4")):
+            im = np.ascontiguousarray(np.asarray(im).copy())
+            K = np.array([[I[t][0], 0, I[t][2]], [0, I[t][1], I[t][3]], [0, 0, 1]])
+            for rank, aid in enumerate(anchors):
+                if aid in nodes:
+                    draw_obb(im, obb_corners(*node_obb_at(nodes[aid], t)), T_wg, K, C[t], PALETTE[rank % len(PALETTE)],
+                             f"{rank + 1}:{nodes[aid]['label']}", thickness=4)
+            w = a.width // 2 * 2
+            im = cv2.resize(im, (w, int(w * 9 / 16) // 2 * 2))
+            cv2.rectangle(im, (0, 0), (im.shape[1], 22), (0, 0, 0), -1)
+            cv2.putText(im, f"{v[:8]} t{t}", (4, 16), 0, 0.45, (255, 255, 255), 1, cv2.LINE_AA)
+            frames.append(im)
+        tiles.append(frames)
+    T = min(len(x) for x in tiles)
+    n = a.grid
+    blank = np.zeros_like(tiles[0][0])
+    out = []
+    for t in range(T):
+        cells = [x[t] for x in tiles] + [blank] * (n * n - len(tiles))
+        out.append(np.vstack([np.hstack(cells[r * n:(r + 1) * n]) for r in range(n)]))
+    iio.mimwrite(a.out, out, fps=a.fps, macro_block_size=1)
+    print(f"{label}: {len(tiles)} 영상 -> {a.out}")
+
+
 def main(a):
     cam = np.load(f"{EVAL}/recon_and_seg/{a.video}/cameras.npz")
     C, I = cam["cam_c2w"], cam["intrinsics"]
@@ -57,11 +96,15 @@ def main(a):
 
 if __name__ == "__main__":
     ap = ArgumentParser()
-    ap.add_argument("--video", required=True)
+    ap.add_argument("--video", default=None)
+    ap.add_argument("--videos", nargs="*", default=None)       # [R271] 격자 모드 (graph 하나)
+    ap.add_argument("--grid", default=4, type=int)
+    ap.add_argument("--route_name", default="preset_route_d343.json")
     ap.add_argument("--graph", action="append", required=True)   # label=<output_root> (그 아래 <video>/scene_graph.json)
     ap.add_argument("--route", default=None)                      # anchor 를 읽을 preset_route json (없으면 --anchors / dyn_0,dyn_1)
     ap.add_argument("--anchors", nargs="*", default=None)
     ap.add_argument("--out", required=True)
     ap.add_argument("--width", default=480, type=int)
     ap.add_argument("--fps", default=8, type=int)
-    main(ap.parse_args())
+    args = ap.parse_args()
+    grid_main(args) if args.videos else main(args)

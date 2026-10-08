@@ -11,6 +11,8 @@ Follows [Keep a Changelog](https://keepachangelog.com/).
 
 ### Added
 
+- **`viz/viz_obb_compare.py --videos ... --grid N`** (R271) — graph 하나로 여러 영상을 N×N 격자에 (anchor 1·2순위 OBB).
+- **`configs/bank/v5_dynpose_obbtrim.json`** (Dataset-v5) — v3 풀 그대로, graph 만 d182 인자 + `--obb_trim_quantile 0.02` + `--prefer_person_label`, fit 은 면적 하한 0.02. 출력 루트 `out_dynpose_v5` (v3 불변).
 - **`fit/graph/build_scene_graph.py --tracker_ref_area_frac` / `--tracker_accumulate`** (R267) — `--tracker_dir` 위치의 기준을 첫 프레임 대신 ① 마스크 면적이 최대의 이 배 이상인 프레임들 (중심 = 각 기준 프레임 OBB 중심 + 변위차 의 축별 중앙값, extent 도 그 프레임들 중앙값) 또는 ② 변위로 보정한 물체 좌표계에서 전 프레임 마스크 점을 누적해 OBB 한 번 (yaw 고정). 첫 프레임에 일부만 보이면 상자가 커지지 않던 것 대책. 기본 0 / off.
 - **`viz/viz_obb_compare.py`** (R267) — 같은 영상의 graph 여럿을 열로 나란히, route 가 고른 anchor 1·2순위 OBB 만 소스 프레임에 그린다.
 - **`fit/graph/build_scene_graph.py --tracker_dir` / `--tracker_min_pairs`** (R265) — dyn 노드의 `track.center_smooth`·`center_drift_u`·`path_len_u` 를 CoTracker 궤적 (`<dir>/<video>__<id>.npz`, 첫 프레임 OBB 중심 + 누적 변위) 으로 바꾼다. 일부만 보여 OBB 중심이 떠돌던 정지 subject 가 `track_*` 로 라우팅되던 것 대책. `moving` 은 안 바꾼다 (D128). 궤적이 끊기거나 파일이 없으면 OBB 그대로 + `center_source` 기록. 기본 None = 끔. 파일럿 config `configs/bank/r265_tracker.json`.
@@ -108,6 +110,7 @@ Follows [Keep a Changelog](https://keepachangelog.com/).
 
 ### Changed
 
+- **`scene_graph/lift.py radius_outlier_mask`** (R271) — 반경 안 이웃을 다 세지 않고 k번째 최근접 거리로 판정 (같은 결과: 합성 3종 + v3 49d40fd2 graph 노드 완전 일치). graph 1편 312 s → 67 s.
 - **D283 — TRUMANS source 궤적 보간을 뱅크 target 과 같은 규약으로 (2026-09-24, 사용자 지시 "smooth_kf 적용하는거
   아니었나? translation, rotation 다 keyframe 6개").** `trumans_to_recon.py --source_kf_ease smooth_kf
   --source_pos_keyframes 6`: 회전 = keyframe 6 look-at + `decode/build_poses.smooth_kf_schedule`,

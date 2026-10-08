@@ -112,5 +112,11 @@ def radius_outlier_mask(points: np.ndarray, radius: float, min_neighbors: int = 
 
     if len(points) == 0:
         return np.zeros(0, dtype=bool)
-    counts = cKDTree(points).query_ball_point(points, r=radius, return_length=True)
-    return counts >= min_neighbors + 1  # 자기 자신 포함
+    # [R271] 반경 안 이웃을 **다 세지 않고** (k = min_neighbors+1)-번째 최근접 거리만 본다. 판정은 같다
+    # (`count(d <= r) >= k` ⇔ `k번째 최근접 거리 <= r`) — query_ball_point(return_length) 는 조밀한 물체에서
+    # 이웃 수천 개를 다 세느라 graph 1편 312 s 중 248 s 를 먹었다 (v3 49d40fd2 cProfile).
+    k = min_neighbors + 1  # 자기 자신 포함
+    if len(points) < k:
+        return np.zeros(len(points), dtype=bool)
+    dist, _ = cKDTree(points).query(points, k=k, distance_upper_bound=np.nextafter(radius, np.inf))
+    return dist[:, k - 1] <= radius

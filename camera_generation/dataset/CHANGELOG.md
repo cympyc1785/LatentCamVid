@@ -11,7 +11,7 @@ Follows [Keep a Changelog](https://keepachangelog.com/).
 
 ### Added
 
-- **`viz/viz_obb_compare.py --videos ... --grid N`** (R271) — graph 하나로 여러 영상을 N×N 격자에 (anchor 1·2순위 OBB).
+- **`viz/viz_obb_compare.py --videos ... --grid N [--tile_note json]`** (R271) — graph 하나로 여러 영상을 N×N 격자에 (anchor 1·2순위 OBB), 칸 제목에 메모.
 - **`configs/bank/v5_dynpose_obbtrim.json`** (Dataset-v5) — v3 풀 그대로, graph 만 d182 인자 + `--obb_trim_quantile 0.02` + `--prefer_person_label`, fit 은 면적 하한 0.02. 출력 루트 `out_dynpose_v5` (v3 불변).
 - **`fit/graph/build_scene_graph.py --tracker_ref_area_frac` / `--tracker_accumulate`** (R267) — `--tracker_dir` 위치의 기준을 첫 프레임 대신 ① 마스크 면적이 최대의 이 배 이상인 프레임들 (중심 = 각 기준 프레임 OBB 중심 + 변위차 의 축별 중앙값, extent 도 그 프레임들 중앙값) 또는 ② 변위로 보정한 물체 좌표계에서 전 프레임 마스크 점을 누적해 OBB 한 번 (yaw 고정). 첫 프레임에 일부만 보이면 상자가 커지지 않던 것 대책. 기본 0 / off.
 - **`viz/viz_obb_compare.py`** (R267) — 같은 영상의 graph 여럿을 열로 나란히, route 가 고른 anchor 1·2순위 OBB 만 소스 프레임에 그린다.

@@ -24,6 +24,7 @@ def grid_main(a):
     """[R271] `--videos` 여럿 + graph 하나 → 영상마다 한 칸, `--grid` x `--grid` 격자 (사용자 "OBB overlay 영상 4x4 로").
     anchor 는 각 영상의 `--route_name` (graph 루트 아래, 없으면 out_dynpose 의 preset_route_d343.json) 에서 1·2순위."""
     label, root = a.graph[0].split("=", 1)
+    notes = json.load(open(a.tile_note)) if a.tile_note else {}
     tiles = []
     for v in a.videos:
         rp = path.join(root, v, a.route_name)
@@ -45,7 +46,9 @@ def grid_main(a):
             w = a.width // 2 * 2
             im = cv2.resize(im, (w, int(w * 9 / 16) // 2 * 2))
             cv2.rectangle(im, (0, 0), (im.shape[1], 22), (0, 0, 0), -1)
-            cv2.putText(im, f"{v[:8]} t{t}", (4, 16), 0, 0.45, (255, 255, 255), 1, cv2.LINE_AA)
+            note = notes.get(v, "")
+            note = note if isinstance(note, str) else " ".join(f"{x[0]}:{x[2]} head{x[3]}" for x in note)
+            cv2.putText(im, f"{v[:8]} t{t} {note}"[:60], (4, 16), 0, 0.45, (255, 255, 255), 1, cv2.LINE_AA)
             frames.append(im)
         tiles.append(frames)
     T = min(len(x) for x in tiles)
@@ -99,6 +102,7 @@ if __name__ == "__main__":
     ap.add_argument("--video", default=None)
     ap.add_argument("--videos", nargs="*", default=None)       # [R271] 격자 모드 (graph 하나)
     ap.add_argument("--grid", default=4, type=int)
+    ap.add_argument("--tile_note", default=None)               # json {video: 문자열 | [[rank, id, label, 값], ...]} — 칸 제목에 덧붙임
     ap.add_argument("--route_name", default="preset_route_d343.json")
     ap.add_argument("--graph", action="append", required=True)   # label=<output_root> (그 아래 <video>/scene_graph.json)
     ap.add_argument("--route", default=None)                      # anchor 를 읽을 preset_route json (없으면 --anchors / dyn_0,dyn_1)

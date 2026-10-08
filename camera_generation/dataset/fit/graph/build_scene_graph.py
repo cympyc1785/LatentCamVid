@@ -127,18 +127,35 @@ def person_label(label: str, aliases: list):
     return hit, [a for a in aliases if a != hit] + [label]
 
 
+def trim_obb_points(points_g: np.ndarray, quantile: float) -> np.ndarray:
+    """수평면 주축 2개와 중력축(z) 각각에서 [q, 1-q] 백분위 밖 점을 버린다. q <= 0 이면 그대로."""
+    if quantile <= 0 or len(points_g) < 50:
+        return points_g
+    xy = points_g[:, :2] - np.median(points_g[:, :2], axis=0)
+    _, vecs = np.linalg.eigh(np.cov(xy.T))
+    keep = np.ones(len(points_g), dtype=bool)
+    for col in (xy @ vecs[:, 0], xy @ vecs[:, 1], points_g[:, 2]):
+        lo, hi = np.quantile(col, [quantile, 1.0 - quantile])
+        keep &= (col >= lo) & (col <= hi)
+    return points_g[keep] if keep.sum() >= 3 else points_g
+
+
 def build_node(inst: dict, node_id: str, num_frames: int, cam_centers_g: np.ndarray,
                view_dir_g: np.ndarray, parallax: float, deinflate: bool = False,
                min_points_per_frame: int = 30,
                yaw_median_window: int = 5, moving_threshold_u: float = 0.05,
-               prefer_person_label: bool = False):
+               prefer_person_label: bool = False, obb_trim_quantile: float = 0.0):
     """인스턴스 하나 → 노드 dict. 프레임별 OBB fit → yaw unwrap + median → 대표 OBB."""
     frames = sorted(f for f, points in inst["points_by_frame"].items()
                     if len(points) >= min_points_per_frame)
     if len(frames) < 1:
         return None
 
-    per_frame = [fit_obb(inst["points_by_frame"][f]) for f in frames]
+    # [R264] `obb_trim_quantile` > 0 이면 프레임마다 축별 백분위 양끝을 잘라낸 점으로 OBB 를 맞춘다.
+    # depth 경계에서 시선 방향으로 늘어진 꼬리가 edge_bleed / depth trim / radius denoise 를 일부 통과하고,
+    # minAreaRect 는 남은 점을 하나도 안 빼고 감싸서 OBB 가 그 꼬리만큼 커진다 (c619a48a 실측 양끝 2% 에서
+    # 수평 두 축 0.68~0.84 배). 0 = 예전과 동일.
+    per_frame = [fit_obb(trim_obb_points(inst["points_by_frame"][f], obb_trim_quantile)) for f in frames]
     centers = np.stack([obb["center"] for obb in per_frame])
     extents = np.stack([obb["extent"] for obb in per_frame])
     yaws = unwrap_yaw([obb["yaw_rad"] for obb in per_frame])
@@ -374,7 +391,8 @@ def main(args):
         counters[inst["kind"]] = counters.get(inst["kind"], -1) + 1
         node = build_node(inst, f"{inst['kind']}_{counters[inst['kind']]}", num_frames,
                           cam_centers_g, view_dir_g, plx, deinflate=args.deinflate,
-                          prefer_person_label=args.prefer_person_label)
+                          prefer_person_label=args.prefer_person_label,
+                          obb_trim_quantile=args.obb_trim_quantile)
         if node is None:
             dropped.append({**inst, "drop_reasons": ["OBB 를 세울 프레임이 없다"]})
             counters[inst["kind"]] -= 1
@@ -632,6 +650,8 @@ if __name__ == "__main__":
     # 마스크 depth 가 두 덩어리일 때 중앙값 덩어리만 남긴다. bins 0 이면 끔 = 예전 동작.
     parser.add_argument("--depth_mode_bins", default=40, type=int)
     parser.add_argument("--depth_mode_gap_frac", default=0.005, type=float)
+    # [R264] OBB 를 맞추기 전 프레임별 축별 백분위 양끝 제거 (경계 꼬리). 0 = 끔 (예전과 동일). 권장 0.02.
+    parser.add_argument("--obb_trim_quantile", default=0.0, type=float)
     # 저시차 깊이축 부풀림 보정. **기본 off** — camel dyn_1 에서 실제 몸통 길이(0.16u)를 0.05u 로
     # 날려버렸다. 부풀림 판정은 아래 표의 size_x(투영 OBB / 마스크 bbox) 로 한다.
     parser.add_argument("--deinflate", action="store_true", default=False)

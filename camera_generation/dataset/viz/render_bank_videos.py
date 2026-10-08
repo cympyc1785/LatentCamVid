@@ -248,6 +248,24 @@ def main(args):
                                        args.tile_height, args.tile_width, args.stride,
                                        focal=(None if focal_all is None else focal_all[index]),
                                        depth_mode=args.depth, depth_range=args.depth_range)
+        if args.draw_obb:
+            # [R264] anchor 의 scene graph OBB (그 프레임 위치·yaw) 를 렌더 카메라로 투영해 그린다.
+            # OBB 크기가 subject 와 맞는지 (경계 꼬리로 부풀었는지) 를 렌더 위에서 바로 보려는 것. 기본 off.
+            from lbm.overlay import draw_obb_world
+            from scene_graph.obb import node_obb_at, obb_corners
+            T_wg = np.linalg.inv(np.asarray(graph["frames"]["T_gw"], dtype=float))
+            node = nodes[row["anchor_id"]]
+            for i, f in enumerate(picks):
+                if f >= len(node["track"]["center_smooth"]):
+                    continue
+                corners_g = obb_corners(*node_obb_at(node, int(f)))
+                corners_w = corners_g @ T_wg[:3, :3].T + T_wg[:3, 3]
+                K = np.array(renderer.K_src[f], dtype=np.float64).copy()
+                K[0] *= args.tile_width / renderer.width
+                K[1] *= args.tile_height / renderer.height
+                frames[i] = draw_obb_world(np.ascontiguousarray(frames[i]), corners_w, K,
+                                           cam_c2w[index][f], color=(0, 255, 255), thickness=2,
+                                           draw_bbox=False)
         if stream_only:
             write_video(path.join(clip_folder, f"{row['variant_id']}.mp4"), frames, args.fps)
         else:
@@ -377,6 +395,7 @@ if __name__ == "__main__":
     parser.add_argument("--pose_kind", default="auto", type=str)
     # 옛 산출물 재현용. 켜면 `bank.json` 에 적힌 문자열을 그대로 라벨에 쓴다 (= 예전 동작, 어긋난 채).
     parser.add_argument("--raw_preset_names", action="store_true", default=False)
+    parser.add_argument("--draw_obb", action="store_true", default=False)  # R264: anchor OBB 를 렌더 위에 (노랑)
     parser.add_argument("--label_start_status", action="store_true", default=False)  # R62: 시작 pose 이름 + 판정
     parser.add_argument("--no_raw_preset_names", dest="raw_preset_names", action="store_false")
     parser.add_argument("--columns", default=5, type=int)

@@ -11,6 +11,8 @@ Follows [Keep a Changelog](https://keepachangelog.com/).
 
 ### Added
 
+- **`fit/graph/build_scene_graph.py --obb_trim_quantile`** (R264) — OBB 를 맞추기 전 프레임별로 수평 주축 2개 + 중력축의 백분위 양끝 점을 버린다 (depth 경계에서 시선 방향으로 늘어진 꼬리가 기존 필터를 일부 통과해 minAreaRect 를 부풀리던 것). 기본 0 = 끔. c619a48a 양끝 2% 에서 extent 0.68~0.93 배. 파일럿 config `configs/bank/r264_obbtrim.json` (출력 tmp/r264/out_dynpose, v3 graph 불변).
+- **`viz/render_bank_videos.py --draw_obb`** (R264) — anchor 의 scene graph OBB (그 프레임 위치·yaw) 를 렌더 카메라로 투영해 노랑으로 그린다. 기본 off.
 - **`fit/bank/fit_hole_ladder.py --min_area_end` / `--min_area_end_presets`** (R263) — pull_out 계열 subject 면적 하한. 정규식(기본 `pull_out|dolly_out`)에 맞는 변이는 끝 프레임 subject 면적 < 값 을 넘침(binding `shot_floor`)으로 보고 손잡이를 줄인다. 시작부터 아래면 하한에서도 못 넘어 clamped_low 로 남는다 (= reject). 기본 0 = 끔 (예전과 동일). `sample_camera_bank` stats 에 `subject_area_last` 추가. 파일럿 config `configs/bank/r263_areafloor.json`, `r263p_vista_{before,after}.json` (parkour).
 - **`exec/prepare_et_d200.py`** (R258) — Dataset-v1 s91 → E.T.(DIRECTOR) et-data (`et_dynpose_d200_s91`: traj KITTI c2w · char · caption · CLIP seq 심링크 · cam_segments · intrinsics · split) + 표준화 통계 `DIRECTOR/configs/dataset/standardization/d200s91.yaml`. 좌표 = char0 원점 · y-up (W=diag(1,-1,-1)). train 46,277 / test 5,144. E.T. 대조군 학습 세팅용 (학습은 아직 안 함).
 

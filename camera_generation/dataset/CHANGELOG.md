@@ -11,6 +11,7 @@ Follows [Keep a Changelog](https://keepachangelog.com/).
 
 ### Added
 
+- **`fit/bank/fit_hole_ladder.py` preset 별 지표** (R273) — `--shot_ladder_by_preset` + `--hole_presets` (hole 사다리) / `--motion_presets` (이동량·각도 사다리) / 나머지 shot scale (`--shot_ladder`). `--max_area_end` / `--max_area_end_presets` (dolly_in·push_in 끝 면적 상한, binding `shot_ceiling`). `--min_subject_in_frame_presets` (프레이밍 하한을 정규식 preset 에만). 전부 기본 off. 파일럿 config `configs/bank/r273_preset_metric.json`.
 - **`viz/viz_obb_compare.py --videos ... --grid N [--tile_note json]`** (R271) — graph 하나로 여러 영상을 N×N 격자에 (anchor 1·2순위 OBB), 칸 제목에 메모.
 - **`configs/bank/v5_dynpose_obbtrim.json`** (Dataset-v5) — v3 풀 그대로, graph 만 d182 인자 + `--obb_trim_quantile 0.02` + `--prefer_person_label`, fit 은 면적 하한 0.02. 출력 루트 `out_dynpose_v5` (v3 불변).
 - **`fit/graph/build_scene_graph.py --tracker_ref_area_frac` / `--tracker_accumulate`** (R267) — `--tracker_dir` 위치의 기준을 첫 프레임 대신 ① 마스크 면적이 최대의 이 배 이상인 프레임들 (중심 = 각 기준 프레임 OBB 중심 + 변위차 의 축별 중앙값, extent 도 그 프레임들 중앙값) 또는 ② 변위로 보정한 물체 좌표계에서 전 프레임 마스크 점을 누적해 OBB 한 번 (yaw 고정). 첫 프레임에 일부만 보이면 상자가 커지지 않던 것 대책. 기본 0 / off.

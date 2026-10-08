@@ -633,7 +633,7 @@ def solve_knob(probe, target_hole: float, points: list, kind: str, iterations: i
                lo_override: float | None = None, min_approach: float = float("-inf"),
                min_seen: float = float("-inf"), max_behind_dyn: float | None = None,
                metric_fn=None, min_in_frame: float = float("-inf"),
-               min_area_end: float = float("-inf")):
+               min_area_end: float = float("-inf"), max_area_end: float = float("inf")):
     """"예산 안의 최대 크기"를 이분법으로 푼다. (k, status, binding, 실측 횟수).
 
     `max_behind < 0` 이면 예산은 hole 하나다 (기존 동작 그대로). `>= 0` 이면 **충돌 예산 두 개**가
@@ -743,6 +743,10 @@ def solve_knob(probe, target_hole: float, points: list, kind: str, iterations: i
             # [R263] subject 면적 하한 (pull_out 계열): 끝 프레임 subject 면적이 이 아래면 넘친 것. 끄면 -inf.
             elif (lambda a: a == a and a < min_area_end)(geo.get("subject_area_last", float("nan"))):
                 verdicts[knob] = (True, "shot_floor")
+            # [R273] subject 면적 상한 (dolly_in/push_in 계열): 끝 프레임 면적이 이 위면 넘친 것 (너무 붙음).
+            # 시작부터 위면 하한에서도 걸려 clamped_low (= reject). 끄면 +inf.
+            elif (lambda a: a == a and a > max_area_end)(geo.get("subject_area_last", float("nan"))):
+                verdicts[knob] = (True, "shot_ceiling")
             elif (metric_fn(geo) if metric_fn is not None else hole) >= target_hole:
                 verdicts[knob] = (True, "hole")
             # D112. hole **뒤**. 여기 오면 hole 은 이미 예산 안이므로, 기존 뱅크에서 `(False,
@@ -1264,7 +1268,7 @@ def main(args):
                     if _why is None and _vis == _vis and _vis < min_seen:
                         _why = "occlusion"
                     _inf = float(_st.get("subject_in_frame", float("nan")))
-                    if _why is None and _inf == _inf and _inf < min_in_frame:
+                    if _why is None and _inf == _inf and _inf < min_in_frame and not args.min_subject_in_frame_presets:
                         _why = "framing"
                     _lg, _lg_r, _lg_n = float("nan"), float("nan"), 0
                     if static_g is not None:
@@ -1335,10 +1339,27 @@ def main(args):
             # 게이트가 물리면 작게 풀린다. 프레이밍 게이트는 끈다 (subject 를 안 겨눈다).
             motion = bool(shot_ladder and args.shot_exempt == "targetless"
                           and preset in TARGETLESS_PRESETS and kind is not None)
+            # [R273] preset 별 지표 (사용자 2026-10-08 "hole 은 lateral, pan, tilt 계열에만 … 나머진 subject 면적").
+            # `--shot_ladder_by_preset` 이면 ① `--hole_presets` 정규식 = hole 사다리 (`--hole_ladder`),
+            # ② `--motion_presets` = 이동량(각도) 사다리 (`--motion_ladder`, 면적·hole 이 안 변하는 orbit/crane/roll),
+            # ③ 나머지 = shot scale (|log 면적비|, `--shot_ladder`). 끄면 위 두 줄 그대로 (예전과 동일).
+            shot_p = shot_ladder
+            if shot_ladder and args.shot_ladder_by_preset and kind is not None:
+                if args.hole_presets and re.search(args.hole_presets, preset):
+                    shot_p, motion = False, False
+                    rungs = list(args.hole_ladder)
+                else:
+                    motion = bool(motion or (args.motion_presets and re.search(args.motion_presets, preset)))
+                    if not motion and args.shot_ladder:
+                        rungs = list(args.shot_ladder)
+            # [R273] 프레이밍 하한을 preset 정규식으로 좁힌다 (사용자 "track 중 look_at 없는 것 … subject 가 일정량 이상
+            # 보이게" → 2번 게이트). 정규식이 없으면 예전처럼 전 preset.
+            min_in_frame_p = (min_in_frame if not args.min_subject_in_frame_presets
+                              or re.search(args.min_subject_in_frame_presets, preset) else float("-inf"))
             for rung_i, delta in enumerate(rungs):
                 # shot 사다리에서 Δ 는 **바닥 대비 배율의 로그**라 이미 상대량이다 —
                 # `excess` 처럼 바닥을 더하면 이중으로 상대화된다. 그래서 그대로 쓴다.
-                target = delta if shot_ladder else (hole_static + delta if excess else delta)
+                target = delta if shot_p else (hole_static + delta if excess else delta)
                 if kind is None:
                     knob, status, binding, calls = float(seen[0]["target_tau"]), "static", "", 0
                     probed = probe(knob)         # 캐시에 poses/info 를 채운다 (렌더 1회)
@@ -1367,7 +1388,7 @@ def main(args):
                             why = "occlusion"
                         # D266. 프레이밍도 같은 판정에 넣는다 — `over()` 와 같은 식이다.
                         _inf = probed[1].get("subject_in_frame", float("nan"))
-                        if why is None and _inf == _inf and _inf < min_in_frame:
+                        if why is None and _inf == _inf and _inf < min_in_frame_p:
                             why = "framing"
                         if why is not None:
                             status, binding = f"{why}_blocked", why
@@ -1393,17 +1414,20 @@ def main(args):
                     # 로 매긴 (손잡이, hole) 쌍이라 shot scale 의 bracket 이 아니다. 빈 리스트를
                     # 주면 범위 양끝을 재고 이분법으로 들어간다 (probe 2회 추가).
                     knob, status, binding, calls = solve_knob(probe, target,
-                                                              [] if shot_ladder else points, kind,
+                                                              [] if shot_p else points, kind,
                                                               args.iterations, max_behind, min_obb,
                                                               max_elev, min_ground, lo_override,
                                                               min_approach, min_seen,
                                                               max_behind_dyn,
-                                                              metric_fn=(shot_dev if shot_ladder
+                                                              metric_fn=(shot_dev if shot_p
                                                                          else None),
-                                                              min_in_frame=min_in_frame,
+                                                              min_in_frame=min_in_frame_p,
                                                               min_area_end=(float(args.min_area_end)
                                                                             if args.min_area_end > 0 and re.search(args.min_area_end_presets, preset)
-                                                                            else float("-inf")))
+                                                                            else float("-inf")),
+                                                              max_area_end=(float(args.max_area_end)
+                                                                            if args.max_area_end > 0 and re.search(args.max_area_end_presets, preset)
+                                                                            else float("inf")))
                 calls_total += calls
                 _, poses, info, mult, hold_from = cache[knob]
                 # 모양을 최대치까지 키우고도 max_scale 에 붙어 있으면 knob 이 아니라 **모양이 천장**이다.
@@ -2066,6 +2090,16 @@ def build_parser():
     #   시작부터 이미 아래면 하한에서도 걸려 clamped_low+shot_floor 로 남는다 (= reject).
     parser.add_argument("--min_area_end", default=0.0, type=float)
     parser.add_argument("--min_area_end_presets", default="pull_out|dolly_out", type=str)
+    # [R273] 면적 상한 (dolly_in/push_in 계열이 subject 에 붙는 것). 0 = 끔.
+    parser.add_argument("--max_area_end", default=0.0, type=float)
+    parser.add_argument("--max_area_end_presets", default="dolly_in|push_in", type=str)
+    # [R273] preset 별 지표. 기본 off (= --ladder_metric 하나로 전 preset, 예전과 동일). --ladder_metric shot_scale 과 같이 쓴다.
+    parser.add_argument("--shot_ladder_by_preset", action="store_true", default=False)
+    parser.add_argument("--hole_presets", default="", type=str)      # 예 '(^|_)(truck|pan|tilt)(_|$)'
+    parser.add_argument("--motion_presets", default="", type=str)    # 예 'orbit|crane|roll'
+    parser.add_argument("--shot_ladder", default=None, nargs="+", type=float)   # 없으면 --hole_ladder 값 그대로
+    # [R273] --min_subject_in_frame 을 이 정규식 preset 에만 (빈 문자열 = 전 preset, 예전과 동일).
+    parser.add_argument("--min_subject_in_frame_presets", default="", type=str)
     # D275. shot_scale 사다리에서 빼는 preset 군. targetless = 캡션 `targetless` 플래그
     # (pan/tilt/roll/free_pedestal) → 이동량 사다리 `--motion_ladder` (τ; 회전은 ×60°). none = 옛 동작.
     parser.add_argument("--shot_exempt", default="none", choices=("none", "targetless"))

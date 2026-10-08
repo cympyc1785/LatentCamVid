@@ -6,6 +6,7 @@ All notable changes to the latentcam sub-project. Follows [Keep a Changelog](htt
 
 ### Added
 
+- **`traj_time_metrics.py` fr_off / fr_off_gt** (R256) — screen offset: subject 화면 위치의 중앙 거리 |uv| 프레임 평균 (pred · GT). 기존 지표 불변.
 - **`peav_readout_cond_p`** (R253) — readout aux head 의 subject xyz 예측을 `target_track` concat 조건으로 쓴다 (target_track_dim=4 · aux_dim=3). 학습 때 샘플별 확률 p 로 GT 대신 예측 (detach), 추론 때는 항상 예측 → test 에 GT subject 불필요. readout 을 cam_in 앞에서 먼저 돌리고 video 토큰은 재사용. 0 (기본) = 예전 동작.
 - **`subject_bbox_cond`** (R243) — subject 의 원본 영상 2D bbox (SAM3, `[cx-0.5, cy-0.5, w, h, valid]`) 를 `target_track` 과 같은 concat 조건 경로로 (cond_dim +5, `target_track_dim` 과 같이 켜면 9). `<scene>/da3/subject_bbox.npz` 를 읽는다. 기본 false = 예전 동작.
 - **train/cam_loss · train/framing_loss 로깅** (R236) — framing_aux_dim>0 일 때 두 손실을 따로 wandb 에 (+100 step 마다 stdout).

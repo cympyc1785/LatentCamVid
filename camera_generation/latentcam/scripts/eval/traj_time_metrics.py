@@ -207,8 +207,10 @@ def main():
                     m["fr_err"] = float(fe.mean())
                     m["fr_err_late"] = float(fe[np.array_split(np.arange(len(fe)), 3)[2]].mean())   # [R145] 마지막 1/3
                     m["has_subj"] = 1.0
+                    # [R256] screen offset = subject 화면 위치가 중앙에서 떨어진 거리 |uv| 프레임 평균 (화면 폭·높이 = 1, ±1.5 clip)
+                    m["fr_off"] = float(np.linalg.norm(uvp, axis=1).mean()); m["fr_off_gt"] = float(np.linalg.norm(uvg, axis=1).mean())
                 else:
-                    for k_ in ("fr_jit", "fr_std", "sz_jit", "in_box", "fr_err", "fr_jit_late", "fr_err_late"):
+                    for k_ in ("fr_jit", "fr_std", "sz_jit", "in_box", "fr_err", "fr_jit_late", "fr_err_late", "fr_off"):
                         m.setdefault(k_, float("nan")); m.setdefault(k_ + "_gt", float("nan"))
                     m.pop("fr_err_gt", None); m.pop("fr_err_late_gt", None)
                     m["has_subj"] = 0.0

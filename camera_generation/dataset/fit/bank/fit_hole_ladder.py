@@ -635,7 +635,8 @@ def solve_knob(probe, target_hole: float, points: list, kind: str, iterations: i
                lo_override: float | None = None, min_approach: float = float("-inf"),
                min_seen: float = float("-inf"), max_behind_dyn: float | None = None,
                metric_fn=None, min_in_frame: float = float("-inf"),
-               min_area_end: float = float("-inf"), max_area_end: float = float("inf")):
+               min_area_end: float = float("-inf"), max_area_end: float = float("inf"),
+               wrong_dir_fn=None):
     """"예산 안의 최대 크기"를 이분법으로 푼다. (k, status, binding, 실측 횟수).
 
     `max_behind < 0` 이면 예산은 hole 하나다 (기존 동작 그대로). `>= 0` 이면 **충돌 예산 두 개**가
@@ -749,6 +750,9 @@ def solve_knob(probe, target_hole: float, points: list, kind: str, iterations: i
             # 시작부터 위면 하한에서도 걸려 clamped_low (= reject). 끄면 +inf.
             elif (lambda a: a == a and a > max_area_end)(geo.get("subject_area_last", float("nan"))):
                 verdicts[knob] = (True, "shot_ceiling")
+            # [R283] in/out 계열이 반대 방향으로 면적이 변하면 넘친 것.
+            elif wrong_dir_fn is not None and wrong_dir_fn(geo):
+                verdicts[knob] = (True, "shot_dir")
             elif (metric_fn(geo) if metric_fn is not None else hole) >= target_hole:
                 verdicts[knob] = (True, "hole")
             # D112. hole **뒤**. 여기 오면 hole 은 이미 예산 안이므로, 기존 뱅크에서 `(False,
@@ -1325,6 +1329,26 @@ def main(args):
                 if not (area == area and _base == _base) or area <= 0.0 or _base <= 0.0:
                     return float("nan")      # nan 은 `>=` 가 거짓이라 "예산 안"으로 떨어진다
                 return abs(log(area / _base))
+            # [R283] 방향 있는 shot scale (`--shot_signed`). |log| 는 dolly_in 인데 면적이 **줄어도** (truck·crane 성분이
+            # subject 를 화면 밖으로 밀어서) 목표에 닿은 것으로 쳤다 (v5 파일럿 dolly_in "목표 도달" 예시 4/4 가 면적 감소).
+            # in 계열은 log(면적비), out 계열은 −log(면적비) 만 예산으로 센다. 방향이 없는 preset 은 |log| 그대로.
+            def shot_dev_dir(sign, _base=area_static):
+                def f(stats):
+                    area = float(stats.get("subject_area_med", float("nan")))
+                    if not (area == area and _base == _base) or area <= 0.0 or _base <= 0.0:
+                        return float("nan")
+                    return sign * log(area / _base) if sign else abs(log(area / _base))
+                return f
+            # 반대 방향으로 `--shot_dir_tol` (log) 넘게 가면 넘친 것으로 본다 (binding `shot_dir`). 끄면 None.
+            def shot_wrong_dir(sign, _base=area_static):
+                def f(stats):
+                    area = float(stats.get("subject_area_med", float("nan")))   # 바닥(_base)과 같은 양 (중앙값) 끼리 비교
+                    if not sign or not (area == area and _base == _base) or _base <= 0.0:
+                        return False
+                    if area <= 0.0:
+                        return sign > 0          # in 계열인데 subject 가 사라졌다
+                    return sign * log(area / _base) < -float(args.shot_dir_tol)
+                return f
             # τ 하한을 소스 시차 위로 올린다. pan 은 손잡이가 각도라 이 병이 없다 (τ 가 스케일에
             # 불변이라 애초에 `fit_tau` 를 안 탄다, D40).
             lo_override = (tau_start_src + KNOB_RANGE["tau"][0]
@@ -1358,6 +1382,10 @@ def main(args):
                         rungs = list(args.shot_ladder)
             # [R273] 프레이밍 하한을 preset 정규식으로 좁힌다 (사용자 "track 중 look_at 없는 것 … subject 가 일정량 이상
             # 보이게" → 2번 게이트). 정규식이 없으면 예전처럼 전 preset.
+            shot_sign = 0
+            if args.shot_signed:
+                shot_sign = (1 if re.search(args.shot_in_presets, preset) else
+                             (-1 if re.search(args.shot_out_presets, preset) else 0))
             min_in_frame_p = (min_in_frame if not args.min_subject_in_frame_presets
                               or re.search(args.min_subject_in_frame_presets, preset) else float("-inf"))
             for rung_i, delta in enumerate(rungs):
@@ -1423,8 +1451,9 @@ def main(args):
                                                               max_elev, min_ground, lo_override,
                                                               min_approach, min_seen,
                                                               max_behind_dyn,
-                                                              metric_fn=(shot_dev if shot_p
-                                                                         else None),
+                                                              metric_fn=((shot_dev_dir(shot_sign) if args.shot_signed else shot_dev)
+                                                                         if shot_p else None),
+                                                              wrong_dir_fn=(shot_wrong_dir(shot_sign) if (shot_p and args.shot_signed and shot_sign) else None),
                                                               min_in_frame=min_in_frame_p,
                                                               min_area_end=(float(args.min_area_end)
                                                                             if args.min_area_end > 0 and re.search(args.min_area_end_presets, preset)
@@ -2106,6 +2135,11 @@ def build_parser():
     parser.add_argument("--min_subject_in_frame_presets", default="", type=str)
     # [R275] 프레이밍 게이트의 양. in_frame = subject 중심이 중앙 박스 안 (예전) · onscreen = subject 가 화면에 보임 (면적 ≥ 0.2%).
     parser.add_argument("--framing_metric", default="in_frame", choices=("in_frame", "onscreen"))
+    # [R283] 방향 있는 shot scale. 끄면 |log 면적비| (예전과 동일).
+    parser.add_argument("--shot_signed", action="store_true", default=False)
+    parser.add_argument("--shot_in_presets", default="dolly_in|push_in", type=str)
+    parser.add_argument("--shot_out_presets", default="dolly_out|pull_out", type=str)
+    parser.add_argument("--shot_dir_tol", default=0.223, type=float)   # log(1/0.8): 반대로 20% 넘게 변하면 넘침
     # D275. shot_scale 사다리에서 빼는 preset 군. targetless = 캡션 `targetless` 플래그
     # (pan/tilt/roll/free_pedestal) → 이동량 사다리 `--motion_ladder` (τ; 회전은 ×60°). none = 옛 동작.
     parser.add_argument("--shot_exempt", default="none", choices=("none", "targetless"))

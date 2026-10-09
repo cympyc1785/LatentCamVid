@@ -454,6 +454,9 @@ def main(args):
         # 최상위에 한 번만 싣는다 (emit_model_cams 는 `rel_c2w` 만 읽으므로 무해).
         entry.pop("notes", None)
         # 뱅크가 실측한 것들 — canonical 만 받은 소비자가 뱅크 CSV 없이도 고를 수 있게.
+        # [R289] 목표 shot scale 사다리 변이면 그 칸 이름을 싣는다 (캡션이 읽는다). 없는 뱅크는 키 자체가 없다.
+        if variant.get("shot_target_class"):
+            entry["shot_target_class"] = variant["shot_target_class"]
         entry.update({"variant_id": vid, "anchor_id": variant["anchor_id"],
                       "anchor_label": variant["anchor_label"],
                       "target_hole": float(variant["target_hole"]),

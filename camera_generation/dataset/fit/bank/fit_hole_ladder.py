@@ -300,6 +300,8 @@ def _targetless_presets():
 TARGETLESS_PRESETS = _targetless_presets()
 # [R275] 프레이밍 게이트가 읽는 stats 열. `--framing_metric onscreen` 이면 main() 에서 바꾼다 (기본 = 예전 열).
 FRAMING_KEY = ["subject_in_frame"]
+# [R289] `--shot_class_edges` 기본 (0.02, 0.08, 0.25, 0.5) 이 나누는 5 칸의 이름 — 캡션 (`build_bank_captions`) 이 그대로 읽는다.
+SHOT_CLASS_NAMES = ["extreme_wide", "wide", "medium", "close_up", "extreme_close_up"]
 
 
 def knob_kind(preset: str):
@@ -1388,10 +1390,30 @@ def main(args):
                              (-1 if re.search(args.shot_out_presets, preset) else 0))
             min_in_frame_p = (min_in_frame if not args.min_subject_in_frame_presets
                               or re.search(args.min_subject_in_frame_presets, preset) else float("-inf"))
+            # [R289] 목표 shot scale 사다리 (사용자 2026-10-10 "dolly in, pull out 같은 건 목표 shot scale 에 따라 다르게 …
+            # shot scale 목적에 따라 다른 변이로 … 캡션에도"). in/out 계열은 시작 shot (바닥 면적 `area_static`) 보다
+            # 1..`--shot_class_steps` 단 타이트(in)/넓은(out) shot 마다 **변이 하나씩**. 단 = 클래스 번호, 목표 = 그 클래스의
+            # 기하 중심 면적 (끝 프레임), 넘침 = 클래스 경계 밖 (shot_ceiling / shot_floor). 갈 데가 없으면 변이 없음.
+            shot_cls = None
+            if (args.shot_class_presets and shot_p and not motion and kind is not None and shot_sign
+                    and re.search(args.shot_class_presets, preset) and area_static == area_static and area_static > 0):
+                edges = [0.0] + [float(x) for x in args.shot_class_edges.split(",")] + [1.0]
+                start_c = max(i for i in range(len(edges) - 1) if area_static >= edges[i])
+                rungs = [c for c in (start_c + shot_sign * k for k in range(1, args.shot_class_steps + 1))
+                         if 0 <= c < len(edges) - 1
+                         # out 계열은 전역 하한 (--min_area_end, 사용자 0.02) 아래 칸으로는 안 간다
+                         and not (shot_sign < 0 and args.min_area_end > 0 and edges[c + 1] <= args.min_area_end)]
+                shot_cls = edges
             for rung_i, delta in enumerate(rungs):
                 # shot 사다리에서 Δ 는 **바닥 대비 배율의 로그**라 이미 상대량이다 —
                 # `excess` 처럼 바닥을 더하면 이중으로 상대화된다. 그래서 그대로 쓴다.
                 target = delta if shot_p else (hole_static + delta if excess else delta)
+                cls_bounds = None
+                if shot_cls is not None:
+                    lo_e, hi_e = shot_cls[delta], shot_cls[delta + 1]
+                    cls_bounds = (lo_e, hi_e)
+                    centre = (max(lo_e, 0.005) * hi_e) ** 0.5
+                    target = shot_sign * log(centre)      # metric = shot_sign·log(끝 면적) — 중심에 닿으면 넘친 것
                 if kind is None:
                     knob, status, binding, calls = float(seen[0]["target_tau"]), "static", "", 0
                     probed = probe(knob)         # 캐시에 poses/info 를 채운다 (렌더 1회)
@@ -1451,14 +1473,24 @@ def main(args):
                                                               max_elev, min_ground, lo_override,
                                                               min_approach, min_seen,
                                                               max_behind_dyn,
-                                                              metric_fn=((shot_dev_dir(shot_sign) if args.shot_signed else shot_dev)
+                                                              metric_fn=((lambda st, _s=shot_sign: (_s * log(st["subject_area_last"])
+                                                                                                     if st.get("subject_area_last", 0) == st.get("subject_area_last", 0)
+                                                                                                     and st.get("subject_area_last", 0) > 0 else
+                                                                                                     (float("inf") if _s < 0 else float("nan"))))
+                                                                         if cls_bounds else
+                                                                         (shot_dev_dir(shot_sign) if args.shot_signed else shot_dev)
                                                                          if shot_p else None),
                                                               wrong_dir_fn=(shot_wrong_dir(shot_sign) if (shot_p and args.shot_signed and shot_sign) else None),
                                                               min_in_frame=min_in_frame_p,
-                                                              min_area_end=(float(args.min_area_end)
+                                                              # 클래스 모드: 경계는 게이트로 안 건다 (시작이 목표 칸 밖이라 작은 손잡이가 다 넘침이 된다).
+                                                              # out 계열의 전역 하한 (--min_area_end) 만 남긴다.
+                                                              min_area_end=((float(args.min_area_end) if (shot_sign < 0 and args.min_area_end > 0) else float("-inf"))
+                                                                            if cls_bounds else
+                                                                            float(args.min_area_end)
                                                                             if args.min_area_end > 0 and re.search(args.min_area_end_presets, preset)
                                                                             else float("-inf")),
-                                                              max_area_end=(float(args.max_area_end)
+                                                              max_area_end=(float("inf") if cls_bounds else
+                                                                            float(args.max_area_end)
                                                                             if args.max_area_end > 0 and re.search(args.max_area_end_presets, preset)
                                                                             else float("inf")))
                 calls_total += calls
@@ -1508,12 +1540,14 @@ def main(args):
                     # 채운다 — 이름을 파싱하는 곳은 릴 도구 하나뿐이다
                     # (`render_target_swap_warp.py:40`, 못 읽으면 inf 로 뒤로 민다).
                     "variant_id": (f"{anchor}__{preset}__"
-                                   f"{'motion' if motion else ('shot' if shot_ladder else 'hole')}{delta:g}"
+                                   + (f"shotcls{SHOT_CLASS_NAMES[delta]}" if shot_cls is not None else
+                                      f"{'motion' if motion else ('shot' if shot_ladder else 'hole')}{delta:g}")
                                    + (f"__{cand_id}" if cand_id else "")),
                     "anchor_id": anchor, "anchor_label": node["label"], "preset": preset,
                     # D259. 후보 전문을 그대로 옮겨 싣는다 — `emit_bank` 가 이 값으로 같은
                     # 카메라를 되만든다. 격자를 끄면 키 자체가 없다 (예전 뱅크와 같은 JSON).
                     **({"start_cand": start_cand} if start_cand else {}),
+                    **({"shot_target_class": SHOT_CLASS_NAMES[delta]} if shot_cls is not None else {}),
                     "target_hole": round(float(target), 5), "hole_delta": delta,
                     "hole_static": round(hole_static, 4),
                     # D266. 사다리가 무엇을 재고 있나 + shot 모드의 바닥 면적. `hole` 이면
@@ -2140,6 +2174,10 @@ def build_parser():
     parser.add_argument("--shot_in_presets", default="dolly_in|push_in", type=str)
     parser.add_argument("--shot_out_presets", default="dolly_out|pull_out", type=str)
     parser.add_argument("--shot_dir_tol", default=0.223, type=float)   # log(1/0.8): 반대로 20% 넘게 변하면 넘침
+    # [R289] 목표 shot scale 사다리. 빈 문자열 = 끔 (예전과 동일). --shot_signed 와 같이 쓴다 (in/out 판정).
+    parser.add_argument("--shot_class_presets", default="", type=str)          # 예 'dolly_in|push_in|dolly_out|pull_out'
+    parser.add_argument("--shot_class_edges", default="0.02,0.08,0.25,0.5", type=str)
+    parser.add_argument("--shot_class_steps", default=2, type=int)             # 시작 shot 에서 몇 단까지 변이를 만들지
     # D275. shot_scale 사다리에서 빼는 preset 군. targetless = 캡션 `targetless` 플래그
     # (pan/tilt/roll/free_pedestal) → 이동량 사다리 `--motion_ladder` (τ; 회전은 ×60°). none = 옛 동작.
     parser.add_argument("--shot_exempt", default="none", choices=("none", "targetless"))

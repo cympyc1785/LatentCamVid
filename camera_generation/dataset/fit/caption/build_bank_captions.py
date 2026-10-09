@@ -221,6 +221,10 @@ def motion_of(variant: dict, spec: dict, mag_tables: dict, magnitude: bool = Fal
     phrase = (spec["phrase"].replace(TARGET_SLOT, target_text or LEGACY_TARGET)
               .replace("{it}", obj).replace("{they}", subj)
               .replace("{s}", "" if plural else "s"))
+    # [R289] 목표 shot scale 사다리 변이 (fit `--shot_class_presets`) 는 끝 shot 을 문장에 붙인다
+    # (사용자 2026-10-10 "shot scale 목적에 따라 다른 변이로 … 캡션에도 넣어줘"). 키가 없으면 예전 문장 그대로.
+    if variant.get("shot_target_class"):
+        phrase = f"{phrase}, ending on {shot_phrase(SHOT_CLASS_TEXT[variant['shot_target_class']])}"
     if not magnitude:
         return f"the camera {phrase}"
     return f"the camera {adverb_of(variant, mag_tables)} {phrase}"
@@ -446,6 +450,10 @@ def framing_parts(variant: dict, cfg: dict, timeline: bool = False):
         return med, None, None
     order = [row["name"] for row in table]
     return head, tail, ("tighten" if order.index(tail) > order.index(head) else "widen")
+
+
+SHOT_CLASS_TEXT = {"extreme_wide": "extreme wide shot", "wide": "wide shot", "medium": "medium shot",
+                   "close_up": "close-up", "extreme_close_up": "extreme close-up"}
 
 
 def shot_phrase(name: str):

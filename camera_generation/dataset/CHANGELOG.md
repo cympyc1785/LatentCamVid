@@ -11,6 +11,7 @@ Follows [Keep a Changelog](https://keepachangelog.com/).
 
 ### Added
 
+- **목표 shot scale 사다리** (R289) — `fit_hole_ladder.py --shot_class_presets/--shot_class_edges/--shot_class_steps`: in/out 계열을 시작 shot (면적 경계 0.02/0.08/0.25/0.5 의 5 칸) 에서 1..N 단 타이트/넓은 칸마다 변이 하나씩 (목표 = 칸의 기하 중심 면적, 끝 프레임), variant_id `…__shotcls<칸>`, 행에 `shot_target_class`. `emit_bank` 이 그 키를 canonical 에 싣고, `build_bank_captions.motion_of` 가 'ending on a <shot>' 을 붙인다. 전부 기본 off. v5 config 에 켬.
 - **`fit/bank/route_presets.py --pool_offset`** (R287) — 섞은 preset 풀의 앞 K 개를 건너뛴다. 기본 0. `configs/bank/d344_v3_2_extra.json` = Dataset-v3-2 추가분 (v3 anchor ∩ 연속성 필터, 풀 13~18번째, v3 fit 기준).
 - **`eval/pred_collision_rate.py`** (R286) — 예측 카메라 궤적 충돌률. eval 산출 (`<eval_dir>/test/*_transforms_{pred,ref}.json`, scene world GL c2w) 에 뱅크 collision 게이트와 같은 `lbm.gates.behind_profile` (depth shell, margin 0.02·S, min_zcam 0.02·S, time_match) 를 건다. GT 도 같이 잼 (좌표 검증용). 출력 per_entry.csv · summary.json.
 - **`fit/bank/fit_hole_ladder.py --shot_signed`** (R283) — shot scale 을 방향 있게: `--shot_in_presets` (dolly_in·push_in) 는 log(면적비), `--shot_out_presets` (dolly_out·pull_out) 는 −log 만 예산으로 센다. 반대 방향으로 `--shot_dir_tol` (기본 log 1.25) 넘게 변하면 넘침 (binding `shot_dir`). |log| 는 dolly_in 인데 면적이 줄어도 목표 도달로 쳤다. 기본 off. v5 config 에 켬.

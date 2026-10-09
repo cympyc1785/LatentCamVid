@@ -298,6 +298,8 @@ def _targetless_presets():
 
 
 TARGETLESS_PRESETS = _targetless_presets()
+# [R275] 프레이밍 게이트가 읽는 stats 열. `--framing_metric onscreen` 이면 main() 에서 바꾼다 (기본 = 예전 열).
+FRAMING_KEY = ["subject_in_frame"]
 
 
 def knob_kind(preset: str):
@@ -738,7 +740,7 @@ def solve_knob(probe, target_hole: float, points: list, kind: str, iterations: i
             # D266. 프레이밍은 예산(hole/shot) **앞**에 둔다 — subject 가 화면을 벗어난 크기는
             # shot scale 이 얼마든 못 쓰는 카메라다. 끄면 `-inf` 라 조건이 영원히 거짓이다.
             elif (lambda f: f == f and f < min_in_frame)(
-                    geo.get("subject_in_frame", float("nan"))):
+                    geo.get(FRAMING_KEY[0], float("nan"))):
                 verdicts[knob] = (True, "framing")
             # [R263] subject 면적 하한 (pull_out 계열): 끝 프레임 subject 면적이 이 아래면 넘친 것. 끄면 -inf.
             elif (lambda a: a == a and a < min_area_end)(geo.get("subject_area_last", float("nan"))):
@@ -942,6 +944,8 @@ def main(args):
     # --raycast`)가 보고, 뱅크는 크기 사다리만 만든다 (사용자 지시 2026-09-23).
     shot_ladder = args.ladder_metric == "shot_scale"
     # 프레이밍 하한. 가림 게이트와 **다른 양**이다 — 이건 subject 중심이 중앙 박스 안이었나다.
+    if args.framing_metric == "onscreen":
+        FRAMING_KEY[0] = "subject_onscreen_frac"
     min_in_frame = (float(args.min_subject_in_frame) if args.min_subject_in_frame > 0.0
                     else float("-inf"))
     # [new 2026-09-27, R62] `--start_screen`: 시작 pose(격자 후보)의 **frame 0 카메라만** 같은 게이트로
@@ -1387,7 +1391,7 @@ def main(args):
                         if why is None and _seen_frac == _seen_frac and _seen_frac < min_seen:
                             why = "occlusion"
                         # D266. 프레이밍도 같은 판정에 넣는다 — `over()` 와 같은 식이다.
-                        _inf = probed[1].get("subject_in_frame", float("nan"))
+                        _inf = probed[1].get(FRAMING_KEY[0], float("nan"))
                         if why is None and _inf == _inf and _inf < min_in_frame_p:
                             why = "framing"
                         if why is not None:
@@ -2100,6 +2104,8 @@ def build_parser():
     parser.add_argument("--shot_ladder", default=None, nargs="+", type=float)   # 없으면 --hole_ladder 값 그대로
     # [R273] --min_subject_in_frame 을 이 정규식 preset 에만 (빈 문자열 = 전 preset, 예전과 동일).
     parser.add_argument("--min_subject_in_frame_presets", default="", type=str)
+    # [R275] 프레이밍 게이트의 양. in_frame = subject 중심이 중앙 박스 안 (예전) · onscreen = subject 가 화면에 보임 (면적 ≥ 0.2%).
+    parser.add_argument("--framing_metric", default="in_frame", choices=("in_frame", "onscreen"))
     # D275. shot_scale 사다리에서 빼는 preset 군. targetless = 캡션 `targetless` 플래그
     # (pan/tilt/roll/free_pedestal) → 이동량 사다리 `--motion_ladder` (τ; 회전은 ×60°). none = 옛 동작.
     parser.add_argument("--shot_exempt", default="none", choices=("none", "targetless"))

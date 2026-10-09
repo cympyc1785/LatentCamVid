@@ -853,7 +853,10 @@ def measure_trajectory(renderer, poses: np.ndarray, num_frames: int, measure_fra
              "subject_in_frame": round(float(np.mean(in_frame)), 3),
              "measured_frames": picks.tolist(),
              # [R263] 마지막 잰 프레임의 subject 면적 — pull_out 하한 게이트 (fit --min_area_end) 가 이분법 중에 읽는다.
-             "subject_area_last": round(float(areas[-1]), 4) if len(areas) else float("nan")}
+             "subject_area_last": round(float(areas[-1]), 4) if len(areas) else float("nan"),
+             # [R275] subject 가 **화면에 보이는** (렌더 면적 ≥ 0.002 = 화면의 0.2%) 프레임 비율. 중앙 박스와 무관
+             # (사용자 2026-10-09 "subject 가 화면 중심이 아니라 그냥 보이는 걸 기준으로"). fit `--framing_metric onscreen` 이 읽는다.
+             "subject_onscreen_frac": round(float(np.mean([a == a and a >= 0.002 for a in areas])), 3) if len(areas) else float("nan")}
     if area_timeline:
         # 접기 전 배열. `measured_frames` 와 길이가 같고 인덱스가 1:1 로 맞는다 — CSV 로 나갈 때
         # 쉼표를 못 쓰므로(`bank.csv` 는 따옴표 없는 writer 다) `|` 로 잇는다.

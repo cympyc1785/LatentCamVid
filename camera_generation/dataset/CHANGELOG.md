@@ -11,6 +11,7 @@ Follows [Keep a Changelog](https://keepachangelog.com/).
 
 ### Added
 
+- **`fit/bank/fit_hole_ladder.py --framing_metric onscreen`** (R275) — 프레이밍 게이트가 `subject_in_frame` (중심이 중앙 박스) 대신 `subject_onscreen_frac` (렌더 subject 면적 ≥ 0.2% 인 프레임 비율, `sample_camera_bank` stats 신설) 을 본다. 기본 in_frame (예전과 동일). `configs/bank/v5_dynpose_obbtrim.json` fit 을 R273 preset 별 지표 + onscreen ≥ 0.8 (track_ aim=free) 로.
 - **`fit/bank/fit_hole_ladder.py` preset 별 지표** (R273) — `--shot_ladder_by_preset` + `--hole_presets` (hole 사다리) / `--motion_presets` (이동량·각도 사다리) / 나머지 shot scale (`--shot_ladder`). `--max_area_end` / `--max_area_end_presets` (dolly_in·push_in 끝 면적 상한, binding `shot_ceiling`). `--min_subject_in_frame_presets` (프레이밍 하한을 정규식 preset 에만). 전부 기본 off. 파일럿 config `configs/bank/r273_preset_metric.json`.
 - **`viz/viz_obb_compare.py --videos ... --grid N [--tile_note json]`** (R271) — graph 하나로 여러 영상을 N×N 격자에 (anchor 1·2순위 OBB), 칸 제목에 메모.
 - **`configs/bank/v5_dynpose_obbtrim.json`** (Dataset-v5) — v3 풀 그대로, graph 만 d182 인자 + `--obb_trim_quantile 0.02` + `--prefer_person_label`, fit 은 면적 하한 0.02. 출력 루트 `out_dynpose_v5` (v3 불변).

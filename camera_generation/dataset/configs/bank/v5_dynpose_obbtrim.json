@@ -121,7 +121,29 @@
    "--follow_kf_interp",
    "cubic",
    "--min_area_end",
-   "0.02"
+   "0.02",
+   "--ladder_metric",
+   "shot_scale",
+   "--shot_exempt",
+   "targetless",
+   "--shot_ladder_by_preset",
+   "--hole_presets",
+   "^(track_)?(truck_(left|right)|pan_(left|right)|tilt_(up|down))$",
+   "--motion_presets",
+   "orbit|crane|roll",
+   "--shot_ladder",
+   "0.7",
+   "--max_area_end",
+   "0.4",
+   "--max_area_end_presets",
+   "dolly_in|push_in",
+   "--min_subject_in_frame",
+   "0.8",
+   "--min_subject_in_frame_presets",
+   "^track_(hold|truck_(left|right)|dolly_(in|out)|pedestal_(up|down))(_(dolly_(in|out)|pedestal_(up|down)))?$",
+   "--framing_metric",
+   "onscreen"
   ]
- }
+ },
+ "_fit": "R273 preset 별 지표 (hole: 순수 truck/pan/tilt · 이동량: orbit/crane/roll+targetless · 면적 Δ0.7: 나머지, dolly_in/push_in 끝 ≤ 0.4, pull_out/dolly_out 끝 ≥ 0.02) + R275 track_ aim=free 계열은 subject 가 화면에 보이는 (면적 ≥ 0.2%) 프레임 ≥ 0.8 (사용자 2026-10-09 \"화면 중심이 아니라 그냥 보이는 걸 기준으로\")."
 }

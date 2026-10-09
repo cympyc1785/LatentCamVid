@@ -1,0 +1,46 @@
+{
+ "_why": "D344 = Dataset-v3-2 추가분 (사용자 2026-10-09 \"v3 학습용 추가로 굽는 거 … A 로 하되 추가하는 걸 포함한 데이터셋은 Dataset-v3-2\"). v3 (d343) 와 같은 영상·같은 graph·같은 τ/fit 기준, anchor 는 v3 route 가 고른 것 중 v5 연속성 필터 (처음·끝 결측 0, 가운데 ≤5, 가림 ≤0.2) 통과분만 고정 (tmp/d344/anchor_ids_v3_2.json, 9,652편 · anchor 15,436), preset 은 v3 가 구운 풀 앞 12 개 다음 6 개 (--pool_offset 12 --pool_size 6), 영상당 목표 4 (free-moving 없음). 출력 bank_d344 / hole_bank_d344 — v3 는 그대로, export 때 합친다.",
+ "extends": "d343_dynpose_v3_pool.json",
+ "generation": "d344",
+ "tau_bank_dir": "bank_d344",
+ "bank_dir": "hole_bank_d344",
+ "stages": [
+  "route",
+  "tau",
+  "fit",
+  "emit"
+ ],
+ "route": {
+  "out": "preset_route_d344.json",
+  "args": [
+   "--num_external",
+   "0",
+   "--max_dynamic_anchors",
+   "2",
+   "--max_static_anchors",
+   "2",
+   "--max_anchors",
+   "2",
+   "--min_anchor_sep",
+   "2.0",
+   "--slot_plan",
+   "pool",
+   "--pool_size",
+   "6",
+   "--free_moving",
+   "off",
+   "--track_min_drift_u",
+   "0.05",
+   "--target_variants",
+   "4",
+   "--anchor_require_frame0",
+   "--vertical_gravity",
+   "ground_ransac,geocalib",
+   "--skip_if_empty",
+   "--pool_offset",
+   "12",
+   "--anchor_ids_file",
+   "/data1/cympyc1785/LatentCamVid/tmp/d344/anchor_ids_v3_2.json"
+  ]
+ }
+}

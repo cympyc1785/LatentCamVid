@@ -656,6 +656,9 @@ def main(args):
             # `--pool_size N` — 섞은 풀의 앞 N 개만. τ 뱅크(`--variant_pool full`)가 풀 전량을
             # 예비로 굽기 때문에 70 개면 tau 가 19 s -> 168 s 가 된다 (d273 스모크 1편). 씬마다
             # 순서가 다르므로 코퍼스 전체로는 전량이 고르게 쓰인다. 0 = 전량.
+            # [R287] `--pool_offset K` — 섞은 풀의 K 번째부터 (Dataset-v3-2: v3 가 이미 구운 앞 12 개 다음 것만). 0 = 예전과 동일.
+            if args.pool_offset > 0:
+                pool = pool[args.pool_offset:]
             if args.pool_size > 0:
                 pool = pool[:args.pool_size]
             reasons["pool_track_ok"] = track_ok
@@ -930,6 +933,7 @@ def build_parser():
     # D273: anchor 로 허용할 노드 라벨 (쉼표). 빈 문자열 = 끔 (옛 동작).
     parser.add_argument("--anchor_labels", default="", type=str)
     parser.add_argument("--pool_size", default=0, type=int)          # D273: --slot_plan pool 앞 N 개
+    parser.add_argument("--pool_offset", default=0, type=int)        # R287: 풀 앞 K 개를 건너뛴다 (v3 에서 이미 시도한 것)
     # D166: target 절 없는 변이를 scene 당 1개. off = 안 넣음(옛 동작).
     # rotate = 라우팅된 `pan_*`(caption `targetless`), datadop = `dd_*` 1개(`--external_shapes` 필요).
     parser.add_argument("--free_moving", default="off", type=str,

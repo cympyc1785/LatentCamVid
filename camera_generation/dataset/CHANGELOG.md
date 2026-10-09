@@ -11,6 +11,7 @@ Follows [Keep a Changelog](https://keepachangelog.com/).
 
 ### Added
 
+- **`eval/pred_collision_rate.py`** (R286) — 예측 카메라 궤적 충돌률. eval 산출 (`<eval_dir>/test/*_transforms_{pred,ref}.json`, scene world GL c2w) 에 뱅크 collision 게이트와 같은 `lbm.gates.behind_profile` (depth shell, margin 0.02·S, min_zcam 0.02·S, time_match) 를 건다. GT 도 같이 잼 (좌표 검증용). 출력 per_entry.csv · summary.json.
 - **`fit/bank/fit_hole_ladder.py --shot_signed`** (R283) — shot scale 을 방향 있게: `--shot_in_presets` (dolly_in·push_in) 는 log(면적비), `--shot_out_presets` (dolly_out·pull_out) 는 −log 만 예산으로 센다. 반대 방향으로 `--shot_dir_tol` (기본 log 1.25) 넘게 변하면 넘침 (binding `shot_dir`). |log| 는 dolly_in 인데 면적이 줄어도 목표 도달로 쳤다. 기본 off. v5 config 에 켬.
 - **`fit/bank/route_presets.py` subject 연속성 필터·배분** (R280) — `--anchor_gap_max` / `--anchor_edge_gap` / `--anchor_occl_max` (dyn 노드 SAM3 track 의 가운데 연속 결측·처음끝 결측·가림 비율로 anchor 후보 제외, `--anchor_seg_root`), `--pair_always` (subject 2 개면 움직임 무관 2x2), `--free_fill_when_empty` (subject 0 이면 운반자 노드에 free-moving 만 target 개). `sample_camera_bank.plan_variants` 가 route JSON 의 `pair_always` / `free_only` 를 읽는다. 전부 기본 off. v5 config route 에 켬, Dataset-v5 목록 `tmp/r279/v5_list_mid5_edge0_occl.txt` (16,384편).
 - **`fit/bank/fit_hole_ladder.py --framing_metric onscreen`** (R275) — 프레이밍 게이트가 `subject_in_frame` (중심이 중앙 박스) 대신 `subject_onscreen_frac` (렌더 subject 면적 ≥ 0.2% 인 프레임 비율, `sample_camera_bank` stats 신설) 을 본다. 기본 in_frame (예전과 동일). `configs/bank/v5_dynpose_obbtrim.json` fit 을 R273 preset 별 지표 + onscreen ≥ 0.8 (track_ aim=free) 로.

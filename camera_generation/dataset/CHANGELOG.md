@@ -11,6 +11,7 @@ Follows [Keep a Changelog](https://keepachangelog.com/).
 
 ### Added
 
+- **`fit/bank/route_presets.py` subject 연속성 필터·배분** (R280) — `--anchor_gap_max` / `--anchor_edge_gap` / `--anchor_occl_max` (dyn 노드 SAM3 track 의 가운데 연속 결측·처음끝 결측·가림 비율로 anchor 후보 제외, `--anchor_seg_root`), `--pair_always` (subject 2 개면 움직임 무관 2x2), `--free_fill_when_empty` (subject 0 이면 운반자 노드에 free-moving 만 target 개). `sample_camera_bank.plan_variants` 가 route JSON 의 `pair_always` / `free_only` 를 읽는다. 전부 기본 off. v5 config route 에 켬, Dataset-v5 목록 `tmp/r279/v5_list_mid5_edge0_occl.txt` (16,384편).
 - **`fit/bank/fit_hole_ladder.py --framing_metric onscreen`** (R275) — 프레이밍 게이트가 `subject_in_frame` (중심이 중앙 박스) 대신 `subject_onscreen_frac` (렌더 subject 면적 ≥ 0.2% 인 프레임 비율, `sample_camera_bank` stats 신설) 을 본다. 기본 in_frame (예전과 동일). `configs/bank/v5_dynpose_obbtrim.json` fit 을 R273 preset 별 지표 + onscreen ≥ 0.8 (track_ aim=free) 로.
 - **`fit/bank/fit_hole_ladder.py` preset 별 지표** (R273) — `--shot_ladder_by_preset` + `--hole_presets` (hole 사다리) / `--motion_presets` (이동량·각도 사다리) / 나머지 shot scale (`--shot_ladder`). `--max_area_end` / `--max_area_end_presets` (dolly_in·push_in 끝 면적 상한, binding `shot_ceiling`). `--min_subject_in_frame_presets` (프레이밍 하한을 정규식 preset 에만). 전부 기본 off. 파일럿 config `configs/bank/r273_preset_metric.json`.
 - **`viz/viz_obb_compare.py --videos ... --grid N [--tile_note json]`** (R271) — graph 하나로 여러 영상을 N×N 격자에 (anchor 1·2순위 OBB), 칸 제목에 메모.

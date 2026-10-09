@@ -172,6 +172,36 @@ def pick_anchors(graph: dict, min_area_frac: float, max_dynamic: int = 3, max_st
     return anchors
 
 
+def subject_continuity_ok(seg, node: dict, gap_max: int, edge_gap: int, occl_max: float):
+    """[R280] 이 dyn 노드의 SAM3 track 이 '계속 보이는가'. -> (ok, 사유 dict).
+
+    사용자 2026-10-09 "가려짐이나 사라짐 기준에 충족되지 않는 것들을 제외한 걸로 main subject 선정".
+    ① 처음·끝 결측 ≤ `edge_gap` 프레임 (끝단 결측은 graph 보간이 값을 그대로 붙잡아 track 카메라가 멈춘다 —
+       1 프레임만 비어도 위치 오차가 물체 크기의 10% 를 넘는 비율 0.12~0.13, R279 시뮬레이션)
+    ② 가운데 연속 결측 ≤ `gap_max` (5 프레임까지 오차 중앙값 크기의 2%)
+    ③ 가림: 가장자리에 안 닿는 프레임 중 면적 < 중앙값의 절반인 비율 ≤ `occl_max` (`run_video_filter` v4 의 occl 정의).
+    """
+    frames = sorted(seg.tracks[int(node["track_id"])]["frames"]) if int(node["track_id"]) in seg.tracks else []
+    n = seg.num_frames
+    if not frames:
+        return False, {"missing": "no_track"}
+    head, tail = frames[0], n - 1 - frames[-1]
+    gaps = [b - a - 1 for a, b in zip(frames, frames[1:]) if b - a > 1]
+    why = {"edge_gap": max(head, tail), "max_gap": max(gaps, default=0)}
+    ok = head <= edge_gap and tail <= edge_gap and why["max_gap"] <= gap_max
+    if occl_max >= 0:
+        tid = int(node["track_id"]); tr = seg.tracks[tid]; area, edge = [], []
+        for f, slot in zip(tr["frames"], tr["slots"]):
+            m = np.unpackbits(seg._npz[f"{f:05d}"][slot], axis=-1, count=seg.width).astype(bool)
+            area.append(m.mean()); edge.append(bool(m[:2].any() or m[-2:].any() or m[:, :2].any() or m[:, -2:].any()))
+        area, edge = np.array(area), np.array(edge)
+        inner = (area > 0) & ~edge
+        med = float(np.median(area[area > 0])) if (area > 0).any() else 0.0
+        why["occl_frac"] = round(float((inner & (area < 0.5 * med)).sum() / max(inner.sum(), 1)), 3)
+        ok = ok and why["occl_frac"] <= occl_max
+    return ok, why
+
+
 def pick_anchor(graph: dict, min_area_frac: float):
     """`pick_anchors(..., 1)` 의 옛 이름. 후보가 없으면 `None` (호출부 계약 유지)."""
     got = pick_anchors(graph, min_area_frac, 1)
@@ -503,6 +533,25 @@ def main(args):
     with open(graph_path, encoding="utf-8") as file:
         graph = json.load(file)
     forced = load_anchor_ids(args.anchor_ids_file, args.video)
+    # [R280] subject 연속성 필터 — dyn 노드 중 사라짐·가림 기준을 못 넘는 것은 anchor 후보에서 뺀다. 기본 off.
+    continuity_drop = {}
+    if args.anchor_gap_max >= 0:
+        from scene_graph.io import SegInstances
+        seg = SegInstances(path.join(args.anchor_seg_root, args.video), "dyn")
+        keep_nodes = []
+        for n in graph["nodes"]:
+            if n.get("kind") == "dyn":
+                ok, why = subject_continuity_ok(seg, n, args.anchor_gap_max, args.anchor_edge_gap, args.anchor_occl_max)
+                if not ok:
+                    continuity_drop[n["id"]] = why
+                    continue
+            keep_nodes.append(n)
+        graph_all, graph = graph, dict(graph, nodes=keep_nodes)
+        if continuity_drop:
+            print("continuity_drop " + " ".join(f"{k}:{v}" for k, v in continuity_drop.items()), file=sys.stderr)
+    else:
+        graph_all = graph
+    free_only = None
     if forced is None:
         anchors = pick_anchors(graph, args.min_area_frac,
                                args.max_dynamic_anchors, args.max_static_anchors,
@@ -528,6 +577,13 @@ def main(args):
         anchors = [by_id[i] for i in forced if i in by_id]
         why = (f"--anchor_ids_file 가 지정한 {forced} 가 이 씬의 노드에 없다 "
                f"(그래프를 다시 구웠으면 id 가 밀렸을 수 있다)")
+    if not anchors and args.free_fill_when_empty and forced is None:
+        # [R280] subject 가 하나도 안 남으면 free-moving 으로만 채운다 (사용자 "아예 없을 경우 free-moving 으로 채우도록").
+        # 뱅크의 gate·frame0 가시성이 anchor 노드를 요구하므로 걸러지기 전 graph 의 1등 노드를 **운반자**로 쓰고
+        # 그 노드의 슬롯은 비운다 — 변이는 전부 targetless (캡션 target 절 없음).
+        anchors = pick_anchors(graph_all, args.min_area_frac, args.max_dynamic_anchors, args.max_static_anchors,
+                               1, 0.0, require_frame0=args.anchor_require_frame0)[:1]
+        free_only = []
     if not anchors and args.skip_if_empty:
         print(why, file=sys.stderr)
         raise SystemExit(3)
@@ -733,6 +789,16 @@ def main(args):
             free = picked[0][1] if picked else None
         assert args.free_moving != "datadop" or args.external_shapes, \
             "--free_moving datadop 은 --external_shapes 가 있어야 한다"
+        if free_only is not None:
+            # [R280] 운반자 anchor 의 슬롯을 비우고 free-moving 만 `--target_variants` 개 (풀 순서는 영상 해시).
+            grav_ok = graph.get("gravity", {}).get("method") in vertical_gravity
+            cands = [p for p in FREE_POOL_PRESETS if grav_ok or "pedestal" not in p]
+            start = stable_hash(f"{args.video}/free") % len(cands)
+            free_only = [cands[(start + i) % len(cands)] for i in range(min(args.target_variants, len(cands)))]
+            free = free_only[0]
+            routed[0]["slots"], routed[0]["backfill"] = [], []
+            routed[0]["reasons"]["free_only"] = free_only
+            presets = [p for p in free_only]
         if free:
             assert not free.startswith("track_"), \
                 f"free-moving 슬롯에 track_ 이 붙었다: {free} (target 절이 없는데 추종한다)"
@@ -777,6 +843,8 @@ def main(args):
                        "free_moving": free_moving,
                        "target_count": args.target_variants,
                        "object_budget": object_budget,
+                       "pair_always": bool(args.pair_always), "free_only": free_only,
+                       "continuity_drop": continuity_drop,
                        "slots": [{"slot": s, "preset": p} for s, p in slots],
                        "presets": presets, "reasons": reasons},
                       file, ensure_ascii=False, indent=1)
@@ -979,6 +1047,14 @@ def build_parser():
     # 이 안 남아 라운드마다 같은 씬을 영원히 다시 집는다. `run_bank.py` 가 rc=3 을 받아
     # `skipped.json(no_surviving_anchors)` 를 남긴다.
     parser.add_argument("--skip_if_empty", action="store_true", default=False)
+    # [R280] subject 연속성 필터 (dyn 노드). -1 = 끔 (예전과 동일). seg 루트 = <eval_data>/eval_data/seg_instances.
+    parser.add_argument("--anchor_gap_max", default=-1, type=int)      # 가운데 연속 결측 상한 (예 5)
+    parser.add_argument("--anchor_edge_gap", default=0, type=int)      # 처음·끝 결측 상한
+    parser.add_argument("--anchor_occl_max", default=-1.0, type=float) # 가림 프레임 비율 상한 (예 0.2), -1 = 안 봄
+    parser.add_argument("--anchor_seg_root", default="/data1/cympyc1785/data/DynPose-100K/eval_data/seg_instances", type=str)
+    # [R280] subject 가 0 이면 free-moving 으로만 채운다 / subject 2 개면 움직임과 무관하게 2x2 (뱅크 plan_variants 가 읽는다).
+    parser.add_argument("--free_fill_when_empty", action="store_true", default=False)
+    parser.add_argument("--pair_always", action="store_true", default=False)
     return parser
 
 

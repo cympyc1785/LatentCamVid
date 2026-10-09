@@ -56,7 +56,15 @@
    "--anchor_require_frame0",
    "--vertical_gravity",
    "ground_ransac,geocalib",
-   "--skip_if_empty"
+   "--skip_if_empty",
+   "--anchor_gap_max",
+   "5",
+   "--anchor_edge_gap",
+   "0",
+   "--anchor_occl_max",
+   "0.2",
+   "--free_fill_when_empty",
+   "--pair_always"
   ]
  },
  "fit": {
@@ -145,5 +153,7 @@
    "onscreen"
   ]
  },
- "_fit": "R273 preset 별 지표 (hole: 순수 truck/pan/tilt · 이동량: orbit/crane/roll+targetless · 면적 Δ0.7: 나머지, dolly_in/push_in 끝 ≤ 0.4, pull_out/dolly_out 끝 ≥ 0.02) + R275 track_ aim=free 계열은 subject 가 화면에 보이는 (면적 ≥ 0.2%) 프레임 ≥ 0.8 (사용자 2026-10-09 \"화면 중심이 아니라 그냥 보이는 걸 기준으로\")."
+ "_fit": "R273 preset 별 지표 (hole: 순수 truck/pan/tilt · 이동량: orbit/crane/roll+targetless · 면적 Δ0.7: 나머지, dolly_in/push_in 끝 ≤ 0.4, pull_out/dolly_out 끝 ≥ 0.02) + R275 track_ aim=free 계열은 subject 가 화면에 보이는 (면적 ≥ 0.2%) 프레임 ≥ 0.8 (사용자 2026-10-09 \"화면 중심이 아니라 그냥 보이는 걸 기준으로\").",
+ "_route": "R280 (사용자 2026-10-09) subject = dyn 노드 중 처음·끝 결측 0 · 가운데 연속 결측 ≤5 · 가림 프레임 ≤0.2 만 anchor 후보. subject 2 → 2x2 (움직임 무관, --pair_always), 1 → 그 subject × 4, 0 → free-moving 만 5 (--free_fill_when_empty), + free 1.",
+ "_videos": "Dataset-v5 목록 = tmp/r279/v5_list_mid5_edge0_occl.txt (v8obj VLM 통과 + 사라짐·가림 기준 통과 subject 가 main 인 영상 16,384편)"
 }

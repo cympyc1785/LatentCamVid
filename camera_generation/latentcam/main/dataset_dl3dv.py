@@ -1849,6 +1849,13 @@ class CamDataset(torch.utils.data.Dataset):
                 or _aim_w > 0):
             out['target_track'] = self._track_cond(
                 scene_idx, data_name.split('_')[-1], extrinsics, norm_scale)
+        # [R291] video_patch_points: Molmo2 video 토큰 (프레임 f, 8x8 r,c) 마다의 소스 3D 점 (scripts/data/cache_patch_points.py)
+        #   을 target_track 과 같은 게이지 (frame-s 카메라 좌표 / norm_scale) 로. soft-argmax readout 이 읽는다. 기본 off = 키 없음.
+        if getattr(self.cfg, 'video_patch_points', False):
+            _pp = np.load(osp.join(self.scene_dir_list[scene_idx], 'da3', 'patch_points_8x8.npz'))
+            _P = torch.from_numpy(_pp['points']).float(); _E = extrinsics[0].float()
+            out['video_points'] = (_P @ _E[:3, :3].T + _E[:3, 3]) / norm_scale.reshape(1, 1, 1).float()
+            out['video_points_valid'] = torch.from_numpy(_pp['valid'])
         # [R243] subject_bbox_cond: 원본 영상의 subject 2D bbox 를 concat 조건으로 (target_track 과 같은 경로 · 기본 off = 키 없음).
         if getattr(self.cfg, 'subject_bbox_cond', False):
             out['subject_bbox'] = self._subject_bbox(scene_idx, data_name.split('_')[-1], extrinsics.shape[0])

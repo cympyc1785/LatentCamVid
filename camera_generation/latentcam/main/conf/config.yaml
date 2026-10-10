@@ -645,6 +645,11 @@ peav_readout_mode: replace
 # [R253] >0 이면 readout aux head 의 subject xyz 예측을 target_track concat 조건으로 쓴다 (target_track_dim=4 · aux_dim=3 필요).
 #   학습 때 샘플별 확률 p 로 GT 대신 예측 (detach), 추론 때는 항상 예측 → test 에 GT subject 불필요. 0 = 예전 (aux 는 손실 전용).
 peav_readout_cond_p: 0.0
+# [R291] readout aux 방식: regress (aux_head 로 xyz 회귀, 예전) | softargmax (OmniCam 식 — 프레임 f 의 Molmo2 video 토큰 64 개에
+#   attention 해 그 토큰들의 3D 점 가중평균 + 0 초기화 보정. video_patch_points: true 와 같이 써야 한다).
+peav_readout_aux_mode: regress
+# [R291] Molmo2 토큰별 소스 3D 점 (`<scene>/da3/patch_points_8x8.npz`, scripts/data/cache_patch_points.py) 을 batch 에 싣는다.
+video_patch_points: false
 
 # ─── [new 2026-09-20, D206] aim aux loss ─────────────────────────────────────────────────
 # 학습 스텝 안에서 예측 x0 를 **궤적 VAE 로 디코드**해, 카메라 forward 와

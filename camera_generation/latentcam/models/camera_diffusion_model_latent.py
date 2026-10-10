@@ -104,8 +104,17 @@ class PeavReadout(nn.Module):
     `num_layers=0` 이면 이 모듈이 아예 생성되지 않는다 (기존 arm 과 state_dict·동작 비트 동일).
     """
 
-    def __init__(self, dim, num_heads, num_queries, num_layers, dropout, aux_dim=0):
+    def __init__(self, dim, num_heads, num_queries, num_layers, dropout, aux_dim=0, aux_mode="regress"):
         super().__init__()
+        # [R291] aux_mode "softargmax" (OmniCam 식): query f 가 **프레임 f 의 video 토큰 64 개** 에 attention 해
+        #   그 토큰들의 3D 점 (dataset video_points) 가중평균 + 작은 보정 (0 초기화) 으로 subject 위치를 낸다.
+        #   semantic (어느 토큰이 subject 인가) 은 Molmo2 가, 거리는 소스 depth 가 맡는다. "regress" = 예전 aux_head.
+        self.aux_mode = str(aux_mode)
+        if self.aux_mode == "softargmax":
+            self.sa_q = nn.Linear(dim, dim)
+            self.sa_k = nn.Linear(dim, dim)
+            self.sa_res = nn.Linear(dim, 3)
+            nn.init.zeros_(self.sa_res.weight); nn.init.zeros_(self.sa_res.bias)
         self.query = nn.Parameter(torch.randn(num_queries, dim) * 0.02)
         self.layers = nn.ModuleList([
             nn.ModuleList([
@@ -120,7 +129,7 @@ class PeavReadout(nn.Module):
                                        nn.Linear(dim, int(aux_dim)))
                          if int(aux_dim) > 0 else None)
 
-    def forward(self, tok, key_padding_mask=None):
+    def forward(self, tok, key_padding_mask=None, points=None, points_valid=None):
         """(B,L,D) 캐시 토큰 → ((B,Q,D) 요약, (B,Q,aux_dim) aux 예측 | None)."""
         q = self.query.unsqueeze(0).expand(tok.shape[0], -1, -1)
         for self_attn, cross_attn, mlp in self.layers:
@@ -128,6 +137,17 @@ class PeavReadout(nn.Module):
             q = cross_attn(q, tok, key_padding_mask=key_padding_mask)
             q = mlp(q) + q
         q = self.out_ln(q)
+        if self.aux_mode == "softargmax" and points is not None:
+            B, Fn, P, _ = points.shape                       # (B,49,64,3)
+            vt = tok[:, -Fn * P:].reshape(B, Fn, P, -1)      # 합본 [text | video] 의 video 부분 (프레임 우선, 행 우선)
+            qf = self.sa_q(q[:, :Fn])                        # query f ↔ 프레임 f (Q = 49 = 프레임 수)
+            logit = torch.einsum("bfd,bfpd->bfp", qf, self.sa_k(vt)) / (qf.shape[-1] ** 0.5)
+            if points_valid is not None:
+                logit = logit.masked_fill(~points_valid, -1e4)
+            w = torch.softmax(logit.float(), dim=-1)
+            pred = torch.einsum("bfp,bfpc->bfc", w, points.float()) + self.sa_res(q[:, :Fn]).float()
+            self.sa_weight = w.detach()
+            return q, pred.to(q.dtype)
         return q, (self.aux_head(q) if self.aux_head is not None else None)
 
 
@@ -156,6 +176,7 @@ class CameraDiffusionModel(nn.Module):
         peav_readout_aux_dim=0,
         peav_readout_mode="replace",
         peav_readout_cond_p=0.0,
+        peav_readout_aux_mode="regress",
         video_text_fuse="token",
         start_pose_dim=0,
         start_pose_tf_p=0.0,
@@ -299,7 +320,7 @@ class CameraDiffusionModel(nn.Module):
             self.peav_readout_layers = int(peav_readout_layers)
             self.readout = (PeavReadout(hidden_dim, num_heads, int(peav_readout_queries),
                                         self.peav_readout_layers, dropout,
-                                        aux_dim=int(peav_readout_aux_dim))
+                                        aux_dim=int(peav_readout_aux_dim), aux_mode=str(peav_readout_aux_mode))
                             if self.peav_readout_layers > 0 else None)
             # [R253] readout aux head 의 subject 3D 예측을 **concat 조건으로** 쓴다 (test 때 GT subject 없이).
             #   학습: 샘플마다 확률 p 로 GT target_track 대신 예측 (detach) · 추론: 항상 예측. 0 = 기존 (aux 는 손실 전용).
@@ -407,7 +428,7 @@ class CameraDiffusionModel(nn.Module):
 
     def forward(self, x_t, t, text_emb, text_mask, geo_emb=None, geo_mask=None, cond=None,
                 video_emb=None, video_mask=None, video_text_emb=None, video_text_mask=None,
-                start_pose=None):
+                start_pose=None, video_points=None, video_points_valid=None):
         self.text_cross_attn_weight = None
         # [new 2026-09-03] video CA. `video_latent_dim==0` 이거나 video_emb 가 없으면 이 스트림은
         # 통째로 건너뛴다 = 기존 경로와 동일.
@@ -433,7 +454,7 @@ class CameraDiffusionModel(nn.Module):
         if getattr(self, 'peav_readout_cond_p', 0.0) > 0 and has_video and self.readout is not None and self.cond_dim > 0:
             # [R253] readout 을 cam_in 앞에서 먼저 돌려 그 예측 (B,Q,3) 을 조건 xyz 로 쓴다. video_tok 은 아래에서 재사용.
             _vt, _vk = self._build_video_tok(video_emb, video_mask, video_text_emb, video_text_mask)
-            _rd, self.readout_aux_pred = self.readout(_vt, _vk)
+            _rd, self.readout_aux_pred = self.readout(_vt, _vk, video_points, video_points_valid)
             _vid_built = (_vt, _vk, _rd)
             pc = self.readout_aux_pred.detach().float().transpose(1, 2)
             pc = F.interpolate(pc, size=T, mode='linear', align_corners=True).transpose(1, 2)        # (B,T,3)
@@ -503,7 +524,7 @@ class CameraDiffusionModel(nn.Module):
                 if _vid_built is not None:
                     _rd = _vid_built[2]
                 else:
-                    _rd, self.readout_aux_pred = self.readout(video_tok, video_kpm)
+                    _rd, self.readout_aux_pred = self.readout(video_tok, video_kpm, video_points, video_points_valid)
                 if self.peav_readout_mode == 'append':      # [R81] 원 토큰 + 요약 49 토큰
                     if video_kpm is not None:
                         video_kpm = torch.cat([video_kpm, video_kpm.new_zeros(_rd.shape[:2])], dim=1)

@@ -538,6 +538,10 @@ def build_video_cond(data, device):
         _conn = VIDEO_ONFLY['conn']
         with torch.set_grad_enabled(_conn.training):
             kw['video_emb'] = _conn(_feat).float()
+    # [R291] soft-argmax readout 용 토큰별 3D 점 (dataset video_patch_points). 없으면 키 없음 = 예전과 같은 호출.
+    if kw and 'video_points' in data:
+        kw['video_points'] = data['video_points'].to(device).float()
+        kw['video_points_valid'] = data['video_points_valid'].to(device).bool()
     if kw and getattr(cfg, 'video_text_in_stream', False) and 'peav_text' in data:
         kw['video_text_emb'] = data['peav_text'].to(device).float()
         kw['video_text_mask'] = data['peav_text_mask'].to(device).bool()
@@ -877,7 +881,8 @@ def train():
                 peav_readout_queries=int(getattr(cfg, 'peav_readout_queries', 49)),
                 peav_readout_aux_dim=int(getattr(cfg, 'peav_readout_aux_dim', 0) or 0),
                 peav_readout_mode=str(getattr(cfg, 'peav_readout_mode', 'replace') or 'replace'),
-                peav_readout_cond_p=float(getattr(cfg, 'peav_readout_cond_p', 0.0) or 0.0))   # [R253]
+                peav_readout_cond_p=float(getattr(cfg, 'peav_readout_cond_p', 0.0) or 0.0),   # [R253]
+                peav_readout_aux_mode=str(getattr(cfg, 'peav_readout_aux_mode', 'regress') or 'regress'))   # [R291]
             _auxw = float(getattr(cfg, 'peav_readout_aux_w', 0.0))
             print(f"(model) peav readout: layers={_rol} "
                   f"queries={_vid_kw['peav_readout_queries']} "

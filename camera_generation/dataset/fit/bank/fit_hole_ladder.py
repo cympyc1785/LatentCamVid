@@ -1660,6 +1660,14 @@ def main(args):
                     # 1/2/3 = fallback 예비). `--no_fallback_ladder` 면 전부 0.
                     "plan_tier": tier,
                     **stats})
+                # [R305] 목표 shot 칸 미도달 → `shot_missed` (사용자 2026-10-10 "도달 못하면 버려야지. 대신 나중에 통계 내보고").
+                # 끝 프레임 면적 (`subject_area_end`, 전 프레임 재측정) 의 칸이 목표와 다르면 상태만 바꿔 행은 남긴다 —
+                # `run_corpus_export --drop_status` 기본이 뺀다. 원래 상태는 `status_before_shot_miss` 에. 끄면 (기본) 예전 그대로.
+                if args.drop_shot_miss and shot_cls is not None:
+                    _ae = rows[-1].get("subject_area_end", float("nan"))
+                    if not (_ae == _ae and shot_cls[delta] <= _ae < shot_cls[delta + 1]):
+                        rows[-1]["status_before_shot_miss"] = rows[-1]["status"]
+                        rows[-1]["status"] = "shot_missed"
                 poses_all.append(poses)
                 # D168 ②. 사다리가 여러 단이면 **한 단이라도** 풀리면 그 변이는 쓸 만한 것으로
                 # 센다 (집합이라 중복 안 됨). 예산 판정은 변이 단위지 행 단위가 아니다.
@@ -2014,6 +2022,8 @@ def main(args):
                # `instance_desc.json` 이 갖고 있고, 그건 뱅크를 다시 안 굽고 바꿀 수 있어야 한다.
                # `--no_composition` 이면 빈 칸이고 예전 뱅크와 같다.
                "in_frame_ids", "enter_ids", "exit_ids"]
+    if args.drop_shot_miss:           # [R305] 켰을 때만 열을 늘린다 — 끄면 스키마 비트 동일
+        columns = list(columns) + ["shot_target_class", "status_before_shot_miss"]
     if RAY_GATE is not None:          # D277. 게이트를 켰을 때만 열을 늘린다 — 끄면 스키마 비트 동일
         columns = list(columns) + ["ray_clear_frac", "ray_min_clearance",
                                    "ray_min_subject_dist", "ray_min_floor_drop"]
@@ -2264,6 +2274,8 @@ def build_parser():
     parser.add_argument("--iterations", default=4, type=int)     # bracket 이 이미 좁다
     # [R299] shot 사다리 (bracket 없음) 전용 이분 횟수. 0 = --iterations 그대로 (예전 동작).
     parser.add_argument("--shot_iterations", default=0, type=int)
+    # [R305] shot class 사다리에서 끝 면적이 목표 칸 밖이면 status `shot_missed` (행은 통계용으로 남김).
+    parser.add_argument("--drop_shot_miss", action="store_true", default=False)
     # `fit_tau` 가 max_scale 에 붙으면 모양을 이 배율로 키워 다시 푼다 (docstring 의 천장 문제).
     parser.add_argument("--shape_headroom", default=2.0, type=float)
     parser.add_argument("--shape_doublings", default=4, type=int)

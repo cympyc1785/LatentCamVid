@@ -147,6 +147,9 @@
  },
  "tau_bank_dir": "bank_v5f",
  "stages": [
+  "graph",
+  "route",
+  "tau",
   "fit",
   "emit"
  ]

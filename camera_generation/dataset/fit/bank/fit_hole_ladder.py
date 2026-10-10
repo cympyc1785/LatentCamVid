@@ -1495,6 +1495,23 @@ def main(args):
                                                                             else float("inf")))
                 calls_total += calls
                 _, poses, info, mult, hold_from = cache[knob]
+                if args.trace_probes:
+                    # [R295] 진단: 이 (anchor, preset) 에서 이분법이 시험한 손잡이 전부의 궤적·게이트 값·판정을 남긴다.
+                    # "무엇이 막았나" 를 막힌 바로 그 손잡이의 궤적으로 보기 위함. 끄면 (기본) 이 블록이 안 돈다.
+                    _ks = sorted(cache)
+                    _tag = (f"{anchor}__{preset}__" + (f"shotcls{SHOT_CLASS_NAMES[delta]}" if shot_cls is not None else f"{delta:g}")
+                            + (f"__{cand_id}" if cand_id else ""))
+                    makedirs(args.trace_probes, exist_ok=True)
+                    np.savez_compressed(
+                        path.join(args.trace_probes, f"{_tag}.npz"),
+                        knob=np.array(_ks), chosen=float(knob), status=status, binding=binding,
+                        poses=np.stack([np.asarray(cache[k][1], dtype=np.float32) for k in _ks]),
+                        verdict=np.array([physical_verdict(cache[k][0], max_behind, min_obb, max_elev, min_ground,
+                                                           min_approach, max_behind_dyn) or "" for k in _ks]),
+                        min_approach=float(min_approach), min_obb=float(min_obb),
+                        **{c: np.array([float(cache[k][0].get(c, float("nan"))) for k in _ks])
+                           for c in ("approach_gap", "approach_frames", "obb_slack", "subject_area_last", "hole_fraction")},
+                        obb_node=np.array([str(cache[k][0].get("obb_node", "")) for k in _ks]))
                 # 모양을 최대치까지 키우고도 max_scale 에 붙어 있으면 knob 이 아니라 **모양이 천장**이다.
                 if status == "unreached" and info["tau"]["scale"] >= FIT_TAU_MAX_SCALE - 1e-9:
                     status = "shape_limited"
@@ -2131,6 +2148,8 @@ def build_parser():
     # 출력 폴더 이름. `emit_bank.py --bank_dir` 과 같은 값을 쓴다. 예전엔 여기가 하드코딩이라
     # 변종 뱅크를 만들려면 사후에 손으로 이름을 바꿔야 했다 (hole_bank_r90 등이 그렇게 생겼다).
     parser.add_argument("--bank_dir", default="hole_bank", type=str)
+    # [R295] 진단용: 디렉토리를 주면 변이마다 이분법이 시험한 손잡이별 궤적·게이트 값·판정을 <dir>/<variant>.npz 로 남긴다.
+    parser.add_argument("--trace_probes", default="", type=str)
     # D77. 읽어들일 τ 뱅크 폴더 (`sample_camera_bank.py --bank_dir` 과 같은 값). 기본 "bank" 가
     # 예전 하드코딩과 동일하다 — 새 preset 축을 넣은 τ 뱅크를 옆에 두려고만 노출한다.
     parser.add_argument("--tau_bank_dir", default="bank", type=str)

@@ -1472,7 +1472,9 @@ def main(args):
                     # 주면 범위 양끝을 재고 이분법으로 들어간다 (probe 2회 추가).
                     knob, status, binding, calls = solve_knob(probe, target,
                                                               [] if shot_p else points, kind,
-                                                              args.iterations, max_behind, min_obb,
+                                                              # [R299] shot 사다리는 bracket 없이 [0.005, 3] 전 구간이라 4회면 눈금이 0.19 다.
+                                                              (args.shot_iterations if (shot_p and args.shot_iterations) else args.iterations),
+                                                              max_behind, min_obb,
                                                               max_elev, min_ground, lo_override,
                                                               min_approach, min_seen,
                                                               max_behind_dyn,
@@ -2225,6 +2227,8 @@ def build_parser():
     parser.add_argument("--static_rung", action="store_true", default=True)
     parser.add_argument("--no_static_rung", dest="static_rung", action="store_false")
     parser.add_argument("--iterations", default=4, type=int)     # bracket 이 이미 좁다
+    # [R299] shot 사다리 (bracket 없음) 전용 이분 횟수. 0 = --iterations 그대로 (예전 동작).
+    parser.add_argument("--shot_iterations", default=0, type=int)
     # `fit_tau` 가 max_scale 에 붙으면 모양을 이 배율로 키워 다시 푼다 (docstring 의 천장 문제).
     parser.add_argument("--shape_headroom", default=2.0, type=float)
     parser.add_argument("--shape_doublings", default=4, type=int)

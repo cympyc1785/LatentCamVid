@@ -706,7 +706,7 @@ def subject_push_positions(p0: np.ndarray, centers: np.ndarray, up: np.ndarray, 
     SE(3) 로그 전체(회전 포함)를 키워 τ 가 크면 arc 가 주동작이 돼 오히려 멀어졌다 (R298 실측: 파일럿 push/옆 중앙 1.6~1.8,
     현재 subject 까지 거리가 끝에서 더 먼 변이 15~22%). 여기서는 θ = min(arc_ratio·k, cap) 라 **옆 이동이 항상 push 의
     arc_ratio 배 이하**이고, 기준점은
-      track=True  : 매 프레임 subject 중심 c(f) (상대 위치 유지 — tracking shot)
+      track=True  : subject 순이동 직선 c(0) + s·(c(F−1) − c(0)) (흔들림 제외 상대 위치 유지 — tracking shot)
       track=False : subject 중심 c(ref_index) 고정 (따라다니지 않지만 끝에는 실제 subject 앞에 선다). 호출자가 정한다 —
                     움직이는 노드는 마지막 프레임, 정지 노드는 가장 크게 보인 프레임 `best_frame`
                     (사용자 2026-10-10 "static object 는 가장 많이 보이는 컷, dynamic 은 마지막 컷").
@@ -714,7 +714,11 @@ def subject_push_positions(p0: np.ndarray, centers: np.ndarray, up: np.ndarray, 
     """
     n = len(centers)
     s = np.linspace(0.0, 1.0, n)
-    ref = centers if track else np.repeat(centers[ref_index][None], n, axis=0)
+    # track 도 매 프레임 c(f) 가 아니라 c(0)→c(F−1) **순이동 직선** 위를 따른다 — subject 의 앞뒤 흔들림을 카메라 위치에
+    # 옮기지 않기 위함 (사용자 2026-10-10 "물체 움직임에 따라서 앞뒤로 왔다갔다", R299: man path 0.592u 인데 순이동 0.124u).
+    # 조준은 build_poses 의 look_at 경로가 실제 c(f) 를 그대로 lock 한다.
+    ref = (centers[0] + s[:, None] * (centers[-1] - centers[0])) if track \
+        else np.repeat(centers[ref_index][None], n, axis=0)
     v0 = p0 - ref[0]
     theta = np.radians(min(np.degrees(arc_ratio * k), theta_cap_deg))     # 옆 이동 ≈ ρ·θ ≤ arc_ratio·(ρ·k)
     sign = arc_sign * (1.0 if float(np.dot(np.cross(up, v0), left)) >= 0 else -1.0)
@@ -930,7 +934,7 @@ def build_poses(decision: dict, graph: dict, board: dict | None = None,
         tau_info = {**tau_info, "scale": round(k_push, 6), "tau_max": round(_tau(k_push), 4),
                     "tau_saturated": bool(saturated), "push_mode": "subject", "push_k": round(k_push, 6),
                     "push_theta_deg": round(min(np.degrees(push_arc_ratio * k_push), _sweep_cap), 4),
-                    "push_ref": "c(f)" if _track else f"c({_ref_i})"}
+                    "push_ref": "lerp(c0,cF)" if _track else f"c({_ref_i})"}
 
     # ── world 로 올리고 조준
     poses = T.start_at(basis_c2w, rel_local)

@@ -744,7 +744,7 @@ def build_poses(decision: dict, graph: dict, board: dict | None = None,
                 tau_ref: str = "source", deroll: bool = False,
                 orbit_fixed_sweep: bool = False, tau_denom: str = "z_med_frame0",
                 push_mode: str = "frame0", push_arc_ratio: float = 0.5, push_k_max: float = 0.9,
-                push_arc_deg: float = 0.0):
+                push_arc_deg: float = 0.0, push_arc_min_deg: float = 0.0):
     """(poses (n,4,4) world c2w, info dict). 이 함수가 `decision.json` 의 유일한 해석자다.
 
     `tau_denom` (D150) 은 τ 의 분모를 고른다 — `"S"` 면 전 프레임 non-sky 점의 첫 카메라 거리
@@ -917,6 +917,12 @@ def build_poses(decision: dict, graph: dict, board: dict | None = None,
         _cent = follow_centers if _track else centers_world
         _p0, _left = basis_c2w[:3, 3], -c2w_start[:3, 0]
         _sweep_cap = float(context["sweep"]) / 2.0
+        if push_arc_deg > 0:
+            # [R301] 고정 각도 모드의 상한은 preset 의 sweep/2 (22.5°) 가 아니라 관측 방위각 폭 × orbit_span_frac 이고,
+            # `push_arc_min_deg` 로 바닥을 둔다 (사용자 2026-10-10 "1,3번도 arc 가 잘 안 느껴져" — 289dfbf4 는 관측 폭 7.6° 라
+            # 3.04° 로 묶였다). 바닥이 관측 폭을 넘으면 안 본 면이 구멍으로 나올 수 있다 (shot 사다리는 hole 을 안 본다).
+            _sweep_cap = max(min(float(push_arc_deg), orbit_span_frac * float(node["obs_az_span_deg"])),
+                             float(push_arc_min_deg))
         _ref_i = (num_frames - 1 if node.get("moving", True)
                   else int(np.clip(int(node.get("best_frame", num_frames - 1)) * num_frames
                                    // max(len(node["track"]["center_smooth"]), 1), 0, num_frames - 1)))

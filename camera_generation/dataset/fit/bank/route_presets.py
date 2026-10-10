@@ -847,6 +847,7 @@ def main(args):
                        "target_count": args.target_variants,
                        "object_budget": object_budget,
                        "pair_always": bool(args.pair_always), "free_only": free_only,
+                       "per_anchor": int(args.per_anchor_presets),
                        "continuity_drop": continuity_drop,
                        "slots": [{"slot": s, "preset": p} for s, p in slots],
                        "presets": presets, "reasons": reasons},
@@ -1059,6 +1060,8 @@ def build_parser():
     # [R280] subject 가 0 이면 free-moving 으로만 채운다 / subject 2 개면 움직임과 무관하게 2x2 (뱅크 plan_variants 가 읽는다).
     parser.add_argument("--free_fill_when_empty", action="store_true", default=False)
     parser.add_argument("--pair_always", action="store_true", default=False)
+    # [R304] anchor 2개 이상이면 전 anchor 에 N 개씩 (sample_camera_bank.plan_variants). 0 = 예전 (앞 2개 × 예산/2).
+    parser.add_argument("--per_anchor_presets", default=0, type=int)
     return parser
 
 

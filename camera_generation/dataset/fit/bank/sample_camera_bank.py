@@ -157,7 +157,8 @@ def variant_tier(preset: str) -> int:
 
 def plan_variants(live, route_presets: dict, route_backfill: dict, free_preset,
                   object_budget: int, target_count: int, presets, track_ok,
-                  variant_pool: str = "budget", pair_always: bool = False, free_only=None):
+                  variant_pool: str = "budget", pair_always: bool = False, free_only=None,
+                  per_anchor: int = 0):
     """살아남은 anchor 에 scene 예산을 배분한다 (D166). -> (plan, tiers).
 
     `plan` 은 `[(node, subject_points, [preset])]`, `tiers` 는 `{(anchor_id, preset): 층}`.
@@ -200,6 +201,11 @@ def plan_variants(live, route_presets: dict, route_backfill: dict, free_preset,
     # [R280] `pair_always`: subject 2 개면 움직임과 무관하게 2x2 (사용자 "subject 2 x preset 2"). 끄면 예전 규칙.
     used = live[:2] if (len(live) >= 2 and (moving or pair_always)) else live[:1]
     per = max(object_budget // len(used), 1)
+    if per_anchor > 0 and len(live) >= 2:
+        # [R304] anchor 2개 이상이면 **살아남은 전부** (route 가 dyn ≤ 2 · stat ≤ 2 로 자른 것) 에 `per_anchor` 개씩.
+        # 사용자 2026-10-10 "dyn 최대 2개 stat 최대 2개로". 예산 상한도 그만큼 올린다 (anchor 1개면 위 규칙 그대로).
+        used, per = list(live), int(per_anchor)
+        target_count = per * len(used) + (1 if free_preset else 0)
 
     # anchor 별 후보 풀: keep_pair 슬롯 먼저, 그다음 backfill. track 게이트를 여기서 태운다 —
     # `track_*` 이 빠진 자리도 결손이라 backfill 로 채워야 한다 (파일럿 1차의 3개 원인).
@@ -925,6 +931,7 @@ def main(args):
     # D166. anchor 별 preset 목록 (`--preset_route`). 없으면 전 anchor 가 `presets` 합집합.
     route_presets, route_backfill = {}, {}
     route_pair_always, route_free_only = False, None
+    route_per_anchor = 0
     free_preset, target_count, object_budget = None, 0, 0
     if args.preset_route:
         with open(args.preset_route, encoding="utf-8") as file:
@@ -938,6 +945,7 @@ def main(args):
                           for a in blob["anchors"]}
         free_preset = (blob.get("free_moving") or {}).get("preset")
         route_pair_always, route_free_only = bool(blob.get("pair_always")), blob.get("free_only")
+        route_per_anchor = int(blob.get("per_anchor", 0))      # [R304] 키 없는 옛 JSON = 0 = 예전 배분
         target_count = args.target_variants or int(blob.get("target_count", 0))
         object_budget = max(target_count - (1 if free_preset else 0), 1) if target_count else 0
         print(f"{'preset_route':<16}" + "  ".join(f"{k}:{len(v)}"
@@ -1022,7 +1030,7 @@ def main(args):
     plan, plan_tiers = plan_variants(live, route_presets, route_backfill, free_preset,
                                      object_budget, target_count, presets, track_ok,
                                      args.variant_pool, pair_always=route_pair_always,
-                                     free_only=route_free_only)
+                                     free_only=route_free_only, per_anchor=route_per_anchor)
     if target_count:
         n_var = sum(len(p) for _, _, p in plan)
         n_primary = sum(1 for t in plan_tiers.values() if t == 0)

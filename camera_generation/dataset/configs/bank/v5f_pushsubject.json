@@ -1,5 +1,5 @@
 {
- "_why": "R298 (사용자 10-10 \"push in arc left 면 push in 이 강조되고 첫 프레임 이후 OBB 까지 고려해 더 가까이\") — v5e (approach off) + --push_mode subject (subject 중심 극좌표 push, 옆 회전 ≤ 0.5×push, 비-track 은 끝 프레임 subject 기준). 파일럿 4편. R299: track push 는 subject 순이동 직선 기준, shot 사다리 이분 8회. R300: arc 각도 고정 22.5° (관측 폭 clamp 유지). R301: arc 40° (상한 = 관측 폭 × 0.8, 바닥 20°). R302: arc 40→30→20° 재시도, |k|<0.1 이면 arc_blocked. pull_out_arc 도 subject 극좌표.",
+ "_why": "R298 (사용자 10-10 \"push in arc left 면 push in 이 강조되고 첫 프레임 이후 OBB 까지 고려해 더 가까이\") — v5e (approach off) + --push_mode subject (subject 중심 극좌표 push, 옆 회전 ≤ 0.5×push, 비-track 은 끝 프레임 subject 기준). 파일럿 4편. R299: track push 는 subject 순이동 직선 기준, shot 사다리 이분 8회. R300: arc 각도 고정 22.5° (관측 폭 clamp 유지). R301: arc 40° (상한 = 관측 폭 × 0.8, 바닥 20°). R302: arc 40→30→20° 재시도, |k|<0.1 이면 arc_blocked. pull_out_arc 도 subject 극좌표. R304: anchor dyn ≤ 2 · stat ≤ 2 (합계 상한 끔), anchor 2개 이상이면 전원 preset 2개씩 (route --per_anchor_presets 2).",
  "extends": "v5e_noapproach.json",
  "generation": "v5f",
  "bank_dir": "hole_bank_v5f",
@@ -104,5 +104,51 @@
    "--push_k_min",
    "0.1"
   ]
- }
+ },
+ "route": {
+  "out": "preset_route_v5f.json",
+  "args": [
+   "--num_external",
+   "0",
+   "--max_dynamic_anchors",
+   "2",
+   "--max_static_anchors",
+   "2",
+   "--max_anchors",
+   "0",
+   "--min_anchor_sep",
+   "2.0",
+   "--slot_plan",
+   "pool",
+   "--pool_size",
+   "12",
+   "--free_moving",
+   "pool",
+   "--track_min_drift_u",
+   "0.05",
+   "--target_variants",
+   "5",
+   "--anchor_require_frame0",
+   "--vertical_gravity",
+   "ground_ransac,geocalib",
+   "--skip_if_empty",
+   "--anchor_gap_max",
+   "5",
+   "--anchor_edge_gap",
+   "0",
+   "--anchor_occl_max",
+   "0.2",
+   "--free_fill_when_empty",
+   "--pair_always",
+   "--per_anchor_presets",
+   "2"
+  ]
+ },
+ "tau_bank_dir": "bank_v5f",
+ "stages": [
+  "route",
+  "tau",
+  "fit",
+  "emit"
+ ]
 }

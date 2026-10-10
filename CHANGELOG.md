@@ -15,6 +15,7 @@
 - **VAE worldtraj 캐시의 cameras.json 해석 c2w → w2c** (R169). `train_camera_vae.py --stage cache_wt` 가 `rotation`/`position` 을 c2w 로 읽어 worldtraj 창(학습 228,130 · test 2,846)이 전부 역궤적이었다. 레포 규약(`main/dynamicverse_shim.py`, CamVLA `data/worldtraj`)과 scene.ply 투영 (images_pc_rendered 대비 색 오차 c2w 50~63 / w2c 18~21) 모두 w2c. `--wt_pose w2c|c2w` 신설, 기본 w2c · c2w 는 R125~R168 캐시 재현용.
 
 ### Added
+- dataset `--push_arc_deg D` (R300, fit_hole_ladder/emit_bank/build_poses, 기본 0 = push 비례식 θ = push_arc_ratio·k): push_mode subject 의 arc 각도를 push 양과 무관하게 고정 (관측 방위각 폭 sweep/2 clamp 유지). v5f config 22.5°.
 - dataset `fit_hole_ladder.py --shot_iterations N` (R299, 기본 0 = --iterations 그대로): shot 사다리 (bracket 없이 [0.005, 3] 전 구간) 전용 이분 횟수 — 4회면 눈금이 0.19 라 게이트 여유를 크게 남겼다.
 - dataset `--push_mode subject` (R298, fit_hole_ladder/emit_bank/build_poses, 기본 frame0 = 예전): push_in_arc_* / dolly_in_look_at (track_ 포함) 위치를 subject 중심 극좌표로 — 거리 축소율 k 가 주동작, 옆 회전 θ = min(push_arc_ratio·k, sweep/2), τ 손잡이 의미는 그대로 (k 를 τ 에 맞춰 이분법). 기준점: track_ = 매 프레임 c(f), 비-track = 움직이는 노드는 마지막 프레임, 정지 노드는 `best_frame`. bank.json fixed 에 `push_mode`·`push_arc_ratio` 를 적어 emit 이 재현. config `v5f_pushsubject.json`.
 - latentcam `scripts/eval_testset.py --dump-readout` (R297, 기본 off): soft-argmax readout 가중치 (B,49,64)·3D 예측·GT target_track 을 `<out>/readout_dump.npz` 로 저장 — readout 이 Molmo2 토큰 중 실제 subject 를 보는지 재는 용도.

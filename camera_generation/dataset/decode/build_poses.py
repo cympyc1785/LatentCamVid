@@ -698,7 +698,7 @@ PUSH_SUBJECT_PRESETS = {"push_in_arc_left": 1.0, "push_in_arc_right": -1.0, "dol
 
 def subject_push_positions(p0: np.ndarray, centers: np.ndarray, up: np.ndarray, left: np.ndarray,
                            k: float, arc_sign: float, arc_ratio: float, theta_cap_deg: float, track: bool,
-                           ref_index: int = -1):
+                           ref_index: int = -1, arc_deg: float = 0.0):
     """[R298] subject 중심 극좌표 push. 카메라→subject 벡터를 up 축 둘레로 θ·s 돌리고 길이를 (1 − k·s) 로 줄인다.
 
     사용자 2026-10-10 "push in arc left 면 push in 이 강조되고 물체의 첫 프레임 이후의 OBB 까지 고려해서 더 가까이 가야".
@@ -720,7 +720,9 @@ def subject_push_positions(p0: np.ndarray, centers: np.ndarray, up: np.ndarray, 
     ref = (centers[0] + s[:, None] * (centers[-1] - centers[0])) if track \
         else np.repeat(centers[ref_index][None], n, axis=0)
     v0 = p0 - ref[0]
-    theta = np.radians(min(np.degrees(arc_ratio * k), theta_cap_deg))     # 옆 이동 ≈ ρ·θ ≤ arc_ratio·(ρ·k)
+    # arc_deg > 0 (R300): push 양과 무관하게 고정 각도 (사용자 2026-10-10 "이번엔 arc 가 잘 안 느껴지는데" — 비례식은 k 가
+    # 작으면 θ 가 몇 도뿐). 거리는 어느 쪽이든 (1 − k·s) 로 단조 감소라 arc 가 커져도 멀어지지 않는다.
+    theta = np.radians(min(arc_deg if arc_deg > 0 else np.degrees(arc_ratio * k), theta_cap_deg))
     sign = arc_sign * (1.0 if float(np.dot(np.cross(up, v0), left)) >= 0 else -1.0)
     disp = np.zeros((n, 3))
     for f in range(n):
@@ -741,7 +743,8 @@ def build_poses(decision: dict, graph: dict, board: dict | None = None,
                 smooth_passes: int = 12, smooth_lambda: float = 0.5,
                 tau_ref: str = "source", deroll: bool = False,
                 orbit_fixed_sweep: bool = False, tau_denom: str = "z_med_frame0",
-                push_mode: str = "frame0", push_arc_ratio: float = 0.5, push_k_max: float = 0.9):
+                push_mode: str = "frame0", push_arc_ratio: float = 0.5, push_k_max: float = 0.9,
+                push_arc_deg: float = 0.0):
     """(poses (n,4,4) world c2w, info dict). 이 함수가 `decision.json` 의 유일한 해석자다.
 
     `tau_denom` (D150) 은 τ 의 분모를 고른다 — `"S"` 면 전 프레임 non-sky 점의 첫 카메라 거리
@@ -918,7 +921,7 @@ def build_poses(decision: dict, graph: dict, board: dict | None = None,
                   else int(np.clip(int(node.get("best_frame", num_frames - 1)) * num_frames
                                    // max(len(node["track"]["center_smooth"]), 1), 0, num_frames - 1)))
         _make = lambda k: subject_push_positions(_p0, _cent, up_world, _left, k, PUSH_SUBJECT_PRESETS[_base],
-                                                 push_arc_ratio, _sweep_cap, _track, _ref_i)
+                                                 push_arc_ratio, _sweep_cap, _track, _ref_i, push_arc_deg)
         _tau = lambda k: float(np.linalg.norm(_make(k)[1], axis=-1).max() / max(z_med, 1e-9))
         lo, hi = 0.0, float(push_k_max)
         saturated = _tau(hi) < target_tau
@@ -933,7 +936,7 @@ def build_poses(decision: dict, graph: dict, board: dict | None = None,
         offsets_world = np.zeros_like(offsets_world)                          # 추종은 pos 안에 이미 있다
         tau_info = {**tau_info, "scale": round(k_push, 6), "tau_max": round(_tau(k_push), 4),
                     "tau_saturated": bool(saturated), "push_mode": "subject", "push_k": round(k_push, 6),
-                    "push_theta_deg": round(min(np.degrees(push_arc_ratio * k_push), _sweep_cap), 4),
+                    "push_theta_deg": round(min(push_arc_deg if push_arc_deg > 0 else np.degrees(push_arc_ratio * k_push), _sweep_cap), 4),
                     "push_ref": "lerp(c0,cF)" if _track else f"c({_ref_i})"}
 
     # ── world 로 올리고 조준

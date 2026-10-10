@@ -167,6 +167,8 @@ def main():
     # [new 2026-09-05] video CA 를 끄고 추론한다. --drop-track 의 video 판. 같은 ckpt 로
     # 이 플래그만 켜고 끄면 "video 스트림이 최종 궤적을 얼마나 바꾸나"가 짝지은 비교로 나온다.
     # [R91] start pose head 가 있는 run: 예측 궤적을 예측 첫 카메라 위에 놓는다 (기본 off = GT 첫 카메라, 기존 동작)
+    # [R297] readout soft-argmax 가중치·3D 예측·GT track 을 <out>/readout_dump.npz 로 (기본 off).
+    ap.add_argument('--dump-readout', action='store_true', default=False)
     ap.add_argument('--pred_start', action='store_true', default=False)
     # [R102] GT latent 에 t 수준 노이즈를 얹어 거기서부터 denoise (SDEdit). 기본 None = 순수 노이즈 x_T.
     ap.add_argument('--init_gt_t', type=int, default=None)
@@ -407,6 +409,7 @@ def main():
 
     tot_lat = tot_traj = 0.0
     n_seen = 0
+    readout_dump = {}       # [R297] --dump-readout
     names = []
     # [new 2026-09-05] 추론 1건 = jsonl 1행. 플래그가 없으면 None 이라 아래 블록이 통째로 꺼진다.
     probe_fh = open(osp.join(out_dir, 'video_ca_probe.jsonl'), 'w',
@@ -519,6 +522,18 @@ def main():
                                    step_cb=_sc,
                                    x_init=(traj_latents if args.init_gt_t is not None else None),
                                    t_start=args.init_gt_t)
+                if args.dump_readout:
+                    # [R297] readout 이 Molmo2 video 토큰 어디를 보나 — soft-argmax 가중치 (B,49,64) 와 3D 예측, GT track 을 남긴다.
+                    # readout 은 x_t·t 와 무관 (학습된 query × 캐시 토큰) 이라 마지막 denoise 스텝의 값이 곧 그 표본의 값이다.
+                    _ro = getattr(model, 'readout', None)
+                    _w = getattr(_ro, 'sa_weight', None)
+                    _pp = getattr(model, 'readout_aux_pred', None)
+                    _tt = data.get('target_track')
+                    for _i, _n in enumerate(data_name):
+                        readout_dump[_n] = {
+                            'w': None if _w is None else _w[_i].half().cpu().numpy(),
+                            'pred': None if _pp is None else _pp[_i].float().cpu().numpy(),
+                            'gt': None if _tt is None else _tt[_i].float().cpu().numpy()}
                 if args.probe_video_ca and probe_fh is not None:
                     _pvkw = T.build_video_cond(data, device)
                     # [new] 배치는 seg 순서라 probe 안의 roll(1) 짝이 거의 항상 같은 scene 이다.
@@ -621,6 +636,12 @@ def main():
         probe_fh.close()
         print(f"[probe] {osp.join(out_dir, 'video_ca_probe.jsonl')}")
 
+    if args.dump_readout and readout_dump:
+        import numpy as np
+        _ks = sorted(readout_dump)
+        _st = lambda k: np.stack([readout_dump[n][k] for n in _ks]) if readout_dump[_ks[0]][k] is not None else np.zeros(0)
+        np.savez_compressed(osp.join(out_dir, 'readout_dump.npz'), data_name=np.array(_ks), w=_st('w'), pred=_st('pred'), gt=_st('gt'))
+        print(f"[R297] readout_dump.npz {len(_ks)} 표본")
     losses = {'val/loss_latent': tot_lat / n_seen, 'val/loss_traj': tot_traj / n_seen,
               'n_samples': n_seen, 'sampling_sec': round(time.time() - t0, 1)}
     with open(osp.join(out_dir, 'losses.json'), 'w') as f:

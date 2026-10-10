@@ -269,6 +269,8 @@ SHAPE_DEFAULTS = {"aim_ramp_frames": 12, "orbit_span_frac": 0.8, "min_sweep_deg"
                   # F9. 같은 두 층 구조. **`False` 여야 한다** — 이 키가 없는 뱅크는 F9 이전이고
                   # 그때 `fit_tau` 는 언제나 SE(3) 로그 전체를 깎았다 (orbit 반경 유지 + sweep 축소).
                   "orbit_fixed_sweep": False,
+                  # [R298] 같은 두 층 구조. 키가 없는 뱅크는 R298 이전 = frame-0 기준 preset 모양 그대로.
+                  "push_mode": "frame0", "push_arc_ratio": 0.5,
                   # F7. 같은 두 층 구조. **`False` 여야 한다** — 이 키가 없는 뱅크는 F7 이전이고
                   # 그때는 절단이 아예 없었다. 되만들 때 실제로 읽는 건 행의 `hold_from` 이고
                   # (이 키는 "이 뱅크가 절단을 켜고 구워졌나"의 표식), 그 열이 없거나 비어 있으면
@@ -1198,6 +1200,7 @@ def main(args):
                             smooth_lambda=args.smooth_lambda,
                             preset_tracking=args.preset_tracking, deroll=args.deroll,
                             orbit_fixed_sweep=args.orbit_fixed_sweep,
+                            push_mode=args.push_mode, push_arc_ratio=args.push_arc_ratio,
                             # D171. 0 이면 `build_poses` 가 예전 저역통과 경로를 그대로 탄다.
                             follow_keyframes=args.follow_keyframes,
                             follow_kf_interp=args.follow_kf_interp,
@@ -1898,6 +1901,8 @@ def main(args):
                       "deroll": bool(args.deroll),
                       # F9. 이분법이 sweep 을 깎았는지(False) 반경을 깎았는지(True).
                       "orbit_fixed_sweep": bool(args.orbit_fixed_sweep),
+                      # [R298] push_in_arc / dolly_in_look_at 의 위치 정의. "frame0" = 예전.
+                      "push_mode": str(args.push_mode), "push_arc_ratio": float(args.push_arc_ratio),
                       # D171. follow 위치 채널 keyframe 보간. 0 = 저역통과(D171 이전 동작).
                       # 키가 없는 옛 뱅크는 `SHAPE_DEFAULTS` 가 같은 0 으로 되푼다.
                       "follow_keyframes": int(args.follow_keyframes),
@@ -2425,6 +2430,10 @@ def build_parser():
     # F9. 이분법이 sweep 이 아니라 반경을 깎게 한다 (§presets.shape_resizer). sweep 을 안 쓰는
     # preset 은 `shape_resizer` 가 None 을 줘서 옛 경로 그대로다.
     parser.add_argument("--orbit_fixed_sweep", action="store_true", default=True)
+    # [R298] push_in_arc_* / dolly_in_look_at (track_ 포함) 위치: frame0 = 예전 (frame-0 subject 앞 preset 모양),
+    # subject = subject 중심 극좌표 (거리 축소가 주동작, 옆 회전 ≤ arc_ratio × push, 비-track 은 끝 프레임 subject 기준).
+    parser.add_argument("--push_mode", default="frame0", choices=["frame0", "subject"])
+    parser.add_argument("--push_arc_ratio", default=0.5, type=float)
     parser.add_argument("--no_orbit_fixed_sweep", dest="orbit_fixed_sweep", action="store_false")
     # F2. 옛 게이지(`frame0_ray`)로 구운 그래프를 일부러 쓸 때만 (§scene_graph.scale.assert_scale_mode).
     parser.add_argument("--allow_legacy_scale", action="store_true", default=False)

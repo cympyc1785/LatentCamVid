@@ -391,6 +391,9 @@ def main(args):
                 # (그때 이분법은 SE(3) 로그 전체를 깎았다).
                 orbit_fixed_sweep=bool(fixed.get("orbit_fixed_sweep",
                                                  FIXED_FALLBACK["orbit_fixed_sweep"])),
+                # [R298] 같은 규칙 — **뱅크에 적힌 값**. 키가 없으면 R298 이전 뱅크라 "frame0".
+                push_mode=str(fixed.get("push_mode", FIXED_FALLBACK.get("push_mode", "frame0"))),
+                push_arc_ratio=float(fixed.get("push_arc_ratio", FIXED_FALLBACK.get("push_arc_ratio", 0.5))),
                 # D171. 같은 규칙 — **뱅크에 적힌 값**. 키가 없으면 D171 이전 뱅크라 0 =
                 # 저역통과 (그때 follow 위치 채널은 언제나 savgol 이었다).
                 follow_keyframes=int(fixed.get("follow_keyframes",

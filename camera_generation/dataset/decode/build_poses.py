@@ -692,6 +692,39 @@ def orthonormalize(c2w: np.ndarray):
     return result
 
 
+# [R298] `push_mode="subject"` 가 위치를 다시 만드는 preset. arc 부호 +1 = 카메라가 자기 왼쪽으로 돈다.
+PUSH_SUBJECT_PRESETS = {"push_in_arc_left": 1.0, "push_in_arc_right": -1.0, "dolly_in_look_at": 0.0}
+
+
+def subject_push_positions(p0: np.ndarray, centers: np.ndarray, up: np.ndarray, left: np.ndarray,
+                           k: float, arc_sign: float, arc_ratio: float, theta_cap_deg: float, track: bool,
+                           ref_index: int = -1):
+    """[R298] subject 중심 극좌표 push. 카메라→subject 벡터를 up 축 둘레로 θ·s 돌리고 길이를 (1 − k·s) 로 줄인다.
+
+    사용자 2026-10-10 "push in arc left 면 push in 이 강조되고 물체의 첫 프레임 이후의 OBB 까지 고려해서 더 가까이 가야".
+    예전 `compose(arc(sweep/2, R), dolly(0.35R))` 는 frame-0 subject 앞 원의 **현** 위를 움직이고, τ 이분법이
+    SE(3) 로그 전체(회전 포함)를 키워 τ 가 크면 arc 가 주동작이 돼 오히려 멀어졌다 (R298 실측: 파일럿 push/옆 중앙 1.6~1.8,
+    현재 subject 까지 거리가 끝에서 더 먼 변이 15~22%). 여기서는 θ = min(arc_ratio·k, cap) 라 **옆 이동이 항상 push 의
+    arc_ratio 배 이하**이고, 기준점은
+      track=True  : 매 프레임 subject 중심 c(f) (상대 위치 유지 — tracking shot)
+      track=False : subject 중심 c(ref_index) 고정 (따라다니지 않지만 끝에는 실제 subject 앞에 선다). 호출자가 정한다 —
+                    움직이는 노드는 마지막 프레임, 정지 노드는 가장 크게 보인 프레임 `best_frame`
+                    (사용자 2026-10-10 "static object 는 가장 많이 보이는 컷, dynamic 은 마지막 컷").
+    반환 (positions (n,3), shape displacement (n,3)) — 후자는 "추종만 하는 카메라" 대비 변위라 τ(follow 기준) 계산용이다.
+    """
+    n = len(centers)
+    s = np.linspace(0.0, 1.0, n)
+    ref = centers if track else np.repeat(centers[ref_index][None], n, axis=0)
+    v0 = p0 - ref[0]
+    theta = np.radians(min(np.degrees(arc_ratio * k), theta_cap_deg))     # 옆 이동 ≈ ρ·θ ≤ arc_ratio·(ρ·k)
+    sign = arc_sign * (1.0 if float(np.dot(np.cross(up, v0), left)) >= 0 else -1.0)
+    disp = np.zeros((n, 3))
+    for f in range(n):
+        rot = Rotation.from_rotvec(up * sign * theta * s[f]).as_matrix()
+        disp[f] = rot @ v0 * (1.0 - k * s[f]) - v0
+    return ref + v0 + disp, disp
+
+
 def build_poses(decision: dict, graph: dict, board: dict | None = None,
                 num_frames: int | None = None, target_tau: float | None = None,
                 orbit_span_frac: float = 0.8, start_mode: str = "source_frame0",
@@ -703,7 +736,8 @@ def build_poses(decision: dict, graph: dict, board: dict | None = None,
                 use_fit_tau: bool = True, preset_tracking: bool = True,
                 smooth_passes: int = 12, smooth_lambda: float = 0.5,
                 tau_ref: str = "source", deroll: bool = False,
-                orbit_fixed_sweep: bool = False, tau_denom: str = "z_med_frame0"):
+                orbit_fixed_sweep: bool = False, tau_denom: str = "z_med_frame0",
+                push_mode: str = "frame0", push_arc_ratio: float = 0.5, push_k_max: float = 0.9):
     """(poses (n,4,4) world c2w, info dict). 이 함수가 `decision.json` 의 유일한 해석자다.
 
     `tau_denom` (D150) 은 τ 의 분모를 고른다 — `"S"` 면 전 프레임 non-sky 점의 첫 카메라 거리
@@ -864,6 +898,39 @@ def build_poses(decision: dict, graph: dict, board: dict | None = None,
                     "tau_resize": False}
     tau_info = {**tau_info, "fit_tau": bool(use_fit_tau), "tau_ref": tau_ref,
                 "orbit_fixed_sweep": bool(orbit_fixed_sweep)}
+
+    # [R298] push_mode="subject": push_in_arc_* / dolly_in_look_at (track_ 짝 포함) 의 **위치**를 subject 중심 극좌표로
+    # 다시 만든다. 손잡이 의미 (target_tau = 추종 제외 변위 최대 / z_med) 는 그대로라 fit 이분법이 안 바뀐다 — τ 에 맞는
+    # 거리 축소율 k 를 여기서 푼다. 조준은 아래 keyframe/look_at 경로가 c(f) 를 lock 하는 그대로다. 기본 "frame0" 은 이
+    # 블록이 안 돌아 예전과 비트 동일하다.
+    _base = preset[len("track_"):] if preset.startswith("track_") else preset
+    push_subject = push_mode == "subject" and _base in PUSH_SUBJECT_PRESETS
+    if push_subject:
+        _track = preset.startswith("track_")
+        _cent = follow_centers if _track else centers_world
+        _p0, _left = basis_c2w[:3, 3], -c2w_start[:3, 0]
+        _sweep_cap = float(context["sweep"]) / 2.0
+        _ref_i = (num_frames - 1 if node.get("moving", True)
+                  else int(np.clip(int(node.get("best_frame", num_frames - 1)) * num_frames
+                                   // max(len(node["track"]["center_smooth"]), 1), 0, num_frames - 1)))
+        _make = lambda k: subject_push_positions(_p0, _cent, up_world, _left, k, PUSH_SUBJECT_PRESETS[_base],
+                                                 push_arc_ratio, _sweep_cap, _track, _ref_i)
+        _tau = lambda k: float(np.linalg.norm(_make(k)[1], axis=-1).max() / max(z_med, 1e-9))
+        lo, hi = 0.0, float(push_k_max)
+        saturated = _tau(hi) < target_tau
+        if not saturated:
+            for _ in range(30):
+                mid = 0.5 * (lo + hi)
+                lo, hi = (mid, hi) if _tau(mid) < target_tau else (lo, mid)
+        k_push = hi
+        pos, _disp = _make(k_push)
+        rel_local = np.stack([np.eye(4)] * num_frames)
+        rel_local[:, :3, 3] = (pos - basis_c2w[:3, 3]) @ basis_c2w[:3, :3]     # basis 로컬 (회전 없음)
+        offsets_world = np.zeros_like(offsets_world)                          # 추종은 pos 안에 이미 있다
+        tau_info = {**tau_info, "scale": round(k_push, 6), "tau_max": round(_tau(k_push), 4),
+                    "tau_saturated": bool(saturated), "push_mode": "subject", "push_k": round(k_push, 6),
+                    "push_theta_deg": round(min(np.degrees(push_arc_ratio * k_push), _sweep_cap), 4),
+                    "push_ref": "c(f)" if _track else f"c({_ref_i})"}
 
     # ── world 로 올리고 조준
     poses = T.start_at(basis_c2w, rel_local)

@@ -15,6 +15,7 @@
 - **VAE worldtraj 캐시의 cameras.json 해석 c2w → w2c** (R169). `train_camera_vae.py --stage cache_wt` 가 `rotation`/`position` 을 c2w 로 읽어 worldtraj 창(학습 228,130 · test 2,846)이 전부 역궤적이었다. 레포 규약(`main/dynamicverse_shim.py`, CamVLA `data/worldtraj`)과 scene.ply 투영 (images_pc_rendered 대비 색 오차 c2w 50~63 / w2c 18~21) 모두 w2c. `--wt_pose w2c|c2w` 신설, 기본 w2c · c2w 는 R125~R168 캐시 재현용.
 
 ### Added
+- dataset `fit_hole_ladder.py --shot_iterations N` (R299, 기본 0 = --iterations 그대로): shot 사다리 (bracket 없이 [0.005, 3] 전 구간) 전용 이분 횟수 — 4회면 눈금이 0.19 라 게이트 여유를 크게 남겼다.
 - dataset `--push_mode subject` (R298, fit_hole_ladder/emit_bank/build_poses, 기본 frame0 = 예전): push_in_arc_* / dolly_in_look_at (track_ 포함) 위치를 subject 중심 극좌표로 — 거리 축소율 k 가 주동작, 옆 회전 θ = min(push_arc_ratio·k, sweep/2), τ 손잡이 의미는 그대로 (k 를 τ 에 맞춰 이분법). 기준점: track_ = 매 프레임 c(f), 비-track = 움직이는 노드는 마지막 프레임, 정지 노드는 `best_frame`. bank.json fixed 에 `push_mode`·`push_arc_ratio` 를 적어 emit 이 재현. config `v5f_pushsubject.json`.
 - latentcam `scripts/eval_testset.py --dump-readout` (R297, 기본 off): soft-argmax readout 가중치 (B,49,64)·3D 예측·GT target_track 을 `<out>/readout_dump.npz` 로 저장 — readout 이 Molmo2 토큰 중 실제 subject 를 보는지 재는 용도.
 - dataset `fit_hole_ladder.py --trace_probes <dir>` (R295, 기본 off): 변이마다 이분법이 시험한 손잡이 전부의 궤적·게이트 값 (approach_gap·obb_slack·subject_area_last 등)·물리 판정을 `<dir>/<variant>.npz` 로 남긴다 — `*_limited` 가 어느 손잡이에서 무엇에 막혔는지 그 궤적으로 렌더하기 위한 진단.
@@ -34,6 +35,7 @@
 - **plot_traj_curves `--jerk`** (R169): 위치 jerk |Δ³p|/reach · 회전 jerk |Δ²ω| 프레임별 곡선 열 2개 (traj_time_metrics 와 같은 정의, 범례에 평균).
 
 ### Changed
+- dataset `push_mode subject` (R299): track_ push 의 기준점을 매 프레임 c(f) 에서 c(0)→c(F−1) 순이동 직선으로 — subject 앞뒤 흔들림이 카메라 위치로 옮겨가지 않게 (조준은 실제 c(f) lock 그대로).
 
 - **train_camera_vae 기본 레시피 = old VAE** (R138). `--lr_schedule constant|cosine`, `--wd`, `--recon l1|mse` 추가, 기본값을 SCVideo old VAE 학습과 같게 (lr 1e-4 constant · wd 0.01 · L1 · kl_w 1e-3). R125~R137 레시피는 `--lr 1e-3 --lr_schedule cosine --wd 0 --recon mse --kl_w 1e-4`.
 - **최종 git 정리** (R15). 작업 트리의 미추적 항목을 **추적 / 닫기** 둘 중 하나로 전부 처리했다.

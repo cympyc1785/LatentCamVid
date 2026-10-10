@@ -40,6 +40,7 @@
 - **plot_traj_curves `--jerk`** (R169): 위치 jerk |Δ³p|/reach · 회전 jerk |Δ²ω| 프레임별 곡선 열 2개 (traj_time_metrics 와 같은 정의, 범례에 평균).
 
 ### Changed
+- dataset config `v5f_pushsubject.json` (R308): `--shot_class_presets` 를 look_at preset 만 (`^(track_)?(dolly_in_look_at|push_in_arc_*|pull_out_arc_*)$`) — 예전 `dolly_in|push_in|dolly_out|pull_out` 이 `truck_left_dolly_in` 같은 free 조합까지 걸어 초반 34편 shot_missed 89/316. bank_dir `hole_bank_v5f2`.
 - dataset `push_mode subject` (R299): track_ push 의 기준점을 매 프레임 c(f) 에서 c(0)→c(F−1) 순이동 직선으로 — subject 앞뒤 흔들림이 카메라 위치로 옮겨가지 않게 (조준은 실제 c(f) lock 그대로).
 
 - **train_camera_vae 기본 레시피 = old VAE** (R138). `--lr_schedule constant|cosine`, `--wd`, `--recon l1|mse` 추가, 기본값을 SCVideo old VAE 학습과 같게 (lr 1e-4 constant · wd 0.01 · L1 · kl_w 1e-3). R125~R137 레시피는 `--lr 1e-3 --lr_schedule cosine --wd 0 --recon mse --kl_w 1e-4`.

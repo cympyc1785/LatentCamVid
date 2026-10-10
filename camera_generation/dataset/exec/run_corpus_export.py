@@ -270,7 +270,7 @@ if __name__ == "__main__":
                                          "latentcam_dynpose_d200", type=str)
     p.add_argument("--tmp", default="/data1/cympyc1785/LatentCamVid/tmp/d200", type=str)
     # ── 필터. 사용자 지시(2026-09-16): **clamped_low 만** 뺀다. free-moving 도 남긴다 ──
-    p.add_argument("--drop_status", nargs="*", default=["clamped_low"])
+    p.add_argument("--drop_status", nargs="*", default=["clamped_low", "arc_blocked"])   # [R302] arc_blocked = arc 최소각에서도 거리 변화 없음 (push_k_min). 옛 뱅크엔 없는 값이라 무영향
     p.add_argument("--drop_suspect", nargs="*", default=[])
     # D271. TRUMANS mesh raycast 통과 변이만 내보낸다 (`vista4d_bank_to_dl3dv.py --raycast_name`).
     p.add_argument("--raycast_name", default=None, type=str)

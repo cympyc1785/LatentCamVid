@@ -693,12 +693,17 @@ def orthonormalize(c2w: np.ndarray):
 
 
 # [R298] `push_mode="subject"` 가 위치를 다시 만드는 preset. arc 부호 +1 = 카메라가 자기 왼쪽으로 돈다.
-PUSH_SUBJECT_PRESETS = {"push_in_arc_left": 1.0, "push_in_arc_right": -1.0, "dolly_in_look_at": 0.0}
+PUSH_SUBJECT_PRESETS = {"push_in_arc_left": 1.0, "push_in_arc_right": -1.0, "dolly_in_look_at": 0.0,
+                        # [R302] pull_out_arc 도 같은 극좌표로 (거리 증가). 사용자 2026-10-10 "모든 arc 에 저 최소값 적용".
+                        "pull_out_arc_left": 1.0, "pull_out_arc_right": -1.0}
+# 거리 방향: +1 = push (ρ·(1 − k·s)), −1 = pull (ρ·(1 + k·s)).
+PUSH_SUBJECT_DIR = {"pull_out_arc_left": -1.0, "pull_out_arc_right": -1.0}
+PULL_K_MAX = 3.0
 
 
 def subject_push_positions(p0: np.ndarray, centers: np.ndarray, up: np.ndarray, left: np.ndarray,
                            k: float, arc_sign: float, arc_ratio: float, theta_cap_deg: float, track: bool,
-                           ref_index: int = -1, arc_deg: float = 0.0):
+                           ref_index: int = -1, arc_deg: float = 0.0, direction: float = 1.0):
     """[R298] subject 중심 극좌표 push. 카메라→subject 벡터를 up 축 둘레로 θ·s 돌리고 길이를 (1 − k·s) 로 줄인다.
 
     사용자 2026-10-10 "push in arc left 면 push in 이 강조되고 물체의 첫 프레임 이후의 OBB 까지 고려해서 더 가까이 가야".
@@ -727,7 +732,7 @@ def subject_push_positions(p0: np.ndarray, centers: np.ndarray, up: np.ndarray, 
     disp = np.zeros((n, 3))
     for f in range(n):
         rot = Rotation.from_rotvec(up * sign * theta * s[f]).as_matrix()
-        disp[f] = rot @ v0 * (1.0 - k * s[f]) - v0
+        disp[f] = rot @ v0 * (1.0 - direction * k * s[f]) - v0
     return ref + v0 + disp, disp
 
 
@@ -927,9 +932,10 @@ def build_poses(decision: dict, graph: dict, board: dict | None = None,
                   else int(np.clip(int(node.get("best_frame", num_frames - 1)) * num_frames
                                    // max(len(node["track"]["center_smooth"]), 1), 0, num_frames - 1)))
         _make = lambda k: subject_push_positions(_p0, _cent, up_world, _left, k, PUSH_SUBJECT_PRESETS[_base],
-                                                 push_arc_ratio, _sweep_cap, _track, _ref_i, push_arc_deg)
+                                                 push_arc_ratio, _sweep_cap, _track, _ref_i, push_arc_deg,
+                                                 PUSH_SUBJECT_DIR.get(_base, 1.0))
         _tau = lambda k: float(np.linalg.norm(_make(k)[1], axis=-1).max() / max(z_med, 1e-9))
-        lo, hi = 0.0, float(push_k_max)
+        lo, hi = 0.0, float(PULL_K_MAX if PUSH_SUBJECT_DIR.get(_base, 1.0) < 0 else push_k_max)
         saturated = _tau(hi) < target_tau
         if not saturated:
             for _ in range(30):

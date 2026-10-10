@@ -394,7 +394,8 @@ def main(args):
                 # [R298] 같은 규칙 — **뱅크에 적힌 값**. 키가 없으면 R298 이전 뱅크라 "frame0".
                 push_mode=str(fixed.get("push_mode", FIXED_FALLBACK.get("push_mode", "frame0"))),
                 push_arc_ratio=float(fixed.get("push_arc_ratio", FIXED_FALLBACK.get("push_arc_ratio", 0.5))),
-                push_arc_deg=float(fixed.get("push_arc_deg", FIXED_FALLBACK.get("push_arc_deg", 0.0))),
+                # [R302] arc 최소각 모드는 행마다 실제 쓴 각도를 적는다 — 그게 이긴다.
+                push_arc_deg=float(v.get("push_arc_deg", fixed.get("push_arc_deg", FIXED_FALLBACK.get("push_arc_deg", 0.0)))),
                 push_arc_min_deg=float(fixed.get("push_arc_min_deg", FIXED_FALLBACK.get("push_arc_min_deg", 0.0))),
                 # D171. 같은 규칙 — **뱅크에 적힌 값**. 키가 없으면 D171 이전 뱅크라 0 =
                 # 저역통과 (그때 follow 위치 채널은 언제나 savgol 이었다).

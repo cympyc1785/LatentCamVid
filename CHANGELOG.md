@@ -15,6 +15,7 @@
 - **VAE worldtraj 캐시의 cameras.json 해석 c2w → w2c** (R169). `train_camera_vae.py --stage cache_wt` 가 `rotation`/`position` 을 c2w 로 읽어 worldtraj 창(학습 228,130 · test 2,846)이 전부 역궤적이었다. 레포 규약(`main/dynamicverse_shim.py`, CamVLA `data/worldtraj`)과 scene.ply 투영 (images_pc_rendered 대비 색 오차 c2w 50~63 / w2c 18~21) 모두 w2c. `--wt_pose w2c|c2w` 신설, 기본 w2c · c2w 는 R125~R168 캐시 재현용.
 
 ### Added
+- dataset arc 최소각 (R302): `--push_k_min` — push_mode subject + `--push_arc_deg` 일 때 arc preset 은 arc 를 push_arc_deg → 중간 → push_arc_min_deg 로 줄여 가며 풀고, 거리 변화 |k| ≥ push_k_min 인 첫 각도를 쓴다 (행에 `push_arc_deg`·`push_k`, emit 은 행 값 우선). 최소각에서도 미달이면 status `arc_blocked` (`run_corpus_export --drop_status` 기본에 추가). `pull_out_arc_*` 도 subject 극좌표 (거리 증가) 로.
 - dataset `--push_arc_min_deg D` (R301, 기본 0): `--push_arc_deg` 고정 각도 모드의 상한을 sweep/2 대신 관측 방위각 폭 × orbit_span_frac 으로 두고 그 바닥을 D 도로. v5f config arc 40° / 바닥 20°.
 - dataset `--push_arc_deg D` (R300, fit_hole_ladder/emit_bank/build_poses, 기본 0 = push 비례식 θ = push_arc_ratio·k): push_mode subject 의 arc 각도를 push 양과 무관하게 고정 (관측 방위각 폭 sweep/2 clamp 유지). v5f config 22.5°.
 - dataset `fit_hole_ladder.py --shot_iterations N` (R299, 기본 0 = --iterations 그대로): shot 사다리 (bracket 없이 [0.005, 3] 전 구간) 전용 이분 횟수 — 4회면 눈금이 0.19 라 게이트 여유를 크게 남겼다.

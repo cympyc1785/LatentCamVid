@@ -1,5 +1,5 @@
 {
- "_why": "R298 (사용자 10-10 \"push in arc left 면 push in 이 강조되고 첫 프레임 이후 OBB 까지 고려해 더 가까이\") — v5e (approach off) + --push_mode subject (subject 중심 극좌표 push, 옆 회전 ≤ 0.5×push, 비-track 은 끝 프레임 subject 기준). 파일럿 4편. R299: track push 는 subject 순이동 직선 기준, shot 사다리 이분 8회. R300: arc 각도 고정 22.5° (관측 폭 clamp 유지). R301: arc 40° (상한 = 관측 폭 × 0.8, 바닥 20°).",
+ "_why": "R298 (사용자 10-10 \"push in arc left 면 push in 이 강조되고 첫 프레임 이후 OBB 까지 고려해 더 가까이\") — v5e (approach off) + --push_mode subject (subject 중심 극좌표 push, 옆 회전 ≤ 0.5×push, 비-track 은 끝 프레임 subject 기준). 파일럿 4편. R299: track push 는 subject 순이동 직선 기준, shot 사다리 이분 8회. R300: arc 각도 고정 22.5° (관측 폭 clamp 유지). R301: arc 40° (상한 = 관측 폭 × 0.8, 바닥 20°). R302: arc 40→30→20° 재시도, |k|<0.1 이면 arc_blocked. pull_out_arc 도 subject 극좌표.",
  "extends": "v5e_noapproach.json",
  "generation": "v5f",
  "bank_dir": "hole_bank_v5f",
@@ -100,7 +100,9 @@
    "--push_arc_deg",
    "40",
    "--push_arc_min_deg",
-   "20"
+   "20",
+   "--push_k_min",
+   "0.1"
   ]
  }
 }

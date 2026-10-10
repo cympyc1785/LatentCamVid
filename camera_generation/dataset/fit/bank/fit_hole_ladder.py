@@ -199,7 +199,7 @@ CINEMATRAJ_ROOT = path.dirname(path.dirname(path.dirname(path.abspath(__file__))
 if CINEMATRAJ_ROOT not in sys.path:
     sys.path.insert(0, CINEMATRAJ_ROOT)
 
-from decode.build_poses import build_poses                                      # noqa: E402
+from decode.build_poses import PUSH_SUBJECT_PRESETS, build_poses                 # noqa: E402
 from lbm.cloud import EVAL_DATA_DEFAULT, VISTA4D_ROOT_DEFAULT                   # noqa: E402
 from lbm.cloud import CINEMATRAJ_ROOT as CLOUD_ROOT                             # noqa: E402
 from lbm.cloud import subject_point_mask                                        # noqa: E402
@@ -1408,6 +1408,36 @@ def main(args):
                          # out 계열은 전역 하한 (--min_area_end, 사용자 0.02) 아래 칸으로는 안 간다
                          and not (shot_sign < 0 and args.min_area_end > 0 and edges[c + 1] <= args.min_area_end)]
                 shot_cls = edges
+            # [R302] arc 최소각 (사용자 2026-10-10 "모든 arc 에 저 최소값 적용"). push_mode subject + 고정 arc 일 때 arc preset 은
+            # arc 를 push_arc_deg → push_arc_min_deg 로 줄여 가며 풀고, 거리 변화 |k| 가 push_k_min 이상 나온 첫 각도를 쓴다.
+            # 최소각에서도 거리 변화가 없으면 (= arc 만 남은 카메라) `arc_blocked` 로 버린다 — arc 를 0 까지 내리면 그건
+            # dolly_in_look_at 이고 이미 따로 있다. 조건이 안 맞으면 `solve_knob` 그대로 (예전과 비트 동일).
+            _base_p = preset[len("track_"):] if preset.startswith("track_") else preset
+            _arc_mode = (args.push_mode == "subject" and args.push_arc_deg > 0 and "_arc_" in _base_p
+                         and _base_p in PUSH_SUBJECT_PRESETS)
+            _arc_hold = {"arc": float(args.push_arc_deg) if _arc_mode else None, "cache_arc": float(args.push_arc_deg)}
+            _arc_list = (sorted({float(args.push_arc_deg), float(args.push_arc_min_deg),
+                                 0.5 * (float(args.push_arc_deg) + float(args.push_arc_min_deg))}, reverse=True)
+                         if _arc_mode else [])
+
+            def _arc_solve(*a, _orig=float(args.push_arc_deg), **kw):
+                if not _arc_mode:
+                    return solve_knob(*a, **kw)
+                res, tot = None, 0
+                for _a in _arc_list:
+                    args.push_arc_deg = _a
+                    if _arc_hold["cache_arc"] != _a:
+                        cache.clear(); _arc_hold["cache_arc"] = _a
+                    res = solve_knob(*a, **kw); tot += res[3]
+                    _pk = abs(float(cache[res[0]][2]["tau"].get("push_k", 0.0)))
+                    if _pk >= args.push_k_min and not res[1].startswith("clamped_low"):
+                        _arc_hold["arc"] = _a
+                        args.push_arc_deg = _orig
+                        return res[0], res[1], res[2], tot
+                _arc_hold["arc"] = _arc_list[-1]
+                args.push_arc_deg = _orig
+                return res[0], "arc_blocked", res[2], tot
+
             for rung_i, delta in enumerate(rungs):
                 # shot 사다리에서 Δ 는 **바닥 대비 배율의 로그**라 이미 상대량이다 —
                 # `excess` 처럼 바닥을 더하면 이중으로 상대화된다. 그래서 그대로 쓴다.
@@ -1471,7 +1501,7 @@ def main(args):
                     # D266. shot 사다리에서는 bracket 을 **안 쓴다** — `points` 는 τ 뱅크가 hole
                     # 로 매긴 (손잡이, hole) 쌍이라 shot scale 의 bracket 이 아니다. 빈 리스트를
                     # 주면 범위 양끝을 재고 이분법으로 들어간다 (probe 2회 추가).
-                    knob, status, binding, calls = solve_knob(probe, target,
+                    knob, status, binding, calls = _arc_solve(probe, target,
                                                               [] if shot_p else points, kind,
                                                               # [R299] shot 사다리는 bracket 없이 [0.005, 3] 전 구간이라 4회면 눈금이 0.19 다.
                                                               (args.shot_iterations if (shot_p and args.shot_iterations) else args.iterations),
@@ -1571,6 +1601,9 @@ def main(args):
                     # 카메라를 되만든다. 격자를 끄면 키 자체가 없다 (예전 뱅크와 같은 JSON).
                     **({"start_cand": start_cand} if start_cand else {}),
                     **({"shot_target_class": SHOT_CLASS_NAMES[delta]} if shot_cls is not None else {}),
+                    # [R302] 이 행을 실제로 만든 arc 각도 (emit 이 이 값으로 되만든다). arc 최소각 모드가 아니면 키 없음.
+                    **({"push_arc_deg": _arc_hold["arc"], "push_k": round(float(cache[knob][2]["tau"].get("push_k", 0.0)), 5)}
+                       if _arc_mode else {}),
                     "target_hole": round(float(target), 5), "hole_delta": delta,
                     "hole_static": round(hole_static, 4),
                     # D266. 사다리가 무엇을 재고 있나 + shot 모드의 바닥 면적. `hole` 이면
@@ -2444,6 +2477,8 @@ def build_parser():
     parser.add_argument("--push_arc_deg", default=0.0, type=float)
     # [R301] 고정 각도 모드에서 관측 방위각 폭 clamp 의 바닥 (도). 0 = clamp 그대로.
     parser.add_argument("--push_arc_min_deg", default=0.0, type=float)
+    # [R302] arc preset 이 "arc + 거리 변화" 로 인정받는 최소 |k| (거리 변화율). 미달이면 더 작은 arc 로 다시, 최소각에서도 미달이면 arc_blocked.
+    parser.add_argument("--push_k_min", default=0.0, type=float)
     parser.add_argument("--no_orbit_fixed_sweep", dest="orbit_fixed_sweep", action="store_false")
     # F2. 옛 게이지(`frame0_ray`)로 구운 그래프를 일부러 쓸 때만 (§scene_graph.scale.assert_scale_mode).
     parser.add_argument("--allow_legacy_scale", action="store_true", default=False)

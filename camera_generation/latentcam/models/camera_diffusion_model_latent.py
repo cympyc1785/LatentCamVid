@@ -129,12 +129,22 @@ class PeavReadout(nn.Module):
                                        nn.Linear(dim, int(aux_dim)))
                          if int(aux_dim) > 0 else None)
 
-    def forward(self, tok, key_padding_mask=None, points=None, points_valid=None):
-        """(B,L,D) 캐시 토큰 → ((B,Q,D) 요약, (B,Q,aux_dim) aux 예측 | None)."""
+    def forward(self, tok, key_padding_mask=None, points=None, points_valid=None, extra=None, extra_kpm=None):
+        """(B,L,D) 캐시 토큰 → ((B,Q,D) 요약, (B,Q,aux_dim) aux 예측 | None).
+
+        [R292] `extra` (B,Lg,D) 를 주면 cross-attn 의 key/value 에 **이어 붙인다** (DA3 geo 토큰 — readout 이 Molmo2 와
+        DA3 를 같이 본다). soft-argmax 는 여전히 `tok` 의 video 부분만 점 가중평균의 대상으로 쓴다."""
         q = self.query.unsqueeze(0).expand(tok.shape[0], -1, -1)
+        kv, kv_mask = tok, key_padding_mask
+        if extra is not None:
+            kv = torch.cat([tok, extra], dim=1)
+            if key_padding_mask is not None or extra_kpm is not None:
+                a = key_padding_mask if key_padding_mask is not None else tok.new_zeros(tok.shape[:2], dtype=torch.bool)
+                b = extra_kpm if extra_kpm is not None else extra.new_zeros(extra.shape[:2], dtype=torch.bool)
+                kv_mask = torch.cat([a, b], dim=1)
         for self_attn, cross_attn, mlp in self.layers:
             q = self_attn(q)
-            q = cross_attn(q, tok, key_padding_mask=key_padding_mask)
+            q = cross_attn(q, kv, key_padding_mask=kv_mask)
             q = mlp(q) + q
         q = self.out_ln(q)
         if self.aux_mode == "softargmax" and points is not None:
@@ -177,6 +187,7 @@ class CameraDiffusionModel(nn.Module):
         peav_readout_mode="replace",
         peav_readout_cond_p=0.0,
         peav_readout_aux_mode="regress",
+        peav_readout_geo=False,
         video_text_fuse="token",
         start_pose_dim=0,
         start_pose_tf_p=0.0,
@@ -325,6 +336,8 @@ class CameraDiffusionModel(nn.Module):
             # [R253] readout aux head 의 subject 3D 예측을 **concat 조건으로** 쓴다 (test 때 GT subject 없이).
             #   학습: 샘플마다 확률 p 로 GT target_track 대신 예측 (detach) · 추론: 항상 예측. 0 = 기존 (aux 는 손실 전용).
             self.peav_readout_cond_p = float(peav_readout_cond_p)
+            # [R292] readout 이 DA3 geo 토큰도 key/value 로 본다 (geo_emb 가 있을 때만). False = 예전과 동일.
+            self.peav_readout_geo = bool(peav_readout_geo)
 
         # [new 2026-09-22 / D261] 시작 pose 를 궤적과 **같이** 예측한다.
         #
@@ -366,6 +379,16 @@ class CameraDiffusionModel(nn.Module):
         self.readout_aux_pred = None
 
         self.geo_encoder = geo_encoder
+
+    def _readout_geo_tok(self, geo_emb, geo_mask, B, device):
+        """[R292] readout 용 geo 토큰 (아래 geo CA 와 같은 투영) — 꺼져 있거나 geo 가 없으면 (None, None)."""
+        if not getattr(self, 'peav_readout_geo', False) or geo_emb is None:
+            return None, None
+        g = self.geo_proj(self._lift_geo_cam(geo_emb))
+        if self.geo_pe:
+            g = g + positional_encoding(g.shape[-2], g.shape[-1], device=device).unsqueeze(0).expand(B, -1, -1)
+        g = g * geo_mask.unsqueeze(-1)
+        return g, ~geo_mask
 
     def _lift_geo_cam(self, geo_emb):
         """[new] split the trailing raw camera dims off geo_emb and replace them with the MLP
@@ -454,7 +477,9 @@ class CameraDiffusionModel(nn.Module):
         if getattr(self, 'peav_readout_cond_p', 0.0) > 0 and has_video and self.readout is not None and self.cond_dim > 0:
             # [R253] readout 을 cam_in 앞에서 먼저 돌려 그 예측 (B,Q,3) 을 조건 xyz 로 쓴다. video_tok 은 아래에서 재사용.
             _vt, _vk = self._build_video_tok(video_emb, video_mask, video_text_emb, video_text_mask)
-            _rd, self.readout_aux_pred = self.readout(_vt, _vk, video_points, video_points_valid)
+            _gx = self._readout_geo_tok(geo_emb, geo_mask, B, device)
+            _rd, self.readout_aux_pred = self.readout(_vt, _vk, video_points, video_points_valid,
+                                                      extra=_gx[0], extra_kpm=_gx[1])
             _vid_built = (_vt, _vk, _rd)
             pc = self.readout_aux_pred.detach().float().transpose(1, 2)
             pc = F.interpolate(pc, size=T, mode='linear', align_corners=True).transpose(1, 2)        # (B,T,3)
@@ -524,7 +549,9 @@ class CameraDiffusionModel(nn.Module):
                 if _vid_built is not None:
                     _rd = _vid_built[2]
                 else:
-                    _rd, self.readout_aux_pred = self.readout(video_tok, video_kpm, video_points, video_points_valid)
+                    _gx = self._readout_geo_tok(geo_emb, geo_mask, B, device)
+                    _rd, self.readout_aux_pred = self.readout(video_tok, video_kpm, video_points, video_points_valid,
+                                                              extra=_gx[0], extra_kpm=_gx[1])
                 if self.peav_readout_mode == 'append':      # [R81] 원 토큰 + 요약 49 토큰
                     if video_kpm is not None:
                         video_kpm = torch.cat([video_kpm, video_kpm.new_zeros(_rd.shape[:2])], dim=1)

@@ -15,6 +15,7 @@
 - **VAE worldtraj 캐시의 cameras.json 해석 c2w → w2c** (R169). `train_camera_vae.py --stage cache_wt` 가 `rotation`/`position` 을 c2w 로 읽어 worldtraj 창(학습 228,130 · test 2,846)이 전부 역궤적이었다. 레포 규약(`main/dynamicverse_shim.py`, CamVLA `data/worldtraj`)과 scene.ply 투영 (images_pc_rendered 대비 색 오차 c2w 50~63 / w2c 18~21) 모두 w2c. `--wt_pose w2c|c2w` 신설, 기본 w2c · c2w 는 R125~R168 캐시 재현용.
 
 ### Added
+- latentcam `peav_readout_geo` (R292, 기본 false): readout cross-attn 의 key/value 에 DA3 geo 토큰 (geo CA 와 같은 `geo_proj` 투영·PE·mask) 을 Molmo2 [text|video] 뒤에 이어 붙인다. soft-argmax 가중평균 대상은 그대로 Molmo2 video 토큰의 3D 점. geo_emb 없는 arm 에서는 무시.
 
 - **train_camera_vae `--train_on_test`** (R194): 1 이면 test 창 (Dataset-v1 test + joint worldtraj test) 도 학습에 넣는다 — in-distribution 용량 비교용. 기본 0 = 옛 동작.
 - **CameraVAE `pad_mode="rep_enc"`** (R187): encoder 는 replicate, decoder 는 zeros — rep_lin 의 끝 프레임 속도 감쇠가 decoder 쪽 replicate 에서 오는지 가르는 변형. state_dict 호환, `train_camera_vae --pad_mode rep_enc`.

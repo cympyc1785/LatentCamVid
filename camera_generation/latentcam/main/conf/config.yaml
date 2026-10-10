@@ -650,6 +650,8 @@ peav_readout_cond_p: 0.0
 peav_readout_aux_mode: regress
 # [R291] Molmo2 토큰별 소스 3D 점 (`<scene>/da3/patch_points_8x8.npz`, scripts/data/cache_patch_points.py) 을 batch 에 싣는다.
 video_patch_points: false
+# [R292] readout 이 DA3 geo 토큰도 같이 본다 (geo_encoder 가 있는 arm 에서만 의미).
+peav_readout_geo: false
 
 # ─── [new 2026-09-20, D206] aim aux loss ─────────────────────────────────────────────────
 # 학습 스텝 안에서 예측 x0 를 **궤적 VAE 로 디코드**해, 카메라 forward 와

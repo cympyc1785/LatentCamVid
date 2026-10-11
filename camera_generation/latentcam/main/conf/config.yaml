@@ -652,6 +652,13 @@ peav_readout_aux_mode: regress
 video_patch_points: false
 # [R292] readout 이 DA3 geo 토큰도 같이 본다 (geo_encoder 가 있는 arm 에서만 의미).
 peav_readout_geo: false
+# [R312] readout 강화 (전부 0 = 예전). heat_w: soft-argmax 가중치를 subject bbox 토큰 분포로 CE 지도 (da3/subject_bbox.npz 필요).
+#   smooth_w: readout 3D 궤적 가속도 페널티. cond_noise: 학습 때 GT 위치 조건에 더할 σ (conditioning augmentation).
+#   cond_p_ramp: readout 예측 조건 비율을 이 epoch 수 동안 0 → peav_readout_cond_p 로 (scheduled sampling).
+peav_readout_heat_w: 0.0
+peav_readout_smooth_w: 0.0
+peav_readout_cond_noise: 0.0
+peav_readout_cond_p_ramp: 0
 
 # ─── [new 2026-09-20, D206] aim aux loss ─────────────────────────────────────────────────
 # 학습 스텝 안에서 예측 x0 를 **궤적 VAE 로 디코드**해, 카메라 forward 와

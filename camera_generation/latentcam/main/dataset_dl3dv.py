@@ -1856,6 +1856,9 @@ class CamDataset(torch.utils.data.Dataset):
             _P = torch.from_numpy(_pp['points']).float(); _E = extrinsics[0].float()
             out['video_points'] = (_P @ _E[:3, :3].T + _E[:3, 3]) / norm_scale.reshape(1, 1, 1).float()
             out['video_points_valid'] = torch.from_numpy(_pp['valid'])
+        # [R312] readout heatmap 지도용 subject bbox — 조건(`subject_bbox`)과 **다른 키** (build_track_cond 는 키가 있으면 조건으로 쓴다).
+        if float(getattr(self.cfg, 'peav_readout_heat_w', 0.0) or 0.0) > 0:
+            out['readout_bbox'] = self._subject_bbox(scene_idx, data_name.split('_')[-1], extrinsics.shape[0])
         # [R243] subject_bbox_cond: 원본 영상의 subject 2D bbox 를 concat 조건으로 (target_track 과 같은 경로 · 기본 off = 키 없음).
         if getattr(self.cfg, 'subject_bbox_cond', False):
             out['subject_bbox'] = self._subject_bbox(scene_idx, data_name.split('_')[-1], extrinsics.shape[0])

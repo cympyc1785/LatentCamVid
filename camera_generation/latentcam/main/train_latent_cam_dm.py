@@ -356,6 +356,47 @@ def build_track_cond(data, t_lat, device, dropout_p=0.0):
     return cond
 
 
+def readout_heat_loss(raw_model, data, device):
+    """[R312] soft-argmax readout 가중치 (B,F,64) 를 subject 2D bbox 가 덮는 Molmo2 토큰으로 직접 지도 (cross-entropy).
+
+    사용자 2026-10-11 "readout 쪽 강화". R297: MSTsa 의 가중치가 subject 위에 실린 정도와 3D 오차가 spearman −0.51 — 가중치가
+    subject 를 놓친 하위 25% 의 오차가 2.6배. 3D 회귀 손실만으로는 "어느 토큰" 을 간접으로만 배우므로, heatmap 지도
+    (Integral Human Pose Regression, Sun et al. 2018 의 soft-argmax 를 heatmap 감독과 같이 쓰는 방식) 로 위치 분포를 직접 준다.
+    토큰 (r,c) 의 정규화 사각형 = x∈[c/9,(c+2)/9), y∈[r/9,(r+2)/9) (tmp/agent/reader-r291-molmo2-layout.md). 목표 분포 = 토큰별
+    bbox 덮는 비율을 합 1 로. bbox 없는 프레임은 빼고, 없으면 None (손실 비트 동일)."""
+    ro = getattr(raw_model, 'readout', None)
+    w = getattr(ro, 'sa_weight_grad', None)
+    bb = data.get('readout_bbox')
+    if w is None or bb is None:
+        return None
+    bb = bb.to(device).float()                                      # (B,T,5) [cx-0.5, cy-0.5, w, h, valid]
+    B, Fn, P = w.shape
+    if bb.shape[1] != Fn:
+        bb = F.interpolate(bb.transpose(1, 2), size=Fn, mode='nearest').transpose(1, 2)
+    cx, cy, bw, bh, ok = bb[..., 0] + 0.5, bb[..., 1] + 0.5, bb[..., 2], bb[..., 3], bb[..., 4] > 0.5
+    k = torch.arange(P, device=device); r, c = (k // 8).float(), (k % 8).float()
+    tx0, tx1, ty0, ty1 = c / 9, (c + 2) / 9, r / 9, (r + 2) / 9
+    ox = (torch.minimum((cx + bw / 2)[..., None], tx1) - torch.maximum((cx - bw / 2)[..., None], tx0)).clamp(min=0)
+    oy = (torch.minimum((cy + bh / 2)[..., None], ty1) - torch.maximum((cy - bh / 2)[..., None], ty0)).clamp(min=0)
+    tgt = ox * oy                                                   # (B,F,64)
+    s = tgt.sum(-1, keepdim=True)
+    m = ok & (s[..., 0] > 0)
+    if not m.any():
+        return None
+    tgt = tgt / s.clamp(min=1e-8)
+    ce = -(tgt * torch.log(w.float().clamp(min=1e-8))).sum(-1)      # (B,F)
+    return (ce * m).sum() / m.sum()
+
+
+def readout_smooth_loss(raw_model):
+    """[R312] readout 3D 예측 궤적의 2차 차분 (가속도) 제곱 평균 — 조건으로 들어갈 subject 궤적이 프레임마다 튀지 않게."""
+    p = getattr(raw_model, 'readout_aux_pred', None)
+    if p is None or p.shape[1] < 3:
+        return None
+    a = p[:, 2:] - 2 * p[:, 1:-1] + p[:, :-2]
+    return a.float().pow(2).mean()
+
+
 def readout_aux_loss(raw_model, data, device):
     """[new 2026-09-15] readout query → subject OBB center 보조 손실 (valid 채널로 마스킹).
 
@@ -883,7 +924,8 @@ def train():
                 peav_readout_mode=str(getattr(cfg, 'peav_readout_mode', 'replace') or 'replace'),
                 peav_readout_cond_p=float(getattr(cfg, 'peav_readout_cond_p', 0.0) or 0.0),   # [R253]
                 peav_readout_aux_mode=str(getattr(cfg, 'peav_readout_aux_mode', 'regress') or 'regress'),   # [R291]
-                peav_readout_geo=bool(getattr(cfg, 'peav_readout_geo', False)))   # [R292]
+                peav_readout_geo=bool(getattr(cfg, 'peav_readout_geo', False)),   # [R292]
+                peav_readout_cond_noise=float(getattr(cfg, 'peav_readout_cond_noise', 0.0) or 0.0))   # [R312]
             _auxw = float(getattr(cfg, 'peav_readout_aux_w', 0.0))
             print(f"(model) peav readout: layers={_rol} "
                   f"queries={_vid_kw['peav_readout_queries']} "
@@ -1492,6 +1534,12 @@ def train():
               f"(start step {global_step} -> lr {_lr_at(global_step):.3e})")
 
     for epoch in range(start_epoch, _epochs):
+        # [R312] scheduled sampling (Bengio et al. 2015): readout 예측을 조건으로 쓰는 비율을 0 → peav_readout_cond_p 로
+        # `peav_readout_cond_p_ramp` epoch 동안 선형으로 올린다. 0 (기본) = 처음부터 고정 (예전 동작).
+        _ramp = int(getattr(cfg, 'peav_readout_cond_p_ramp', 0) or 0)
+        if _ramp > 0:
+            _rm = accelerator.unwrap_model(model)
+            _rm.peav_readout_cond_p = float(cfg.peav_readout_cond_p) * min(1.0, (epoch + 1) / _ramp)
         pbar = tqdm(train_dataloader)
         model.train()
         total_loss = torch.tensor(0.0, device=accelerator.device)
@@ -1679,6 +1727,17 @@ def train():
                 _aux = readout_aux_loss(accelerator.unwrap_model(model), data, device)
                 if _aux is not None:
                     loss = loss + float(getattr(cfg, 'peav_readout_aux_w', 0.0)) * _aux
+                # [R312] readout 강화 손실 둘 (기본 0 = 호출 안 함, 예전과 비트 동일).
+                _hw = float(getattr(cfg, 'peav_readout_heat_w', 0.0) or 0.0)
+                if _hw > 0:
+                    _hl = readout_heat_loss(accelerator.unwrap_model(model), data, device)
+                    if _hl is not None:
+                        loss = loss + _hw * _hl
+                _sw = float(getattr(cfg, 'peav_readout_smooth_w', 0.0) or 0.0)
+                if _sw > 0:
+                    _sl = readout_smooth_loss(accelerator.unwrap_model(model))
+                    if _sl is not None:
+                        loss = loss + _sw * _sl
                 # [new 2026-09-20, D206] aim 보조 손실. aim_loss_w=0 (기본) 이면 호출조차
                 # 안 하므로 VAE decode 비용도 0 이고 loss 가 예전과 비트 동일하다.
                 _aim_w = float(getattr(cfg, 'aim_loss_w', 0.0) or 0.0)

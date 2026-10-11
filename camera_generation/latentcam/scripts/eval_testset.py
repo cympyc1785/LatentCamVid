@@ -342,7 +342,8 @@ def main():
                 peav_readout_mode=str(getattr(cfg, 'peav_readout_mode', 'replace') or 'replace'),
                 peav_readout_cond_p=float(getattr(cfg, 'peav_readout_cond_p', 0.0) or 0.0),   # [R253]
                 peav_readout_aux_mode=str(getattr(cfg, 'peav_readout_aux_mode', 'regress') or 'regress'),   # [R291]
-                peav_readout_geo=bool(getattr(cfg, 'peav_readout_geo', False)))   # [R292]
+                peav_readout_geo=bool(getattr(cfg, 'peav_readout_geo', False)),   # [R292]
+                peav_readout_cond_noise=float(getattr(cfg, 'peav_readout_cond_noise', 0.0) or 0.0))   # [R312]
     # [R91] start pose head (D261/D296) — 학습 진입점과 같은 kwargs. 안 넘기면 strict load 가 start_query/start_out 에서 죽는다.
     _sp_kw = {}
     if bool(getattr(cfg, 'start_pose_pred', False)):

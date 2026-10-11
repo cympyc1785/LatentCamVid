@@ -157,6 +157,7 @@ class PeavReadout(nn.Module):
             w = torch.softmax(logit.float(), dim=-1)
             pred = torch.einsum("bfp,bfpc->bfc", w, points.float()) + self.sa_res(q[:, :Fn]).float()
             self.sa_weight = w.detach()
+            self.sa_weight_grad = w if self.training else None     # [R312] 토큰 heatmap 지도 손실용 (grad 유지)
             return q, pred.to(q.dtype)
         return q, (self.aux_head(q) if self.aux_head is not None else None)
 
@@ -188,6 +189,7 @@ class CameraDiffusionModel(nn.Module):
         peav_readout_cond_p=0.0,
         peav_readout_aux_mode="regress",
         peav_readout_geo=False,
+        peav_readout_cond_noise=0.0,
         video_text_fuse="token",
         start_pose_dim=0,
         start_pose_tf_p=0.0,
@@ -336,6 +338,8 @@ class CameraDiffusionModel(nn.Module):
             # [R253] readout aux head 의 subject 3D 예측을 **concat 조건으로** 쓴다 (test 때 GT subject 없이).
             #   학습: 샘플마다 확률 p 로 GT target_track 대신 예측 (detach) · 추론: 항상 예측. 0 = 기존 (aux 는 손실 전용).
             self.peav_readout_cond_p = float(peav_readout_cond_p)
+            # [R312] GT 위치 조건에 더할 가우시안 σ (norm 단위, 학습 때 GT 를 쓰는 표본만). 0 = 예전.
+            self.peav_readout_cond_noise = float(peav_readout_cond_noise)
             # [R292] readout 이 DA3 geo 토큰도 key/value 로 본다 (geo_emb 가 있을 때만). False = 예전과 동일.
             self.peav_readout_geo = bool(peav_readout_geo)
 
@@ -490,7 +494,14 @@ class CameraDiffusionModel(nn.Module):
                 cond = pc
             else:
                 use = (torch.rand(B, 1, 1, device=device) < self.peav_readout_cond_p).to(pc.dtype)
-                cond = use * pc + (1 - use) * cond.to(pc.dtype)
+                _gt = cond.to(pc.dtype)
+                _sig = float(getattr(self, 'peav_readout_cond_noise', 0.0) or 0.0)
+                if _sig > 0:
+                    # [R312] conditioning augmentation (Ho et al. 2021, Cascaded Diffusion): GT 위치 조건에 readout 오차 크기의
+                    # 가우시안을 더해, 추론 때 들어오는 불완전한 readout 예측에 덜 민감하게 한다. valid 채널(3)과 그 밖은 그대로.
+                    _n = torch.zeros_like(_gt); _n[..., :3] = torch.randn_like(_gt[..., :3]) * _sig
+                    _gt = _gt + _n * (_gt[..., 3:4] > 0.5).to(_gt.dtype) if _gt.shape[-1] > 3 else _gt + _n
+                cond = use * pc + (1 - use) * _gt
         if self.cond_dim > 0:
             if cond is None:
                 cond = x_t.new_zeros(B, T, self.cond_dim)

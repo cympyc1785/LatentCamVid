@@ -659,6 +659,10 @@ peav_readout_heat_w: 0.0
 peav_readout_smooth_w: 0.0
 peav_readout_cond_noise: 0.0
 peav_readout_cond_p_ramp: 0
+# [R315] cond_grad: readout 예측 조건을 detach 하지 않음 (diffusion 손실이 readout 으로). init_ckpt/freeze: 다른 run 의 readout.* 로 시작 / 고정 (2단계 학습).
+peav_readout_cond_grad: false
+peav_readout_init_ckpt: null
+peav_readout_freeze: false
 
 # ─── [new 2026-09-20, D206] aim aux loss ─────────────────────────────────────────────────
 # 학습 스텝 안에서 예측 x0 를 **궤적 VAE 로 디코드**해, 카메라 forward 와

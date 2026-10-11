@@ -925,7 +925,8 @@ def train():
                 peav_readout_cond_p=float(getattr(cfg, 'peav_readout_cond_p', 0.0) or 0.0),   # [R253]
                 peav_readout_aux_mode=str(getattr(cfg, 'peav_readout_aux_mode', 'regress') or 'regress'),   # [R291]
                 peav_readout_geo=bool(getattr(cfg, 'peav_readout_geo', False)),   # [R292]
-                peav_readout_cond_noise=float(getattr(cfg, 'peav_readout_cond_noise', 0.0) or 0.0))   # [R312]
+                peav_readout_cond_noise=float(getattr(cfg, 'peav_readout_cond_noise', 0.0) or 0.0),   # [R312]
+                peav_readout_cond_grad=bool(getattr(cfg, 'peav_readout_cond_grad', False)))   # [R315]
             _auxw = float(getattr(cfg, 'peav_readout_aux_w', 0.0))
             print(f"(model) peav readout: layers={_rol} "
                   f"queries={_vid_kw['peav_readout_queries']} "
@@ -992,6 +993,23 @@ def train():
     if VIDEO_ONFLY is not None:
         assert accelerator.num_processes == 1, \
             "video_onfly connector 는 forward 밖에서 불려서 DDP 다중 프로세스를 지원하지 않는다"
+
+    # [R315] readout 2단계: 다른 run 의 ckpt 에서 `readout.*` 만 가져와 (peav_readout_init_ckpt) 필요하면 고정 (peav_readout_freeze).
+    #   1단계 = readout 을 보조 손실로 학습한 run (예 MSTsa), 2단계 = 그 readout 예측을 조건으로 diffusion 을 처음부터.
+    #   둘 다 비우면 (기본) 이 블록이 안 돈다 — 예전과 동일.
+    _ri = getattr(cfg, 'peav_readout_init_ckpt', None)
+    if _ri:
+        _sd = torch.load(_ri, map_location='cpu', weights_only=False)
+        _sd = _sd.get('model', _sd) if isinstance(_sd, dict) and 'model' in _sd else _sd
+        _sub = {k: v for k, v in _sd.items() if k.startswith('readout.')}
+        assert _sub, f"peav_readout_init_ckpt 에 readout.* 가 없다: {_ri}"
+        _mm, _uu = model.load_state_dict(_sub, strict=False)
+        print(f"(readout init) {len(_sub)} tensors <- {_ri} (unexpected {len(_uu)})")
+    if bool(getattr(cfg, 'peav_readout_freeze', False)):
+        assert getattr(model, 'readout', None) is not None, "peav_readout_freeze 인데 readout 이 없다"
+        for _p in model.readout.parameters():
+            _p.requires_grad_(False)
+        print(f"(readout freeze) {sum(p.numel() for p in model.readout.parameters()) / 1e6:.2f} M params 고정")
 
     # Load weights from the (peeked) resume checkpoint. Optimizer/step/epoch are
     # restored after accelerator.prepare() below (full resume only).

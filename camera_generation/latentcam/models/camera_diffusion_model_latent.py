@@ -190,6 +190,7 @@ class CameraDiffusionModel(nn.Module):
         peav_readout_aux_mode="regress",
         peav_readout_geo=False,
         peav_readout_cond_noise=0.0,
+        peav_readout_cond_grad=False,
         video_text_fuse="token",
         start_pose_dim=0,
         start_pose_tf_p=0.0,
@@ -340,6 +341,7 @@ class CameraDiffusionModel(nn.Module):
             self.peav_readout_cond_p = float(peav_readout_cond_p)
             # [R312] GT 위치 조건에 더할 가우시안 σ (norm 단위, 학습 때 GT 를 쓰는 표본만). 0 = 예전.
             self.peav_readout_cond_noise = float(peav_readout_cond_noise)
+            self.peav_readout_cond_grad = bool(peav_readout_cond_grad)   # [R315]
             # [R292] readout 이 DA3 geo 토큰도 key/value 로 본다 (geo_emb 가 있을 때만). False = 예전과 동일.
             self.peav_readout_geo = bool(peav_readout_geo)
 
@@ -485,7 +487,9 @@ class CameraDiffusionModel(nn.Module):
             _rd, self.readout_aux_pred = self.readout(_vt, _vk, video_points, video_points_valid,
                                                       extra=_gx[0], extra_kpm=_gx[1])
             _vid_built = (_vt, _vk, _rd)
-            pc = self.readout_aux_pred.detach().float().transpose(1, 2)
+            # [R315] peav_readout_cond_grad: 예측을 detach 하지 않아 diffusion 손실이 readout 까지 흐른다 (기본 False = detach, 예전).
+            _rp = self.readout_aux_pred if getattr(self, 'peav_readout_cond_grad', False) else self.readout_aux_pred.detach()
+            pc = _rp.float().transpose(1, 2)
             pc = F.interpolate(pc, size=T, mode='linear', align_corners=True).transpose(1, 2)        # (B,T,3)
             pc = torch.cat([pc, pc.new_ones(B, T, 1)], -1)[..., :self.cond_dim]
             if pc.shape[-1] < self.cond_dim:

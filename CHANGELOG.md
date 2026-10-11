@@ -15,6 +15,7 @@
 - **VAE worldtraj 캐시의 cameras.json 해석 c2w → w2c** (R169). `train_camera_vae.py --stage cache_wt` 가 `rotation`/`position` 을 c2w 로 읽어 worldtraj 창(학습 228,130 · test 2,846)이 전부 역궤적이었다. 레포 규약(`main/dynamicverse_shim.py`, CamVLA `data/worldtraj`)과 scene.ply 투영 (images_pc_rendered 대비 색 오차 c2w 50~63 / w2c 18~21) 모두 w2c. `--wt_pose w2c|c2w` 신설, 기본 w2c · c2w 는 R125~R168 캐시 재현용.
 
 ### Added
+- dataset `exec/prepare_et_d200.py --stage infer,evaldir` (R314): 우리 데이터로 학습한 E.T. ckpt 를 test 전량 추론 → 역변환 c2w = [W·R' | W·t' + p0] → 우리 eval dir (arm raw · anc). `run_director_vista.build_diffuser(overrides=())` 인자 추가 (기본 = 예전), ckpt 경로에 `=` 가 있으면 hydra override 를 따옴표로.
 - latentcam readout 옵션 (R315, 기본 off): `peav_readout_cond_grad` (readout 예측 조건을 detach 하지 않아 diffusion 손실이 readout 으로), `peav_readout_init_ckpt` + `peav_readout_freeze` (다른 run 의 `readout.*` 로 시작·고정 — 2단계 학습).
 - latentcam readout 강화 옵션 (R312, 전부 기본 0 = 예전): `peav_readout_heat_w` (soft-argmax 가중치를 subject bbox 토큰 분포로 CE 지도, dataset 키 `readout_bbox`), `peav_readout_smooth_w` (readout 3D 궤적 가속도 페널티), `peav_readout_cond_noise` (학습 때 GT 위치 조건에 가우시안 — conditioning augmentation), `peav_readout_cond_p_ramp` (readout 예측 조건 비율 epoch 램프 — scheduled sampling).
 - dataset `fit_hole_ladder.py --drop_shot_miss` (R305, 기본 off): shot class 사다리에서 끝 프레임 면적이 목표 칸 밖이면 status `shot_missed` (원래 값은 `status_before_shot_miss`, 행은 통계용으로 남김). `run_corpus_export --drop_status` 기본에 `shot_missed` 추가. v5f config 에 켬.

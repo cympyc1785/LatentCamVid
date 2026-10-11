@@ -107,7 +107,7 @@ def world_to_et(centers_u, up, fwd, meters_per_u):
 # DIRECTOR
 
 
-def build_diffuser(checkpoint_path, device_str):
+def build_diffuser(checkpoint_path, device_str, overrides=()):
     from hydra import compose, initialize_config_dir
     from hydra.utils import instantiate
     from omegaconf import OmegaConf
@@ -120,8 +120,9 @@ def build_diffuser(checkpoint_path, device_str):
     with initialize_config_dir(version_base="1.3",
                                config_dir=path.join(DIRECTOR_ROOT, "configs")):
         config = compose(config_name="config_demo",
-                         overrides=[f"checkpoint_path={checkpoint_path}",
-                                    f"compnode.device={device_str}"])
+                         # [R314] 경로에 '=' 가 있으면 (lightning ckpt 이름 epoch=399-step=…) hydra 가 못 읽으므로 따옴표.
+                         overrides=[f"checkpoint_path='{checkpoint_path}'" if "=" in str(checkpoint_path) else f"checkpoint_path={checkpoint_path}",
+                                    f"compnode.device={device_str}", *overrides])   # [R314] 우리 데이터 학습 ckpt 용 (기본 () = 예전)
     device = torch.device(config.compnode.device)
     diffuser = instantiate(config.diffuser)
     # torch>=2.6 의 weights_only=True 는 ckpt 안의 omegaconf ListConfig 에서 막힌다.

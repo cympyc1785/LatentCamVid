@@ -17,6 +17,12 @@ stats (--stage stats, train 만): shift = t'[0], norm = diff(t'), norm_h = char 
       → DIRECTOR configs/dataset/standardization/d200s91.yaml (num_cams 49, velocity true).
 발산 컷 |c2w| ≥ 1e2 (prepare_clatr_vista.py 와 같다), subject invalid 는 제외.
 env: GenDoP (torch · evo · DIRECTOR import). 예: python exec/prepare_et_d200.py --stage convert,stats
+
+[R314] 역방향 (우리 지표로 E.T. 평가, 사용자 2026-10-11 "E.T. 는 결과가 어떻게 됨?"): --stage infer,evaldir
+  infer   : 학습 ckpt (d200s91 · ca_director) 로 test split 전량 추론 (seed 42, guidance 1.4, 10 step) → <eval_out>/et_preds.npz
+  evaldir : 역변환 c2w = [W·R' | W·t' + p0] (OpenCV) → OpenGL, ref/caption json 은 --ref_eval_dir (우리 eval_testset 산출) 에서 복사.
+            arm 둘: <eval_out>_raw (예측 frame0 그대로) · <eval_out>_anc (P = ref0 · inv(P0) · P — 우리 모델처럼 GT 첫 카메라에 붙임).
+  역변환은 GT traj 에 적용해 ref json 과 max|diff| 1.7e-07 (tmp/agent/reader-r314-et-eval.md).
 """
 import json
 import os
@@ -121,10 +127,87 @@ def stage_stats(a):
     print(f"[stats] → {out}\n{y}", flush=True)
 
 
+def stage_infer(a):
+    import torch
+    import torch.nn.functional as F
+    sys.path.insert(0, DIRECTOR); sys.path.insert(0, path.dirname(path.abspath(__file__)))
+    from run_director_vista import build_diffuser, build_char_feat, make_get_matrix
+    os.makedirs(a.eval_out, exist_ok=True)
+    diffuser, config, device = build_diffuser(path.abspath(a.ckpt), "cuda",
+                                              ["dataset/standardization=d200s91", "diffuser/network/module=ca_director"])
+    num_cams = int(config.dataset.num_cams); assert num_cams == 49, num_cams
+    std = {k: list(v) for k, v in config.dataset.standardization.items() if k.startswith(("norm_", "shift_"))}
+    get_matrix = make_get_matrix(config).get_matrix
+    names = [n for n in open(f"{a.out}/mixed_test_split.txt").read().split("\n") if n]
+    diffuser.guidance_weight, diffuser.num_steps = a.guidance_weight, a.num_steps
+    out = []
+    for b0 in range(0, len(names), a.batch):
+        nb = names[b0:b0 + a.batch]; B = len(nb)
+        ch = torch.cat([build_char_feat(np.load(f"{a.out}/char/{n}.npy"), num_cams, std, device) for n in nb])
+        caps = []
+        for n in nb:
+            sq = torch.from_numpy(np.load(f"{a.out}/caption_clip/seq/{n}.npy")).float()[:77]
+            caps.append(F.pad(sq, (0, 0, 0, 77 - sq.shape[0])).T[None])
+        cond = [ch, torch.cat(caps).to(device)]
+        mask = torch.ones((B, num_cams), device=device)
+        ref = torch.zeros((B, int(config.dataset.num_feats), num_cams), device=device) * diffuser.loss_fn.sigma_data
+        diffuser.gen_seeds = [a.seed] * B
+        with torch.no_grad():
+            _, gen = diffuser.sample(diffuser.ema.ema_model, ref, cond, mask)
+        out.append(torch.stack([get_matrix(x) for x in gen]).cpu().numpy()[:, :num_cams])
+        print(f"[infer] {b0 + B}/{len(names)}", flush=True)
+    np.savez_compressed(f"{a.eval_out}/et_preds.npz", names=np.array(names), poses=np.concatenate(out))
+
+
+def stage_evaldir(a):
+    import shutil
+    z = np.load(f"{a.eval_out}/et_preds.npz"); names, P = z["names"], z["poses"]
+    GL2CV = np.diag([1.0, -1.0, -1.0, 1.0])
+    outs = {k: f"{a.eval_out}_{k}" for k in ("raw", "anc")}
+    for o in outs.values():
+        os.makedirs(f"{o}/test", exist_ok=True)
+    cache, n_ok = {}, 0
+    for n, pe in zip(names, P):
+        scene, idx = n.split("__")
+        en = f"dynpose_{scene}_{idx}"
+        rj = f"{a.ref_eval_dir}/test/{en}_transforms_ref.json"
+        if not path.isfile(rj):
+            continue
+        sd = f"{C}/dynpose/{scene}/da3"
+        if scene not in cache:
+            tt = np.load(f"{sd}/target_track.npz", allow_pickle=True); cache.clear()
+            cache[scene] = ({str(k): i for i, k in enumerate(tt["keys"].tolist())}, tt["track_world"])
+        tk, tw = cache[scene]; p0 = tw[tk[idx]][0].astype(np.float64)
+        cv = np.tile(np.eye(4), (len(pe), 1, 1))
+        cv[:, :3, :3] = np.einsum("ij,tjk->tik", W, pe[:, :3, :3]); cv[:, :3, 3] = pe[:, :3, 3] @ W.T + p0
+        ref = json.load(open(rj))
+        ref_cv = np.array([f["transform_matrix"] for f in ref["frames"]], dtype=np.float64) @ GL2CV
+        arms = {"raw": cv, "anc": ref_cv[0] @ np.linalg.inv(cv[0]) @ cv}
+        for k, M in arms.items():
+            js = json.loads(json.dumps(ref))
+            for f, m in zip(js["frames"], M @ GL2CV):
+                f["transform_matrix"] = m.tolist()
+            json.dump(js, open(f"{outs[k]}/test/{en}_transforms_pred.json", "w"))
+            shutil.copy(rj, f"{outs[k]}/test/{en}_transforms_ref.json")
+            cj = f"{a.ref_eval_dir}/test/{en}_caption.json"
+            if path.isfile(cj):
+                shutil.copy(cj, f"{outs[k]}/test/{en}_caption.json")
+        n_ok += 1
+    print(f"[evaldir] {n_ok}/{len(names)} → {list(outs.values())}", flush=True)
+
+
 if __name__ == "__main__":
     ap = ArgumentParser()
     ap.add_argument("--stage", default="convert,stats")
     ap.add_argument("--out", default="/data1/cympyc1785/data/DynPose-LBM/et_dynpose_d200_s91")
+    # [R314] infer / evaldir
+    ap.add_argument("--ckpt", default="")
+    ap.add_argument("--eval_out", default="")
+    ap.add_argument("--ref_eval_dir", default="")
+    ap.add_argument("--batch", type=int, default=64)
+    ap.add_argument("--seed", type=int, default=42)
+    ap.add_argument("--guidance_weight", type=float, default=1.4)
+    ap.add_argument("--num_steps", type=int, default=10)
     a = ap.parse_args()
     for st in a.stage.split(","):
         globals()[f"stage_{st}"](a)

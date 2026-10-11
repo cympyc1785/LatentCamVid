@@ -73,17 +73,28 @@ def stage_gen(a):
     os.makedirs(a.out, exist_ok=True)
     proc = AutoProcessor.from_pretrained(M, trust_remote_code=True, padding_side="left")
     model = AutoModelForImageTextToText.from_pretrained(M, dtype=torch.bfloat16, trust_remote_code=True).to("cuda").eval()
-    print(f"[gen] shard {a.shard_id}/{a.num_shards}: {len(P)} 쌍 남음", flush=True)
+    print(f"[gen] shard {a.shard_id}/{a.num_shards}: {len(P)} 쌍 남음 (DataLoader workers {a.prep_workers})", flush=True)
+    # [R326b] 프레임 읽기 + processor (CPU) 를 DataLoader worker 에서 미리 — GPU generate 와 겹친다 (사용자 10-12 "전처리를 먼저 병렬로").
+    batches = [P[b0:b0 + a.batch] for b0 in range(0, len(P), a.batch)]
+
+    class _DS(torch.utils.data.Dataset):
+        def __len__(self):
+            return len(batches)
+
+        def __getitem__(self, j):
+            B = batches[j]; vids, texts, metas = [], [], []
+            for v, aid in B:
+                fr = np.stack([np.asarray(Image.open(f"{a.corpus}/dynpose/{v}/images_4/{i:05d}.png").convert("RGB")) for i in range(49)])
+                msgs = [{"role": "user", "content": [{"type": "text", "text": phrase(v, aid)}, {"type": "video"}]}]
+                texts.append(proc.apply_chat_template(msgs, add_generation_prompt=True, tokenize=False)); vids.append(fr)
+                metas.append({"fps": FPS, "total_num_frames": 49, "duration": 49 / FPS, "frames_indices": list(range(49)), "width": fr.shape[2], "height": fr.shape[1]})
+            return B, dict(proc(text=texts, videos=vids, return_tensors="pt", do_sample_frames=False, video_metadata=metas, padding=True))
+
+    dl = torch.utils.data.DataLoader(_DS(), batch_size=None, shuffle=False, num_workers=a.prep_workers,
+                                     prefetch_factor=(2 if a.prep_workers > 0 else None), persistent_workers=False)
     t_all = time.time(); done = 0
-    for b0 in range(0, len(P), a.batch):
-        B = P[b0:b0 + a.batch]
-        vids, texts, metas = [], [], []
-        for v, aid in B:
-            fr = np.stack([np.asarray(Image.open(f"{a.corpus}/dynpose/{v}/images_4/{i:05d}.png").convert("RGB")) for i in range(49)])
-            msgs = [{"role": "user", "content": [{"type": "text", "text": phrase(v, aid)}, {"type": "video"}]}]
-            texts.append(proc.apply_chat_template(msgs, add_generation_prompt=True, tokenize=False)); vids.append(fr)
-            metas.append({"fps": FPS, "total_num_frames": 49, "duration": 49 / FPS, "frames_indices": list(range(49)), "width": fr.shape[2], "height": fr.shape[1]})
-        inp = proc(text=texts, videos=vids, return_tensors="pt", do_sample_frames=False, video_metadata=metas, padding=True).to("cuda")
+    for bi, (B, inp) in enumerate(dl):
+        inp = {k: (v.to("cuda") if hasattr(v, "to") else v) for k, v in inp.items()}
         t0 = time.time()
         with torch.inference_mode():
             g = model.generate(**inp, max_new_tokens=a.max_tokens, do_sample=False)
@@ -92,7 +103,7 @@ def stage_gen(a):
             s = proc.tokenizer.decode(row[inp["input_ids"].shape[1]:], skip_special_tokens=True)
             json.dump(dict(video=v, anchor=aid, prompt=phrase(v, aid), pts=parse(s), text=s[:300], sec=round(dt, 2)), open(f"{a.out}/{v}__{aid}.json", "w"))
         done += len(B)
-        if (b0 // a.batch) % 10 == 0:
+        if bi % 10 == 0:
             el = time.time() - t_all
             print(f"[gen] {done}/{len(P)}  {el / done:.1f} s/쌍  ETA {(len(P) - done) * el / done / 3600:.1f} h", flush=True)
     print(f"=== gen shard {a.shard_id} DONE ===", flush=True)
@@ -164,6 +175,7 @@ if __name__ == "__main__":
     ap.add_argument("--num_shards", type=int, default=1)
     ap.add_argument("--shard_id", type=int, default=0)
     ap.add_argument("--batch", type=int, default=8)
+    ap.add_argument("--prep_workers", type=int, default=3)   # [R326b] 0 = 예전 (생성 루프 안에서 전처리)
     ap.add_argument("--max_tokens", type=int, default=1536)
     ap.add_argument("--min_frames", type=int, default=25)
     ap.add_argument("--workers", type=int, default=24)

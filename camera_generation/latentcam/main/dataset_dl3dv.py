@@ -1197,7 +1197,9 @@ class CamDataset(torch.utils.data.Dataset):
         """
         cache = self._target_track_cache.get(scene_idx)
         if cache is None:
-            p = osp.join(self.scene_dir_list[scene_idx], 'da3', 'target_track.npz')
+            # [R326] target_track_file: subject 궤적 출처를 바꾼다 (기본 target_track.npz = VLM+SAM3+DA3 OBB 중심;
+            #   예 target_track_molmo2.npz = Molmo2 tracking + DA3 lifting). 같은 키·형식이어야 한다.
+            p = osp.join(self.scene_dir_list[scene_idx], 'da3', str(getattr(self.cfg, 'target_track_file', None) or 'target_track.npz'))
             if not osp.isfile(p):
                 raise FileNotFoundError(
                     f"target_track_dim>0 (또는 peav_readout_aux_dim>0) 인데 파일이 없다: {p} — "

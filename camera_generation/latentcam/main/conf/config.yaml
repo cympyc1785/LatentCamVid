@@ -275,6 +275,8 @@ prompts_file: prompts.json
 # world 궤적을 frame-s 카메라 좌표 + norm_scale 게이지로 옮긴 (T,4)[xyz,valid] 를 latent 토큰
 # 길이로 interp 해 x_t 채널에 concat 한다 (4 = xyz+valid). 0 = 기존 구조/동작 비트 동일.
 target_track_dim: 0
+# [R326] subject 궤적 파일 (<scene>/da3/ 아래). 기본 = VLM+SAM3+DA3 OBB 중심. target_track_molmo2.npz = Molmo2 tracking + DA3 lifting.
+target_track_file: target_track.npz
 target_track_dropout: 0.1     # per-sample null 드랍 (추론에서 track 없이 쓸 수 있게)
 # [new 2026-08-28] val 을 **track 없이**(cond = 전 채널 0 = null) 돌린다. false = 기존 동작
 # (val 은 실제 track 을 그대로 받는다). true 면 val 곡선이 "track 없이도 얼마나 하나"를 재므로

@@ -644,7 +644,10 @@ peav_readout_aux_target: target_track
 peav_readout_mode: replace
 # [R253] >0 이면 readout aux head 의 subject xyz 예측을 target_track concat 조건으로 쓴다 (target_track_dim=4 · aux_dim=3 필요).
 #   학습 때 샘플별 확률 p 로 GT 대신 예측 (detach), 추론 때는 항상 예측 → test 에 GT subject 불필요. 0 = 예전 (aux 는 손실 전용).
-peav_readout_cond_p: 0.0
+# [R325] 기본 1.0 (사용자 2026-10-12 "cond_p 1.0 를 기본값으로") — 학습도 항상 readout 예측을 조건으로 (추론과 같게; R316 MSTrc1
+#   회복률 33.2% vs cond_p 0.5 MSTrc 19.9%). readout 이 track3d xyz 를 예측하는 구성 (aux_dim 3 · target_track_dim>0 · aux_target target_track)
+#   에서만 적용되고 그 밖은 0. 예전 run 은 저장된 config.yaml 의 값을 그대로 쓴다.
+peav_readout_cond_p: 1.0
 # [R291] readout aux 방식: regress (aux_head 로 xyz 회귀, 예전) | softargmax (OmniCam 식 — 프레임 f 의 Molmo2 video 토큰 64 개에
 #   attention 해 그 토큰들의 3D 점 가중평균 + 0 초기화 보정. video_patch_points: true 와 같이 써야 한다).
 peav_readout_aux_mode: regress

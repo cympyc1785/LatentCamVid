@@ -340,7 +340,12 @@ def main():
                 peav_readout_queries=int(getattr(cfg, 'peav_readout_queries', 49)),
                 peav_readout_aux_dim=int(getattr(cfg, 'peav_readout_aux_dim', 0) or 0),
                 peav_readout_mode=str(getattr(cfg, 'peav_readout_mode', 'replace') or 'replace'),
-                peav_readout_cond_p=float(getattr(cfg, 'peav_readout_cond_p', 0.0) or 0.0),   # [R253]
+                # [R325] 기본값이 1.0 이 됐으므로 readout 이 track3d 와 같은 xyz 를 예측하는 구성에서만 켠다 (그 밖은 0 = 예전).
+                peav_readout_cond_p=(float(getattr(cfg, 'peav_readout_cond_p', 0.0) or 0.0)
+                                     if (int(getattr(cfg, 'peav_readout_aux_dim', 0) or 0) == 3
+                                         and int(getattr(cfg, 'target_track_dim', 0) or 0) > 0
+                                         and str(getattr(cfg, 'peav_readout_aux_target', 'target_track')) == 'target_track')
+                                     else 0.0),   # [R253]
                 peav_readout_aux_mode=str(getattr(cfg, 'peav_readout_aux_mode', 'regress') or 'regress'),   # [R291]
                 peav_readout_geo=bool(getattr(cfg, 'peav_readout_geo', False)),   # [R292]
                 peav_readout_cond_noise=float(getattr(cfg, 'peav_readout_cond_noise', 0.0) or 0.0),   # [R312]

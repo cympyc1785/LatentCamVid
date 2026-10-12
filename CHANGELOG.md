@@ -15,6 +15,7 @@
 - **VAE worldtraj 캐시의 cameras.json 해석 c2w → w2c** (R169). `train_camera_vae.py --stage cache_wt` 가 `rotation`/`position` 을 c2w 로 읽어 worldtraj 창(학습 228,130 · test 2,846)이 전부 역궤적이었다. 레포 규약(`main/dynamicverse_shim.py`, CamVLA `data/worldtraj`)과 scene.ply 투영 (images_pc_rendered 대비 색 오차 c2w 50~63 / w2c 18~21) 모두 w2c. `--wt_pose w2c|c2w` 신설, 기본 w2c · c2w 는 R125~R168 캐시 재현용.
 
 ### Added
+- latentcam `scripts/viz/track_overlay_molmo2_vs_gt.py` (R342): Molmo2 lift 궤적 (target_track_molmo2.npz) 과 GT subject 궤적 (target_track.npz) 을 소스 카메라 (pose.npz) 로 프레임별 정사영해 소스 영상에 겹친 그리드 mp4 (Molmo2 원 2D 점 · 화면 거리 px · 3D 상대 오차 표기). `--items video:seg,...` 또는 `--sample_bins` 로 test 에서 오차 구간별 추출. CPU 만.
 - latentcam val 지표 `val/readout_aux_obb` · `val/readout_aux_dist` (R340): readout 이 subject xyz 를 예측하는 run (aux_dim 3, 타깃 target_track) 에서 val sample() 마지막 forward 의 예측과 GT track3d 의 3D MSE (학습 `train/readout_aux_obb` 와 같은 정의) 와 평균 L2 거리 (norm_scale 단위). readout xyz head 가 없는 run 은 안 찍힘 (손실·학습 동작 변화 없음).
 - latentcam `subject_uv_cond` (R333, 기본 false = 예전): Molmo2 tracking 원본 영상 2D 점 (`<corpus>/molmo2_track/*.json`, anchor·valid 는 `target_track_molmo2.npz` 와 같은 rule) 을 (T,4) [u-0.5, v-0.5, observed, valid] 로 track 조건 concat 경로에 (cond_dim +4, depth 로 3D 로 안 올린 판). `subject_uv_dir` (null = <corpus>/molmo2_track).
 - latentcam `scene_points_cond` (R328, 기본 false = 예전): 토큰별 depth 3D 점 (`video_points` 49×64, `video_patch_points: true` 필요) 을 xyz Fourier → MLP + 칸 임베딩 + 프레임 PE 로 임베딩해 geo CA key/value 에 srccam 토큰과 함께 붙인다 (장면 기하용). readout 쪽 geo_mask 는 원본 유지.

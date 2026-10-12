@@ -13,6 +13,13 @@ stage
   check (CPU, env vista4d) [R343] 품질 통계: Molmo2 원 2D 점 (main id) 이 그 anchor 의 SAM3 mask (seg_instances[_static], scene graph
         node.track_id + merged_from — export_target_track.node_bbox_2d 와 같은 매칭) 안에 있나 (정확히 · 반경 --near_frac·W 안),
         그리고 lift depth (점 주변 창 중앙값) 가 mask 안 depth 중앙값과 얼마나 다른가 → --check_out CSV (쌍마다 1행) + 요약 출력.
+  [R346] Molmo2 점 → SAM3 → mask 3D 중심 (R345 검증: 점 lift 보다 GT OBB 중심에 가깝고 같은 정의)
+  point    (GPU, env latentcam) --point_mode point1|pointK|pointK8 에 필요한 "Point to the {desc}." → <--point_out>/<video>__<anchor>.json
+             (trackf 는 gen 의 tracking json 을 그대로 쓴다 — 이 stage 불필요)
+  sam3     (GPU, env vista4d, PYTHONPATH=Vista4D) 영상마다 SAM3 세션 1개, anchor 마다 reset → 고른 점 (frame, x, y) point prompt (obj 1) →
+           양방향 전파 → <--sam3_out>/<video>__<anchor>.npz (packbits mask, 고른 점)
+  sam3lift (CPU, env vista4d) mask 안 depth 점 → world → 축별 10~90% 구간 중점 = 프레임 중심, 빈 프레임 보간 (덮인 프레임 < --min_frames 면 invalid)
+           → <scene>/da3/<--sam3_name> (target_track.npz 와 같은 키·형식)
 예) CUDA_VISIBLE_DEVICES=0 python fit/bank/molmo2_track_lift.py --stage gen --num_shards 3 --shard_id 0 --batch 8
     python fit/bank/molmo2_track_lift.py --stage lift --workers 24
 """
@@ -158,6 +165,174 @@ def lift_video(job):
     return v, f"ok {sum(per[x][1] for x in set(aids))}/{len(set(aids))}"
 
 
+K_FRAMES = {"pointK": list(range(0, 49, 8)), "pointK8": [int(round(x)) for x in np.linspace(0, 48, 8)]}
+
+
+def stage_point(a):
+    """[R346] Molmo2 pointing (영상 1회 = point1, 또는 K 프레임 이미지 각각 = pointK·pointK8)."""
+    import torch
+    from PIL import Image
+    from transformers import AutoProcessor, AutoModelForImageTextToText
+    src = a.point_mode[:-1] if a.point_mode.endswith("f") else a.point_mode
+    assert src in ("point1", "pointK", "pointK8"), a.point_mode
+    P = [p for i, p in enumerate(pairs(a.corpus)) if i % a.num_shards == a.shard_id and not osp.isfile(f"{a.point_out}/{p[0]}__{p[1]}.json")]
+    os.makedirs(a.point_out, exist_ok=True)
+    proc = AutoProcessor.from_pretrained(M, trust_remote_code=True, padding_side="left")
+    model = AutoModelForImageTextToText.from_pretrained(M, dtype=torch.bfloat16, trust_remote_code=True).to("cuda").eval()
+    print(f"[point] {src} shard {a.shard_id}/{a.num_shards}: {len(P)} 쌍", flush=True); t_all = time.time()
+    for n, (v, aid) in enumerate(P):
+        need = range(49) if src == "point1" else K_FRAMES[src]       # K 모드는 필요한 프레임만 읽는다 (49장 읽기가 병목)
+        fr = {i: np.asarray(Image.open(f"{a.corpus}/dynpose/{v}/images_4/{i:05d}.png").convert("RGB")) for i in need}
+        if src == "point1":
+            fr = np.stack([fr[i] for i in range(49)])
+        q = "Point to " + phrase(v, aid)[len("Track "):]; pts = []
+        if src == "point1":
+            msgs = [{"role": "user", "content": [{"type": "text", "text": q}, {"type": "video"}]}]
+            meta = {"fps": FPS, "total_num_frames": 49, "duration": 49 / FPS, "frames_indices": list(range(49)), "width": fr.shape[2], "height": fr.shape[1]}
+            inp = proc(text=[proc.apply_chat_template(msgs, add_generation_prompt=True, tokenize=False)], videos=[fr], return_tensors="pt",
+                       do_sample_frames=False, video_metadata=[meta])
+            jobs = [(None, inp)]
+        else:
+            msgs = [{"role": "user", "content": [{"type": "text", "text": q}, {"type": "image"}]}]
+            txt = proc.apply_chat_template(msgs, add_generation_prompt=True, tokenize=False)
+            Ks = K_FRAMES[src]       # K 프레임을 한 batch 로 (decode 가 짧아 batch 이득이 큼)
+            jobs = [(Ks, proc(text=[txt] * len(Ks), images=[Image.fromarray(fr[f]) for f in Ks], return_tensors="pt", padding=True))]
+        for f, inp in jobs:
+            inp = {k: (x.to("cuda") if hasattr(x, "to") else x) for k, x in dict(inp).items()}
+            with torch.inference_mode():
+                g = model.generate(**inp, max_new_tokens=256 if f is None else 64, do_sample=False)
+            outs = [proc.tokenizer.decode(row[inp["input_ids"].shape[1]:], skip_special_tokens=True) for row in g]
+            if f is None:
+                pts += parse(outs[0])
+            else:
+                for fk, s_ in zip(f, outs):
+                    for c in COORD.finditer(s_):
+                        pts += [[fk, m.group(1), float(m.group(2)) / 1000, float(m.group(3)) / 1000] for m in PTS.finditer(c.group(1))]
+        json.dump(dict(video=v, anchor=aid, prompt=q, mode=src, pts=pts), open(f"{a.point_out}/{v}__{aid}.json", "w"))
+        if n % 100 == 0:
+            el = time.time() - t_all; print(f"[point] {n + 1}/{len(P)} {el / (n + 1):.1f} s/쌍 ETA {(len(P) - n - 1) * el / (n + 1) / 3600:.1f} h", flush=True)
+    print(f"=== point shard {a.shard_id} DONE ===", flush=True)
+
+
+def choose_point(a, v, aid):
+    """[R346] --point_mode 규칙으로 (frame, x, y) 하나. *f = confidence 안 쓰고 가장 이른 점 (R345b: log-prob 최고 고르기가 오히려 나쁨)."""
+    if a.point_mode.startswith("track"):
+        jp = f"{a.out}/{v}__{aid}.json"
+        P = json.load(open(jp))["pts"] if osp.isfile(jp) else []
+        cnt = {}
+        for q in P:
+            cnt[q[1]] = cnt.get(q[1], 0) + 1
+        if not cnt:
+            return None
+        main = max(cnt, key=cnt.get); P = [q for q in P if q[1] == main]
+    else:
+        jp = f"{a.point_out}/{v}__{aid}.json"
+        P = json.load(open(jp))["pts"] if osp.isfile(jp) else []
+        if not P:
+            return None
+        nf = {}
+        for q in P:
+            nf[q[0]] = nf.get(q[0], 0) + 1
+        P = [q for q in P if nf[q[0]] == 1] or P            # 같은 프레임에 점 여러 개 = 모호 → 뺀다
+    f, _, x, y = min(P, key=lambda q: q[0])
+    return int(min(48, max(0, f))), float(x), float(y)
+
+
+def stage_sam3(a):
+    """[R346] 영상마다 SAM3 세션 1개 (프레임 1번 적재), anchor 마다 reset_session 후 point prompt → 양방향 전파."""
+    sys.path.insert(0, "/data1/cympyc1785/LatentCamVid/video_generation/models/Vista4D")
+    from utils.media import load_video
+    from utils.recon_and_seg.seg_sam3_official import init_sam3_video
+    from PIL import Image
+    by_v = {}
+    for v, aid in pairs(a.corpus):
+        by_v.setdefault(v, []).append(aid)
+    vids = [v for i, v in enumerate(sorted(by_v)) if i % a.num_shards == a.shard_id]
+    os.makedirs(a.sam3_out, exist_ok=True); pred = init_sam3_video(); t_all = time.time(); n_done = 0
+    print(f"[sam3] {a.point_mode} shard {a.shard_id}/{a.num_shards}: 영상 {len(vids)}", flush=True)
+    for n, v in enumerate(vids):
+        todo = [aid for aid in by_v[v] if not osp.isfile(f"{a.sam3_out}/{v}__{aid}.npz")]
+        if not todo:
+            continue
+        frames, _ = load_video(f"{E}/{v}/video.mp4"); T_, H, W, _ = frames.shape
+        sid = pred.handle_request({"type": "start_session", "resource_path": [Image.fromarray(frames[i]) for i in range(T_)]})["session_id"]
+        for aid in todo:
+            out = f"{a.sam3_out}/{v}__{aid}.npz"; ch = choose_point(a, v, aid)
+            if ch is None:
+                np.savez(out, ok=False); continue
+            pred.handle_request({"type": "reset_session", "session_id": sid})
+            st = pred._get_session(sid)["state"]
+            for f in range(T_):        # point 단독 추적: 빈 cache 로 채움 (R345 FIX — 원래 text 전파 뒤 보정 경로)
+                st["cached_frame_outputs"].setdefault(f, {})
+            f0, x, y = ch
+            pred.handle_request({"type": "add_prompt", "session_id": sid, "frame_index": f0, "points": [[x, y]], "point_labels": [1], "obj_id": 1})
+            masks = np.zeros((T_, H, W), bool)
+            for r in pred.handle_stream_request({"type": "propagate_in_video", "session_id": sid, "propagation_direction": "both",
+                                                 "start_frame_index": f0, "max_frame_num_to_track": T_}):
+                o = r["outputs"]
+                if o is None:
+                    continue
+                for k, oid in enumerate(o["out_obj_ids"]):
+                    if int(oid) == 1:
+                        masks[r["frame_index"]] |= np.asarray(o["out_binary_masks"][k]).astype(bool)
+            np.savez_compressed(out, ok=True, masks=np.packbits(masks, axis=-1), W=W, frame=f0, x=x, y=y)
+            n_done += 1
+        pred.handle_request({"type": "close_session", "session_id": sid})
+        if n % 50 == 0:
+            el = time.time() - t_all; print(f"[sam3] 영상 {n + 1}/{len(vids)} · 쌍 {n_done} · {el / (n + 1):.1f} s/영상 ETA {(len(vids) - n - 1) * el / (n + 1) / 3600:.1f} h", flush=True)
+    print(f"=== sam3 shard {a.shard_id} DONE ===", flush=True)
+
+
+def sam3lift_video(job):
+    a, v = job
+    sys.path.insert(0, "/data1/cympyc1785/LatentCamVid/video_generation/models/Vista4D")
+    from utils.media import load_cameras, load_depths, load_masks
+    dst = f"{a.corpus}/dynpose/{v}/da3/{a.sam3_name}"
+    if osp.isfile(dst) and not a.overwrite:
+        return v, "skip"
+    z = np.load(f"{a.corpus}/dynpose/{v}/da3/target_track.npz", allow_pickle=True)
+    keys, aids = [str(k) for k in z["keys"]], [str(x) for x in z["anchor_id"]]
+    try:
+        d = load_depths(f"{E}/{v}/depths", dtype=np.float16, desc=None).astype(np.float32)
+        sky = np.asarray(load_masks(f"{E}/{v}/sky_mask", desc=None)).astype(bool)
+        Cw, K = load_cameras(f"{E}/{v}/cameras.npz"); Cw, K = np.asarray(Cw, float), np.asarray(K, float)
+    except Exception as e:      # noqa: BLE001
+        return v, f"error {str(e)[:60]}"
+    F_, H, W = d.shape; per = {}
+    for aid in sorted(set(aids)):
+        tr = np.zeros((F_, 3), np.float32); ok = False; mp = f"{a.sam3_out}/{v}__{aid}.npz"
+        if osp.isfile(mp):
+            zz = np.load(mp)
+            if bool(zz["ok"]):
+                M = np.unpackbits(zz["masks"], axis=-1, count=int(zz["W"])).astype(bool); got = {}
+                for f in range(min(F_, len(M))):
+                    mf = M[f][(np.arange(H) * M.shape[1] // H)][:, (np.arange(W) * M.shape[2] // W)] & np.isfinite(d[f]) & (d[f] > 0) & ~sky[f]
+                    if mf.sum() < 10:
+                        continue
+                    vv, uu = np.nonzero(mf); zf = d[f][mf]
+                    fx, fy, cx, cy = (K[f][0], K[f][1], K[f][2], K[f][3]) if K.ndim == 2 else (K[f][0, 0], K[f][1, 1], K[f][0, 2], K[f][1, 2])
+                    Xw = (Cw[f] @ np.stack([(uu + 0.5 - cx) / fx * zf, (vv + 0.5 - cy) / fy * zf, zf, np.ones_like(zf)], 0))[:3].T
+                    got[f] = (np.percentile(Xw, 10, 0) + np.percentile(Xw, 90, 0)) / 2
+                if len(got) >= a.min_frames:
+                    fs = np.array(sorted(got)); X = np.stack([got[f] for f in fs])
+                    tr = np.stack([np.interp(np.arange(F_), fs, X[:, c]) for c in range(3)], -1).astype(np.float32); ok = True
+        per[aid] = (tr, ok)
+    np.savez(dst, track_world=np.stack([per[x][0] for x in aids]), valid=np.array([per[x][1] for x in aids]),
+             keys=np.array(keys), anchor_id=np.array(aids))
+    return v, f"ok {sum(per[x][1] for x in set(aids))}/{len(set(aids))}"
+
+
+def stage_sam3lift(a):
+    from multiprocessing import Pool
+    vids = sorted({v for v, _ in pairs(a.corpus)}); bad = 0
+    with Pool(a.workers) as p:
+        for i, (v, msg) in enumerate(p.imap_unordered(sam3lift_video, [(a, v) for v in vids], chunksize=4)):
+            bad += msg.startswith("error")
+            if i % 500 == 0 or msg.startswith("error"):
+                print(f"[sam3lift {i}/{len(vids)}] {v} {msg}", flush=True)
+    print(f"=== sam3lift DONE {len(vids)} (error {bad}) ===", flush=True)
+
+
 def check_video(job):
     a, v = job
     sys.path.insert(0, "/data1/cympyc1785/LatentCamVid/video_generation/models/Vista4D")
@@ -260,7 +435,7 @@ def stage_lift(a):
 
 if __name__ == "__main__":
     ap = argparse.ArgumentParser()
-    ap.add_argument("--stage", required=True, choices=["gen", "lift", "check"])
+    ap.add_argument("--stage", required=True, choices=["gen", "lift", "check", "point", "sam3", "sam3lift"])
     ap.add_argument("--corpus", default=C)
     ap.add_argument("--out", default="/data1/cympyc1785/data/DynPose-LBM/latentcam_dynpose_d200/molmo2_track")
     ap.add_argument("--name", default="target_track_molmo2.npz")
@@ -274,6 +449,10 @@ if __name__ == "__main__":
     ap.add_argument("--overwrite", action="store_true")
     ap.add_argument("--seg_root", default="/data1/cympyc1785/LatentCamVid/DATA/DynPose-100K/eval_data")   # [R343] seg_instances[_static]
     ap.add_argument("--near_frac", type=float, default=0.02)    # [R343] mask 반경 허용 (영상 폭 비율)
+    ap.add_argument("--point_mode", default="pointK8f")      # [R346] trackf | point1 | pointKf | pointK8f (R345b 결과로 고름)
+    ap.add_argument("--point_out", default="/data1/cympyc1785/data/DynPose-LBM/latentcam_dynpose_d200/molmo2_point")
+    ap.add_argument("--sam3_out", default="/data1/cympyc1785/data/DynPose-LBM/latentcam_dynpose_d200/molmo2_sam3")
+    ap.add_argument("--sam3_name", default="target_track_m2sam3.npz")
     ap.add_argument("--check_out", default="/data1/cympyc1785/LatentCamVid/tmp/r343/molmo2_track_check.csv")
     a = ap.parse_args()
-    {"gen": stage_gen, "lift": stage_lift, "check": stage_check}[a.stage](a)
+    {"gen": stage_gen, "lift": stage_lift, "check": stage_check, "point": stage_point, "sam3": stage_sam3, "sam3lift": stage_sam3lift}[a.stage](a)

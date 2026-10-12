@@ -431,6 +431,22 @@ def readout_aux_loss(raw_model, data, device):
     return ((pred - tgt).pow(2) * valid).sum() / (valid.sum().clamp(min=1.0) * pred.shape[-1])
 
 
+def readout_aux_val(raw_model, data, device):
+    """[R340] val 용 readout subject 3D 예측 지표: (MSE, 평균 L2 거리) — 학습 `train/readout_aux_obb` 와 같은 MSE 와
+    norm_scale 단위 3D 거리 (valid 프레임 평균). sample() 마지막 forward 의 `readout_aux_pred` (추론과 같은 조건) 를 읽는다.
+    타깃이 target_track 이 아니거나 (srccam_target) 예측이 없으면 None."""
+    pred = getattr(raw_model, 'readout_aux_pred', None)
+    tt = data.get('target_track')
+    if pred is None or tt is None or data.get('srccam_target') is not None or pred.shape[-1] != 3:
+        return None
+    tt = tt.to(device).float()
+    if tt.shape[1] != pred.shape[1]:
+        tt = F.interpolate(tt.transpose(1, 2), size=pred.shape[1], mode='linear', align_corners=True).transpose(1, 2)
+    v = tt[..., 3]; n = v.sum().clamp(min=1.0)
+    d = pred.float() - tt[..., :3]
+    return (d.pow(2).sum(-1) * v).sum() / (n * 3), (d.norm(dim=-1) * v).sum() / n
+
+
 def start_pose_loss(raw_model, data, device):
     """[new 2026-09-22 / D261] 시작 pose 회귀 손실. 반환 (loss, trans_err_u, rot_err_deg).
 
@@ -1172,6 +1188,7 @@ def train():
             _tsm = bool(getattr(cfg, 'val_traj_shape_metrics', False))   # [R167] overfit 전용 궤적 모양 지표
             tsm_sum = {k: torch.tensor(0.0, device=accelerator.device) for k in ("jerk", "jerk_gt", "off", "off_gt", "off_err", "n_off", "jerk_t", "jerk_t_gt", "n_t")}
             sp_cnt = torch.tensor(0, device=accelerator.device)
+            ro_sum = torch.zeros(2, device=accelerator.device); ro_cnt = torch.tensor(0, device=accelerator.device)   # [R340] readout 3D val
             data_name_list = []
             _pt = getattr(cfg, 'per_token_noise', False)   # Diffusion-Forcing val monitoring
             tau_bin_sum = torch.zeros(10, device=accelerator.device)
@@ -1304,6 +1321,10 @@ def train():
                     out = sample(model, noise_scheduler, traj_len, text_embeds, text_masks,
                                  pc_embeds, pc_masks, generator=_g, cond=_cond, video_kw=_vkw)
 
+                _rov = readout_aux_val(accelerator.unwrap_model(model), data, device)   # [R340]
+                if _rov is not None:
+                    ro_sum += torch.stack([x.detach() for x in _rov]) * B
+                    ro_cnt += B
                 _spv = start_pose_loss(accelerator.unwrap_model(model), data, device)
                 if _spv is not None:
                     sp_sum += torch.stack([v.detach() for v in _spv]) * B
@@ -1447,6 +1468,12 @@ def train():
                                  "val/subject_screen_offset_err": _r["off_err"].item() / _no})
                 accelerator.log(_log, step=global_step)
                 print("(val shape) " + " ".join(f"{k}={v:.5g}" for k, v in _log.items()))
+            # [R340] readout subject 3D val (readout xyz head 가 없는 arm 은 cnt=0 이라 안 찍힌다)
+            _roc = accelerator.reduce(ro_cnt, reduction='sum')
+            if _roc.item() > 0:
+                _ros = accelerator.reduce(ro_sum, reduction='sum') / _roc
+                accelerator.log({"val/readout_aux_obb": _ros[0].item(), "val/readout_aux_dist": _ros[1].item()}, step=global_step)
+                print(f"(val) readout 3D: mse {_ros[0].item():.5f} dist {_ros[1].item():.4f}u")
             # [new 2026-09-22 / D261] 시작 pose val. head 가 꺼진 arm 은 cnt=0 이라 안 찍힌다.
             _spc = accelerator.reduce(sp_cnt, reduction='sum')
             if _spc.item() > 0:

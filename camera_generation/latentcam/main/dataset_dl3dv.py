@@ -329,6 +329,7 @@ class CamDataset(torch.utils.data.Dataset):
         # target_track_dim>0: scene_idx -> {'track': (V,T,3) world, 'valid': (V,), 'keys': {str:i}}
         self._target_track_cache = {}
         self._subject_bbox_cache = {}   # [R243] subject_bbox_cond
+        self._subject_uv_cache = {}     # [R332] subject_uv_cond
         # [new 2026-09-20, D206] aim_loss_w>0: scene_idx -> {seg_key: 1.0 if aim=='look_at' else 0.0}
         # prompts.json 의 `aim` 필드 하나만 뽑아 둔 것. samples 튜플에는 **안 넣는다** —
         # 그 튜플은 <root>/.latentcam_index/*.pt 에 그대로 직렬화돼 있어(_load_index) 원소 수가
@@ -1236,6 +1237,45 @@ class CamDataset(torch.utils.data.Dataset):
         out = torch.cat([b[:, :2] - 0.5, b[:, 2:], ok[:, None]], -1)
         return out * ok[:, None]
 
+    def _subject_uv(self, scene_idx, seg_key, T):
+        """[R332] subject_uv_cond: Molmo2 tracking 의 원본 영상 2D 점 (fit/bank/molmo2_track_lift.py gen 산출
+        `<corpus>/molmo2_track/<video>__<anchor>.json`) -> (T,4) [u-0.5, v-0.5, observed, valid]. depth 로 3D 로 올리지 않은 판.
+        anchor·valid 는 같은 rule 로 만든 `da3/target_track_molmo2.npz` 를 따른다 (점 최다 track id, 덮인 프레임 >= 25).
+        빠진 프레임은 선형 보간 (observed 0). valid False 면 전 채널 0 (= concat 조건의 null)."""
+        cache = self._subject_uv_cache.get(scene_idx)
+        if cache is None:
+            sd = self.scene_dir_list[scene_idx]
+            z = np.load(osp.join(sd, 'da3', 'target_track_molmo2.npz'), allow_pickle=True)
+            jd = getattr(self.cfg, 'subject_uv_dir', None) or osp.join(osp.dirname(osp.dirname(sd)), 'molmo2_track')
+            F_ = int(z['track_world'].shape[1]); per = {}
+            for aid in sorted({str(x) for x in z['anchor_id']}):
+                uv, obs = np.zeros((F_, 2), np.float32), np.zeros(F_, np.float32)
+                jp = osp.join(jd, f"{osp.basename(sd)}__{aid}.json")
+                if osp.isfile(jp):
+                    P = json.load(open(jp))['pts']; cnt = {}
+                    for q in P:
+                        cnt[q[1]] = cnt.get(q[1], 0) + 1
+                    if cnt:
+                        main = max(cnt, key=cnt.get); got = {}
+                        for f, tid, x, y in P:
+                            if tid == main and 0 <= f < F_ and f not in got:
+                                got[f] = (x, y)
+                        fs = np.array(sorted(got)); X = np.array([got[f] for f in fs], np.float32)
+                        uv = np.stack([np.interp(np.arange(F_), fs, X[:, c]) for c in range(2)], -1).astype(np.float32); obs[fs] = 1.0
+                per[aid] = (uv, obs)
+            cache = {'keys': {str(k): i for i, k in enumerate(z['keys'].tolist())}, 'valid': np.asarray(z['valid'], dtype=bool),
+                     'aid': [str(x) for x in z['anchor_id']], 'per': per}
+            self._subject_uv_cache[scene_idx] = cache
+        v = cache['keys'][str(seg_key)]
+        if not cache['valid'][v]:
+            return torch.zeros(T, 4)
+        uv, obs = cache['per'][cache['aid'][v]]
+        uv, obs = torch.from_numpy(uv), torch.from_numpy(obs)
+        if uv.shape[0] != T:
+            idx = self._even_indices(uv.shape[0], T)
+            uv, obs = uv[idx], obs[idx]
+        return torch.cat([uv - 0.5, obs[:, None], torch.ones(T, 1)], -1)
+
     def _track_cond(self, scene_idx, seg_key, extrinsics, norm_scale):
         """subject world 궤적 -> cam_param 과 같은 게이지의 (T,4) [x,y,z,valid].
 
@@ -1864,6 +1904,9 @@ class CamDataset(torch.utils.data.Dataset):
         # [R243] subject_bbox_cond: 원본 영상의 subject 2D bbox 를 concat 조건으로 (target_track 과 같은 경로 · 기본 off = 키 없음).
         if getattr(self.cfg, 'subject_bbox_cond', False):
             out['subject_bbox'] = self._subject_bbox(scene_idx, data_name.split('_')[-1], extrinsics.shape[0])
+        # [R332] subject_uv_cond: Molmo2 2D track (depth 안 씀) 을 같은 concat 조건 경로로 (기본 off = 키 없음).
+        if getattr(self.cfg, 'subject_uv_cond', False):
+            out['subject_uv'] = self._subject_uv(scene_idx, data_name.split('_')[-1], extrinsics.shape[0])
         # [R167] val_traj_shape_metrics: val 의 subject 화면 위치 측정용. 모델·손실이 읽는 'target_track' 과
         #   **다른 키** 로 둔다 (build_track_cond 는 키만 있으면 concat 조건으로 쓰므로 같은 키면 네트워크 입력이 바뀐다).
         if getattr(self.cfg, 'val_traj_shape_metrics', False):

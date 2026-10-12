@@ -191,6 +191,7 @@ class CameraDiffusionModel(nn.Module):
         peav_readout_geo=False,
         peav_readout_cond_noise=0.0,
         peav_readout_cond_grad=False,
+        scene_points_cond=False,
         video_text_fuse="token",
         start_pose_dim=0,
         start_pose_tf_p=0.0,
@@ -212,6 +213,14 @@ class CameraDiffusionModel(nn.Module):
 
         self.time_mlp = TimeEmbedding(time_emb_dim)
         self.time_proj = nn.Linear(time_emb_dim, hidden_dim)
+        # [R328] 장면 depth 토큰: 소스 depth 로 만든 토큰별 3D 점 (video_points (B,49,64,3), patch_points_8x8) 을 geo CA 의
+        # key/value 에 srccam 토큰과 함께 붙인다. xyz Fourier 특징 → MLP + 칸 임베딩 + 프레임 PE. 사용자 2026-10-12
+        # "depth 를 어떤 식으로 쓰는게 좋음?" → 장면 기하 (충돌·배경 구도) 용. False = 모듈 미생성 (예전과 동일).
+        self.scene_points_cond = bool(scene_points_cond)
+        if self.scene_points_cond:
+            self.scene_nf = 6
+            self.scene_pt_mlp = nn.Sequential(nn.Linear(3 + 3 * 2 * self.scene_nf, hidden_dim), nn.SiLU(), nn.Linear(hidden_dim, hidden_dim))
+            self.scene_cell_emb = nn.Parameter(torch.zeros(64, hidden_dim))
         self.mod1 = nn.Linear(hidden_dim, hidden_dim * 2)
         self.mod2 = nn.Linear(hidden_dim, hidden_dim * 2)
 
@@ -549,6 +558,17 @@ class CameraDiffusionModel(nn.Module):
                 geo_tok = geo_tok + positional_encoding(
                     geo_tok.shape[-2], geo_tok.shape[-1], device=device).unsqueeze(0).expand(B, -1, -1)
             geo_tok = geo_tok * geo_mask.unsqueeze(-1)
+            geo_mask_ca = geo_mask
+            if getattr(self, 'scene_points_cond', False) and video_points is not None:
+                Bp, Fp, Pp, _ = video_points.shape
+                xyz = video_points.to(geo_tok.dtype)
+                fr = torch.cat([fn(xyz * (2.0 ** i)) for i in range(self.scene_nf) for fn in (torch.sin, torch.cos)], -1)
+                st = self.scene_pt_mlp(torch.cat([xyz, fr], -1)) + self.scene_cell_emb[:Pp].to(geo_tok.dtype)      # (B,F,P,H)
+                st = st + positional_encoding(Fp, st.shape[-1], device=device).to(geo_tok.dtype)[None, :, None, :]
+                sv = (video_points_valid if video_points_valid is not None else torch.ones(Bp, Fp, Pp, dtype=torch.bool, device=device))
+                st = st.reshape(Bp, Fp * Pp, -1) * sv.reshape(Bp, -1, 1).to(geo_tok.dtype)
+                geo_tok = torch.cat([geo_tok, st], 1)
+                geo_mask_ca = torch.cat([geo_mask.bool(), sv.reshape(Bp, -1)], 1)   # readout 쪽 geo_mask 는 원본 유지
 
         if has_video:
             if _vid_built is not None:                    # [R253] 위에서 이미 만들었다
@@ -611,7 +631,7 @@ class CameraDiffusionModel(nn.Module):
                 h = norm2(h)
                 h = h * (1 + scale2) + shift2
 
-                h = geo_cross_attn(h, geo_tok, key_padding_mask=~geo_mask)
+                h = geo_cross_attn(h, geo_tok, key_padding_mask=~geo_mask_ca)
                 h = mlp2(h) + h
 
             if self.training is False:

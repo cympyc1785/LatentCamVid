@@ -931,7 +931,8 @@ def train():
                 peav_readout_aux_mode=str(getattr(cfg, 'peav_readout_aux_mode', 'regress') or 'regress'),   # [R291]
                 peav_readout_geo=bool(getattr(cfg, 'peav_readout_geo', False)),   # [R292]
                 peav_readout_cond_noise=float(getattr(cfg, 'peav_readout_cond_noise', 0.0) or 0.0),   # [R312]
-                peav_readout_cond_grad=bool(getattr(cfg, 'peav_readout_cond_grad', False)))   # [R315]
+                peav_readout_cond_grad=bool(getattr(cfg, 'peav_readout_cond_grad', False)),   # [R315]
+                scene_points_cond=bool(getattr(cfg, 'scene_points_cond', False)))   # [R328]
             _auxw = float(getattr(cfg, 'peav_readout_aux_w', 0.0))
             print(f"(model) peav readout: layers={_rol} "
                   f"queries={_vid_kw['peav_readout_queries']} "

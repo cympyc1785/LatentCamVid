@@ -668,6 +668,8 @@ peav_readout_cond_p_ramp: 0
 peav_readout_cond_grad: false
 peav_readout_init_ckpt: null
 peav_readout_freeze: false
+# [R328] 장면 depth 토큰 (video_patch_points: true 필요): 토큰별 3D 점 49x64 를 geo CA 에 srccam 과 같이. false = 예전.
+scene_points_cond: false
 
 # ─── [new 2026-09-20, D206] aim aux loss ─────────────────────────────────────────────────
 # 학습 스텝 안에서 예측 x0 를 **궤적 VAE 로 디코드**해, 카메라 forward 와

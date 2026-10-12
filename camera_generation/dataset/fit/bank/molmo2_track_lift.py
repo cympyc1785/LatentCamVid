@@ -10,6 +10,9 @@ stage
         빠진 프레임은 선형 보간 (양 끝은 가까운 값), 덮인 프레임 < --min_frames 면 valid False.
         → <corpus>/dynpose/<video>/da3/<--name> (target_track.npz 와 같은 키·형식: track_world (V,T,3) · valid · keys · anchor_id).
 대상 문구: out_dynpose/<video>/instance_desc.json descriptions[anchor].description (없으면 scene graph 라벨).
+  check (CPU, env vista4d) [R343] 품질 통계: Molmo2 원 2D 점 (main id) 이 그 anchor 의 SAM3 mask (seg_instances[_static], scene graph
+        node.track_id + merged_from — export_target_track.node_bbox_2d 와 같은 매칭) 안에 있나 (정확히 · 반경 --near_frac·W 안),
+        그리고 lift depth (점 주변 창 중앙값) 가 mask 안 depth 중앙값과 얼마나 다른가 → --check_out CSV (쌍마다 1행) + 요약 출력.
 예) CUDA_VISIBLE_DEVICES=0 python fit/bank/molmo2_track_lift.py --stage gen --num_shards 3 --shard_id 0 --batch 8
     python fit/bank/molmo2_track_lift.py --stage lift --workers 24
 """
@@ -155,6 +158,95 @@ def lift_video(job):
     return v, f"ok {sum(per[x][1] for x in set(aids))}/{len(set(aids))}"
 
 
+def check_video(job):
+    a, v = job
+    sys.path.insert(0, "/data1/cympyc1785/LatentCamVid/video_generation/models/Vista4D")
+    from utils.media import load_depths, load_masks
+    try:
+        nodes = {n["id"]: n for n in json.load(open(f"{G}/{v}/scene_graph.json"))["nodes"]}
+        d = load_depths(f"{E}/{v}/depths", dtype=np.float16, desc=None).astype(np.float32)
+        sky = np.asarray(load_masks(f"{E}/{v}/sky_mask", desc=None)).astype(bool)
+    except Exception as e:      # noqa: BLE001
+        return [dict(video=v, anchor="", status=f"error {str(e)[:60]}")]
+    F_, H, W = d.shape; r = max(2, W // 80); rows = []; seg = {}
+    aids = sorted({x for vv, x in pairs_cache[v]})
+    for aid in aids:
+        row = dict(video=v, anchor=aid, status="ok", kind=aid.split("_")[0])
+        node = nodes.get(aid); jp = f"{a.out}/{v}__{aid}.json"
+        if node is None or not osp.isfile(jp):
+            rows.append({**row, "status": "no_node" if node is None else "no_json"}); continue
+        sub = "seg_instances" if aid.startswith("dyn") else "seg_instances_static"
+        if sub not in seg:
+            mp = f"{a.seg_root}/{sub}/{v}"
+            seg[sub] = (json.load(open(f"{mp}/meta.json")), np.load(f"{mp}/masks.npz")) if osp.isfile(f"{mp}/meta.json") else None
+        if seg[sub] is None:
+            rows.append({**row, "status": "no_seg"}); continue
+        meta, mz = seg[sub]; mW, mH = meta["width"], meta["height"]
+        ids = {node.get("track_id")} | set(node.get("merged_from") or [])
+        P = json.load(open(jp))["pts"]; cnt = {}
+        for q in P:
+            cnt[q[1]] = cnt.get(q[1], 0) + 1
+        main = max(cnt, key=cnt.get) if cnt else None; got = {}
+        for f, tid, x, y in P:
+            if tid == main and 0 <= f < F_ and f not in got:
+                got[f] = (x, y)
+        n_pt = n_mask = n_both = n_in = n_near = 0; dz = []
+        for f in range(min(F_, len(meta["frames"]))):
+            k = [i for i, b in enumerate(meta["frames"][f]) if b.get("id") in ids]
+            m = None
+            if k:
+                m = np.unpackbits(mz[f"{f:05d}"][k], axis=-1, count=mW).astype(bool).any(0); n_mask += 1
+            if f in got:
+                n_pt += 1
+            if m is None or f not in got:
+                continue
+            n_both += 1; x, y = got[f]
+            u, vv = min(mW - 1, int(x * mW)), min(mH - 1, int(y * mH))
+            rr = max(1, int(a.near_frac * mW))
+            n_in += bool(m[vv, u]); n_near += bool(m[max(0, vv - rr):vv + rr + 1, max(0, u - rr):u + rr + 1].any())
+            # lift depth (molmo2_track_lift.lift_video 와 같은 창) vs mask 안 depth 중앙값 (depth 해상도로 최근접 축소)
+            md = m[(np.arange(H) * mH // H)][:, (np.arange(W) * mW // W)] & np.isfinite(d[f]) & (d[f] > 0) & ~sky[f]
+            ud, vd = int(x * W), int(y * H)
+            sl = (f, slice(max(0, vd - r), vd + r + 1), slice(max(0, ud - r), ud + r + 1))
+            ok = np.isfinite(d[sl]) & (d[sl] > 0) & ~sky[sl]
+            if ok.sum() >= 3 and md.sum() >= 10:
+                zm = float(np.median(d[f][md])); dz.append(abs(float(np.median(d[sl][ok])) - zm) / max(zm, 1e-6))
+        rows.append({**row, "n_pt": n_pt, "n_mask": n_mask, "n_both": n_both, "in_frac": n_in / max(1, n_both),
+                     "near_frac": n_near / max(1, n_both), "dz_med": float(np.median(dz)) if dz else float("nan"),
+                     "dz_p90": float(np.percentile(dz, 90)) if dz else float("nan")})
+    return rows
+
+
+def stage_check(a):
+    import csv
+    from multiprocessing import Pool
+    global pairs_cache
+    pairs_cache = {}
+    for v, aid in pairs(a.corpus):
+        pairs_cache.setdefault(v, []).append((v, aid))
+    vids = sorted(pairs_cache); out = []
+    with Pool(a.workers) as p:
+        for i, rows in enumerate(p.imap_unordered(check_video, [(a, v) for v in vids], chunksize=4)):
+            out += rows
+            if i % 1000 == 0:
+                print(f"[check {i}/{len(vids)}]", flush=True)
+    keys = ["video", "anchor", "kind", "status", "n_pt", "n_mask", "n_both", "in_frac", "near_frac", "dz_med", "dz_p90"]
+    with open(a.check_out, "w", newline="") as fh:
+        w = csv.DictWriter(fh, fieldnames=keys); w.writeheader(); [w.writerow({k: r.get(k, "") for k in keys}) for r in out]
+    ok = [r for r in out if r["status"] == "ok" and r["n_both"] > 0]
+    print(f"=== check DONE 쌍 {len(out)} · 평가 가능 {len(ok)} (status {dict(__import__('collections').Counter(r['status'] for r in out))}) -> {a.check_out}")
+    for kind in ("dyn", "stat", None):
+        s = [r for r in ok if kind is None or r["kind"] == kind]
+        if not s:
+            continue
+        inf = np.array([r["in_frac"] for r in s]); nf = np.array([r["near_frac"] for r in s]); dz = np.array([r["dz_med"] for r in s], float)
+        print(f"[{kind or 'all'}] n {len(s)} · mask 안 비율 평균 {inf.mean():.3f} 중앙 {np.median(inf):.3f} · ≥0.8 쌍 {np.mean(inf >= 0.8):.3f} · <0.2 쌍 {np.mean(inf < 0.2):.3f}"
+              f" · 반경 안 평균 {nf.mean():.3f} · depth 상대차 중앙 {np.nanmedian(dz):.3f} (>0.3 쌍 {np.nanmean(dz > 0.3):.3f})")
+
+
+pairs_cache = {}
+
+
 def stage_lift(a):
     from multiprocessing import Pool
     vids = sorted({v for v, _ in pairs(a.corpus)}); bad = 0
@@ -168,7 +260,7 @@ def stage_lift(a):
 
 if __name__ == "__main__":
     ap = argparse.ArgumentParser()
-    ap.add_argument("--stage", required=True, choices=["gen", "lift"])
+    ap.add_argument("--stage", required=True, choices=["gen", "lift", "check"])
     ap.add_argument("--corpus", default=C)
     ap.add_argument("--out", default="/data1/cympyc1785/data/DynPose-LBM/latentcam_dynpose_d200/molmo2_track")
     ap.add_argument("--name", default="target_track_molmo2.npz")
@@ -180,5 +272,8 @@ if __name__ == "__main__":
     ap.add_argument("--min_frames", type=int, default=25)
     ap.add_argument("--workers", type=int, default=24)
     ap.add_argument("--overwrite", action="store_true")
+    ap.add_argument("--seg_root", default="/data1/cympyc1785/LatentCamVid/DATA/DynPose-100K/eval_data")   # [R343] seg_instances[_static]
+    ap.add_argument("--near_frac", type=float, default=0.02)    # [R343] mask 반경 허용 (영상 폭 비율)
+    ap.add_argument("--check_out", default="/data1/cympyc1785/LatentCamVid/tmp/r343/molmo2_track_check.csv")
     a = ap.parse_args()
-    {"gen": stage_gen, "lift": stage_lift}[a.stage](a)
+    {"gen": stage_gen, "lift": stage_lift, "check": stage_check}[a.stage](a)

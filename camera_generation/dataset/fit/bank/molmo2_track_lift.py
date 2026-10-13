@@ -20,6 +20,10 @@ stage
            양방향 전파 → <--sam3_out>/<video>__<anchor>.npz (packbits mask, 고른 점)
   sam3lift (CPU, env vista4d) mask 안 depth 점 → world → 축별 10~90% 구간 중점 = 프레임 중심, 빈 프레임 보간 (덮인 프레임 < --min_frames 면 invalid)
            → <scene>/da3/<--sam3_name> (target_track.npz 와 같은 키·형식)
+  comb     (GPU, env vista4d) [R366] text + point 결합 (R359 검증: 100 쌍 쌍 성공 0.86): 라벨 명사 (scene graph label) text 로 SAM3 전파 → 후보 masklet 전부,
+           --point_mode 규칙 (기본 pointK8f, --point_out json) 의 점 (f*, x, y) 이 든 masklet 선택 (여럿이면 평균 점수 최고). 없으면 점 단독 결과 (--sam3_out) 로 대체.
+           → <corpus>/molmo2_comb/<pair>.npz (how 기록). 같은 전파로 sam3_text_label/<pair>.npz (최고 점수 obj) 도 비어 있으면 채운다 (R358 중복 제거).
+           3D 는 sam3lift --sam3_out <corpus>/molmo2_comb --sam3_name target_track_comb.npz
   sam3text (GPU, env vista4d) [R358] SAM3 text 단독 비교군: 라벨 명사 (scene graph label) · 설명 문장 (instance_desc, Molmo2 질문과 같은 출처)
            0 프레임 text prompt → 전파 (매 프레임 detector), obj 여럿이면 평균 점수 × 등장 프레임 수 최고 하나 → <corpus>/sam3_text_{label,desc}/<video>__<anchor>.npz
 예) CUDA_VISIBLE_DEVICES=0 python fit/bank/molmo2_track_lift.py --stage gen --num_shards 3 --shard_id 0 --batch 8
@@ -340,6 +344,83 @@ def stage_sam3text(a):
     print(f"=== sam3text shard {a.shard_id} DONE ===", flush=True)
 
 
+def stage_comb(a):
+    """[R366] text (라벨) 후보 masklet + Molmo2 점 선택. 영상마다 세션 1개, anchor 마다 reset."""
+    sys.path.insert(0, "/data1/cympyc1785/LatentCamVid/video_generation/models/Vista4D")
+    from utils.media import load_video
+    from utils.recon_and_seg.seg_sam3_official import init_sam3_video
+    from PIL import Image
+    import shutil
+    by_v = {}
+    for v, aid in pairs(a.corpus):
+        by_v.setdefault(v, []).append(aid)
+    vids = [v for i, v in enumerate(sorted(by_v)) if i % a.num_shards == a.shard_id]
+    od, ld = f"{a.corpus}/molmo2_comb", f"{a.corpus}/sam3_text_label"
+    os.makedirs(od, exist_ok=True); os.makedirs(ld, exist_ok=True)
+    pred = init_sam3_video(); t_all = time.time(); how = {}
+    print(f"[comb] {a.point_mode} shard {a.shard_id}/{a.num_shards}: 영상 {len(vids)}", flush=True)
+    for n, v in enumerate(vids):
+        todo = [aid for aid in by_v[v] if not osp.isfile(f"{od}/{v}__{aid}.npz")]
+        if not todo:
+            continue
+        try:
+            nodes = {x["id"]: x for x in json.load(open(f"{G}/{v}/scene_graph.json"))["nodes"]}
+        except Exception:      # noqa: BLE001
+            nodes = {}
+        frames, _ = load_video(f"{E}/{v}/video.mp4"); T_, H, W, _ = frames.shape
+        sid = pred.handle_request({"type": "start_session", "resource_path": [Image.fromarray(frames[i]) for i in range(T_)]})["session_id"]
+        for aid in todo:
+            out = f"{od}/{v}__{aid}.npz"; label = nodes.get(aid, {}).get("label") or ""; ch = choose_point(a, v, aid); per = {}
+            if label:
+                pred.handle_request({"type": "reset_session", "session_id": sid})
+                pred.handle_request({"type": "add_prompt", "session_id": sid, "frame_index": 0, "text": label})
+                for r in pred.handle_stream_request({"type": "propagate_in_video", "session_id": sid, "propagation_direction": "forward",
+                                                     "start_frame_index": 0, "max_frame_num_to_track": T_}):
+                    o = r["outputs"]
+                    if o is None:
+                        continue
+                    for k, oid in enumerate(o["out_obj_ids"]):
+                        dd = per.setdefault(int(oid), {"p": [], "m": {}})
+                        dd["p"].append(float(o["out_probs"][k])); dd["m"][r["frame_index"]] = np.asarray(o["out_binary_masks"][k]).astype(bool)
+
+            def masks_of(i):
+                mm = np.zeros((T_, H, W), bool)
+                for f, mk in per[i]["m"].items():
+                    mm[f] = mk
+                return mm
+            lp = f"{ld}/{v}__{aid}.npz"                      # R358 라벨 판도 같은 규칙으로 채움 (비어 있을 때만)
+            if label and not osp.isfile(lp):
+                if per:
+                    best = max(per, key=lambda i: np.mean(per[i]["p"]) * len(per[i]["m"]))
+                    np.savez_compressed(lp, ok=True, masks=np.packbits(masks_of(best), axis=-1), W=W, conf=float(np.mean(per[best]["p"])), n_obj=len(per), text=label)
+                else:
+                    np.savez(lp, ok=False, why="no_detection", text=label)
+            pick, why = None, ("no_label" if not label else "no_point")
+            if ch is not None and per:
+                f0, x, y = ch; u, vv = min(W - 1, int(x * W)), min(H - 1, int(y * H))
+                hit = [i for i in per if f0 in per[i]["m"] and per[i]["m"][f0][vv, u]]
+                if hit:
+                    pick, why = max(hit, key=lambda i: np.mean(per[i]["p"])), "text_masklet"
+                else:
+                    why = "point_outside"
+            elif ch is not None:
+                why = "no_candidate"
+            if pick is not None:
+                np.savez_compressed(out, ok=True, masks=np.packbits(masks_of(pick), axis=-1), W=W, frame=ch[0], x=ch[1], y=ch[2], how=why, n_obj=len(per))
+            else:
+                src = f"{a.sam3_out}/{v}__{aid}.npz"
+                if osp.isfile(src):
+                    z = dict(np.load(src)); z["how"] = "fallback_point:" + why; np.savez_compressed(out, **z)
+                else:
+                    np.savez(out, ok=False, how="none:" + why)
+                why = "fallback:" + why
+            how[why] = how.get(why, 0) + 1
+        pred.handle_request({"type": "close_session", "session_id": sid})
+        if n % 50 == 0:
+            el = time.time() - t_all; print(f"[comb] 영상 {n + 1}/{len(vids)} · {how} · {el / (n + 1):.1f} s/영상 ETA {(len(vids) - n - 1) * el / (n + 1) / 3600:.1f} h", flush=True)
+    print(f"[comb] how {how}\n=== comb shard {a.shard_id} DONE ===", flush=True)
+
+
 def sam3lift_video(job):
     a, v = job
     sys.path.insert(0, "/data1/cympyc1785/LatentCamVid/video_generation/models/Vista4D")
@@ -492,7 +573,7 @@ def stage_lift(a):
 
 if __name__ == "__main__":
     ap = argparse.ArgumentParser()
-    ap.add_argument("--stage", required=True, choices=["gen", "lift", "check", "point", "sam3", "sam3lift", "sam3text"])
+    ap.add_argument("--stage", required=True, choices=["gen", "lift", "check", "point", "sam3", "sam3lift", "sam3text", "comb"])
     ap.add_argument("--corpus", default=C)
     ap.add_argument("--out", default="/data1/cympyc1785/data/DynPose-LBM/latentcam_dynpose_d200/molmo2_track")
     ap.add_argument("--name", default="target_track_molmo2.npz")
@@ -512,4 +593,4 @@ if __name__ == "__main__":
     ap.add_argument("--sam3_name", default="target_track_m2sam3.npz")
     ap.add_argument("--check_out", default="/data1/cympyc1785/LatentCamVid/tmp/r343/molmo2_track_check.csv")
     a = ap.parse_args()
-    {"gen": stage_gen, "lift": stage_lift, "check": stage_check, "point": stage_point, "sam3": stage_sam3, "sam3lift": stage_sam3lift, "sam3text": stage_sam3text}[a.stage](a)
+    {"gen": stage_gen, "lift": stage_lift, "check": stage_check, "point": stage_point, "sam3": stage_sam3, "sam3lift": stage_sam3lift, "sam3text": stage_sam3text, "comb": stage_comb}[a.stage](a)

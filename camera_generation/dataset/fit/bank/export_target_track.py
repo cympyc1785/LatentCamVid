@@ -92,6 +92,28 @@ def node_bbox_2d(node, seg_root, video, num_frames):
     return box, ok
 
 
+def node_box_axes_world(node, T_wg, num_frames):
+    """[R357] 노드 -> (T,3,3) world 의 OBB 반축 벡터 (열 = 로컬 l·w·h 축 × extent/2). 중력 정렬 OBB 라 G 에서
+    R_g(yaw_t) @ diag(extent/2), world 는 T_wg[:3,:3] (= S·R) 를 곱한다 (scene scale 포함). yaw 는 track.yaw (프레임별,
+    unwrap+median, 안 보인 프레임은 가장 가까운 관측으로 hold — node_track_world 와 같은 규칙), 없으면 obb.yaw_rad 상수.
+    extent 는 노드 하나 (프레임별 median)."""
+    ext = np.asarray(node["obb"]["extent"], dtype=np.float64) / 2.0
+    yaw = None
+    if node.get("track") and node["track"].get("yaw"):
+        y = np.asarray(node["track"]["yaw"], dtype=np.float64)
+        frames = np.asarray(node["track"].get("frames") or list(range(len(y))), dtype=int)
+        if len(y) == num_frames:
+            yaw = y
+        else:
+            yaw = np.array([y[np.abs(frames - f).argmin()] for f in range(num_frames)])
+    if yaw is None:
+        yaw = np.full(num_frames, float(node["obb"]["yaw_rad"]))
+    c, s_ = np.cos(yaw), np.sin(yaw); z = np.zeros_like(c); o = np.ones_like(c)
+    R = np.stack([np.stack([c, -s_, z], -1), np.stack([s_, c, z], -1), np.stack([z, z, o], -1)], 1)   # (T,3,3) G
+    A_g = R * ext[None, None, :]                                                                      # 열마다 반길이
+    return np.einsum("ij,tjk->tik", T_wg[:3, :3], A_g)
+
+
 def main(args):
     out_root = args.out_root or path.join(CINEMATRAJ_ROOT, "out")
     scene_dirs = sorted(glob(path.join(args.dl3dv_root, args.corpus, "*")))
@@ -143,6 +165,21 @@ def main(args):
             track[i] = cache[anchor]
             valid[i] = True
 
+        if args.box:
+            # [R357] 같은 키 순서로 subject 3D OBB 반축 → `<scene>/da3/subject_box.npz` (axes_world (V,T,3,3), valid)
+            axes = np.zeros((len(keys), T, 3, 3), dtype=np.float32); bvalid = np.zeros(len(keys), dtype=bool); xcache = {}
+            for i, anchor in enumerate(anchors):
+                if anchor not in xcache:
+                    node = nodes.get(anchor)
+                    xcache[anchor] = None if node is None else node_box_axes_world(node, T_wg, num_frames).astype(np.float32)
+                if xcache[anchor] is not None:
+                    axes[i] = xcache[anchor]; bvalid[i] = True
+            if not args.dry_run:
+                np.savez(path.join(scene_dir, "da3", "subject_box.npz"), axes_world=axes, valid=bvalid,
+                         keys=np.array(keys), anchor_id=np.array(anchors))
+            if args.only_box:
+                rows.append((video, len(keys), int(bvalid.sum()), sorted(missing)))
+                continue
         if args.bbox_seg_root:
             # [R243] 같은 키 순서로 subject 2D bbox (SAM3) 도 내보낸다 → `<scene>/da3/subject_bbox.npz`
             bbox = np.zeros((len(keys), T, 4), dtype=np.float32)
@@ -203,5 +240,8 @@ if __name__ == "__main__":
     parser.add_argument("--dry_run", action="store_true")
     # [R243] SAM3 2D bbox 도 내보내기: DynPose eval_data 루트 (seg_instances/ · seg_instances_static/ 가 있는 곳). None = 예전 동작.
     parser.add_argument("--bbox_seg_root", default=None)
+    # [R357] subject 3D OBB 반축 (`subject_box.npz`) 도 내보내기. --only_box 면 target_track.npz 는 그대로 둔다.
+    parser.add_argument("--box", action="store_true")
+    parser.add_argument("--only_box", action="store_true")
     parser.add_argument("--only_bbox", action="store_true")      # target_track.npz 는 건드리지 않고 subject_bbox.npz 만
     main(parser.parse_args())

@@ -252,6 +252,7 @@ def main():
     _track_dim = int(getattr(cfg, 'target_track_dim', 0) or 0)
     _track_dim += 5 if getattr(cfg, 'subject_bbox_cond', False) else 0   # [R243] 2D bbox 조건
     _track_dim += 4 if getattr(cfg, 'subject_uv_cond', False) else 0    # [R332] Molmo2 2D track
+    _track_dim += 9 if getattr(cfg, 'subject_box_cond', False) else 0   # [R357] 3D OBB 반축
     if args.drop_track:
         if _track_dim == 0:
             print("[warn] --drop-track 인데 target_track_dim=0 — 이 arm 엔 track 조건이 없다 (no-op)")

@@ -345,9 +345,10 @@ def build_track_cond(data, t_lat, device, dropout_p=0.0):
     tt = data.get('target_track')
     sb = data.get('subject_bbox')          # [R243] subject_bbox_cond — (B,T,5) 2D bbox 를 track 뒤에 이어 붙인다
     su = data.get('subject_uv')            # [R332] subject_uv_cond — (B,T,4) Molmo2 2D track, 그 뒤에
-    if tt is None and sb is None and su is None:
+    sx = data.get('subject_box')           # [R357] subject_box_cond — (B,T,9) 3D OBB 반축, 맨 뒤
+    if tt is None and sb is None and su is None and sx is None:
         return None
-    tt = torch.cat([x.to(device).float() for x in (tt, sb, su) if x is not None], -1)
+    tt = torch.cat([x.to(device).float() for x in (tt, sb, su, sx) if x is not None], -1)
     tt = tt.transpose(1, 2)                                         # (B,C,T)
     cond = F.interpolate(tt, size=int(t_lat), mode='linear',
                          align_corners=True).transpose(1, 2)        # (B,t_lat,4)
@@ -900,6 +901,7 @@ def train():
     _track_dim = int(getattr(cfg, 'target_track_dim', 0) or 0)
     _track_dim += 5 if getattr(cfg, 'subject_bbox_cond', False) else 0   # [R243] 2D bbox [cx,cy,w,h,valid]
     _track_dim += 4 if getattr(cfg, 'subject_uv_cond', False) else 0    # [R332] Molmo2 2D track [u,v,observed,valid]
+    _track_dim += 9 if getattr(cfg, 'subject_box_cond', False) else 0   # [R357] 3D OBB 반축 3x3
     if _track_dim > 0:
         assert not getattr(cfg, 'is_ar', False) and not getattr(cfg, 'per_token_noise', False), \
             "target_track_dim>0 은 표준 diffusion 경로에만 배선되어 있다 (is_ar/per_token_noise 미지원)"

@@ -290,6 +290,10 @@ subject_bbox_cond: false
 #   <scene>/da3/target_track_molmo2.npz + <corpus>/molmo2_track/*.json 필요 (dataset/fit/bank/molmo2_track_lift.py). false = 예전.
 subject_uv_cond: false
 subject_uv_dir: null          # null = <corpus>/molmo2_track
+# [R357] subject 3D OBB 반축 벡터 (중력 정렬, l·w·h × extent/2, frame-s 카메라 좌표 / norm_scale) 를 track 뒤 concat (cond_dim +9). 중심은 target_track.
+#   <scene>/da3/subject_box.npz 필요 (dataset/fit/bank/export_target_track.py --box). false = 예전.
+subject_box_cond: false
+subject_box_file: subject_box.npz
 max_scenes: null              # cap #scenes loaded (null = all; small int for smoke tests)
 train_seg_list: null          # [new] explicit train segment-list file (<batch>/<hash>/<seg>); null = random 90/10 split
 test_seg_list: null           # [new] explicit val/test segment-list file; val = its first (val_max_batches×batch_size) segments

@@ -330,6 +330,7 @@ class CamDataset(torch.utils.data.Dataset):
         self._target_track_cache = {}
         self._subject_bbox_cache = {}   # [R243] subject_bbox_cond
         self._subject_uv_cache = {}     # [R332] subject_uv_cond
+        self._subject_box_cache = {}    # [R357] subject_box_cond
         # [new 2026-09-20, D206] aim_loss_w>0: scene_idx -> {seg_key: 1.0 if aim=='look_at' else 0.0}
         # prompts.json 의 `aim` 필드 하나만 뽑아 둔 것. samples 튜플에는 **안 넣는다** —
         # 그 튜플은 <root>/.latentcam_index/*.pt 에 그대로 직렬화돼 있어(_load_index) 원소 수가
@@ -1276,6 +1277,25 @@ class CamDataset(torch.utils.data.Dataset):
             uv, obs = uv[idx], obs[idx]
         return torch.cat([uv - 0.5, obs[:, None], torch.ones(T, 1)], -1)
 
+    def _subject_box(self, scene_idx, seg_key, extrinsics, norm_scale):
+        """[R357] subject_box_cond: `<scene>/da3/<subject_box_file>` (fit/bank/export_target_track.py --box) 의 중력 정렬 OBB 반축 벡터
+        (world, 열 = l·w·h 축 × extent/2) -> (T,9) frame-s 카메라 좌표 / norm_scale (track 과 같은 게이지, 회전만). 중심은 target_track 이 준다.
+        valid False 면 전 채널 0."""
+        cache = self._subject_box_cache.get(scene_idx)
+        if cache is None:
+            z = np.load(osp.join(self.scene_dir_list[scene_idx], 'da3', str(getattr(self.cfg, 'subject_box_file', None) or 'subject_box.npz')), allow_pickle=True)
+            cache = {'axes': torch.from_numpy(np.asarray(z['axes_world'], dtype=np.float32)), 'valid': np.asarray(z['valid'], dtype=bool),
+                     'keys': {str(k): i for i, k in enumerate(z['keys'].tolist())}}
+            self._subject_box_cache[scene_idx] = cache
+        v = cache['keys'][str(seg_key)]; T = extrinsics.shape[0]
+        if not cache['valid'][v]:
+            return torch.zeros(T, 9)
+        A = cache['axes'][v]
+        if A.shape[0] != T:
+            A = A[self._even_indices(A.shape[0], T)]
+        Ac = torch.einsum('ij,tjk->tik', extrinsics[0].float()[:3, :3], A.float()) / norm_scale.reshape(1, 1, 1).float()
+        return Ac.reshape(T, 9)
+
     def _track_cond(self, scene_idx, seg_key, extrinsics, norm_scale):
         """subject world 궤적 -> cam_param 과 같은 게이지의 (T,4) [x,y,z,valid].
 
@@ -1905,6 +1925,9 @@ class CamDataset(torch.utils.data.Dataset):
         if getattr(self.cfg, 'subject_bbox_cond', False):
             out['subject_bbox'] = self._subject_bbox(scene_idx, data_name.split('_')[-1], extrinsics.shape[0])
         # [R332] subject_uv_cond: Molmo2 2D track (depth 안 씀) 을 같은 concat 조건 경로로 (기본 off = 키 없음).
+        # [R357] subject_box_cond: 3D OBB 반축 (9) 을 같은 concat 조건 경로로 (기본 off = 키 없음).
+        if getattr(self.cfg, 'subject_box_cond', False):
+            out['subject_box'] = self._subject_box(scene_idx, data_name.split('_')[-1], extrinsics, norm_scale)
         if getattr(self.cfg, 'subject_uv_cond', False):
             out['subject_uv'] = self._subject_uv(scene_idx, data_name.split('_')[-1], extrinsics.shape[0])
         # [R167] val_traj_shape_metrics: val 의 subject 화면 위치 측정용. 모델·손실이 읽는 'target_track' 과

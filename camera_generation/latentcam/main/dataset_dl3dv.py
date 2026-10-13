@@ -1322,8 +1322,20 @@ class CamDataset(torch.utils.data.Dataset):
             return torch.zeros(T, N, 4)
         if self.type == 'train':
             sel = cand[torch.randperm(len(cand))[:N]]
+        elif str(getattr(self.cfg, 'subject_pts_eval_select', 'fps_best')) == 'visible':
+            sel = cand[torch.argsort(-cnt[cand], stable=True)[:N]]          # 예전 규칙 (동률이 index 순 → frame 0 query 점 편중)
         else:
-            sel = cand[torch.argsort(-cnt[cand], stable=True)[:N]]
+            # [R363] 유효 점이 가장 많은 프레임 b 에서, 그 프레임에 유효한 점들을 3D 위치로 farthest point sampling → subject 전체에 고르게.
+            #   모자라면 보인 프레임 많은 순으로 채운다.
+            b = int(V.sum(1).argmax()); c_b = torch.nonzero(V[b]).flatten()
+            X = P[b, c_b]; picked = [int(torch.linalg.norm(X - X.mean(0), dim=1).argmin())] if len(c_b) else []
+            d = torch.linalg.norm(X - X[picked[0]], dim=1) if picked else None
+            while len(picked) < min(N, len(c_b)):
+                i = int(d.argmax()); picked.append(i); d = torch.minimum(d, torch.linalg.norm(X - X[i], dim=1))
+            sel = c_b[picked] if picked else c_b[:0]
+            if len(sel) < N:
+                rest = cand[~torch.isin(cand, sel)]
+                sel = torch.cat([sel, rest[torch.argsort(-cnt[rest], stable=True)[:N - len(sel)]]])
         E_s = extrinsics[0].float()
         q = (P[:, sel] @ E_s[:3, :3].T + E_s[:3, 3]) / norm_scale.reshape(1, 1, 1).float()
         out = torch.zeros(T, N, 4); v = V[:, sel].float()

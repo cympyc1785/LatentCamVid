@@ -300,6 +300,8 @@ subject_pts_cond: false
 subject_pts_n: 64
 subject_pts_dim: 64
 subject_pts_file: subject_points.npz
+# [R363] eval (train 외) 점 고르기: fps_best = 유효 점 최다 프레임에서 3D farthest point sampling (기본) · visible = 보인 프레임 많은 순 (예전)
+subject_pts_eval_select: fps_best
 max_scenes: null              # cap #scenes loaded (null = all; small int for smoke tests)
 train_seg_list: null          # [new] explicit train segment-list file (<batch>/<hash>/<seg>); null = random 90/10 split
 test_seg_list: null           # [new] explicit val/test segment-list file; val = its first (val_max_batches×batch_size) segments

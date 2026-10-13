@@ -54,6 +54,7 @@
 - **plot_traj_curves `--jerk`** (R169): 위치 jerk |Δ³p|/reach · 회전 jerk |Δ²ω| 프레임별 곡선 열 2개 (traj_time_metrics 와 같은 정의, 범례에 평균).
 
 ### Changed
+- latentcam `subject_pts_cond` 평가 시 점 고르기 (R363): 유효 점 최다 프레임에서 3D farthest point sampling (`subject_pts_eval_select: fps_best`, 기본). 예전 "보인 프레임 많은 순" 은 동률이 index 순이라 frame 0 query 점에 몰렸다 (`visible` 로 재현). 학습 (무작위) 은 그대로.
 - latentcam `peav_readout_cond_p` 기본값 0.0 → **1.0** (R325, 사용자 10-12 "cond_p 1.0 를 기본값으로"): 학습도 항상 readout 예측을 조건으로. readout 이 track3d xyz 를 예측하는 구성 (aux_dim 3 · target_track_dim>0 · aux_target target_track) 에서만 적용되도록 train/eval 에서 게이트 (그 밖은 0 = 예전). 예전 run 은 저장된 config 값 그대로.
 - dataset config `v5f_pushsubject.json` (R308): `--shot_class_presets` 를 look_at preset 만 (`^(track_)?(dolly_in_look_at|push_in_arc_*|pull_out_arc_*)$`) — 예전 `dolly_in|push_in|dolly_out|pull_out` 이 `truck_left_dolly_in` 같은 free 조합까지 걸어 초반 34편 shot_missed 89/316. bank_dir `hole_bank_v5f2`.
 - dataset `push_mode subject` (R299): track_ push 의 기준점을 매 프레임 c(f) 에서 c(0)→c(F−1) 순이동 직선으로 — subject 앞뒤 흔들림이 카메라 위치로 옮겨가지 않게 (조준은 실제 c(f) lock 그대로).

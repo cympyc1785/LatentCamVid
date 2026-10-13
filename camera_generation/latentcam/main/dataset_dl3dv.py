@@ -331,6 +331,7 @@ class CamDataset(torch.utils.data.Dataset):
         self._subject_bbox_cache = {}   # [R243] subject_bbox_cond
         self._subject_uv_cache = {}     # [R332] subject_uv_cond
         self._subject_box_cache = {}    # [R357] subject_box_cond
+        self._subject_pts_cache = {}    # [R361] subject_pts_cond
         # [new 2026-09-20, D206] aim_loss_w>0: scene_idx -> {seg_key: 1.0 if aim=='look_at' else 0.0}
         # prompts.json 의 `aim` 필드 하나만 뽑아 둔 것. samples 튜플에는 **안 넣는다** —
         # 그 튜플은 <root>/.latentcam_index/*.pt 에 그대로 직렬화돼 있어(_load_index) 원소 수가
@@ -1296,6 +1297,39 @@ class CamDataset(torch.utils.data.Dataset):
         Ac = torch.einsum('ij,tjk->tik', extrinsics[0].float()[:3, :3], A.float()) / norm_scale.reshape(1, 1, 1).float()
         return Ac.reshape(T, 9)
 
+    def _subject_pts(self, scene_idx, seg_key, extrinsics, norm_scale):
+        """[R361] subject_pts_cond: `<scene>/da3/<subject_pts_file>` (dataset/fit/bank/export_subject_points.py; dyn = CoTracker3 600 점,
+        stat = GT mask 샘플) 의 anchor 점들 -> (T, N, 4) [x, y, z, valid] frame-s 카메라 좌표 / norm_scale (track 과 같은 게이지).
+        N = cfg.subject_pts_n. 점 고르기: train 은 표본마다 무작위 (증강), 그 외는 보인 프레임이 많은 순 (결정적). 모자라면 0 + valid 0."""
+        cache = self._subject_pts_cache.get(scene_idx)
+        if cache is None:
+            sd = self.scene_dir_list[scene_idx]
+            z = np.load(osp.join(sd, 'da3', str(getattr(self.cfg, 'subject_pts_file', None) or 'subject_points.npz')), allow_pickle=True)
+            tt = np.load(osp.join(sd, 'da3', 'target_track.npz'), allow_pickle=True)
+            cache = {'pts': z['pts'], 'valid': z['valid'], 'aid': {str(a): i for i, a in enumerate(z['anchor_id'])},
+                     'seg2aid': {str(k): str(a) for k, a in zip(tt['keys'], tt['anchor_id'])}}
+            self._subject_pts_cache[scene_idx] = cache
+        T = extrinsics.shape[0]; N = int(getattr(self.cfg, 'subject_pts_n', 64) or 64)
+        ai = cache['aid'].get(cache['seg2aid'].get(str(seg_key), ''), None)
+        if ai is None:
+            return torch.zeros(T, N, 4)
+        P = torch.from_numpy(cache['pts'][ai].astype(np.float32)); V = torch.from_numpy(cache['valid'][ai])     # (F,P,3), (F,P)
+        if P.shape[0] != T:
+            idx = self._even_indices(P.shape[0], T); P, V = P[idx], V[idx]
+        cnt = V.sum(0)                                              # 점마다 보인 프레임 수
+        cand = torch.nonzero(cnt > 0).flatten()
+        if len(cand) == 0:
+            return torch.zeros(T, N, 4)
+        if self.type == 'train':
+            sel = cand[torch.randperm(len(cand))[:N]]
+        else:
+            sel = cand[torch.argsort(-cnt[cand], stable=True)[:N]]
+        E_s = extrinsics[0].float()
+        q = (P[:, sel] @ E_s[:3, :3].T + E_s[:3, 3]) / norm_scale.reshape(1, 1, 1).float()
+        out = torch.zeros(T, N, 4); v = V[:, sel].float()
+        out[:, :len(sel), :3] = q * v[..., None]; out[:, :len(sel), 3] = v
+        return out
+
     def _track_cond(self, scene_idx, seg_key, extrinsics, norm_scale):
         """subject world 궤적 -> cam_param 과 같은 게이지의 (T,4) [x,y,z,valid].
 
@@ -1925,6 +1959,9 @@ class CamDataset(torch.utils.data.Dataset):
         if getattr(self.cfg, 'subject_bbox_cond', False):
             out['subject_bbox'] = self._subject_bbox(scene_idx, data_name.split('_')[-1], extrinsics.shape[0])
         # [R332] subject_uv_cond: Molmo2 2D track (depth 안 씀) 을 같은 concat 조건 경로로 (기본 off = 키 없음).
+        # [R361] subject_pts_cond: subject 3D 점 (T,N,4) — 모델의 set encoder 가 프레임마다 요약해 concat (기본 off = 키 없음).
+        if getattr(self.cfg, 'subject_pts_cond', False):
+            out['subject_pts'] = self._subject_pts(scene_idx, data_name.split('_')[-1], extrinsics, norm_scale)
         # [R357] subject_box_cond: 3D OBB 반축 (9) 을 같은 concat 조건 경로로 (기본 off = 키 없음).
         if getattr(self.cfg, 'subject_box_cond', False):
             out['subject_box'] = self._subject_box(scene_idx, data_name.split('_')[-1], extrinsics, norm_scale)

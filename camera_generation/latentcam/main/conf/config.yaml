@@ -294,6 +294,12 @@ subject_uv_dir: null          # null = <corpus>/molmo2_track
 #   <scene>/da3/subject_box.npz 필요 (dataset/fit/bank/export_target_track.py --box). false = 예전.
 subject_box_cond: false
 subject_box_file: subject_box.npz
+# [R361] subject 3D 점 집합 (CoTracker3 · GT mask, frame-s 카메라 / norm_scale) 을 set encoder (점별 MLP + max·mean pool) 로 프레임마다
+#   subject_pts_dim 특징 → cam latent 에 concat. <scene>/da3/subject_points.npz 필요 (dataset/fit/bank/export_subject_points.py). false = 예전.
+subject_pts_cond: false
+subject_pts_n: 64
+subject_pts_dim: 64
+subject_pts_file: subject_points.npz
 max_scenes: null              # cap #scenes loaded (null = all; small int for smoke tests)
 train_seg_list: null          # [new] explicit train segment-list file (<batch>/<hash>/<seg>); null = random 90/10 split
 test_seg_list: null           # [new] explicit val/test segment-list file; val = its first (val_max_batches×batch_size) segments

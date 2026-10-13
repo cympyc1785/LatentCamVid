@@ -598,6 +598,8 @@ def build_video_cond(data, device):
         with torch.set_grad_enabled(_conn.training):
             kw['video_emb'] = _conn(_feat).float()
     # [R291] soft-argmax readout 용 토큰별 3D 점 (dataset video_patch_points). 없으면 키 없음 = 예전과 같은 호출.
+    if 'subject_pts' in data:          # [R361] subject 3D 점 집합 → 모델 set encoder (video CA 없는 arm 에서도)
+        kw['subject_pts'] = data['subject_pts'].to(device).float()
     if kw and 'video_points' in data:
         kw['video_points'] = data['video_points'].to(device).float()
         kw['video_points_valid'] = data['video_points_valid'].to(device).bool()
@@ -952,7 +954,8 @@ def train():
                 peav_readout_geo=bool(getattr(cfg, 'peav_readout_geo', False)),   # [R292]
                 peav_readout_cond_noise=float(getattr(cfg, 'peav_readout_cond_noise', 0.0) or 0.0),   # [R312]
                 peav_readout_cond_grad=bool(getattr(cfg, 'peav_readout_cond_grad', False)),   # [R315]
-                scene_points_cond=bool(getattr(cfg, 'scene_points_cond', False)))   # [R328]
+                scene_points_cond=bool(getattr(cfg, 'scene_points_cond', False)),   # [R328]
+                subject_pts_dim=(int(getattr(cfg, 'subject_pts_dim', 64) or 64) if getattr(cfg, 'subject_pts_cond', False) else 0))   # [R361]
             _auxw = float(getattr(cfg, 'peav_readout_aux_w', 0.0))
             print(f"(model) peav readout: layers={_rol} "
                   f"queries={_vid_kw['peav_readout_queries']} "

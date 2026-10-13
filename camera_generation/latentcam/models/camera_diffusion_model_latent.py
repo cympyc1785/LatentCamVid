@@ -192,6 +192,7 @@ class CameraDiffusionModel(nn.Module):
         peav_readout_cond_noise=0.0,
         peav_readout_cond_grad=False,
         scene_points_cond=False,
+        subject_pts_dim=0,
         video_text_fuse="token",
         start_pose_dim=0,
         start_pose_tf_p=0.0,
@@ -209,7 +210,13 @@ class CameraDiffusionModel(nn.Module):
         # forward 에서 "빼기"가 불가능하므로 null = 전 채널 0 (forward 의 cond=None 분기).
         # 0 = 기존 구조 그대로 (기존 ckpt 와 state_dict 호환).
         self.cond_dim = int(cond_dim)
-        self.cam_in = nn.Linear(cam_dim + self.cond_dim, hidden_dim)
+        # [R361] subject 3D 점 집합 (B,F,N,4 [xyz, valid]) → 점별 MLP → 프레임마다 valid 점만 max·mean pool (순서 무관, N 가변)
+        #   → subject_pts_dim 특징을 cam latent 에 concat (track 조건과 같은 자리). 0 = 모듈 미생성 (예전과 동일).
+        self.subject_pts_dim = int(subject_pts_dim)
+        if self.subject_pts_dim > 0:
+            self.pts_mlp = nn.Sequential(nn.Linear(3, 128), nn.SiLU(), nn.Linear(128, 128), nn.SiLU(), nn.Linear(128, 128))
+            self.pts_out = nn.Linear(256, self.subject_pts_dim)
+        self.cam_in = nn.Linear(cam_dim + self.cond_dim + self.subject_pts_dim, hidden_dim)
 
         self.time_mlp = TimeEmbedding(time_emb_dim)
         self.time_proj = nn.Linear(time_emb_dim, hidden_dim)
@@ -466,7 +473,7 @@ class CameraDiffusionModel(nn.Module):
 
     def forward(self, x_t, t, text_emb, text_mask, geo_emb=None, geo_mask=None, cond=None,
                 video_emb=None, video_mask=None, video_text_emb=None, video_text_mask=None,
-                start_pose=None, video_points=None, video_points_valid=None):
+                start_pose=None, video_points=None, video_points_valid=None, subject_pts=None):
         self.text_cross_attn_weight = None
         # [new 2026-09-03] video CA. `video_latent_dim==0` 이거나 video_emb 가 없으면 이 스트림은
         # 통째로 건너뛴다 = 기존 경로와 동일.
@@ -519,6 +526,18 @@ class CameraDiffusionModel(nn.Module):
             if cond is None:
                 cond = x_t.new_zeros(B, T, self.cond_dim)
             x_t = torch.cat([x_t, cond.to(x_t.dtype)], dim=-1)
+        if getattr(self, 'subject_pts_dim', 0) > 0:                 # [R361]
+            if subject_pts is None:
+                pf = x_t.new_zeros(B, T, self.subject_pts_dim)
+            else:
+                sp = subject_pts.to(x_t.dtype); vm = sp[..., 3:4] > 0.5                    # (B,F,N,1)
+                e = self.pts_mlp(sp[..., :3])
+                mx = e.masked_fill(~vm, -1e4).amax(2); mn = (e * vm).sum(2) / vm.sum(2).clamp(min=1)
+                fv = vm.any(2).to(e.dtype)                                                     # 프레임에 점이 하나라도
+                pf = self.pts_out(torch.cat([mx * fv, mn], -1)) * fv                          # (B,F,D)
+                if pf.shape[1] != T:
+                    pf = F.interpolate(pf.transpose(1, 2), size=T, mode='linear', align_corners=True).transpose(1, 2)
+            x_t = torch.cat([x_t, pf], dim=-1)
 
         h = self.cam_in(x_t)
 

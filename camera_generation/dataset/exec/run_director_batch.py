@@ -125,6 +125,9 @@ def main():
     ap.add_argument("--device", default="cuda")
     ap.add_argument("--limit", type=int, default=None)
     ap.add_argument("--overwrite", action="store_true")
+    # [R352] subject 궤적 출처: "" = scene_graph node track.center_smooth (기존). 파일명이면 <corpus>/<dataset>/<scene>/da3/<file>
+    #   (target_track.npz 형식, world) 의 그 세그먼트 궤적을 T_wg 역변환으로 G frame 에 놓는다 (예 target_track_molmo2.npz). 높이 게이지는 node OBB 그대로.
+    ap.add_argument("--track_file", default="")
     a = ap.parse_args()
 
     # `run_director_vista.main` 이 하던 일 — 그 파일은 함수만 빌려 쓰므로 여기서 직접 건다.
@@ -225,6 +228,14 @@ def main():
             continue
 
         centers_u = np.asarray(node["track"]["center_smooth"], dtype=np.float64)
+        if a.track_file:                                   # [R352]
+            tz = np.load(path.join(a.corpus, dataset, scene, "da3", a.track_file), allow_pickle=True)
+            ti = [str(k) for k in tz["keys"]].index(index)
+            if not bool(tz["valid"][ti]):
+                n_bad += 1
+                continue
+            T_wg_ = np.asarray(graph["frames"]["T_wg"], dtype=np.float64)
+            centers_u = (tz["track_world"][ti].astype(np.float64) - T_wg_[:3, 3]) @ np.linalg.inv(T_wg_[:3, :3]).T
         F_ = centers_u.shape[0]
         height_u = float(node["obb"]["extent"][2])
         path_u = float(np.linalg.norm(np.diff(centers_u, axis=0), axis=1).sum())

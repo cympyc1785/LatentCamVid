@@ -36,13 +36,14 @@ C = "/data1/cympyc1785/data/DynPose-LBM/latentcam_dynpose_d200"
 CLIP_SEQ = "/data1/cympyc1785/data/DynPose-LBM/clatr_dynpose_d200_s91/seq"
 DIRECTOR = "/data1/cympyc1785/LatentCamVid/camera_generation/models/DIRECTOR"
 W = np.diag([1.0, -1.0, -1.0])
+TRACK = "target_track.npz"     # [R352] --track_file 로 바꾼다 (convert 의 char·p0 와 evaldir 의 p0 가 같은 파일을 써야 역변환이 맞다)
 
 
 def convert_one(scene, idx, cache):
     if scene not in cache:
         sd = f"{C}/dynpose/{scene}/da3"
         tp = np.load(f"{sd}/target_poses.npz", allow_pickle=True)
-        tt = np.load(f"{sd}/target_track.npz", allow_pickle=True)
+        tt = np.load(f"{sd}/{TRACK}", allow_pickle=True)
         K = np.load(f"{sd}/pose.npz")["intrinsics"][0]
         cache.clear()
         cache[scene] = dict(E=tp["extrinsics"], keys={str(k): i for i, k in enumerate(tp["keys"].tolist())},
@@ -74,15 +75,16 @@ def stage_convert(a):
     for sub in ("traj", "char", "char_raw", "caption", "caption_clip/seq", "intrinsics", "cam_segments"):
         os.makedirs(f"{a.out}/{sub}", exist_ok=True)
     cache, why = {}, {}
-    for split in ("train", "test"):
+    for split in (["test"] if a.split_list else ["train", "test"]):     # [R352] --split_list = test 하나만
         names = []
-        for line in open(f"{C}/seg_list_dynpose_s91_{split}.txt"):
+        for line in open(a.split_list or f"{C}/seg_list_dynpose_s91_{split}.txt"):
             line = line.strip()
             if not line:
                 continue
             _, scene, idx = line.split("/")
             n = f"{scene}__{idx}"
-            clip_src = f"{CLIP_SEQ}/{split}/{n}_caption.npy"
+            clip_src = (f"{a.clip_seq_dir}/dynpose_{scene}_{idx}_caption.npy" if a.clip_seq_dir     # [R352] eval_my/<dir>/seq/test 이름 규칙
+                        else f"{CLIP_SEQ}/{split}/{n}_caption.npy")
             if not path.isfile(clip_src):
                 why["no_clip"] = why.get("no_clip", 0) + 1
                 continue
@@ -175,7 +177,7 @@ def stage_evaldir(a):
             continue
         sd = f"{C}/dynpose/{scene}/da3"
         if scene not in cache:
-            tt = np.load(f"{sd}/target_track.npz", allow_pickle=True); cache.clear()
+            tt = np.load(f"{sd}/{TRACK}", allow_pickle=True); cache.clear()
             cache[scene] = ({str(k): i for i, k in enumerate(tt["keys"].tolist())}, tt["track_world"])
         tk, tw = cache[scene]; p0 = tw[tk[idx]][0].astype(np.float64)
         cv = np.tile(np.eye(4), (len(pe), 1, 1))
@@ -202,6 +204,10 @@ if __name__ == "__main__":
     ap.add_argument("--out", default="/data1/cympyc1785/data/DynPose-LBM/et_dynpose_d200_s91")
     # [R314] infer / evaldir
     ap.add_argument("--ckpt", default="")
+    ap.add_argument("--corpus", default=C)              # [R352] 다른 코퍼스 (기본 = Dataset-v1 d200)
+    ap.add_argument("--track_file", default=TRACK)      # [R352] 예 target_track_molmo2.npz
+    ap.add_argument("--split_list", default="")         # [R352] seg 목록 하나 (test 로 취급). "" = s91 train/test
+    ap.add_argument("--clip_seq_dir", default="")       # [R352] 캡션 CLIP seq 폴더 (dynpose_<scene>_<idx>_caption.npy). "" = clatr d200 캐시
     ap.add_argument("--eval_out", default="")
     ap.add_argument("--ref_eval_dir", default="")
     ap.add_argument("--batch", type=int, default=64)
@@ -209,5 +215,6 @@ if __name__ == "__main__":
     ap.add_argument("--guidance_weight", type=float, default=1.4)
     ap.add_argument("--num_steps", type=int, default=10)
     a = ap.parse_args()
+    C, TRACK = a.corpus, a.track_file          # [R352] 모듈 전역 (convert_one · stage_evaldir 가 읽는다)
     for st in a.stage.split(","):
         globals()[f"stage_{st}"](a)

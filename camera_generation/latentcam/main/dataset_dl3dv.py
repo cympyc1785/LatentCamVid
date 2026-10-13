@@ -1320,9 +1320,14 @@ class CamDataset(torch.utils.data.Dataset):
         cand = torch.nonzero(cnt > 0).flatten()
         if len(cand) == 0:
             return torch.zeros(T, N, 4)
+        _mode = str(getattr(self.cfg, 'subject_pts_eval_select', 'random'))
         if self.type == 'train':
             sel = cand[torch.randperm(len(cand))[:N]]
-        elif str(getattr(self.cfg, 'subject_pts_eval_select', 'fps_best')) == 'visible':
+        elif _mode == 'random':
+            # [R365] 학습과 같은 규칙 (후보 중 무작위 N) — 평가 재현성을 위해 (씬, 세그먼트) 로 고정 seed
+            g = torch.Generator().manual_seed(int(hashlib.md5(f"{self.scene_dir_list[scene_idx]}|{seg_key}".encode()).hexdigest()[:8], 16))
+            sel = cand[torch.randperm(len(cand), generator=g)[:N]]
+        elif _mode == 'visible':
             sel = cand[torch.argsort(-cnt[cand], stable=True)[:N]]          # 예전 규칙 (동률이 index 순 → frame 0 query 점 편중)
         else:
             # [R363] 유효 점이 가장 많은 프레임 b 에서, 그 프레임에 유효한 점들을 3D 위치로 farthest point sampling → subject 전체에 고르게.

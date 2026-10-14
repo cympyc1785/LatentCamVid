@@ -52,6 +52,8 @@ def scene_job(job):
     if K.ndim == 2:            # (N,4) fx fy cx cy → (N,3,3)
         K = np.stack([np.array([[k[0], 0, k[2]], [0, k[1], k[3]], [0, 0, 1]]) for k in K])
     out = []
+    if ARGS.method == "esdf":
+        return esdf_scene(recon, K, S, [(a, n, load_c2w(p)) for a, n, p in items])
     for arm, name, path in items:
         poses = load_c2w(path)
         bad, worst, ch = behind_profile(poses, recon["depths"], K=K, cam_c2w=recon["cam_c2w"],
@@ -62,6 +64,90 @@ def scene_job(job):
         T = len(poses)
         out.append({"arm": arm, "entry": name, "coll_any": float(bad > 0), "coll_frac": bad / T,
                     "coll_static_frac": ch["static"]["frames"] / T, "coll_dyn_frac": ch["dynamic"]["frames"] / T})
+    return out
+
+
+def esdf_scene(recon, K, S, trajs):
+    """[R374] `--method esdf` — 4D 점구름을 voxel 로 올려 occupied / free / unknown 세 상태로 판정 (최종 평가용, shell 보다 느림).
+
+    - occupied (정적): 동적·하늘 아닌 depth 점 (전 소스 프레임, `--pix_stride` 간격) 이 든 voxel. ESDF = 가장 가까운 occupied voxel
+      까지 거리 (scipy EDT). 카메라 중심의 ESDF < `--radius_frac`·S 면 정적 충돌.
+    - occupied (동적): 시간이 맞는 소스 프레임 한 장의 동적 점까지 최근접 거리 < 반경 (shell 의 time_match 와 같은 규약, KD-tree).
+    - free: 소스 카메라에서 depth 점까지 쏜 ray 가 지난 voxel. ray 를 하나씩 걷는 대신 voxel 중심을 소스 프레임마다 투영해
+      `0 < z_cam < depth(u,v) − voxel` 이면 free (같은 집합의 쌍대 계산, 하늘·무효 depth 픽셀은 ray 가 끝없이 free). 동적 픽셀도
+      그 시각의 앞쪽 공간은 비어 있었으므로 free 증거로 쓴다.
+    - `--src_free 1` (기본): 소스 카메라 중심 반경 r 안 voxel 도 free (카메라가 실제로 지나간 자리).
+    - unknown: 나머지 (어느 소스 프레임에서도 표면 앞으로 보인 적 없는 곳 + 격자 밖).
+    판정 순서: 충돌 (정적/동적) > free > unknown. 격자 = 정적 점 축별 1~99% 구간 ∪ 소스·예측 카메라, voxel = `--vox_frac`·S
+    (축 최대 `--max_dim` 넘으면 voxel 을 키운다)."""
+    import torch
+    from scipy.ndimage import distance_transform_edt
+    from scipy.spatial import cKDTree
+    dev = "cuda" if torch.cuda.is_available() else "cpu"
+    D = np.asarray(recon["depths"], np.float32); T, H, W = D.shape
+    sky = np.asarray(recon["sky_mask"], bool); dyn = np.asarray(recon["dynamic_mask"], bool)
+    Cw = np.asarray(recon["cam_c2w"], np.float64); st = ARGS.pix_stride
+    vv, uu = np.mgrid[0:H:st, 0:W:st]
+    pts_s, pts_d = [], []
+    for t in range(T):
+        d = D[t][vv, uu]; ok = np.isfinite(d) & (d > 0) & ~sky[t][vv, uu]
+        Xc = np.stack([(uu + 0.5 - K[t][0, 2]) / K[t][0, 0] * d, (vv + 0.5 - K[t][1, 2]) / K[t][1, 1] * d, d], -1)
+        Xw = Xc @ Cw[t][:3, :3].T + Cw[t][:3, 3]
+        dm = dyn[t][vv, uu]
+        pts_s.append(Xw[ok & ~dm]); pts_d.append(Xw[ok & dm])
+    P = np.concatenate(pts_s) if pts_s else np.zeros((0, 3))
+    cams = np.concatenate([Cw[:, :3, 3]] + [p[:, :3, 3] for _, _, p in trajs])
+    r = ARGS.radius_frac * S
+    lo = np.minimum(np.percentile(P, 1, 0) if len(P) else cams.min(0), cams.min(0)) - 2 * r
+    hi = np.maximum(np.percentile(P, 99, 0) if len(P) else cams.max(0), cams.max(0)) + 2 * r
+    vox = max(ARGS.vox_frac * S, float((hi - lo).max()) / ARGS.max_dim)
+    dims = np.ceil((hi - lo) / vox).astype(int) + 1
+    occ = np.zeros(dims, bool)
+    ij = np.floor((P - lo) / vox).astype(int); inb = ((ij >= 0) & (ij < dims)).all(1)
+    occ[tuple(ij[inb].T)] = True
+    esdf = distance_transform_edt(~occ) * vox if occ.any() else np.full(dims, np.inf)
+    # free: voxel 중심을 소스 프레임마다 투영 (GPU)
+    g = [torch.arange(n, device=dev, dtype=torch.float32) for n in dims]
+    ctr = torch.stack(torch.meshgrid(*g, indexing="ij"), -1).reshape(-1, 3) * vox + torch.tensor(lo + vox / 2, device=dev, dtype=torch.float32)
+    free = torch.zeros(len(ctr), dtype=torch.bool, device=dev)
+    Dt = torch.from_numpy(np.where(np.isfinite(D) & (D > 0) & ~sky, D, np.inf)).to(dev)
+    w2c = torch.from_numpy(np.linalg.inv(Cw)).float().to(dev); Kt = torch.from_numpy(K).float().to(dev)
+    for t in range(T):
+        for c0 in range(0, len(ctr), 1 << 22):
+            x = ctr[c0:c0 + (1 << 22)] @ w2c[t, :3, :3].T + w2c[t, :3, 3]
+            z = x[:, 2]; zc = z.clamp(min=1e-6)
+            u = (Kt[t, 0, 0] * x[:, 0] / zc + Kt[t, 0, 2]).floor().long(); v_ = (Kt[t, 1, 1] * x[:, 1] / zc + Kt[t, 1, 2]).floor().long()
+            ins = (z > 1e-6) & (u >= 0) & (u < W) & (v_ >= 0) & (v_ < H)
+            dd = torch.full_like(z, -1.0); dd[ins] = Dt[t, v_[ins], u[ins]]
+            free[c0:c0 + (1 << 22)] |= ins & (z < dd - vox)
+    free = free.reshape(*dims).cpu().numpy()
+    if ARGS.src_free:                       # 소스 카메라가 지나간 자리 (반경 r) 는 비어 있었다
+        n = int(np.ceil(r / vox)); o = np.stack(np.meshgrid(*[np.arange(-n, n + 1)] * 3, indexing="ij"), -1).reshape(-1, 3)
+        o = o[(np.linalg.norm(o, axis=1) * vox) <= r + vox / 2]
+        kk = (np.floor((Cw[:, :3, 3] - lo) / vox).astype(int)[:, None] + o[None]).reshape(-1, 3)
+        kk = kk[((kk >= 0) & (kk < dims)).all(1)]; free[tuple(kk.T)] = True
+    free &= ~occ
+    trees = [cKDTree(p) if len(p) else None for p in pts_d]
+    out = []
+    for arm, name, poses in trajs:
+        Tp = len(poses); cs = cd = unk = fr = 0; cs_m = []
+        for f in range(Tp):
+            c = poses[f][:3, 3]; k = np.floor((c - lo) / vox).astype(int); ing = bool(((k >= 0) & (k < dims)).all())
+            s_hit = ing and esdf[tuple(k)] < r
+            tr = trees[int(round(f * (T - 1) / max(Tp - 1, 1)))]
+            d_hit = tr is not None and tr.query(c, distance_upper_bound=r)[0] < r
+            cs += s_hit; cd += d_hit
+            if not (s_hit or d_hit):
+                if ing and free[tuple(k)]:
+                    fr += 1
+                else:
+                    unk += 1
+            cs_m.append(s_hit or d_hit)
+        nc = sum(cs_m)
+        out.append({"arm": arm, "entry": name, "coll_any": float(nc > 0), "coll_frac": nc / Tp, "coll_static_frac": cs / Tp,
+                    "coll_dyn_frac": cd / Tp, "unk_frac": unk / Tp, "unk_any": float(unk > 0), "free_frac": fr / Tp,
+                    "coll_or_unk_any": float(nc + unk > 0), "vox": vox / S, "n_vox": int(np.prod(dims)),
+                    "occ_frac": float(occ.mean()), "free_vox_frac": float(free.mean())})
     return out
 
 
@@ -79,6 +165,12 @@ def main():
     ap.add_argument("--margin_frac", type=float, default=0.02)         # 뱅크 --behind_margin_frac 기본
     ap.add_argument("--min_zcam_frac", type=float, default=0.02)       # 뱅크 --behind_min_zcam
     ap.add_argument("--workers", type=int, default=16)
+    ap.add_argument("--method", default="shell", choices=["shell", "esdf"])   # [R374] shell = 기존 depth shell (빠름, val 용)
+    ap.add_argument("--vox_frac", type=float, default=0.02)            # esdf: voxel 크기 / S
+    ap.add_argument("--radius_frac", type=float, default=0.02)         # esdf: 카메라 반경 / S (= shell margin 과 같은 값)
+    ap.add_argument("--max_dim", type=int, default=256)                # esdf: 격자 축 최대 칸 수
+    ap.add_argument("--src_free", type=int, default=1)                # esdf: 소스 카메라 경로 (반경 r) 를 free 로
+    ap.add_argument("--pix_stride", type=int, default=2)               # esdf: occupied 점 픽셀 간격
     ARGS = ap.parse_args()
     arms = [s.split("=", 1) for s in ARGS.arm]
     gt_arm = ARGS.gt_from or arms[0][0]
@@ -101,6 +193,8 @@ def main():
             if i % 100 == 0:
                 print(f"[{i}/{len(by_scene)}] scenes", flush=True)
     keys = ["coll_any", "coll_frac", "coll_static_frac", "coll_dyn_frac"]
+    if ARGS.method == "esdf":
+        keys += ["unk_frac", "unk_any", "free_frac", "coll_or_unk_any", "vox", "n_vox", "occ_frac", "free_vox_frac"]
     with open(osp.join(ARGS.out, "per_entry.csv"), "w", newline="") as f:
         w = csv.DictWriter(f, fieldnames=["arm", "entry", *keys, "error"]); w.writeheader(); w.writerows(rows)
     summ = {}

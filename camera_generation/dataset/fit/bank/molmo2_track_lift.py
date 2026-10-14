@@ -43,10 +43,15 @@ PTS = re.compile(r"([0-9]+) ([0-9]{3,4}) ([0-9]{3,4})")
 FPS = 2.0
 
 
+VIDEOS = None                     # [R386] --videos_file 로 영상 제한 (None = 코퍼스 전부)
+
+
 def pairs(corpus):
     """(video, anchor) 전부 — target_track.npz 의 anchor_id 기준 (seg 여러 개가 같은 anchor 를 공유)."""
     out = []
     for v in sorted(os.listdir(f"{corpus}/dynpose")):
+        if VIDEOS is not None and v not in VIDEOS:
+            continue
         p = f"{corpus}/dynpose/{v}/da3/target_track.npz"
         if not osp.isfile(p):
             continue
@@ -430,6 +435,12 @@ def stage_comb(a):
                     why = "point_outside"
             elif ch is not None:
                 why = "no_candidate"
+            if a.save_cands and per:                     # [R386] noun 후보 masklet 전부 (규칙을 바꿔도 SAM3 를 다시 안 돌리게)
+                os.makedirs(f"{od}_cands", exist_ok=True)
+                ids = sorted(per, key=lambda i: -np.mean(per[i]["p"]) * len(per[i]["m"]))
+                np.savez_compressed(f"{od}_cands/{v}__{aid}.npz", masks=np.packbits(np.stack([masks_of(i) for i in ids]), axis=-1), W=W,
+                                    ids=np.array(ids, int), score=np.array([np.mean(per[i]["p"]) for i in ids]),
+                                    nfr=np.array([len(per[i]["m"]) for i in ids]), text=label)
             if pick is not None:
                 np.savez_compressed(out, ok=True, masks=np.packbits(masks_of(pick), axis=-1), W=W, frame=ch[0], x=ch[1], y=ch[2], how=why, n_obj=len(per))
             else:
@@ -613,6 +624,8 @@ if __name__ == "__main__":
     ap.add_argument("--seg_root", default="/data1/cympyc1785/LatentCamVid/DATA/DynPose-100K/eval_data")   # [R343] seg_instances[_static]
     ap.add_argument("--near_frac", type=float, default=0.02)    # [R343] mask 반경 허용 (영상 폭 비율)
     ap.add_argument("--comb_rule", default="vote", choices=["vote", "earliest"])   # [R384] comb 의 masklet 고르기 (기본 vote, earliest = R366)
+    ap.add_argument("--save_cands", action="store_true")                           # [R386] comb: 후보 masklet 전부 <comb_out>_cands/
+    ap.add_argument("--videos_file", default="")                                   # [R386] 이 목록의 영상만 (예: v1 test)
     ap.add_argument("--comb_out", default="")                                       # [R384] 비우면 <corpus>/molmo2_comb[_<rule>]
     ap.add_argument("--point_mode", default="pointK8f")      # [R346] trackf | point1 | pointKf | pointK8f (R345b 결과로 고름)
     ap.add_argument("--point_out", default="/data1/cympyc1785/data/DynPose-LBM/latentcam_dynpose_d200/molmo2_point")
@@ -620,4 +633,6 @@ if __name__ == "__main__":
     ap.add_argument("--sam3_name", default="target_track_m2sam3.npz")
     ap.add_argument("--check_out", default="/data1/cympyc1785/LatentCamVid/tmp/r343/molmo2_track_check.csv")
     a = ap.parse_args()
+    if a.videos_file:                                   # [R386]
+        VIDEOS = set(open(a.videos_file).read().split())
     {"gen": stage_gen, "lift": stage_lift, "check": stage_check, "point": stage_point, "sam3": stage_sam3, "sam3lift": stage_sam3lift, "sam3text": stage_sam3text, "comb": stage_comb}[a.stage](a)

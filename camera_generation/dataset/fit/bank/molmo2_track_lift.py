@@ -22,7 +22,8 @@ stage
            → <scene>/da3/<--sam3_name> (target_track.npz 와 같은 키·형식)
   comb     (GPU, env vista4d) [R366] text + point 결합 (R359 검증: 100 쌍 쌍 성공 0.86): 라벨 명사 (scene graph label) text 로 SAM3 전파 → 후보 masklet 전부,
            --point_mode 규칙 (기본 pointK8f, --point_out json) 의 점 (f*, x, y) 이 든 masklet 선택 (여럿이면 평균 점수 최고). 없으면 점 단독 결과 (--sam3_out) 로 대체.
-           → <corpus>/molmo2_comb/<pair>.npz (how 기록). 같은 전파로 sam3_text_label/<pair>.npz (최고 점수 obj) 도 비어 있으면 채운다 (R358 중복 제거).
+           → <corpus>/molmo2_comb[_vote]/<pair>.npz (how 기록). 고르기 규칙 --comb_rule: vote (기본, R384 — 점이 1 개인 프레임들의 다수결)
+           · earliest (R366, 가장 이른 단일 점이 든 masklet → molmo2_comb). 같은 전파로 sam3_text_label/<pair>.npz (최고 점수 obj) 도 비어 있으면 채운다 (R358 중복 제거).
            3D 는 sam3lift --sam3_out <corpus>/molmo2_comb --sam3_name target_track_comb.npz
   sam3text (GPU, env vista4d) [R358] SAM3 text 단독 비교군: 라벨 명사 (scene graph label) · 설명 문장 (instance_desc, Molmo2 질문과 같은 출처)
            0 프레임 text prompt → 전파 (매 프레임 detector), obj 여럿이면 평균 점수 × 등장 프레임 수 최고 하나 → <corpus>/sam3_text_{label,desc}/<video>__<anchor>.npz
@@ -344,6 +345,16 @@ def stage_sam3text(a):
     print(f"=== sam3text shard {a.shard_id} DONE ===", flush=True)
 
 
+def single_points(a, v, aid):
+    """[R384] --point_out json 에서 점이 1 개뿐인 프레임의 점들 [(frame, x, y)] (같은 프레임 여러 점 = 모호 → 뺀다, 없으면 전부)."""
+    jp = f"{a.point_out}/{v}__{aid}.json"
+    P = json.load(open(jp))["pts"] if osp.isfile(jp) else []
+    nf = {}
+    for q in P:
+        nf[q[0]] = nf.get(q[0], 0) + 1
+    return [(int(min(48, max(0, q[0]))), float(q[2]), float(q[3])) for q in ([q for q in P if nf[q[0]] == 1] or P)]
+
+
 def stage_comb(a):
     """[R366] text (라벨) 후보 masklet + Molmo2 점 선택. 영상마다 세션 1개, anchor 마다 reset."""
     sys.path.insert(0, "/data1/cympyc1785/LatentCamVid/video_generation/models/Vista4D")
@@ -355,7 +366,8 @@ def stage_comb(a):
     for v, aid in pairs(a.corpus):
         by_v.setdefault(v, []).append(aid)
     vids = [v for i, v in enumerate(sorted(by_v)) if i % a.num_shards == a.shard_id]
-    od, ld = f"{a.corpus}/molmo2_comb", f"{a.corpus}/sam3_text_label"
+    # [R384] 출력 폴더는 규칙별 (예전 earliest = molmo2_comb 그대로 두고, vote = molmo2_comb_vote)
+    od, ld = a.comb_out or f"{a.corpus}/molmo2_comb" + ("" if a.comb_rule == "earliest" else f"_{a.comb_rule}"), f"{a.corpus}/sam3_text_label"
     os.makedirs(od, exist_ok=True); os.makedirs(ld, exist_ok=True)
     pred = init_sam3_video(); t_all = time.time(); how = {}
     print(f"[comb] {a.point_mode} shard {a.shard_id}/{a.num_shards}: 영상 {len(vids)}", flush=True)
@@ -396,7 +408,20 @@ def stage_comb(a):
                 else:
                     np.savez(lp, ok=False, why="no_detection", text=label)
             pick, why = None, ("no_label" if not label else "no_point")
-            if ch is not None and per:
+            if ch is not None and per and a.comb_rule == "vote":
+                # [R384] 기본 = vote (R376 1순위 1000 쌍 성공 0.954 vs earliest 0.914): 점이 1 개인 프레임의 점마다 그 점이 든 masklet 에 한 표,
+                #   최다 표 (동률은 그 masklet 을 가리킨 가장 이른 프레임). ch 는 대체 경로 (점 단독 SAM3) 기록용으로만 쓴다.
+                vote, first = {}, {}
+                for f1, x1, y1 in single_points(a, v, aid):
+                    u1, v1 = min(W - 1, int(x1 * W)), min(H - 1, int(y1 * H))
+                    for i in per:
+                        if f1 in per[i]["m"] and per[i]["m"][f1][v1, u1]:
+                            vote[i] = vote.get(i, 0) + 1; first[i] = min(first.get(i, 99), f1)
+                if vote:
+                    pick, why = max(vote, key=lambda i: (vote[i], -first[i])), "text_masklet_vote"
+                else:
+                    why = "point_outside"
+            elif ch is not None and per:
                 f0, x, y = ch; u, vv = min(W - 1, int(x * W)), min(H - 1, int(y * H))
                 hit = [i for i in per if f0 in per[i]["m"] and per[i]["m"][f0][vv, u]]
                 if hit:
@@ -587,6 +612,8 @@ if __name__ == "__main__":
     ap.add_argument("--overwrite", action="store_true")
     ap.add_argument("--seg_root", default="/data1/cympyc1785/LatentCamVid/DATA/DynPose-100K/eval_data")   # [R343] seg_instances[_static]
     ap.add_argument("--near_frac", type=float, default=0.02)    # [R343] mask 반경 허용 (영상 폭 비율)
+    ap.add_argument("--comb_rule", default="vote", choices=["vote", "earliest"])   # [R384] comb 의 masklet 고르기 (기본 vote, earliest = R366)
+    ap.add_argument("--comb_out", default="")                                       # [R384] 비우면 <corpus>/molmo2_comb[_<rule>]
     ap.add_argument("--point_mode", default="pointK8f")      # [R346] trackf | point1 | pointKf | pointK8f (R345b 결과로 고름)
     ap.add_argument("--point_out", default="/data1/cympyc1785/data/DynPose-LBM/latentcam_dynpose_d200/molmo2_point")
     ap.add_argument("--sam3_out", default="/data1/cympyc1785/data/DynPose-LBM/latentcam_dynpose_d200/molmo2_sam3")

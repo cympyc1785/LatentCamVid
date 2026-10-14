@@ -2944,3 +2944,17 @@ scene 당 정확히 1개로 하려면 `pick_external` 을 scene 단위로 한 �
   (`caption-fscore-dynpose-vs-vista-gap`: `track_*` 이 dynpose val 의 52%) 를 같이 보고 정한다.
 - K2 를 τ 사다리에도 적용할지 (τ 는 5단이라 "2·4단"의 대응이 애매하다).
 - 새 config 이름 / generation 태그.
+
+---
+
+## subject 찾기 (text → subject, Molmo2 + SAM3)
+
+### D59 subject 찾기 기본 = **SAM3 noun 후보 + Molmo2 점 vote** (`molmo2_track_lift.py --stage comb --comb_rule vote`, 사용자 2026-10-14)
+
+- **선택지** SAM3 noun 단독 (점수 최고 후보) · SAM3 설명 문장 단독 · Molmo2 점 → SAM3 · noun 후보 + Molmo2 점 (earliest · vote · conf · wsum)
+- **채택** vote — 8 프레임 이미지 "Point to {desc}" 에서 점이 1 개인 프레임의 점마다, 그 점이 든 noun masklet 에 한 표 → 최다 표 (동률 = 가장 이른 프레임).
+  R376 1순위 1000 쌍 쌍 성공 vote 0.954 · wsum 0.946 · earliest 0.914 · noun 단독 0.891 · conf 0.890 · 점 단독 0.783. 2순위 100 쌍 vote 0.880 · earliest 0.830.
+  설명 문장 단독은 22~29% 검출 실패 (R376/R381). conf (log-prob) 는 단독 선택 기준으로 earliest 보다도 3D 오차가 크다.
+- **주의** noun 단독 정답률은 GT mask 가 같은 noun 으로 SAM3 를 돌려 만든 것이라 유리하고, 선정 규칙 (평균 점수 × 프레임 수) 에 좌우된다 — 출력 비교는 영상 (R380·R381).
+- **바꾸는 법** `--comb_rule earliest` (R366, 출력 `molmo2_comb`). vote 출력은 `molmo2_comb_vote`. test 때 GT 아닌 조건으로 평가하는 것은 방식 확정 뒤 (plans G5).
+

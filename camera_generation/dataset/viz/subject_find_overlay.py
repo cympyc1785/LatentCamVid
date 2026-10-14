@@ -100,7 +100,9 @@ def row(a, ev, v, aid, methods):
                     for j in range(len(cm)):
                         if f < cm.shape[1] and cm[j, f].any():
                             mm = rs(cm[j, f]); c_ = PAL[j % len(PAL)]; t[mm] = (0.5 * t[mm] + 0.5 * np.array(c_)).astype(np.uint8)
-                            ys, xs = np.nonzero(mm); cv2.putText(t, f"#{j}", (int(xs.mean()), int(ys.mean())), 0, 0.45, c_, 2, cv2.LINE_AA)
+                            ys, xs = np.nonzero(mm)
+                            if len(xs):                                           # 작은 mask 는 축소하면 사라질 수 있다
+                                cv2.putText(t, f"#{j}", (int(xs.mean()), int(ys.mean())), 0, 0.45, c_, 2, cv2.LINE_AA)
                     for j in range(min(len(cm), 4)):
                         cv2.putText(t, f"#{j} s{sc[j]:.2f} {int(nfr[j])}f", (3, TH - 6 - 12 * j), 0, 0.35, PAL[j % len(PAL)], 1, cv2.LINE_AA)
                 cv2.putText(t, f"{name} ({0 if cm is None else len(cm)})", (3, 13), 0, 0.42, (255, 255, 0), 1, cv2.LINE_AA)
@@ -172,7 +174,7 @@ def main():
     ap.add_argument("--first", type=int, default=0)                    # >0 = pairs.json 앞 n 쌍 그대로 (선택 규칙 없이)
     a = ap.parse_args()
     sys.path.insert(0, V4)
-    want = a.methods.split(","); methods = [x for x in METHODS if x[0] in want]
+    want = a.methods.split(","); _by = {x[0]: x for x in METHODS}; methods = [_by[k] for k in want if k in _by]   # --methods 순서대로
     ev = {}
     for p in a.eval:
         for r in json.load(open(p)):

@@ -193,6 +193,7 @@ class CameraDiffusionModel(nn.Module):
         peav_readout_cond_grad=False,
         scene_points_cond=False,
         subject_pts_dim=0,
+        subject_pts_feat=False,
         video_text_fuse="token",
         start_pose_dim=0,
         start_pose_tf_p=0.0,
@@ -215,6 +216,10 @@ class CameraDiffusionModel(nn.Module):
         self.subject_pts_dim = int(subject_pts_dim)
         if self.subject_pts_dim > 0:
             self.pts_mlp = nn.Sequential(nn.Linear(3, 128), nn.SiLU(), nn.Linear(128, 128), nn.SiLU(), nn.Linear(128, 128))
+            # [R369] subject_pts_feat: 점 2D 위치에서 Molmo2 video 토큰 (프레임당 8x8, 9x9 의 2x2 평균) 을 bilinear 샘플 → LN → 128, xyz 특징에 더함
+            self.subject_pts_feat = bool(subject_pts_feat)
+            if self.subject_pts_feat:
+                self.pts_feat_proj = nn.Sequential(nn.LayerNorm(int(video_latent_dim)), nn.Linear(int(video_latent_dim), 128))
             self.pts_out = nn.Linear(256, self.subject_pts_dim)
         self.cam_in = nn.Linear(cam_dim + self.cond_dim + self.subject_pts_dim, hidden_dim)
 
@@ -532,6 +537,14 @@ class CameraDiffusionModel(nn.Module):
             else:
                 sp = subject_pts.to(x_t.dtype); vm = sp[..., 3:4] > 0.5                    # (B,F,N,1)
                 e = self.pts_mlp(sp[..., :3])
+                if getattr(self, 'subject_pts_feat', False) and video_emb is not None and sp.shape[-1] >= 6:
+                    Fp, Np = sp.shape[1], sp.shape[2]; D = video_emb.shape[-1]
+                    g = video_emb[:, :Fp * 64].reshape(B * Fp, 8, 8, D).permute(0, 3, 1, 2).to(e.dtype)   # (B*F,D,8,8)
+                    # 8x8 칸 (r,c) 중심 = 정규화 좌표 (r+1)/9 → 칸 좌표 = u*9-1, align_corners=True 격자 [-1,1] 로
+                    gx = ((sp[..., 4] * 9 - 1) / 7 * 2 - 1).clamp(-1, 1); gy = ((sp[..., 5] * 9 - 1) / 7 * 2 - 1).clamp(-1, 1)
+                    grid = torch.stack([gx, gy], -1).reshape(B * Fp, Np, 1, 2).to(e.dtype)
+                    pf_ = F.grid_sample(g, grid, mode='bilinear', align_corners=True)                   # (B*F,D,N,1)
+                    e = e + self.pts_feat_proj(pf_[..., 0].permute(0, 2, 1).reshape(B, Fp, Np, D))
                 mx = e.masked_fill(~vm, -1e4).amax(2); mn = (e * vm).sum(2) / vm.sum(2).clamp(min=1)
                 fv = vm.any(2).to(e.dtype)                                                     # 프레임에 점이 하나라도
                 pf = self.pts_out(torch.cat([mx * fv, mn], -1)) * fv                          # (B,F,D)

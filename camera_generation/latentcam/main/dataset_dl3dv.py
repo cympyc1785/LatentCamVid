@@ -1308,18 +1308,22 @@ class CamDataset(torch.utils.data.Dataset):
             tt = np.load(osp.join(sd, 'da3', 'target_track.npz'), allow_pickle=True)
             cache = {'pts': z['pts'], 'valid': z['valid'], 'aid': {str(a): i for i, a in enumerate(z['anchor_id'])},
                      'seg2aid': {str(k): str(a) for k, a in zip(tt['keys'], tt['anchor_id'])}}
+            if getattr(self.cfg, 'subject_pts_feat', False):          # [R369] 소스 카메라 (images_4 640x360 규약) — 점 2D 위치용
+                pz = np.load(osp.join(sd, 'da3', 'pose.npz'))
+                cache['E'] = torch.from_numpy(pz['extrinsics'].astype(np.float32)); cache['K'] = torch.from_numpy(pz['intrinsics'].astype(np.float32))
             self._subject_pts_cache[scene_idx] = cache
         T = extrinsics.shape[0]; N = int(getattr(self.cfg, 'subject_pts_n', 64) or 64)
+        C_ = 6 if getattr(self.cfg, 'subject_pts_feat', False) else 4
         ai = cache['aid'].get(cache['seg2aid'].get(str(seg_key), ''), None)
         if ai is None:
-            return torch.zeros(T, N, 4)
+            return torch.zeros(T, N, C_)
         P = torch.from_numpy(cache['pts'][ai].astype(np.float32)); V = torch.from_numpy(cache['valid'][ai])     # (F,P,3), (F,P)
         if P.shape[0] != T:
             idx = self._even_indices(P.shape[0], T); P, V = P[idx], V[idx]
         cnt = V.sum(0)                                              # 점마다 보인 프레임 수
         cand = torch.nonzero(cnt > 0).flatten()
         if len(cand) == 0:
-            return torch.zeros(T, N, 4)
+            return torch.zeros(T, N, C_)
         _mode = str(getattr(self.cfg, 'subject_pts_eval_select', 'random'))
         if self.type == 'train':
             sel = cand[torch.randperm(len(cand))[:N]]
@@ -1343,8 +1347,19 @@ class CamDataset(torch.utils.data.Dataset):
                 sel = torch.cat([sel, rest[torch.argsort(-cnt[rest], stable=True)[:N - len(sel)]]])
         E_s = extrinsics[0].float()
         q = (P[:, sel] @ E_s[:3, :3].T + E_s[:3, 3]) / norm_scale.reshape(1, 1, 1).float()
-        out = torch.zeros(T, N, 4); v = V[:, sel].float()
+        out = torch.zeros(T, N, C_); v = V[:, sel].float()
         out[:, :len(sel), :3] = q * v[..., None]; out[:, :len(sel), 3] = v
+        if C_ == 6:
+            # [R369] 점의 소스 프레임 2D 위치 (0~1, Molmo2 video 토큰 격자 샘플용): world 점 → pose.npz w2c·K (640x360) 투영
+            Es, Ks = cache['E'], cache['K']
+            if Es.shape[0] != T:
+                ii = self._even_indices(Es.shape[0], T); Es, Ks = Es[ii], Ks[ii]
+            pw = P[:, sel]                                                            # (T,n,3) world
+            pc = torch.einsum('tij,tnj->tni', Es[:, :3, :3], pw) + Es[:, None, :3, 3]
+            z = pc[..., 2].clamp(min=1e-6)
+            u = (Ks[:, None, 0, 0] * pc[..., 0] / z + Ks[:, None, 0, 2]) / (2 * Ks[:, None, 0, 2])
+            vv = (Ks[:, None, 1, 1] * pc[..., 1] / z + Ks[:, None, 1, 2]) / (2 * Ks[:, None, 1, 2])
+            out[:, :len(sel), 4] = u.clamp(0, 1) * v; out[:, :len(sel), 5] = vv.clamp(0, 1) * v
         return out
 
     def _track_cond(self, scene_idx, seg_key, extrinsics, norm_scale):

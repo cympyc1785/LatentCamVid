@@ -353,7 +353,8 @@ def main():
                 peav_readout_cond_noise=float(getattr(cfg, 'peav_readout_cond_noise', 0.0) or 0.0),   # [R312]
                 peav_readout_cond_grad=bool(getattr(cfg, 'peav_readout_cond_grad', False)),   # [R315]
                 scene_points_cond=bool(getattr(cfg, 'scene_points_cond', False)),   # [R328]
-                subject_pts_dim=(int(getattr(cfg, 'subject_pts_dim', 64) or 64) if getattr(cfg, 'subject_pts_cond', False) else 0))   # [R361]
+                subject_pts_dim=(int(getattr(cfg, 'subject_pts_dim', 64) or 64) if getattr(cfg, 'subject_pts_cond', False) else 0),   # [R361]
+                subject_pts_feat=bool(getattr(cfg, 'subject_pts_feat', False)))   # [R369]
     # [R91] start pose head (D261/D296) — 학습 진입점과 같은 kwargs. 안 넘기면 strict load 가 start_query/start_out 에서 죽는다.
     _sp_kw = {}
     if bool(getattr(cfg, 'start_pose_pred', False)):

@@ -61,7 +61,7 @@ def phrase(v, aid):
 
 def row(a, ev, v, aid, methods):
     from utils.media import load_video
-    fr, _ = load_video(f"{E}/{v}/video.mp4"); TW, TH = a.tile_w, a.tile_w * 9 // 16
+    fr, _ = load_video(f"{E}/{v}/video.mp4"); TW, TH = a.tile_w, (a.tile_w * 9 // 16) // 2 * 2   # 짝수 (libx264 는 홀수 높이 1 행 영상을 못 만든다)
     rs = lambda m: cv2.resize(m.astype(np.uint8), (TW, TH), interpolation=cv2.INTER_NEAREST).astype(bool)
     label = next((n.get("label") for n in json.load(open(f"{G}/{v}/scene_graph.json"))["nodes"] if n["id"] == aid), "") or ""
     desc = phrase(v, aid); Gm = gt_masks(v, aid); e = ev.get((v, aid), {})

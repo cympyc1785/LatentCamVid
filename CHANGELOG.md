@@ -17,6 +17,7 @@
 
 ### Added
 - latentcam `subject_pts_feat` (R369, 기본 false): subject 점마다 소스 2D 위치 (world 점 → `pose.npz` 투영, 0~1) 를 subject_pts 에 더해 (T,N,6), 모델이 그 위치에서 Molmo2 video 토큰 (프레임당 8x8, 칸 중심 (r+1)/9) 을 bilinear 샘플 → LayerNorm → 128 로 점 xyz 특징에 더한다 (video_latent_dim>0 필요). 투영 uv 와 CoTracker 원 좌표 차 중앙 0.0008~0.0054 (정규화).
+- `viz/subject_find_overlay.py --select sam3_limits` (R381): SAM3 text 방식 한계 사례 (noun 후보 여러 개인데 최고 점수가 다른 물체 · 설명 문장 검출 없음 · 설명 문장이 다른 물체, Molmo2 점은 맞힌 쌍) 를 범주별 영상으로. tile 높이를 짝수로 (1 행 영상 인코딩 실패 수정).
 - latentcam (R382) subject 점 대안: `subject_pts_stats` (프레임별 점 요약 13 ch 평균·표준편차·최소·최대 xyz·유효 비율을 cam 토큰에 바로 concat), `subject_pts_fourier K` (점 xyz Fourier 특징), `subject_pts_mode: traj` (점마다 49 프레임 궤적을 토큰 1 개로 → cross-attention). `eval_testset.py --subject-pts-probe drop|shuffle` (점 조건 민감도).
 - (R380) `eval/subject_find_compare.py --stage cands` — 앞 `--cands_n` 쌍의 SAM3 noun · 설명 문장 **후보 masklet 전부** 저장 (선정 규칙 없이). `viz/subject_find_overlay.py` 에 `cands_label` · `cands_desc` 열 (후보마다 색·번호·평균 점수·등장 프레임 수), `--show_iou 0` (정답률 표시 끔), `--first N` (pairs.json 앞 N 쌍 그대로).
 - latentcam `subject_pts_mode` (R379, 기본 `pool` = 기존): `xattn` 이면 subject 점을 프레임 pooling 해 cam 토큰에 concat 하지 않고, 점마다 토큰 (latent 13 프레임 × N 점 + 프레임 PE, 무효 점 key padding, 항상 유효한 null 토큰) 으로 DiT 층마다 cross-attention (0 초기화 gate) 해서 읽는다. `subject_pts_train_select` (기본 `random` = 기존): `fixed` 면 학습도 평가와 같은 (씬, 세그먼트) 고정 seed 점.

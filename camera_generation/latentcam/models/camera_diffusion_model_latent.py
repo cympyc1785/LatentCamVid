@@ -194,6 +194,7 @@ class CameraDiffusionModel(nn.Module):
         scene_points_cond=False,
         subject_pts_dim=0,
         subject_pts_feat=False,
+        subject_pts_mode='pool',
         video_text_fuse="token",
         start_pose_dim=0,
         start_pose_tf_p=0.0,
@@ -221,7 +222,21 @@ class CameraDiffusionModel(nn.Module):
             if self.subject_pts_feat:
                 self.pts_feat_proj = nn.Sequential(nn.LayerNorm(int(video_latent_dim)), nn.Linear(int(video_latent_dim), 128))
             self.pts_out = nn.Linear(256, self.subject_pts_dim)
-        self.cam_in = nn.Linear(cam_dim + self.cond_dim + self.subject_pts_dim, hidden_dim)
+        # [R379] subject_pts_mode: 'pool' (기존) = 프레임마다 max+mean pooling → cam 토큰에 concat.
+        #   'xattn' = 점마다 토큰 (latent 프레임 T 로 시간 간추림 × N 점, + 프레임 PE) 을 두고 DiT 층마다 cross-attention 으로 읽는다.
+        #   유효하지 않은 점은 key padding, 항상 유효한 null 토큰 1 개 (읽을 게 없을 때 물러설 곳), 출력은 0 초기화 gate (video 스트림과 같은 방식).
+        self.subject_pts_mode = str(subject_pts_mode)
+        self.subj_layers = None
+        if self.subject_pts_dim > 0 and self.subject_pts_mode == 'xattn':
+            self.pts_tok = nn.Linear(128, hidden_dim)
+            self.pts_null = nn.Parameter(torch.zeros(1, 1, hidden_dim))
+            self.subj_gate = nn.Parameter(torch.zeros(num_layers))
+            self.subj_layers = nn.ModuleList([
+                nn.ModuleList([nn.LayerNorm(hidden_dim), CrossAttention(hidden_dim, num_heads),
+                               FusedMLP(hidden_dim, dropout, nn.GELU, hidden_layer_multiplier=4)])
+                for _ in range(num_layers)])
+        _pts_cat = self.subject_pts_dim if self.subject_pts_mode == 'pool' else 0
+        self.cam_in = nn.Linear(cam_dim + self.cond_dim + _pts_cat, hidden_dim)
 
         self.time_mlp = TimeEmbedding(time_emb_dim)
         self.time_proj = nn.Linear(time_emb_dim, hidden_dim)
@@ -531,9 +546,12 @@ class CameraDiffusionModel(nn.Module):
             if cond is None:
                 cond = x_t.new_zeros(B, T, self.cond_dim)
             x_t = torch.cat([x_t, cond.to(x_t.dtype)], dim=-1)
+        subj_tok = subj_kpm = None
         if getattr(self, 'subject_pts_dim', 0) > 0:                 # [R361]
             if subject_pts is None:
                 pf = x_t.new_zeros(B, T, self.subject_pts_dim)
+                if getattr(self, 'subject_pts_mode', 'pool') == 'xattn':                    # 조건 없음 = null 토큰만
+                    subj_tok = self.pts_null.expand(B, -1, -1).to(x_t.dtype); subj_kpm = torch.zeros(B, 1, dtype=torch.bool, device=device)
             else:
                 sp = subject_pts.to(x_t.dtype); vm = sp[..., 3:4] > 0.5                    # (B,F,N,1)
                 e = self.pts_mlp(sp[..., :3])
@@ -545,12 +563,22 @@ class CameraDiffusionModel(nn.Module):
                     grid = torch.stack([gx, gy], -1).reshape(B * Fp, Np, 1, 2).to(e.dtype)
                     pf_ = F.grid_sample(g, grid, mode='bilinear', align_corners=True)                   # (B*F,D,N,1)
                     e = e + self.pts_feat_proj(pf_[..., 0].permute(0, 2, 1).reshape(B, Fp, Np, D))
-                mx = e.masked_fill(~vm, -1e4).amax(2); mn = (e * vm).sum(2) / vm.sum(2).clamp(min=1)
-                fv = vm.any(2).to(e.dtype)                                                     # 프레임에 점이 하나라도
-                pf = self.pts_out(torch.cat([mx * fv, mn], -1)) * fv                          # (B,F,D)
-                if pf.shape[1] != T:
-                    pf = F.interpolate(pf.transpose(1, 2), size=T, mode='linear', align_corners=True).transpose(1, 2)
-            x_t = torch.cat([x_t, pf], dim=-1)
+                if self.subject_pts_mode == 'xattn':                                          # [R379]
+                    Fp = e.shape[1]
+                    fi = torch.linspace(0, Fp - 1, T, device=e.device).round().long() if Fp != T else torch.arange(T, device=e.device)
+                    st = self.pts_tok(e[:, fi]) + positional_encoding(T, self.pts_tok.out_features, device=device)[None, :, None, :].to(e.dtype)
+                    sv = vm[:, fi, :, 0]                                                       # (B,T,N)
+                    st = st.reshape(B, -1, st.shape[-1]) * sv.reshape(B, -1, 1).to(st.dtype)
+                    subj_tok = torch.cat([self.pts_null.expand(B, -1, -1).to(st.dtype), st], 1)
+                    subj_kpm = torch.cat([sv.new_zeros(B, 1), ~sv.reshape(B, -1)], 1)
+                else:
+                    mx = e.masked_fill(~vm, -1e4).amax(2); mn = (e * vm).sum(2) / vm.sum(2).clamp(min=1)
+                    fv = vm.any(2).to(e.dtype)                                                     # 프레임에 점이 하나라도
+                    pf = self.pts_out(torch.cat([mx * fv, mn], -1)) * fv                          # (B,F,D)
+                    if pf.shape[1] != T:
+                        pf = F.interpolate(pf.transpose(1, 2), size=T, mode='linear', align_corners=True).transpose(1, 2)
+            if self.subject_pts_mode != 'xattn':
+                x_t = torch.cat([x_t, pf], dim=-1)
 
         h = self.cam_in(x_t)
 
@@ -653,6 +681,11 @@ class CameraDiffusionModel(nn.Module):
                 v = vmlp(v) + v
                 # gate=0 초기화 → 학습 시작 시점에 이 스트림은 no-op 이고 잔차가 안 깎인다.
                 h = (h + self.video_gate[_li] * v) if self.video_gate is not None else v
+
+            if subj_tok is not None and self.subj_layers is not None:                    # [R379] subject 점 토큰 CA (0 초기화 gate)
+                snorm, subj_ca, smlp = self.subj_layers[_li]
+                sx = subj_ca(snorm(h), subj_tok, key_padding_mask=subj_kpm)
+                h = h + self.subj_gate[_li] * (smlp(sx) + sx)
 
             if has_geo_latent:
                 scale2, shift2 = self.mod2(t_embed).chunk(2, dim=-1)

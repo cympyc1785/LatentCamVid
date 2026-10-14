@@ -1325,9 +1325,10 @@ class CamDataset(torch.utils.data.Dataset):
         if len(cand) == 0:
             return torch.zeros(T, N, C_)
         _mode = str(getattr(self.cfg, 'subject_pts_eval_select', 'random'))
-        if self.type == 'train':
+        if self.type == 'train' and str(getattr(self.cfg, 'subject_pts_train_select', 'random')) != 'fixed':
             sel = cand[torch.randperm(len(cand))[:N]]
-        elif _mode == 'random':
+        elif self.type == 'train' or _mode == 'random':
+            # [R379] subject_pts_train_select=fixed 면 학습도 이 가지 (평가와 같은 고정 점).
             # [R365] 학습과 같은 규칙 (후보 중 무작위 N) — 평가 재현성을 위해 (씬, 세그먼트) 로 고정 seed
             g = torch.Generator().manual_seed(int(hashlib.md5(f"{self.scene_dir_list[scene_idx]}|{seg_key}".encode()).hexdigest()[:8], 16))
             sel = cand[torch.randperm(len(cand), generator=g)[:N]]

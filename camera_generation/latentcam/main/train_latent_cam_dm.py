@@ -956,7 +956,8 @@ def train():
                 peav_readout_cond_grad=bool(getattr(cfg, 'peav_readout_cond_grad', False)),   # [R315]
                 scene_points_cond=bool(getattr(cfg, 'scene_points_cond', False)),   # [R328]
                 subject_pts_dim=(int(getattr(cfg, 'subject_pts_dim', 64) or 64) if getattr(cfg, 'subject_pts_cond', False) else 0),   # [R361]
-                subject_pts_feat=bool(getattr(cfg, 'subject_pts_feat', False)))   # [R369]
+                subject_pts_feat=bool(getattr(cfg, 'subject_pts_feat', False)),   # [R369]
+                subject_pts_mode=str(getattr(cfg, 'subject_pts_mode', 'pool') or 'pool'))   # [R379]
             _auxw = float(getattr(cfg, 'peav_readout_aux_w', 0.0))
             print(f"(model) peav readout: layers={_rol} "
                   f"queries={_vid_kw['peav_readout_queries']} "

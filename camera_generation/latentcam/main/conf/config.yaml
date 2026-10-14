@@ -305,6 +305,10 @@ subject_pts_feat: false
 # [R363/R365] eval (train 외) 점 고르기: random = 학습과 같은 무작위 N (세그먼트별 고정 seed, 기본, 10-13 사용자 "test 때 train 때랑 똑같은 세팅을 기본")
 #   · fps_best = 유효 점 최다 프레임에서 3D farthest point sampling (보류) · visible = 보인 프레임 많은 순 (R361 처음)
 subject_pts_eval_select: random
+# [R379] pool = 프레임 pooling → cam 토큰 concat (기존) / xattn = 점 토큰 cross-attention (null 토큰 + 0 초기화 gate)
+subject_pts_mode: pool
+# [R379] random = 학습 표본마다 무작위 64 점 (기존) / fixed = 평가와 같은 (씬, 세그먼트) 고정 점
+subject_pts_train_select: random
 max_scenes: null              # cap #scenes loaded (null = all; small int for smoke tests)
 train_seg_list: null          # [new] explicit train segment-list file (<batch>/<hash>/<seg>); null = random 90/10 split
 test_seg_list: null           # [new] explicit val/test segment-list file; val = its first (val_max_batches×batch_size) segments

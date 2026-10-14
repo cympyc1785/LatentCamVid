@@ -142,6 +142,7 @@ def main():
     ap.add_argument("--tile_w", type=int, default=320)
     ap.add_argument("--out", required=True)                            # 폴더 → <select>_<k>.mp4
     ap.add_argument("--fps", type=int, default=10)
+    ap.add_argument("--tag", default="")                               # 출력 이름 앞머리 (기본 = --select)
     a = ap.parse_args()
     sys.path.insert(0, V4)
     want = a.methods.split(","); methods = [x for x in METHODS if x[0] in want]
@@ -152,7 +153,7 @@ def main():
     if a.pairs:
         pairs = [tuple(x.split(":")) for x in a.pairs.split(",")]; tag = "pairs"
     else:
-        pairs = pick(a, ev, json.load(open(f"{a.root}/pairs.json")), methods); tag = a.select
+        pairs = pick(a, ev, json.load(open(f"{a.root}/pairs.json")), methods); tag = a.tag or a.select
     os.makedirs(a.out, exist_ok=True)
     json.dump([list(p) for p in pairs], open(f"{a.out}/{tag}_pairs.json", "w"))
     for g in range(0, len(pairs), a.rows):

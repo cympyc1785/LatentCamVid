@@ -214,7 +214,7 @@ def main():
     if a.first:
         pairs = [tuple(p) for p in json.load(open(f"{a.root}/pairs.json"))[:a.first]]; tag = a.tag or "first"
     elif a.pairs:
-        pairs = [tuple(x.split(":")) for x in a.pairs.split(",")]; tag = "pairs"
+        pairs = [tuple(x.split(":")) for x in a.pairs.split(",")]; tag = a.tag or "pairs"
     else:
         pairs = pick(a, ev, json.load(open(f"{a.root}/pairs.json")), methods); tag = a.tag or a.select
     os.makedirs(a.out, exist_ok=True)

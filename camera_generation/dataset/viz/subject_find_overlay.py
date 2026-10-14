@@ -27,6 +27,9 @@ METHODS = [("sam3_label", "SAM3 noun", (255, 160, 0)), ("sam3_desc", "SAM3 descr
            ("rule_vote", "noun+pt vote", (120, 255, 120)), ("rule_conf", "noun+pt conf", (255, 220, 0)),
            ("rule_wsum", "noun+pt wsum", (255, 120, 180))]
 RULES = {"rule_earliest", "rule_vote", "rule_conf", "rule_wsum"}
+# [R380] 후보 전부 (선정 규칙 없이 SAM3 출력 그대로): eval/subject_find_compare.py --stage cands 산출 <root>/cands/{label,desc}/
+METHODS += [("cands_label", "SAM3 noun: all", None), ("cands_desc", "SAM3 desc: all", None)]
+PAL = [(255, 80, 80), (80, 160, 255), (255, 210, 0), (200, 80, 255), (0, 230, 200), (255, 140, 0), (150, 255, 80), (255, 80, 200)]
 
 
 def gt_masks(v, aid):
@@ -62,7 +65,12 @@ def row(a, ev, v, aid, methods):
     rs = lambda m: cv2.resize(m.astype(np.uint8), (TW, TH), interpolation=cv2.INTER_NEAREST).astype(bool)
     label = next((n.get("label") for n in json.load(open(f"{G}/{v}/scene_graph.json"))["nodes"] if n["id"] == aid), "") or ""
     desc = phrase(v, aid); Gm = gt_masks(v, aid); e = ev.get((v, aid), {})
-    M = {m: meth_masks(a.root, m, v, aid) for m, _, _ in methods}
+    M = {m: meth_masks(a.root, m, v, aid) for m, _, _ in methods if not m.startswith("cands_")}
+    CA = {}
+    for m, _, _ in methods:
+        if m.startswith("cands_"):
+            z = np.load(f"{a.root}/cands/{m[6:]}/{v}__{aid}.npz")
+            CA[m] = (np.unpackbits(z["masks"], axis=-1, count=int(z["W"])).astype(bool) if len(z["ids"]) else None, z["score"], z["nfr"], str(z["text"]))
     gp = f"{a.root}/gen/{v}__{aid}.json"; pts = []
     if os.path.isfile(gp):
         g = json.load(open(gp)); P = g.get("pointK8", {}).get("pts") if isinstance(g.get("pointK8"), dict) and g["pointK8"].get("pts") else g.get("pts", [])
@@ -82,6 +90,23 @@ def row(a, ev, v, aid, methods):
             cv2.putText(t, desc[k:k + 46], (3, 28 + 11 * (k // 46)), 0, 0.3, (255, 220, 255), 1, cv2.LINE_AA)
         tiles.append(t)
         for m, name, col in methods:
+            if m.startswith("cands_"):
+                t = b.copy(); cm, sc, nfr, text = CA[m]
+                if f in Gm:
+                    cnt, _ = cv2.findContours(rs(Gm[f]).astype(np.uint8), cv2.RETR_EXTERNAL, cv2.CHAIN_APPROX_SIMPLE); cv2.drawContours(t, cnt, -1, (0, 255, 0), 1)
+                if cm is None:
+                    cv2.putText(t, "NO DETECTION", (3, TH // 2), 0, 0.6, (255, 60, 60), 2, cv2.LINE_AA)
+                else:
+                    for j in range(len(cm)):
+                        if f < cm.shape[1] and cm[j, f].any():
+                            mm = rs(cm[j, f]); c_ = PAL[j % len(PAL)]; t[mm] = (0.5 * t[mm] + 0.5 * np.array(c_)).astype(np.uint8)
+                            ys, xs = np.nonzero(mm); cv2.putText(t, f"#{j}", (int(xs.mean()), int(ys.mean())), 0, 0.45, c_, 2, cv2.LINE_AA)
+                    for j in range(min(len(cm), 4)):
+                        cv2.putText(t, f"#{j} s{sc[j]:.2f} {int(nfr[j])}f", (3, TH - 6 - 12 * j), 0, 0.35, PAL[j % len(PAL)], 1, cv2.LINE_AA)
+                cv2.putText(t, f"{name} ({0 if cm is None else len(cm)})", (3, 13), 0, 0.42, (255, 255, 0), 1, cv2.LINE_AA)
+                for k_ in range(0, min(len(text), 2 * 46), 46):
+                    cv2.putText(t, text[k_:k_ + 46], (3, 27 + 11 * (k_ // 46)), 0, 0.3, (255, 220, 255), 1, cv2.LINE_AA)
+                tiles.append(t); continue
             t = b.copy(); mk, how = M[m]
             if mk is not None and f < len(mk) and mk[f].any():
                 mm = rs(mk[f]); t[mm] = (0.45 * t[mm] + 0.55 * np.array(col)).astype(np.uint8)
@@ -96,7 +121,7 @@ def row(a, ev, v, aid, methods):
             cv2.putText(t, name, (3, 13), 0, 0.42, (255, 255, 0), 1, cv2.LINE_AA)
             if m == "sam3_label":
                 cv2.putText(t, f"text '{label}'", (3, 27), 0, 0.35, (255, 220, 255), 1, cv2.LINE_AA)
-            iou = e.get(f"{m}_iou")
+            iou = e.get(f"{m}_iou") if a.show_iou else None
             foot = ("NO DETECTION" if mk is None else (f"IoU {iou:.2f}" if iou is not None else "")) + (f" | {how}" if how and how not in ("masklet",) else "")
             cv2.putText(t, foot, (3, TH - 6), 0, 0.4, (255, 255, 0), 1, cv2.LINE_AA)
             tiles.append(t)
@@ -143,6 +168,8 @@ def main():
     ap.add_argument("--out", required=True)                            # 폴더 → <select>_<k>.mp4
     ap.add_argument("--fps", type=int, default=10)
     ap.add_argument("--tag", default="")                               # 출력 이름 앞머리 (기본 = --select)
+    ap.add_argument("--show_iou", type=int, default=1)                 # 0 = 정답률 (IoU) 표시 안 함 — 출력 그대로만 비교
+    ap.add_argument("--first", type=int, default=0)                    # >0 = pairs.json 앞 n 쌍 그대로 (선택 규칙 없이)
     a = ap.parse_args()
     sys.path.insert(0, V4)
     want = a.methods.split(","); methods = [x for x in METHODS if x[0] in want]
@@ -150,7 +177,9 @@ def main():
     for p in a.eval:
         for r in json.load(open(p)):
             ev.setdefault((r["video"], r["anchor"]), {}).update(r)
-    if a.pairs:
+    if a.first:
+        pairs = [tuple(p) for p in json.load(open(f"{a.root}/pairs.json"))[:a.first]]; tag = a.tag or "first"
+    elif a.pairs:
         pairs = [tuple(x.split(":")) for x in a.pairs.split(",")]; tag = "pairs"
     else:
         pairs = pick(a, ev, json.load(open(f"{a.root}/pairs.json")), methods); tag = a.tag or a.select

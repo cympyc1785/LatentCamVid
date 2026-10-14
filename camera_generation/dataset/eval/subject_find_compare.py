@@ -253,6 +253,33 @@ def eval_one(p):
     return res
 
 
+def stage_cands():
+    """[R380] 시각화용: 앞 `--cands_n` 쌍에서 SAM3 noun · 설명 문장 text 의 **후보 masklet 전부** 를 저장 (선정 규칙 없이 출력 그대로 보기 위해).
+    → cands/{label,desc}/<pair>.npz: masks (K,T,H,W/8) packbits · W · ids · score (masklet 평균 점수) · nfr (등장 프레임 수) · text."""
+    sys.path.insert(0, V4)
+    from utils.media import load_video
+    from utils.recon_and_seg.seg_sam3_official import init_sam3_video
+    for k in ("label", "desc"):
+        os.makedirs(f"{A.out}/cands/{k}", exist_ok=True)
+    P = [p for p in pairs()[:A.cands_n] if not osp.isfile(f"{A.out}/cands/desc/{p[0]}__{p[1]}.npz")]
+    P = [p for i, p in enumerate(P) if i % SHARD[1] == SHARD[0]]
+    pred = init_sam3_video(); log(f"cands shard {SHARD}: {len(P)} 쌍")
+    for n, (v, aid) in enumerate(P):
+        frames, _ = load_video(f"{E}/{v}/video.mp4"); T_, H, W, _ = frames.shape
+        label = next((x.get("label") for x in json.load(open(f"{G}/{v}/scene_graph.json"))["nodes"] if x["id"] == aid), "") or ""
+        for k, text in (("label", label), ("desc", phrase(v, aid).rstrip("."))):
+            per = _propagate(pred, frames, text) if text else {}
+            ids = sorted(per, key=lambda i: -np.mean(per[i]["p"]) * len(per[i]["m"]))
+            M = np.zeros((len(ids), T_, H, W), bool)
+            for j, i in enumerate(ids):
+                for f, mk in per[i]["m"].items():
+                    M[j, f] = mk
+            np.savez_compressed(f"{A.out}/cands/{k}/{v}__{aid}.npz", masks=np.packbits(M, axis=-1), W=W, ids=np.array(ids, int),
+                                score=np.array([np.mean(per[i]["p"]) for i in ids]), nfr=np.array([len(per[i]["m"]) for i in ids]), text=text)
+        log(f"cands {n + 1}/{len(P)} {v[:8]} {aid}")
+    log(f"=== cands shard {SHARD[0]} DONE ===")
+
+
 def stage_eval():
     from multiprocessing import Pool
     global IDX
@@ -286,10 +313,11 @@ if __name__ == "__main__":
     ap.add_argument("--desc_n", type=int, default=0)                   # 앞 n 쌍만 SAM3 설명 문장 단독도
     ap.add_argument("--reuse_gen", action="append", default=[])        # 같은 규칙 gen json 이 있는 폴더 (복사)
     ap.add_argument("--workers", type=int, default=24)
-    ap.add_argument("--stage", required=True)                          # pairs | gen | sam3 | eval (쉼표로 여러 개)
+    ap.add_argument("--cands_n", type=int, default=32)                 # cands stage: 앞 n 쌍
+    ap.add_argument("--stage", required=True)                          # pairs | gen | sam3 | cands | eval (쉼표로 여러 개)
     A = ap.parse_args()
     for st in A.stage.split(","):
         if st == "pairs":
             P = pairs(); print(len(P), "stat", sum(a.startswith("stat") for _, a in P))
         else:
-            {"gen": stage_gen, "sam3": stage_sam3, "eval": stage_eval}[st]()
+            {"gen": stage_gen, "sam3": stage_sam3, "cands": stage_cands, "eval": stage_eval}[st]()

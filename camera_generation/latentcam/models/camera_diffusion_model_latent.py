@@ -195,6 +195,8 @@ class CameraDiffusionModel(nn.Module):
         subject_pts_dim=0,
         subject_pts_feat=False,
         subject_pts_mode='pool',
+        subject_pts_fourier=0,
+        subject_pts_stats=False,
         video_text_fuse="token",
         start_pose_dim=0,
         start_pose_tf_p=0.0,
@@ -216,7 +218,9 @@ class CameraDiffusionModel(nn.Module):
         #   → subject_pts_dim 특징을 cam latent 에 concat (track 조건과 같은 자리). 0 = 모듈 미생성 (예전과 동일).
         self.subject_pts_dim = int(subject_pts_dim)
         if self.subject_pts_dim > 0:
-            self.pts_mlp = nn.Sequential(nn.Linear(3, 128), nn.SiLU(), nn.Linear(128, 128), nn.SiLU(), nn.Linear(128, 128))
+            # [R382] subject_pts_fourier K: xyz 를 [xyz, sin(2^k π xyz), cos(2^k π xyz)]_{k<K} 로 (작은 이동을 MLP 가 가르게 — spectral bias). 0 = 기존.
+            self.subject_pts_fourier = int(subject_pts_fourier)
+            self.pts_mlp = nn.Sequential(nn.Linear(3 + 6 * self.subject_pts_fourier, 128), nn.SiLU(), nn.Linear(128, 128), nn.SiLU(), nn.Linear(128, 128))
             # [R369] subject_pts_feat: 점 2D 위치에서 Molmo2 video 토큰 (프레임당 8x8, 9x9 의 2x2 평균) 을 bilinear 샘플 → LN → 128, xyz 특징에 더함
             self.subject_pts_feat = bool(subject_pts_feat)
             if self.subject_pts_feat:
@@ -227,7 +231,10 @@ class CameraDiffusionModel(nn.Module):
         #   유효하지 않은 점은 key padding, 항상 유효한 null 토큰 1 개 (읽을 게 없을 때 물러설 곳), 출력은 0 초기화 gate (video 스트림과 같은 방식).
         self.subject_pts_mode = str(subject_pts_mode)
         self.subj_layers = None
-        if self.subject_pts_dim > 0 and self.subject_pts_mode == 'xattn':
+        # [R382] 'traj' = 점마다 토큰 1 개, 특징 = 그 점의 전 프레임 궤적 (49 프레임 × [xyz·valid], CoTracker 점 대응을 그대로 씀) → MLP → xattn.
+        if self.subject_pts_dim > 0 and self.subject_pts_mode == 'traj':
+            self.pts_traj_mlp = nn.Sequential(nn.Linear(49 * 4, 512), nn.SiLU(), nn.Linear(512, 128))
+        if self.subject_pts_dim > 0 and self.subject_pts_mode in ('xattn', 'traj'):
             self.pts_tok = nn.Linear(128, hidden_dim)
             self.pts_null = nn.Parameter(torch.zeros(1, 1, hidden_dim))
             self.subj_gate = nn.Parameter(torch.zeros(num_layers))
@@ -235,7 +242,10 @@ class CameraDiffusionModel(nn.Module):
                 nn.ModuleList([nn.LayerNorm(hidden_dim), CrossAttention(hidden_dim, num_heads),
                                FusedMLP(hidden_dim, dropout, nn.GELU, hidden_layer_multiplier=4)])
                 for _ in range(num_layers)])
-        _pts_cat = self.subject_pts_dim if self.subject_pts_mode == 'pool' else 0
+        # [R382] subject_pts_stats: 점 집합의 프레임별 요약 13 ch [평균 xyz · 표준편차 xyz · 최소 xyz · 최대 xyz · 유효 비율] 을 학습 없이 바로
+        #   cam 토큰에 concat (중심·크기를 선형으로 읽게 — GT 중심 track 없이 점에서 나온 값). 다른 모드와 같이 쓸 수 있다.
+        self.subject_pts_stats = bool(subject_pts_stats) and self.subject_pts_dim > 0
+        _pts_cat = (self.subject_pts_dim if self.subject_pts_mode == 'pool' else 0) + (13 if self.subject_pts_stats else 0)
         self.cam_in = nn.Linear(cam_dim + self.cond_dim + _pts_cat, hidden_dim)
 
         self.time_mlp = TimeEmbedding(time_emb_dim)
@@ -550,11 +560,26 @@ class CameraDiffusionModel(nn.Module):
         if getattr(self, 'subject_pts_dim', 0) > 0:                 # [R361]
             if subject_pts is None:
                 pf = x_t.new_zeros(B, T, self.subject_pts_dim)
-                if getattr(self, 'subject_pts_mode', 'pool') == 'xattn':                    # 조건 없음 = null 토큰만
+                if getattr(self, 'subject_pts_mode', 'pool') in ('xattn', 'traj'):          # 조건 없음 = null 토큰만
                     subj_tok = self.pts_null.expand(B, -1, -1).to(x_t.dtype); subj_kpm = torch.zeros(B, 1, dtype=torch.bool, device=device)
+                pstat = x_t.new_zeros(B, T, 13) if getattr(self, 'subject_pts_stats', False) else None
             else:
                 sp = subject_pts.to(x_t.dtype); vm = sp[..., 3:4] > 0.5                    # (B,F,N,1)
-                e = self.pts_mlp(sp[..., :3])
+                pstat = None
+                if getattr(self, 'subject_pts_stats', False):                                 # [R382]
+                    xyz, w = sp[..., :3], vm.to(sp.dtype); n_ = w.sum(2).clamp(min=1)
+                    mu = (xyz * w).sum(2) / n_; sd = (((xyz - mu[:, :, None]) ** 2 * w).sum(2) / n_).sqrt()
+                    lo_ = xyz.masked_fill(~vm, 1e4).amin(2); hi_ = xyz.masked_fill(~vm, -1e4).amax(2)
+                    fv_ = vm.any(2).to(sp.dtype)
+                    pstat = torch.cat([mu, sd, lo_ * fv_, hi_ * fv_, w.mean(2)], -1) * fv_      # (B,F,13), 점 없는 프레임 0
+                    if pstat.shape[1] != T:
+                        pstat = F.interpolate(pstat.transpose(1, 2), size=T, mode='linear', align_corners=True).transpose(1, 2)
+                xin = sp[..., :3]
+                if getattr(self, 'subject_pts_fourier', 0) > 0:                               # [R382]
+                    fr = (2.0 ** torch.arange(self.subject_pts_fourier, device=device, dtype=xin.dtype)) * math.pi
+                    ang = xin[..., None] * fr                                                    # (B,F,N,3,K)
+                    xin = torch.cat([xin, ang.sin().flatten(-2), ang.cos().flatten(-2)], -1)
+                e = self.pts_mlp(xin)
                 if getattr(self, 'subject_pts_feat', False) and video_emb is not None and sp.shape[-1] >= 6:
                     Fp, Np = sp.shape[1], sp.shape[2]; D = video_emb.shape[-1]
                     g = video_emb[:, :Fp * 64].reshape(B * Fp, 8, 8, D).permute(0, 3, 1, 2).to(e.dtype)   # (B*F,D,8,8)
@@ -563,7 +588,15 @@ class CameraDiffusionModel(nn.Module):
                     grid = torch.stack([gx, gy], -1).reshape(B * Fp, Np, 1, 2).to(e.dtype)
                     pf_ = F.grid_sample(g, grid, mode='bilinear', align_corners=True)                   # (B*F,D,N,1)
                     e = e + self.pts_feat_proj(pf_[..., 0].permute(0, 2, 1).reshape(B, Fp, Np, D))
-                if self.subject_pts_mode == 'xattn':                                          # [R379]
+                if self.subject_pts_mode == 'traj':                                           # [R382] 점 = 토큰, 특징 = 전 프레임 궤적
+                    Fp, Np = sp.shape[1], sp.shape[2]
+                    fi = torch.linspace(0, Fp - 1, 49, device=device).round().long()
+                    tr = sp[:, fi, :, :4].permute(0, 2, 1, 3).reshape(B, Np, 49 * 4)               # (B,N,196)
+                    tv = vm[:, :, :, 0].any(1)                                                     # (B,N) 한 번이라도 보인 점
+                    st = self.pts_tok(self.pts_traj_mlp(tr)) * tv[..., None].to(tr.dtype)
+                    subj_tok = torch.cat([self.pts_null.expand(B, -1, -1).to(st.dtype), st], 1)
+                    subj_kpm = torch.cat([tv.new_zeros(B, 1), ~tv], 1)
+                elif self.subject_pts_mode == 'xattn':                                        # [R379]
                     Fp = e.shape[1]
                     fi = torch.linspace(0, Fp - 1, T, device=e.device).round().long() if Fp != T else torch.arange(T, device=e.device)
                     st = self.pts_tok(e[:, fi]) + positional_encoding(T, self.pts_tok.out_features, device=device)[None, :, None, :].to(e.dtype)
@@ -577,8 +610,10 @@ class CameraDiffusionModel(nn.Module):
                     pf = self.pts_out(torch.cat([mx * fv, mn], -1)) * fv                          # (B,F,D)
                     if pf.shape[1] != T:
                         pf = F.interpolate(pf.transpose(1, 2), size=T, mode='linear', align_corners=True).transpose(1, 2)
-            if self.subject_pts_mode != 'xattn':
+            if self.subject_pts_mode == 'pool':
                 x_t = torch.cat([x_t, pf], dim=-1)
+            if pstat is not None:                                                             # [R382]
+                x_t = torch.cat([x_t, pstat.to(x_t.dtype)], dim=-1)
 
         h = self.cam_in(x_t)
 

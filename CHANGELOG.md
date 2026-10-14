@@ -11,11 +11,13 @@
 
 ### Fixed
 
+- **subject 점 조건이 readout 없는 arm 에서 모델에 안 들어가던 문제** (R382). `train_latent_cam_dm.py` · `eval_testset.py` 가 `subject_pts_*` kwargs 를 `peav_readout_layers>0` 블록 안에서만 넘겨, MTp · MTpf · R379 첫 기동분은 점 모듈 없이 학습됐다. 블록 밖으로 옮기고, `subject_pts_cond=true` 인데 모듈이 없으면 assert.
 - **VAE worldtraj 캐시 translation 분모를 scene scale 로** (R175). `train_camera_vae.py --wt_norm avg_scale` (기본) — 창별 mean‖R_w2c p + t_w2c‖ (scene.ply 점, Dataset-v1 transforms avg_scale · worldtraj avg_scale/{k}.json 과 같은 정의, 3창 일치 확인). 새 stage `wt_scale` (병렬, → cache/wt_avg_scale.json), cameras.json 목록은 cache/wt_files.json 에 저장해 재사용. R125~R170 은 창 카메라 이동거리 s / m1 로 나눴다 (`--wt_norm cam_disp` 로 재현).
 - **VAE worldtraj 캐시의 cameras.json 해석 c2w → w2c** (R169). `train_camera_vae.py --stage cache_wt` 가 `rotation`/`position` 을 c2w 로 읽어 worldtraj 창(학습 228,130 · test 2,846)이 전부 역궤적이었다. 레포 규약(`main/dynamicverse_shim.py`, CamVLA `data/worldtraj`)과 scene.ply 투영 (images_pc_rendered 대비 색 오차 c2w 50~63 / w2c 18~21) 모두 w2c. `--wt_pose w2c|c2w` 신설, 기본 w2c · c2w 는 R125~R168 캐시 재현용.
 
 ### Added
 - latentcam `subject_pts_feat` (R369, 기본 false): subject 점마다 소스 2D 위치 (world 점 → `pose.npz` 투영, 0~1) 를 subject_pts 에 더해 (T,N,6), 모델이 그 위치에서 Molmo2 video 토큰 (프레임당 8x8, 칸 중심 (r+1)/9) 을 bilinear 샘플 → LayerNorm → 128 로 점 xyz 특징에 더한다 (video_latent_dim>0 필요). 투영 uv 와 CoTracker 원 좌표 차 중앙 0.0008~0.0054 (정규화).
+- latentcam (R382) subject 점 대안: `subject_pts_stats` (프레임별 점 요약 13 ch 평균·표준편차·최소·최대 xyz·유효 비율을 cam 토큰에 바로 concat), `subject_pts_fourier K` (점 xyz Fourier 특징), `subject_pts_mode: traj` (점마다 49 프레임 궤적을 토큰 1 개로 → cross-attention). `eval_testset.py --subject-pts-probe drop|shuffle` (점 조건 민감도).
 - (R380) `eval/subject_find_compare.py --stage cands` — 앞 `--cands_n` 쌍의 SAM3 noun · 설명 문장 **후보 masklet 전부** 저장 (선정 규칙 없이). `viz/subject_find_overlay.py` 에 `cands_label` · `cands_desc` 열 (후보마다 색·번호·평균 점수·등장 프레임 수), `--show_iou 0` (정답률 표시 끔), `--first N` (pairs.json 앞 N 쌍 그대로).
 - latentcam `subject_pts_mode` (R379, 기본 `pool` = 기존): `xattn` 이면 subject 점을 프레임 pooling 해 cam 토큰에 concat 하지 않고, 점마다 토큰 (latent 13 프레임 × N 점 + 프레임 PE, 무효 점 key padding, 항상 유효한 null 토큰) 으로 DiT 층마다 cross-attention (0 초기화 gate) 해서 읽는다. `subject_pts_train_select` (기본 `random` = 기존): `fixed` 면 학습도 평가와 같은 (씬, 세그먼트) 고정 seed 점.
 - `dataset/eval/subject_find_compare.py` (R376): text → subject 찾기 방법 비교 (SAM3 noun · SAM3 설명 문장 · Molmo2 점→SAM3 · noun 후보 + Molmo2 점 규칙 earliest/vote/conf/wsum) 를 `--rank` (route `anchor_ids` 순위, 0 = 옛 무작위) · `--n` · `--splits` · `--desc_n` 로 쌍을 골라 gen/sam3/eval stage 로 돈다. R345·R355·R371·R373 일회성 실험을 승격.

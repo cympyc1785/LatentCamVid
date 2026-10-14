@@ -954,10 +954,7 @@ def train():
                 peav_readout_geo=bool(getattr(cfg, 'peav_readout_geo', False)),   # [R292]
                 peav_readout_cond_noise=float(getattr(cfg, 'peav_readout_cond_noise', 0.0) or 0.0),   # [R312]
                 peav_readout_cond_grad=bool(getattr(cfg, 'peav_readout_cond_grad', False)),   # [R315]
-                scene_points_cond=bool(getattr(cfg, 'scene_points_cond', False)),   # [R328]
-                subject_pts_dim=(int(getattr(cfg, 'subject_pts_dim', 64) or 64) if getattr(cfg, 'subject_pts_cond', False) else 0),   # [R361]
-                subject_pts_feat=bool(getattr(cfg, 'subject_pts_feat', False)),   # [R369]
-                subject_pts_mode=str(getattr(cfg, 'subject_pts_mode', 'pool') or 'pool'))   # [R379]
+                scene_points_cond=bool(getattr(cfg, 'scene_points_cond', False)))   # [R328]
             _auxw = float(getattr(cfg, 'peav_readout_aux_w', 0.0))
             print(f"(model) peav readout: layers={_rol} "
                   f"queries={_vid_kw['peav_readout_queries']} "
@@ -966,6 +963,15 @@ def train():
             if _vid_kw['peav_readout_aux_dim'] > 0:
                 assert _auxw > 0, \
                     "peav_readout_aux_dim>0 인데 peav_readout_aux_w=0 이면 head 가 학습되지 않는다"
+        # [R382 FIX] subject 점 조건 kwargs 는 readout 과 무관하다 — 예전엔 위 `if _rol > 0:` 안에 있어서 readout 없는 arm
+        # (MTp · MTpf · R379) 은 점 모듈 없이 학습됐다 (FIX.log 10-14). subject_pts_cond=false 면 0 = 예전과 같은 state_dict.
+        if getattr(cfg, 'subject_pts_cond', False):
+            _vid_kw.update(
+                subject_pts_dim=int(getattr(cfg, 'subject_pts_dim', 64) or 64),   # [R361]
+                subject_pts_feat=bool(getattr(cfg, 'subject_pts_feat', False)),   # [R369]
+                subject_pts_mode=str(getattr(cfg, 'subject_pts_mode', 'pool') or 'pool'),   # [R379]
+                subject_pts_fourier=int(getattr(cfg, 'subject_pts_fourier', 0) or 0),   # [R382]
+                subject_pts_stats=bool(getattr(cfg, 'subject_pts_stats', False)))   # [R382]
     # [new 2026-09-20, D206] aim aux loss 배선 확인. 0 이면 한 줄도 안 찍히고 경로도 안 탄다.
     _aimw0 = float(getattr(cfg, 'aim_loss_w', 0.0) or 0.0)
     if _aimw0 > 0:
@@ -1015,6 +1021,12 @@ def train():
     else:
         model = CameraDiffusionModel(cam_dim=cfg.cam_dim + _FR, cond_dim=_track_dim,
                                      pc_encoder=pc_encoder, **_geo_kw, **_vid_kw, **_sp_kw)
+    # [R382 FIX] 조건을 켰는데 모듈이 없으면 조용히 조건 없는 모델이 학습된다 (MTp 사고) — 기동 즉시 멈춘다.
+    if getattr(cfg, 'subject_pts_cond', False):
+        assert getattr(model, 'subject_pts_dim', 0) > 0 and hasattr(model, 'pts_mlp'), "subject_pts_cond=true 인데 모델에 점 모듈이 없다"
+        print(f"(model) subject_pts: dim={model.subject_pts_dim} mode={model.subject_pts_mode} "
+              f"fourier={getattr(model, 'subject_pts_fourier', 0)} stats={getattr(model, 'subject_pts_stats', False)} "
+              f"params={sum(p.numel() for n, p in model.named_parameters() if 'pts' in n or 'subj' in n)}")
     
     # [new 2026-09-25, R58/D286] video_onfly: connector 를 model submodule 로 붙인다 (resume/opt/ckpt
     # 가 그대로 따라온다). null 이면 None 이고 모델은 예전과 동일하다.

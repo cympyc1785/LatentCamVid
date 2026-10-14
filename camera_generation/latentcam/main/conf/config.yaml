@@ -307,6 +307,11 @@ subject_pts_feat: false
 subject_pts_eval_select: random
 # [R379] pool = 프레임 pooling → cam 토큰 concat (기존) / xattn = 점 토큰 cross-attention (null 토큰 + 0 초기화 gate)
 subject_pts_mode: pool
+#   traj = 점마다 토큰 1 개 (그 점의 49 프레임 궤적 → MLP) cross-attention [R382]
+# [R382] 점 xyz Fourier 특징 대역 수 (0 = 끔)
+subject_pts_fourier: 0
+# [R382] 점 집합 프레임별 요약 13 ch (평균·표준편차·최소·최대 xyz + 유효 비율) 을 cam 토큰에 바로 concat
+subject_pts_stats: false
 # [R379] random = 학습 표본마다 무작위 64 점 (기존) / fixed = 평가와 같은 (씬, 세그먼트) 고정 점
 subject_pts_train_select: random
 max_scenes: null              # cap #scenes loaded (null = all; small int for smoke tests)

@@ -155,6 +155,8 @@ def main():
     # target_track_dropout 이 남겨 둔 null 조건). 같은 ckpt 로 이 플래그만 켜고 끄면
     # "track 조건이 실제로 얼마나 기여하나"가 짝지은 비교로 나온다. target_track_dim=0 인
     # arm 에서는 조건 자체가 없으므로 no-op (경고만 찍는다).
+    # [R382] subject 점 조건 민감도: drop = subject_pts 를 안 넣음 (모델이 0/null) · shuffle = 배치 안에서 다른 표본의 점으로 바꿔치기
+    ap.add_argument('--subject-pts-probe', default=None, choices=['drop', 'shuffle'])
     ap.add_argument('--drop-track', action='store_true',
                     help='target_track 조건을 null(전 채널 0)로 강제 — track 없이 추론')
     # [new 2026-09-05] video CA(D124 molmo2) 계측. 배치마다 프로브 forward 3회가 더 붙으므로
@@ -257,6 +259,8 @@ def main():
         if _track_dim == 0:
             print("[warn] --drop-track 인데 target_track_dim=0 — 이 arm 엔 track 조건이 없다 (no-op)")
         tag += "__notrack"
+    if args.subject_pts_probe:                                       # [R382]
+        tag += f"__pts{args.subject_pts_probe}"
     out_dir = args.out or osp.join(REPO, EVAL_ROOT, tag)
     # 상대경로 --out 은 REPO 기준. os.chdir(MAIN) 이 이미 돌았기 때문에 그냥 abspath 하면
     # main/ 밑으로 떨어진다 (기본값은 REPO 를 붙여서 만드니 영향 없고, --out 을 준 경우만 문제).
@@ -352,10 +356,16 @@ def main():
                 peav_readout_geo=bool(getattr(cfg, 'peav_readout_geo', False)),   # [R292]
                 peav_readout_cond_noise=float(getattr(cfg, 'peav_readout_cond_noise', 0.0) or 0.0),   # [R312]
                 peav_readout_cond_grad=bool(getattr(cfg, 'peav_readout_cond_grad', False)),   # [R315]
-                scene_points_cond=bool(getattr(cfg, 'scene_points_cond', False)),   # [R328]
-                subject_pts_dim=(int(getattr(cfg, 'subject_pts_dim', 64) or 64) if getattr(cfg, 'subject_pts_cond', False) else 0),   # [R361]
+                scene_points_cond=bool(getattr(cfg, 'scene_points_cond', False)))   # [R328]
+        # [R382 FIX] subject 점 조건 kwargs 는 readout 과 무관하다 — 예전엔 위 `if _rol > 0:` 안에 있어서 readout 없는 arm
+        # (MTp · MTpf · R379) 은 점 모듈 없이 학습됐다 (FIX.log 10-14). subject_pts_cond=false 면 0 = 예전과 같은 state_dict.
+        if getattr(cfg, 'subject_pts_cond', False):
+            _vid_kw.update(
+                subject_pts_dim=int(getattr(cfg, 'subject_pts_dim', 64) or 64),   # [R361]
                 subject_pts_feat=bool(getattr(cfg, 'subject_pts_feat', False)),   # [R369]
-                subject_pts_mode=str(getattr(cfg, 'subject_pts_mode', 'pool') or 'pool'))   # [R379]
+                subject_pts_mode=str(getattr(cfg, 'subject_pts_mode', 'pool') or 'pool'),   # [R379]
+                subject_pts_fourier=int(getattr(cfg, 'subject_pts_fourier', 0) or 0),   # [R382]
+                subject_pts_stats=bool(getattr(cfg, 'subject_pts_stats', False)))   # [R382]
     # [R91] start pose head (D261/D296) — 학습 진입점과 같은 kwargs. 안 넘기면 strict load 가 start_query/start_out 에서 죽는다.
     _sp_kw = {}
     if bool(getattr(cfg, 'start_pose_pred', False)):
@@ -516,6 +526,10 @@ def main():
                 # 다른 모델**이 평가됐다. video_latent_dim=0 인 arm 은 빈 dict 라 무영향.
                 with ph('prefill/video'):
                     _vkw = {} if args.drop_video else T.build_video_cond(data, device)
+                    if args.subject_pts_probe == 'drop':                     # [R382]
+                        _vkw.pop('subject_pts', None)
+                    elif args.subject_pts_probe == 'shuffle' and 'subject_pts' in _vkw:
+                        _vkw['subject_pts'] = torch.roll(_vkw['subject_pts'], 1, dims=0)
                 # step_cb 는 --timing 일 때만 넘긴다 (None 이면 sample() 이 부르지도 않는다).
                 _sc = None
                 if args.timing:

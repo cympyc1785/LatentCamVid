@@ -157,12 +157,32 @@ def pick(a, ev, pairs, methods):
     return out[:a.n]
 
 
+def pick_limits(a, ev, pairs):
+    """[R381] SAM3 text 방식의 한계 사례 (사례 고르기에만 GT IoU 를 쓰고, 영상에는 정답률을 안 띄운다). Molmo2 점→SAM3 은 맞힌 쌍 (IoU ≥ 0.5) 만.
+    noun_multi : noun 후보 masklet ≥ 2 개이고 noun 최고 점수 후보가 GT 가 아님 (IoU < 0.5)
+    desc_none  : 설명 문장 검출 없음
+    desc_wrong : 설명 문장이 검출은 했지만 GT 가 아님 (IoU < 0.3)"""
+    out = {"noun_multi": [], "desc_none": [], "desc_wrong": []}
+    for v, aid in pairs:
+        e = ev.get((v, aid)); cl, cd = f"{a.root}/cands/label/{v}__{aid}.npz", f"{a.root}/cands/desc/{v}__{aid}.npz"
+        if e is None or not (os.path.isfile(cl) and os.path.isfile(cd)) or e.get("pointK8f_iou", 0) < 0.5:
+            continue
+        nl, nd = len(np.load(cl)["ids"]), len(np.load(cd)["ids"])
+        if nl >= 2 and e.get("sam3_label_iou", 1) < 0.5:
+            out["noun_multi"].append((v, aid))
+        if nd == 0:
+            out["desc_none"].append((v, aid))
+        elif e.get("sam3_desc_iou", 1) < 0.3:
+            out["desc_wrong"].append((v, aid))
+    return out
+
+
 def main():
     ap = argparse.ArgumentParser()
     ap.add_argument("--root", required=True)                           # 실험 폴더 (sam3/<method>/ · gen/ · pairs.json)
     ap.add_argument("--eval", action="append", default=[])             # 쌍별 <method>_iou 가 든 json (여럿이면 합침)
     ap.add_argument("--methods", default=",".join(m for m, _, _ in METHODS))
-    ap.add_argument("--select", default="rules_differ", choices=["rules_differ", "desc_fail", "method_differ", "all_ok", "random"])
+    ap.add_argument("--select", default="rules_differ", choices=["rules_differ", "desc_fail", "method_differ", "all_ok", "random", "sam3_limits"])
     ap.add_argument("--pairs", default="")                              # "video:anchor,..." 직접 지정 (있으면 --select 무시)
     ap.add_argument("--n", type=int, default=8)
     ap.add_argument("--rows", type=int, default=4)                     # 영상 하나당 행 수
@@ -179,6 +199,18 @@ def main():
     for p in a.eval:
         for r in json.load(open(p)):
             ev.setdefault((r["video"], r["anchor"]), {}).update(r)
+    if a.select == "sam3_limits":                                         # [R381] 범주별로 따로 영상
+        os.makedirs(a.out, exist_ok=True)
+        cats = pick_limits(a, ev, [tuple(p) for p in json.load(open(f"{a.root}/pairs.json"))])
+        json.dump({k: [list(p) for p in v] for k, v in cats.items()}, open(f"{a.out}/{a.tag or 'limits'}_pairs.json", "w"), indent=1)
+        print({k: len(v) for k, v in cats.items()}, flush=True)
+        for cat, ps in cats.items():
+            ps = ps[:a.n]
+            for g in range(0, len(ps), a.rows):
+                cl = [row(a, ev, v, aid, methods) for v, aid in ps[g:g + a.rows]]; n = min(len(c) for c in cl)
+                pth = f"{a.out}/{a.tag or 'limits'}_{cat}_{g // a.rows + 1}.mp4"
+                iio.mimwrite(pth, [np.vstack([c[f] for c in cl]) for f in range(n)], fps=a.fps, macro_block_size=1); print("->", pth, flush=True)
+        return
     if a.first:
         pairs = [tuple(p) for p in json.load(open(f"{a.root}/pairs.json"))[:a.first]]; tag = a.tag or "first"
     elif a.pairs:

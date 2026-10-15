@@ -17,6 +17,7 @@
 
 ### Added
 - latentcam `subject_pts_feat` (R369, 기본 false): subject 점마다 소스 2D 위치 (world 점 → `pose.npz` 투영, 0~1) 를 subject_pts 에 더해 (T,N,6), 모델이 그 위치에서 Molmo2 video 토큰 (프레임당 8x8, 칸 중심 (r+1)/9) 을 bilinear 샘플 → LayerNorm → 128 로 점 xyz 특징에 더한다 (video_latent_dim>0 필요). 투영 uv 와 CoTracker 원 좌표 차 중앙 0.0008~0.0054 (정규화).
+- dataset `fit/bank/cloud_mesh_grid.py` (R405): in-the-wild 영상 (DynPose · Vista) 의 4D 점구름으로 TRUMANS `mesh_grid.npz` 와 같은 형식 (정적 EDT · 소스 카메라 도달 free 성분 · 프레임별 동적 EDT, recon world) 을 굽는다 — fit `--collision_source both --mesh_margin_frac 0.02` 로 ESDF 충돌 게이트를 코드 변경 없이 켠다. 정적 점은 동적 mask 경계 (dilate 7px) · depth 불연속 점 제외.
 - latentcam `scripts/eval_testset.py --drop-box` (R392): subject_box_cond 모델에서 3D OBB 9 채널 (track 조건 맨 뒤) 만 0 으로 추론 (track3d 는 그대로).
 - dataset `fit/bank/molmo2_track_lift.py --stage sam3box` (R391): mask (기본 vote, `--sam3_out`) + depth → 프레임별 중력 정렬 OBB (`scene_graph.obb.fit_obb`) → `subject_box.npz` 와 같은 형식의 반축 벡터 (`--box_name`, 기본 `subject_box_vote.npz`). yaw 는 2·yaw unwrap + 5 프레임 median, 크기는 프레임 median. v1 test 1,017 편 생성 (error 0).
 - dataset `fit/bank/molmo2_track_lift.py` (R386): `--videos_file` (이 목록의 영상만, 전 stage) · comb `--save_cands` (noun 후보 masklet 전부를 `<comb_out>_cands/` 에 저장 — 규칙을 바꿔도 SAM3 재실행 없이 다시 고르기용).

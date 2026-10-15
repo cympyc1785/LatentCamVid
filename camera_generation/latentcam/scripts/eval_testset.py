@@ -157,6 +157,8 @@ def main():
     # arm 에서는 조건 자체가 없으므로 no-op (경고만 찍는다).
     # [R382] subject 점 조건 민감도: drop = subject_pts 를 안 넣음 (모델이 0/null) · shuffle = 배치 안에서 다른 표본의 점으로 바꿔치기
     ap.add_argument('--subject-pts-probe', default=None, choices=['drop', 'shuffle'])
+    # [R392] subject_box_cond 의 3D OBB 9 채널 (track 조건 맨 뒤) 만 0 으로 — box 없이 (track3d 는 그대로) 추론
+    ap.add_argument('--drop-box', action='store_true')
     ap.add_argument('--drop-track', action='store_true',
                     help='target_track 조건을 null(전 채널 0)로 강제 — track 없이 추론')
     # [new 2026-09-05] video CA(D124 molmo2) 계측. 배치마다 프로브 forward 3회가 더 붙으므로
@@ -261,6 +263,9 @@ def main():
         tag += "__notrack"
     if args.subject_pts_probe:                                       # [R382]
         tag += f"__pts{args.subject_pts_probe}"
+    if args.drop_box:                                                # [R392]
+        assert getattr(cfg, 'subject_box_cond', False), "--drop-box 인데 subject_box_cond=false"
+        tag += "__nobox"
     out_dir = args.out or osp.join(REPO, EVAL_ROOT, tag)
     # 상대경로 --out 은 REPO 기준. os.chdir(MAIN) 이 이미 돌았기 때문에 그냥 abspath 하면
     # main/ 밑으로 떨어진다 (기본값은 REPO 를 붙여서 만드니 영향 없고, --out 을 준 경우만 문제).
@@ -519,6 +524,8 @@ def main():
                 # target_track_dropout 이 남겨 둔 그 조건이라 미학습 입력이 아니다.
                 with ph('prefill/track'):
                     _cond = None if args.drop_track else T.build_track_cond(data, traj_len, device)
+                    if args.drop_box and _cond is not None:                    # [R392] box 9 채널은 맨 뒤
+                        _cond = _cond.clone(); _cond[..., -9:] = 0.0
                 # [FIX 2026-09-05] video CA 조건이 여기서 빠져 있었다. run_validation
                 # (train_latent_cam_dm.py:770) 은 build_video_cond 를 부르는데 이 스크립트는
                 # 안 불러서, D124(molmo2) 처럼 video_latent_dim>0 인 arm 을 이걸로 평가하면

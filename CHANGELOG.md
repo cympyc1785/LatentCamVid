@@ -17,6 +17,7 @@
 
 ### Added
 - latentcam `subject_pts_feat` (R369, 기본 false): subject 점마다 소스 2D 위치 (world 점 → `pose.npz` 투영, 0~1) 를 subject_pts 에 더해 (T,N,6), 모델이 그 위치에서 Molmo2 video 토큰 (프레임당 8x8, 칸 중심 (r+1)/9) 을 bilinear 샘플 → LayerNorm → 128 로 점 xyz 특징에 더한다 (video_latent_dim>0 필요). 투영 uv 와 CoTracker 원 좌표 차 중앙 0.0008~0.0054 (정규화).
+- latentcam `scripts/eval_testset.py --drop-box` (R392): subject_box_cond 모델에서 3D OBB 9 채널 (track 조건 맨 뒤) 만 0 으로 추론 (track3d 는 그대로).
 - dataset `fit/bank/molmo2_track_lift.py --stage sam3box` (R391): mask (기본 vote, `--sam3_out`) + depth → 프레임별 중력 정렬 OBB (`scene_graph.obb.fit_obb`) → `subject_box.npz` 와 같은 형식의 반축 벡터 (`--box_name`, 기본 `subject_box_vote.npz`). yaw 는 2·yaw unwrap + 5 프레임 median, 크기는 프레임 median. v1 test 1,017 편 생성 (error 0).
 - dataset `fit/bank/molmo2_track_lift.py` (R386): `--videos_file` (이 목록의 영상만, 전 stage) · comb `--save_cands` (noun 후보 masklet 전부를 `<comb_out>_cands/` 에 저장 — 규칙을 바꿔도 SAM3 재실행 없이 다시 고르기용).
 - `viz/subject_find_overlay.py --select sam3_limits` (R381): SAM3 text 방식 한계 사례 (noun 후보 여러 개인데 최고 점수가 다른 물체 · 설명 문장 검출 없음 · 설명 문장이 다른 물체, Molmo2 점은 맞힌 쌍) 를 범주별 영상으로. tile 높이를 짝수로 (1 행 영상 인코딩 실패 수정).

@@ -496,6 +496,80 @@ def sam3lift_video(job):
     return v, f"ok {sum(per[x][1] for x in set(aids))}/{len(set(aids))}"
 
 
+def sam3box_video(job):
+    """[R391] --sam3_out 의 mask + depth → 프레임별 중력 정렬 OBB (scene_graph.obb.fit_obb, G 좌표) → subject_box.npz 와 같은 형식의
+    반축 벡터 (S,T,3,3) world (열 = l·w·h 축 × extent/2). yaw 는 180° 대칭이라 2·yaw 로 unwrap 후 5 프레임 median, 빈 프레임은 가장 가까운 관측,
+    extent 는 프레임별 median (GT box 와 같은 규약: yaw 만 프레임별, 크기는 상수). 점은 축별 2~98% 안쪽만 (mask 경계·depth 튐 줄이기)."""
+    a, v = job
+    sys.path.insert(0, "/data1/cympyc1785/LatentCamVid/video_generation/models/Vista4D")
+    sys.path.insert(0, "/data1/cympyc1785/LatentCamVid/camera_generation/dataset")
+    from utils.media import load_cameras, load_depths, load_masks
+    from scene_graph.obb import fit_obb
+    from scipy.ndimage import median_filter
+    dst = f"{a.corpus}/dynpose/{v}/da3/{a.box_name}"
+    if osp.isfile(dst) and not a.overwrite:
+        return v, "skip"
+    z = np.load(f"{a.corpus}/dynpose/{v}/da3/target_track.npz", allow_pickle=True)
+    keys, aids = [str(k) for k in z["keys"]], [str(x) for x in z["anchor_id"]]
+    try:
+        g = json.load(open(f"{G}/{v}/scene_graph.json")); T_wg = np.asarray(g["frames"]["T_wg"], float); T_gw = np.asarray(g["frames"]["T_gw"], float)
+        d = load_depths(f"{E}/{v}/depths", dtype=np.float16, desc=None).astype(np.float32)
+        sky = np.asarray(load_masks(f"{E}/{v}/sky_mask", desc=None)).astype(bool)
+        Cw, K = load_cameras(f"{E}/{v}/cameras.npz"); Cw, K = np.asarray(Cw, float), np.asarray(K, float)
+    except Exception as e:      # noqa: BLE001
+        return v, f"error {str(e)[:60]}"
+    F_, H, W = d.shape; per = {}; rng = np.random.default_rng(0)
+    for aid in sorted(set(aids)):
+        mp = f"{a.sam3_out}/{v}__{aid}.npz"; per[aid] = None
+        if not osp.isfile(mp):
+            continue
+        zz = np.load(mp)
+        if not bool(zz["ok"]):
+            continue
+        M = np.unpackbits(zz["masks"], axis=-1, count=int(zz["W"])).astype(bool); yaw, ext = {}, []
+        for f in range(min(F_, len(M))):
+            mf = M[f][(np.arange(H) * M.shape[1] // H)][:, (np.arange(W) * M.shape[2] // W)] & np.isfinite(d[f]) & (d[f] > 0) & ~sky[f]
+            if mf.sum() < 30:
+                continue
+            vv, uu = np.nonzero(mf)
+            if len(vv) > 4000:
+                k = rng.choice(len(vv), 4000, replace=False); vv, uu = vv[k], uu[k]
+            zf = d[f][vv, uu]
+            fx, fy, cx, cy = (K[f][0], K[f][1], K[f][2], K[f][3]) if K.ndim == 2 else (K[f][0, 0], K[f][1, 1], K[f][0, 2], K[f][1, 2])
+            Xw = (Cw[f] @ np.stack([(uu + 0.5 - cx) / fx * zf, (vv + 0.5 - cy) / fy * zf, zf, np.ones_like(zf)], 0))
+            Xg = (T_gw @ Xw)[:3].T
+            lo, hi = np.percentile(Xg, 2, 0), np.percentile(Xg, 98, 0); Xg = Xg[((Xg >= lo) & (Xg <= hi)).all(1)]
+            if len(Xg) < 10:
+                continue
+            o = fit_obb(Xg); yaw[f] = o["yaw_rad"]; ext.append(o["extent"])
+        if len(yaw) < a.min_frames:
+            continue
+        fs = np.array(sorted(yaw)); y2 = np.unwrap(2 * np.array([yaw[f] for f in fs])) / 2
+        y2 = median_filter(y2, size=min(5, len(y2)), mode="nearest")
+        yf = np.array([y2[np.abs(fs - f).argmin()] for f in range(F_)])
+        e = np.median(np.stack(ext), 0) / 2.0
+        c, s_ = np.cos(yf), np.sin(yf); zr, on = np.zeros_like(c), np.ones_like(c)
+        R = np.stack([np.stack([c, -s_, zr], -1), np.stack([s_, c, zr], -1), np.stack([zr, zr, on], -1)], 1)
+        per[aid] = np.einsum("ij,tjk->tik", T_wg[:3, :3], R * e[None, None, :]).astype(np.float32)
+    axes = np.zeros((len(keys), F_, 3, 3), np.float32); valid = np.zeros(len(keys), bool)
+    for i, aid in enumerate(aids):
+        if per.get(aid) is not None:
+            axes[i] = per[aid]; valid[i] = True
+    np.savez(dst, axes_world=axes, valid=valid, keys=np.array(keys), anchor_id=np.array(aids))
+    return v, f"ok {sum(per[x] is not None for x in set(aids))}/{len(set(aids))}"
+
+
+def stage_sam3box(a):
+    from multiprocessing import Pool
+    vids = sorted({v for v, _ in pairs(a.corpus)}); bad = 0
+    with Pool(a.workers) as p:
+        for i, (v, msg) in enumerate(p.imap_unordered(sam3box_video, [(a, v) for v in vids], chunksize=4)):
+            bad += msg.startswith("error")
+            if i % 200 == 0 or msg.startswith("error"):
+                print(f"[sam3box {i}/{len(vids)}] {v} {msg}", flush=True)
+    print(f"=== sam3box DONE {len(vids)} (error {bad}) ===", flush=True)
+
+
 def stage_sam3lift(a):
     from multiprocessing import Pool
     vids = sorted({v for v, _ in pairs(a.corpus)}); bad = 0
@@ -609,7 +683,7 @@ def stage_lift(a):
 
 if __name__ == "__main__":
     ap = argparse.ArgumentParser()
-    ap.add_argument("--stage", required=True, choices=["gen", "lift", "check", "point", "sam3", "sam3lift", "sam3text", "comb"])
+    ap.add_argument("--stage", required=True, choices=["gen", "lift", "check", "point", "sam3", "sam3lift", "sam3box", "sam3text", "comb"])
     ap.add_argument("--corpus", default=C)
     ap.add_argument("--out", default="/data1/cympyc1785/data/DynPose-LBM/latentcam_dynpose_d200/molmo2_track")
     ap.add_argument("--name", default="target_track_molmo2.npz")
@@ -631,8 +705,9 @@ if __name__ == "__main__":
     ap.add_argument("--point_out", default="/data1/cympyc1785/data/DynPose-LBM/latentcam_dynpose_d200/molmo2_point")
     ap.add_argument("--sam3_out", default="/data1/cympyc1785/data/DynPose-LBM/latentcam_dynpose_d200/molmo2_sam3")
     ap.add_argument("--sam3_name", default="target_track_m2sam3.npz")
+    ap.add_argument("--box_name", default="subject_box_vote.npz")          # [R391] sam3box 출력 이름
     ap.add_argument("--check_out", default="/data1/cympyc1785/LatentCamVid/tmp/r343/molmo2_track_check.csv")
     a = ap.parse_args()
     if a.videos_file:                                   # [R386]
         VIDEOS = set(open(a.videos_file).read().split())
-    {"gen": stage_gen, "lift": stage_lift, "check": stage_check, "point": stage_point, "sam3": stage_sam3, "sam3lift": stage_sam3lift, "sam3text": stage_sam3text, "comb": stage_comb}[a.stage](a)
+    {"gen": stage_gen, "lift": stage_lift, "check": stage_check, "point": stage_point, "sam3": stage_sam3, "sam3lift": stage_sam3lift, "sam3box": stage_sam3box, "sam3text": stage_sam3text, "comb": stage_comb}[a.stage](a)

@@ -1,0 +1,31 @@
+{
+ "name": "v1",
+ "source": "/data1/cympyc1785/data/DynPose-LBM/latentcam_dynpose_d200",
+ "bank_dir": null,
+ "seg_prefix": "dynpose",
+ "n_rows": 51422,
+ "presets": {
+  "track_look_at": 6044,
+  "dolly_out": 5810,
+  "dolly_in_look_at": 4858,
+  "pan_left": 3839,
+  "crane_up": 3705,
+  "track_pull_out_arc_right": 3346,
+  "track_orbit_left": 3193,
+  "track_dolly_in_look_at": 3020,
+  "pan_right": 2743,
+  "track_pull_out_arc_left": 2636,
+  "track_crane_up": 2606,
+  "track_orbit_right": 2442,
+  "static_look_at": 1810,
+  "pull_out_arc_right": 1045,
+  "pull_out_arc_left": 1022,
+  "orbit_left": 995,
+  "orbit_right": 923,
+  "track_truck_left": 716,
+  "track_truck_right": 623,
+  "truck_right": 26,
+  "truck_left": 20
+ },
+ "shot_presets": []
+}

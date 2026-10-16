@@ -165,7 +165,8 @@ class VLMClient:
     def chat_json(self, prompt: str, images=(), system: str | None = None,
                   validate=None, max_repairs: int = 3, label: str = "",
                   echo_previous: bool = True, repair_hint: str = "",
-                  hint_first: bool = False):
+                  hint_first: bool = False, video: str | None = None,
+                  video_fps: float | None = None, video_mm: dict | None = None):
         """스키마를 만족하는 dict 를 얻을 때까지 되묻는다. (payload, info).
 
         `validate(payload) -> list[str]` 이 위반 목록을 돌려주면 그걸 그대로 붙여 재질의한다.
@@ -186,11 +187,15 @@ class VLMClient:
         원 프롬프트가 길어지면(씬 접지 블록 3종 = 약 600 토큰) 뒤에 붙인 힌트가 묻힌다 —
         접지를 켠 실행에서 w18 이 4턴 내내 같은 `body_facing` 위반을 반복하고 fallback 으로
         떨어졌는데, 접지 없이 같은 힌트로는 통과했던 창이다. 기본값 False = 기존 동작.
+
+        `video` / `video_fps` / `video_mm` (R417) 은 `chat` 에 그대로 넘긴다 — 매 재질의 턴에 같은 영상이 실린다.
+        안 주면 payload 가 예전과 글자 그대로 같다.
         """
         turn_prompt, repairs, errors = prompt, 0, []
         while True:
             text, meta = self.chat(turn_prompt, images=images, system=system,
-                                   label=f"{label}#{repairs}")
+                                   label=f"{label}#{repairs}", video=video,
+                                   video_fps=video_fps, video_mm=video_mm)
             payload, parse_error = parse_json_candidates(text)
             violations = [parse_error] if parse_error else \
                 (list(validate(payload)) if validate else [])

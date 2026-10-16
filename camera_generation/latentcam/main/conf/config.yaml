@@ -294,6 +294,14 @@ subject_uv_dir: null          # null = <corpus>/molmo2_track
 #   <scene>/da3/subject_box.npz 필요 (dataset/fit/bank/export_target_track.py --box). false = 예전.
 subject_box_cond: false
 subject_box_file: subject_box.npz
+# [R425] 3D 점유 격자 (occupied·free·unknown, target frame-s 카메라 / norm_scale 의 [-occ_grid_half, occ_grid_half]³, 32³) → 3D conv 8³ 토큰 → DiT 층마다
+#   cross-attention (0 초기화 gate). <scene>/da3/occ_grid32.npz 필요 (camera_generation/dataset/fit/bank/occ_grid_cache.py). false = 예전.
+occ_grid_cond: false
+occ_grid_file: occ_grid32.npz
+occ_grid_half: 2.0
+occ_grid_dropout: 0.1          # 학습 때 표본 단위로 격자를 '전부 unknown' (조건 없음) 으로
+occ_grid_resampler: 0          # K>0 = Perceiver resampler 로 격자 토큰 512 → K (DiT CA 는 K 개만). 0 = 512 그대로
+occ_grid_resampler_layers: 2
 # [R361] subject 3D 점 집합 (CoTracker3 · GT mask, frame-s 카메라 / norm_scale) 을 set encoder (점별 MLP + max·mean pool) 로 프레임마다
 #   subject_pts_dim 특징 → cam latent 에 concat. <scene>/da3/subject_points.npz 필요 (dataset/fit/bank/export_subject_points.py). false = 예전.
 subject_pts_cond: false

@@ -371,6 +371,13 @@ def main():
                 subject_pts_mode=str(getattr(cfg, 'subject_pts_mode', 'pool') or 'pool'),   # [R379]
                 subject_pts_fourier=int(getattr(cfg, 'subject_pts_fourier', 0) or 0),   # [R382]
                 subject_pts_stats=bool(getattr(cfg, 'subject_pts_stats', False)))   # [R382]
+        # [R425] 점유 격자 CA — readout·subject 점과 무관하게 cfg 만 본다 (R382 교훈: 조건 kwargs 를 다른 분기 안에 두지 않는다).
+        if getattr(cfg, 'occ_grid_cond', False):
+            _vid_kw.update(occ_grid_cond=True,
+                           occ_grid_half=float(getattr(cfg, 'occ_grid_half', 2.0) or 2.0),
+                           occ_grid_dropout=float(getattr(cfg, 'occ_grid_dropout', 0.0) or 0.0),
+                           occ_grid_resampler=int(getattr(cfg, 'occ_grid_resampler', 0) or 0),
+                           occ_grid_resampler_layers=int(getattr(cfg, 'occ_grid_resampler_layers', 2) or 2))
     # [R91] start pose head (D261/D296) — 학습 진입점과 같은 kwargs. 안 넘기면 strict load 가 start_query/start_out 에서 죽는다.
     _sp_kw = {}
     if bool(getattr(cfg, 'start_pose_pred', False)):

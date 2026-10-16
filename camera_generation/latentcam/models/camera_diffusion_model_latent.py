@@ -197,6 +197,11 @@ class CameraDiffusionModel(nn.Module):
         subject_pts_mode='pool',
         subject_pts_fourier=0,
         subject_pts_stats=False,
+        occ_grid_cond=False,
+        occ_grid_half=2.0,
+        occ_grid_dropout=0.0,
+        occ_grid_resampler=0,
+        occ_grid_resampler_layers=2,
         video_text_fuse="token",
         start_pose_dim=0,
         start_pose_tf_p=0.0,
@@ -239,6 +244,33 @@ class CameraDiffusionModel(nn.Module):
             self.pts_null = nn.Parameter(torch.zeros(1, 1, hidden_dim))
             self.subj_gate = nn.Parameter(torch.zeros(num_layers))
             self.subj_layers = nn.ModuleList([
+                nn.ModuleList([nn.LayerNorm(hidden_dim), CrossAttention(hidden_dim, num_heads),
+                               FusedMLP(hidden_dim, dropout, nn.GELU, hidden_layer_multiplier=4)])
+                for _ in range(num_layers)])
+        # [R425] occ_grid_cond: 3D 점유 격자 (B,3,N,N,N) [occupied·free·unknown 비율] — target frame-s 카메라 좌표 / norm_scale 의 [-half,half]³
+        #   (dataset `_occ_grid`, fit/bank/occ_grid_cache.py). 3D conv 로 N/4 ³ 토큰 (32³ → 8³ = 512) + 칸 중심 xyz Fourier PE → DiT 층마다
+        #   cross-attention (subject 점 CA 와 같은 0 초기화 gate). occ_grid_dropout: 학습 때 표본 단위로 격자를 '전부 unknown' 으로 (조건 없음 = null).
+        #   False = 모듈 미생성 (예전과 같은 state_dict).
+        self.occ_grid_cond = bool(occ_grid_cond)
+        if self.occ_grid_cond:
+            self.occ_half, self.occ_dropout, self.occ_nf = float(occ_grid_half), float(occ_grid_dropout), 6
+            self.occ_enc = nn.Sequential(nn.Conv3d(3, 32, 3, 2, 1), nn.SiLU(), nn.Conv3d(32, 64, 3, 2, 1), nn.SiLU(),
+                                         nn.Conv3d(64, 128, 3, 1, 1), nn.SiLU())
+            self.occ_tok = nn.Linear(128, hidden_dim)
+            self.occ_pe = nn.Sequential(nn.Linear(3 + 3 * 2 * self.occ_nf, hidden_dim), nn.SiLU(), nn.Linear(hidden_dim, hidden_dim))
+            # [R425] occ_grid_resampler K>0: Perceiver 식 resampler — 학습 query K 개가 격자 토큰 (8³=512) 을 cross-attention 으로 읽어
+            #   고정 길이 K 토큰으로 줄인 뒤 DiT 층 CA 가 그 K 개만 본다 (사용자 10-16 "depth 를 다 condition token 으로 넣는건 비효율적").
+            #   0 = 격자 토큰 512 개를 그대로 (위 기본).
+            self.occ_rs = int(occ_grid_resampler)
+            if self.occ_rs > 0:
+                self.occ_rs_q = nn.Parameter(torch.randn(1, self.occ_rs, hidden_dim) * 0.02)
+                self.occ_rs_layers = nn.ModuleList([
+                    nn.ModuleList([nn.LayerNorm(hidden_dim), nn.LayerNorm(hidden_dim), CrossAttention(hidden_dim, num_heads),
+                                   nn.LayerNorm(hidden_dim), FusedMLP(hidden_dim, dropout, nn.GELU, hidden_layer_multiplier=4)])
+                    for _ in range(int(occ_grid_resampler_layers))])
+                self.occ_rs_out = nn.LayerNorm(hidden_dim)
+            self.occ_gate = nn.Parameter(torch.zeros(num_layers))
+            self.occ_layers = nn.ModuleList([
                 nn.ModuleList([nn.LayerNorm(hidden_dim), CrossAttention(hidden_dim, num_heads),
                                FusedMLP(hidden_dim, dropout, nn.GELU, hidden_layer_multiplier=4)])
                 for _ in range(num_layers)])
@@ -503,7 +535,7 @@ class CameraDiffusionModel(nn.Module):
 
     def forward(self, x_t, t, text_emb, text_mask, geo_emb=None, geo_mask=None, cond=None,
                 video_emb=None, video_mask=None, video_text_emb=None, video_text_mask=None,
-                start_pose=None, video_points=None, video_points_valid=None, subject_pts=None):
+                start_pose=None, video_points=None, video_points_valid=None, subject_pts=None, occ_grid=None):
         self.text_cross_attn_weight = None
         # [new 2026-09-03] video CA. `video_latent_dim==0` 이거나 video_emb 가 없으면 이 스트림은
         # 통째로 건너뛴다 = 기존 경로와 동일.
@@ -615,6 +647,31 @@ class CameraDiffusionModel(nn.Module):
             if pstat is not None:                                                             # [R382]
                 x_t = torch.cat([x_t, pstat.to(x_t.dtype)], dim=-1)
 
+        occ_tok = None
+        if getattr(self, 'occ_grid_cond', False):                   # [R425]
+            if occ_grid is None:
+                g = x_t.new_zeros(B, 3, 32, 32, 32); g[:, 2] = 1.0              # 조건 없음 = 전부 unknown
+            else:
+                g = occ_grid.to(x_t.dtype)
+                if self.training and self.occ_dropout > 0:
+                    drop = (torch.rand(B, device=device) < self.occ_dropout)
+                    if drop.any():
+                        g = g.clone(); g[drop] = 0; g[drop, 2] = 1.0
+            fo = self.occ_enc(g)                                                    # (B,128,n,n,n), 축 = 격자 x,y,z
+            n8 = fo.shape[-1]
+            c1 = ((torch.arange(n8, device=device, dtype=fo.dtype) + 0.5) / n8 * 2 - 1) * self.occ_half
+            cc = torch.stack(torch.meshgrid(c1, c1, c1, indexing='ij'), -1).reshape(-1, 3)      # 칸 중심 (frame-s / norm_scale)
+            fr = (2.0 ** torch.arange(self.occ_nf, device=device, dtype=fo.dtype)) * math.pi / self.occ_half
+            ang = cc[..., None] * fr
+            pe = self.occ_pe(torch.cat([cc, ang.sin().flatten(-2), ang.cos().flatten(-2)], -1))
+            occ_tok = self.occ_tok(fo.flatten(2).transpose(1, 2)) + pe[None]
+            if getattr(self, 'occ_rs', 0) > 0:                                       # Perceiver resampler → 고정 K 토큰
+                q = self.occ_rs_q.expand(B, -1, -1).to(occ_tok.dtype)
+                for ln_q, ln_kv, rca, ln_m, rmlp in self.occ_rs_layers:
+                    q = rca(ln_q(q), ln_kv(occ_tok))                                  # CrossAttention = norm(x + attn) (잔차 포함)
+                    q = q + rmlp(ln_m(q))
+                occ_tok = self.occ_rs_out(q)
+
         h = self.cam_in(x_t)
 
         pos_emb = positional_encoding(T, h.shape[-1], device=device).unsqueeze(0).expand(B, -1, -1)
@@ -721,6 +778,11 @@ class CameraDiffusionModel(nn.Module):
                 snorm, subj_ca, smlp = self.subj_layers[_li]
                 sx = subj_ca(snorm(h), subj_tok, key_padding_mask=subj_kpm)
                 h = h + self.subj_gate[_li] * (smlp(sx) + sx)
+
+            if occ_tok is not None:                                                       # [R425] 점유 격자 CA (0 초기화 gate)
+                onorm, occ_ca, omlp = self.occ_layers[_li]
+                ox = occ_ca(onorm(h), occ_tok.to(h.dtype))
+                h = h + self.occ_gate[_li] * (omlp(ox) + ox)
 
             if has_geo_latent:
                 scale2, shift2 = self.mod2(t_embed).chunk(2, dim=-1)

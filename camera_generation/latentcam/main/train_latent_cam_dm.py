@@ -600,6 +600,8 @@ def build_video_cond(data, device):
     # [R291] soft-argmax readout 용 토큰별 3D 점 (dataset video_patch_points). 없으면 키 없음 = 예전과 같은 호출.
     if 'subject_pts' in data:          # [R361] subject 3D 점 집합 → 모델 set encoder (video CA 없는 arm 에서도)
         kw['subject_pts'] = data['subject_pts'].to(device).float()
+    if 'occ_grid' in data:             # [R425] 3D 점유 격자 → 모델 occ CA
+        kw['occ_grid'] = data['occ_grid'].to(device).float()
     if kw and 'video_points' in data:
         kw['video_points'] = data['video_points'].to(device).float()
         kw['video_points_valid'] = data['video_points_valid'].to(device).bool()
@@ -972,6 +974,13 @@ def train():
                 subject_pts_mode=str(getattr(cfg, 'subject_pts_mode', 'pool') or 'pool'),   # [R379]
                 subject_pts_fourier=int(getattr(cfg, 'subject_pts_fourier', 0) or 0),   # [R382]
                 subject_pts_stats=bool(getattr(cfg, 'subject_pts_stats', False)))   # [R382]
+        # [R425] 점유 격자 CA — readout·subject 점과 무관하게 cfg 만 본다 (R382 교훈: 조건 kwargs 를 다른 분기 안에 두지 않는다).
+        if getattr(cfg, 'occ_grid_cond', False):
+            _vid_kw.update(occ_grid_cond=True,
+                           occ_grid_half=float(getattr(cfg, 'occ_grid_half', 2.0) or 2.0),
+                           occ_grid_dropout=float(getattr(cfg, 'occ_grid_dropout', 0.0) or 0.0),
+                           occ_grid_resampler=int(getattr(cfg, 'occ_grid_resampler', 0) or 0),
+                           occ_grid_resampler_layers=int(getattr(cfg, 'occ_grid_resampler_layers', 2) or 2))
     # [new 2026-09-20, D206] aim aux loss 배선 확인. 0 이면 한 줄도 안 찍히고 경로도 안 탄다.
     _aimw0 = float(getattr(cfg, 'aim_loss_w', 0.0) or 0.0)
     if _aimw0 > 0:
@@ -1027,6 +1036,10 @@ def train():
         print(f"(model) subject_pts: dim={model.subject_pts_dim} mode={model.subject_pts_mode} "
               f"fourier={getattr(model, 'subject_pts_fourier', 0)} stats={getattr(model, 'subject_pts_stats', False)} "
               f"params={sum(p.numel() for n, p in model.named_parameters() if 'pts' in n or 'subj' in n)}")
+    if getattr(cfg, 'occ_grid_cond', False):                     # [R425] 같은 규칙 — 격자 모듈이 없으면 기동 즉시 멈춘다
+        assert getattr(model, 'occ_grid_cond', False) and hasattr(model, 'occ_enc'), "occ_grid_cond=true 인데 모델에 점유 격자 모듈이 없다"
+        print(f"(model) occ_grid: half={model.occ_half} dropout={model.occ_dropout} resampler={getattr(model, 'occ_rs', 0)} "
+              f"params={sum(p.numel() for n, p in model.named_parameters() if n.startswith('occ_'))}")
     
     # [new 2026-09-25, R58/D286] video_onfly: connector 를 model submodule 로 붙인다 (resume/opt/ckpt
     # 가 그대로 따라온다). null 이면 None 이고 모델은 예전과 동일하다.

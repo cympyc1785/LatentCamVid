@@ -332,6 +332,7 @@ class CamDataset(torch.utils.data.Dataset):
         self._subject_uv_cache = {}     # [R332] subject_uv_cond
         self._subject_box_cache = {}    # [R357] subject_box_cond
         self._subject_pts_cache = {}    # [R361] subject_pts_cond
+        self._occ_grid_cache = {}       # [R425] occ_grid_cond
         # [new 2026-09-20, D206] aim_loss_w>0: scene_idx -> {seg_key: 1.0 if aim=='look_at' else 0.0}
         # prompts.json 의 `aim` 필드 하나만 뽑아 둔 것. samples 튜플에는 **안 넣는다** —
         # 그 튜플은 <root>/.latentcam_index/*.pt 에 그대로 직렬화돼 있어(_load_index) 원소 수가
@@ -1278,6 +1279,38 @@ class CamDataset(torch.utils.data.Dataset):
             uv, obs = uv[idx], obs[idx]
         return torch.cat([uv - 0.5, obs[:, None], torch.ones(T, 1)], -1)
 
+    def _occ_grid(self, scene_idx, seg_key, norm_scale):
+        """[R425] `<scene>/da3/<occ_grid_file>` (camera_generation/dataset/fit/bank/occ_grid_cache.py) 의 세그먼트 격자 → (3,N,N,N) float 0..1.
+        격자는 굽는 시점의 avg_scale 파일 (`__meta__.avg_scale_dir`) 로 나눠져 있다 — 학습 분모 (`norm_scale`, max_trans_norm 등으로 바뀔 수 있음) 와
+        다르면 좌표를 그 비율로 다시 샘플한다 (q_model = q_file · ns_file / ns). 키가 없으면 (avg_scale 없는 세그먼트) 전부 unknown."""
+        cache = self._occ_grid_cache.get(scene_idx)
+        sd = self.scene_dir_list[scene_idx]
+        if cache is None:
+            p = osp.join(sd, 'da3', str(getattr(self.cfg, 'occ_grid_file', None) or 'occ_grid32.npz'))
+            if not osp.isfile(p):
+                raise FileNotFoundError(f"occ_grid_cond 인데 파일이 없다: {p} — camera_generation/dataset/fit/bank/occ_grid_cache.py 를 먼저 돌릴 것")
+            z = np.load(p, allow_pickle=True)
+            meta = json.loads(str(z['__meta__']))
+            cache = {'meta': meta, 'g': {k: z[k] for k in z.files if k != '__meta__'}}
+            self._occ_grid_cache[scene_idx] = cache
+        n = int(cache['meta']['n'])
+        g = cache['g'].get(str(seg_key))
+        if g is None:
+            out = torch.zeros(3, n, n, n); out[2] = 1.0
+            return out
+        g = torch.from_numpy(g.astype(np.float32) / 255.0)
+        f = osp.join(sd, 'da3', cache['meta']['avg_scale_dir'], f"{seg_key}.json")
+        ns_file = float(json.load(open(f))) if osp.isfile(f) else float(norm_scale)
+        r = ns_file / float(norm_scale)
+        if abs(r - 1.0) > 1e-4:                                          # 분모가 다르면 같은 world 점을 다른 칸에 둔다 → 재샘플
+            c = torch.linspace(-1 + 1 / n, 1 - 1 / n, n) * r             # 모델 칸 중심 → 파일 격자 정규 좌표
+            zz, yy, xx = torch.meshgrid(c, c, c, indexing='ij')
+            grid = torch.stack([xx, yy, zz], -1)[None]                   # grid_sample 마지막 축 = (W,H,D) 좌표. 격자 축 (D,H,W) = 우리 (x,y,z) → zz=D(x) · yy=H(y) · xx=W(z)
+            unk = torch.zeros(3, 1, 1, 1); unk[2] = 1.0
+            gg = torch.nn.functional.grid_sample((g - unk)[None], grid, mode='bilinear', align_corners=False)[0] + unk
+            g = gg
+        return g
+
     def _subject_box(self, scene_idx, seg_key, extrinsics, norm_scale):
         """[R357] subject_box_cond: `<scene>/da3/<subject_box_file>` (fit/bank/export_target_track.py --box) 의 중력 정렬 OBB 반축 벡터
         (world, 열 = l·w·h 축 × extent/2) -> (T,9) frame-s 카메라 좌표 / norm_scale (track 과 같은 게이지, 회전만). 중심은 target_track 이 준다.
@@ -2000,6 +2033,9 @@ class CamDataset(torch.utils.data.Dataset):
             out['subject_box'] = self._subject_box(scene_idx, data_name.split('_')[-1], extrinsics, norm_scale)
         if getattr(self.cfg, 'subject_uv_cond', False):
             out['subject_uv'] = self._subject_uv(scene_idx, data_name.split('_')[-1], extrinsics.shape[0])
+        # [R425] occ_grid_cond: 3D 점유 격자 (3,N,N,N) float [occupied·free·unknown] — frame-s 카메라 / norm_scale (기본 off = 키 없음).
+        if getattr(self.cfg, 'occ_grid_cond', False):
+            out['occ_grid'] = self._occ_grid(scene_idx, data_name.split('_')[-1], norm_scale)
         # [R167] val_traj_shape_metrics: val 의 subject 화면 위치 측정용. 모델·손실이 읽는 'target_track' 과
         #   **다른 키** 로 둔다 (build_track_cond 는 키만 있으면 concat 조건으로 쓰므로 같은 키면 네트워크 입력이 바뀐다).
         if getattr(self.cfg, 'val_traj_shape_metrics', False):

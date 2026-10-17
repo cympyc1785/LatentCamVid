@@ -49,10 +49,25 @@ def seg_grids(occ, free, lo, vox, ext_list, ns_list, n=32, half=2.0, sub=3):
     return out, cell
 
 
+def seg_edts(esdf, lo, vox, ext_list, ns_list, n=64, half=2.0, clip=0.5):
+    """[R429] world 정적 거리장 (esdf_scene 의 EDT, world 단위) → 세그먼트별 (n,n,n) uint8 — frame-s 카메라 / norm_scale 좌표의 칸 중심에서 잰
+    가장 가까운 정적 occupied 까지 거리 / norm_scale, [0, clip] 을 0..255 로. collision 보조 손실 (train collision_loss) 용."""
+    from scipy.ndimage import map_coordinates
+    e = esdf.astype(np.float32); o = (np.arange(n) + 0.5) / n * 2 * half - half
+    Q = np.stack(np.meshgrid(o, o, o, indexing="ij"), -1).reshape(-1, 3)
+    out = []
+    for E, ns in zip(ext_list, ns_list):
+        Pw = (Q * ns - E[0][:3, 3]) @ E[0][:3, :3]
+        d = map_coordinates(e, ((Pw - lo) / vox - 0.5).T, order=1, mode="nearest") / ns
+        out.append(np.rint(np.clip(d, 0, clip) / clip * 255).reshape(n, n, n).astype(np.uint8))
+    return out
+
+
 def scene(video, a, M, v4):
     sd = osp.join(a.corpus, a.seg_prefix, video, "da3")
     gp = osp.join(sd, a.grid_name); jp = osp.join(a.out, "judge", f"{video}.json")
-    if osp.isfile(jp) and (a.no_grid or osp.isfile(gp)) and not a.overwrite:
+    ep = osp.join(sd, a.edt_name) if a.edt_name else None
+    if osp.isfile(jp) and (a.no_grid or osp.isfile(gp)) and (ep is None or osp.isfile(ep)) and not a.overwrite:
         return "skip"
     z = np.load(osp.join(sd, "target_poses.npz"), allow_pickle=True)
     keys = [str(k) for k in z["keys"]]; ext = z["extrinsics"].astype(np.float64)
@@ -65,14 +80,22 @@ def scene(video, a, M, v4):
     keep = {}
     rows = M.esdf_scene(recon, K, S, trajs, keep=keep)
     os.makedirs(osp.dirname(jp), exist_ok=True)
-    json.dump({"video": video, "S": S, "rows": rows}, open(jp, "w"))
-    if a.no_grid:
-        return "judge"
+    if not osp.isfile(jp) or a.overwrite:
+        json.dump({"video": video, "S": S, "rows": rows}, open(jp, "w"))
     ns = []
     for k in keys:
         f = osp.join(sd, a.avg_scale_dir, f"{k}.json")
         ns.append(float(json.load(open(f))) if osp.isfile(f) else np.nan)
     ok = [i for i, x in enumerate(ns) if np.isfinite(x) and x > 0]
+    if ep is not None and (a.overwrite or not osp.isfile(ep)):                  # [R429] 거리장
+        edts = seg_edts(keep["esdf"], keep["lo"], keep["vox"], [ext[i] for i in ok], [ns[i] for i in ok], a.edt_n, a.grid_half, a.edt_clip)
+        np.savez_compressed(ep + ".tmp.npz", **{keys[i]: g for i, g in zip(ok, edts)},
+                            __meta__=np.array(json.dumps({"n": a.edt_n, "half": a.grid_half, "clip": a.edt_clip, "quant": "uint8 = d/clip*255",
+                                                           "frame": "target frame-s camera (OpenCV) / norm_scale", "avg_scale_dir": a.avg_scale_dir,
+                                                           "what": "static occupied (esdf_scene) 까지 거리 / norm_scale", "vox_over_S": keep["vox"] / S})))
+        os.replace(ep + ".tmp.npz", ep)
+    if a.no_grid or (osp.isfile(gp) and not a.overwrite):
+        return f"edt {len(ok)}/{len(keys)}"
     grids, cell = seg_grids(keep["occ"], keep["free"], keep["lo"], keep["vox"], [ext[i] for i in ok], [ns[i] for i in ok],
                             a.grid_n, a.grid_half, a.grid_sub)
     np.savez_compressed(gp + ".tmp.npz", **{keys[i]: g for i, g in zip(ok, grids)},
@@ -127,6 +150,9 @@ def main():
     ap.add_argument("--grid_sub", type=int, default=3)
     ap.add_argument("--avg_scale_dir", default="avg_scale_context_first_cam")   # 학습 avg_scale_ref=context_first_cam 과 같게
     ap.add_argument("--no_grid", action="store_true")
+    ap.add_argument("--edt_name", default="")                       # [R429] 예 occ_edt64.npz — 세그먼트별 거리장 (collision 손실용). 비우면 안 굽는다 (예전)
+    ap.add_argument("--edt_n", type=int, default=64)
+    ap.add_argument("--edt_clip", type=float, default=0.5)
     ap.add_argument("--overwrite", action="store_true")
     ap.add_argument("--drop_min_frames", type=int, default=3)    # summary: ESDF 충돌 프레임이 이 이상이면 정제 목록에서 뺀다
     # esdf_scene 인자 (pred_collision_rate 기본값 그대로)

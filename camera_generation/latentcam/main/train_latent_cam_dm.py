@@ -485,6 +485,32 @@ def start_pose_loss(raw_model, data, device):
     return loss, trans_err, rot_err
 
 
+def collision_loss(cfg, camera_vae, noisy_x, v_pred, tau, data, device):
+    """[R429] ESDF hinge 보조 손실 (flow matching 전용). x0_hat = x_t − τ·v (선형 경로) → frozen VAE decode → 카메라 중심 c = −Rᵀt
+    (frame-s 카메라 / norm_scale = 거리장 좌표, aim_loss 게이지 주석 참고) → 세그먼트 거리장 (`occ_edt`, 정적 occupied 까지 거리 / norm_scale) 을
+    trilinear 로 읽어 relu(margin − d)² / margin² . τ < collision_loss_max_tau 표본만 (τ 큰 x0_hat 은 궤적이라 부를 수 없다).
+    근거: ThreeDiff 류 SDF 손실 ReLU(d_th − d_sdf)², DIMOS voxel penetration 손실. 반환 (loss, 충돌 프레임 비율 (d < 0.02), n 표본)."""
+    edt = data.get('occ_edt')
+    if edt is None:
+        return None
+    edt = edt.to(device).float()
+    B = noisy_x.shape[0]
+    x0_hat = (noisy_x - tau.view(-1, 1, 1) * v_pred).clamp(-30.0, 30.0)
+    traj_hat = camera_vae.decode(x0_hat * cfg.vae_latent_scale) if getattr(cfg, 'use_vae', False) else x0_hat
+    T = traj_hat.shape[1]
+    R = compute_rotation_matrix_from_ortho6d(traj_hat[..., 0:6].reshape(-1, 6)).view(B, T, 3, 3)
+    c = -torch.einsum('...ji,...j->...i', R, traj_hat[..., 6:9])                  # (B,T,3) frame-s / norm_scale
+    half = float(getattr(cfg, 'occ_grid_half', 2.0) or 2.0)
+    grid = (c[..., [2, 1, 0]] / half).float().view(B, 1, 1, T, 3)              # bf16 autocast 아래에서도 grid·edt dtype 을 맞춘다                         # grid_sample 마지막 축 (W,H,D) = 격자 (z,y,x)
+    d = F.grid_sample(edt, grid, mode='bilinear', padding_mode='border', align_corners=False).view(B, T)
+    mg = float(getattr(cfg, 'collision_loss_margin', 0.05))
+    m = (tau < float(getattr(cfg, 'collision_loss_max_tau', 0.5))).float().view(B, 1).expand(B, T)
+    h = torch.relu(mg - d) ** 2 / mg ** 2
+    loss = (h * m).sum() / m.sum().clamp(min=1.0)
+    frac = ((d < 0.02).float() * m).sum() / m.sum().clamp(min=1.0)
+    return loss, frac.detach(), m[:, 0].sum().detach()
+
+
 def aim_loss(cfg, camera_vae, noise_scheduler, noisy_x, noise_pred, timesteps, data, device):
     """[new 2026-09-20, D206] 카메라 forward 와 (카메라중심→subject) 사이 각을 좁히는 보조 손실.
 
@@ -981,6 +1007,11 @@ def train():
                            occ_grid_dropout=float(getattr(cfg, 'occ_grid_dropout', 0.0) or 0.0),
                            occ_grid_resampler=int(getattr(cfg, 'occ_grid_resampler', 0) or 0),
                            occ_grid_resampler_layers=int(getattr(cfg, 'occ_grid_resampler_layers', 2) or 2))
+    # [R429] collision 손실 배선 확인 (0 이면 안 찍힘).
+    if float(getattr(cfg, 'collision_loss_w', 0.0) or 0.0) > 0:
+        assert bool(getattr(cfg, 'use_vae', False)), "collision_loss 는 latent arm 전용"
+        print(f"(loss) collision: w={cfg.collision_loss_w} max_tau={getattr(cfg, 'collision_loss_max_tau', 0.5)} "
+              f"margin={getattr(cfg, 'collision_loss_margin', 0.05)} edt={getattr(cfg, 'occ_edt_file', 'occ_edt64.npz')}")
     # [new 2026-09-20, D206] aim aux loss 배선 확인. 0 이면 한 줄도 안 찍히고 경로도 안 탄다.
     _aimw0 = float(getattr(cfg, 'aim_loss_w', 0.0) or 0.0)
     if _aimw0 > 0:
@@ -1067,6 +1098,18 @@ def train():
             _p.requires_grad_(False)
         print(f"(readout freeze) {sum(p.numel() for p in model.readout.parameters()) / 1e6:.2f} M params 고정")
 
+    # [R429] train_only_prefixes: 이 이름 접두사로 시작하는 파라미터만 학습 (나머지 requires_grad False). 예 ['occ_'] = 점유 격자 adapter 만
+    #   (SceneAdapt 식: 학습된 base (load_ckpt_path warm-start) 를 고정하고 0 초기화 gate 의 조건 모듈만 붙인다). null (기본) = 전부 학습 = 예전.
+    _top = getattr(cfg, 'train_only_prefixes', None)
+    if _top:
+        _top = [str(x) for x in _top]
+        _n_on = 0
+        for _n, _p in model.named_parameters():
+            _on = any(_n.startswith(x) for x in _top)
+            _p.requires_grad_(_on); _n_on += _p.numel() if _on else 0
+        assert _n_on > 0, f"train_only_prefixes={_top} 에 걸리는 파라미터가 없다"
+        print(f"(train_only) {_top}: {_n_on / 1e6:.2f} M params 학습 · 나머지 고정")
+
     # Load weights from the (peeked) resume checkpoint. Optimizer/step/epoch are
     # restored after accelerator.prepare() below (full resume only).
     if _resume is not None:
@@ -1113,7 +1156,7 @@ def train():
             print(f"(resume) geo encoder from {cfg.load_ckpt_path} "
                   f"(missing={len(_gm)} [frozen DINO 포함], unexpected={len(_gu)})")
     else:
-        opt = torch.optim.AdamW(model.parameters(), lr=cfg.lr)
+        opt = torch.optim.AdamW([p for p in model.parameters() if p.requires_grad], lr=cfg.lr)   # [R429] 고정 파라미터 제외 (전부 학습이면 예전과 같다)
         _opt_param_names = [n for n, _ in model.named_parameters()]
 
     if cfg.use_vae:
@@ -1751,6 +1794,7 @@ def train():
             _aux = None                                  # readout 보조 손실 (없으면 None)
             _aim = None                                  # [D206] aim 보조 손실 (없으면 None)
             _sp = None                                   # [D261] 시작 pose 손실 (없으면 None)
+            _col = None                                  # [R429] collision 보조 손실 (없으면 None)
             if getattr(cfg, 'is_ar', False):
                 # chunk-wise AR: teacher-forced causal self-attn over past clean latents
                 _raw = accelerator.unwrap_model(model)
@@ -1823,6 +1867,13 @@ def train():
                     _sl = readout_smooth_loss(accelerator.unwrap_model(model))
                     if _sl is not None:
                         loss = loss + _sw * _sl
+                # [R429] ESDF hinge 보조 손실 (collision_loss_w=0 기본 = 호출 안 함, 예전과 비트 동일).
+                _cw = float(getattr(cfg, 'collision_loss_w', 0.0) or 0.0)
+                if _cw > 0:
+                    assert _fm, "collision_loss 는 objective=fm 전용 (x0 = x_t − τ·v)"
+                    _col = collision_loss(cfg, camera_vae if cfg.use_vae else None, noisy_x, noise_pred[..., :traj_latents.shape[-1]], _tau, data, device)
+                    if _col is not None:
+                        loss = loss + _cw * _col[0]
                 # [new 2026-09-20, D206] aim 보조 손실. aim_loss_w=0 (기본) 이면 호출조차
                 # 안 하므로 VAE decode 비용도 0 이고 loss 가 예전과 비트 동일하다.
                 _aim_w = float(getattr(cfg, 'aim_loss_w', 0.0) or 0.0)
@@ -1846,6 +1897,8 @@ def train():
             _tE = _tick()                                # backward+step 끝
             # [R108] lr 은 schedule 과 무관하게 항상 기록 (사용자 "다른 모델 학습들도 train/lr 기록되게").
             _log = {"train/loss": loss.item(), "train/lr": _real_opt_lr.param_groups[0]['lr']}
+            if _col is not None:                                          # [R429]
+                _log.update({"train/col_loss": float(_col[0]), "train/col_frac": float(_col[1]), "train/col_n": float(_col[2])})
             if _FR > 0:   # [R236] 카메라·framing 손실을 따로 (L1 이 학습 안 되던 원인 추적)
                 _log.update({"train/cam_loss": _fr_log[0], "train/framing_loss": _fr_log[1], "train/framing_mask": _fr_log[2],
                              "train/framing_absmax": _fr_log[3]})

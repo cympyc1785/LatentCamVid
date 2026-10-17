@@ -333,6 +333,7 @@ class CamDataset(torch.utils.data.Dataset):
         self._subject_box_cache = {}    # [R357] subject_box_cond
         self._subject_pts_cache = {}    # [R361] subject_pts_cond
         self._occ_grid_cache = {}       # [R425] occ_grid_cond
+        self._occ_edt_cache = {}        # [R429] collision_loss_w>0
         # [new 2026-09-20, D206] aim_loss_w>0: scene_idx -> {seg_key: 1.0 if aim=='look_at' else 0.0}
         # prompts.json 의 `aim` 필드 하나만 뽑아 둔 것. samples 튜플에는 **안 넣는다** —
         # 그 튜플은 <root>/.latentcam_index/*.pt 에 그대로 직렬화돼 있어(_load_index) 원소 수가
@@ -1311,6 +1312,35 @@ class CamDataset(torch.utils.data.Dataset):
             g = gg
         return g
 
+    def _occ_edt(self, scene_idx, seg_key, norm_scale):
+        """[R429] `<scene>/da3/<occ_edt_file>` (occ_grid_cache.py --edt_name) 의 세그먼트 거리장 → (1,N,N,N) float — 칸 중심에서 정적 occupied 까지
+        거리 / norm_scale ([0, clip], frame-s 카메라 / norm_scale 좌표의 [-half,half]³). 학습 분모가 굽는 시점 avg_scale 과 다르면 좌표·거리를 같은 비율로
+        바꾼다 (_occ_grid 와 같은 규칙). 키가 없으면 전부 clip (= 멀다, 손실 0)."""
+        cache = self._occ_edt_cache.get(scene_idx)
+        sd = self.scene_dir_list[scene_idx]
+        if cache is None:
+            p = osp.join(sd, 'da3', str(getattr(self.cfg, 'occ_edt_file', None) or 'occ_edt64.npz'))
+            if not osp.isfile(p):
+                raise FileNotFoundError(f"collision_loss_w>0 인데 파일이 없다: {p} — occ_grid_cache.py --edt_name 을 먼저 돌릴 것")
+            z = np.load(p, allow_pickle=True)
+            cache = {'meta': json.loads(str(z['__meta__'])), 'g': {k: z[k] for k in z.files if k != '__meta__'}}
+            self._occ_edt_cache[scene_idx] = cache
+        n, clip = int(cache['meta']['n']), float(cache['meta']['clip'])
+        g = cache['g'].get(str(seg_key))
+        if g is None:
+            return torch.full((1, n, n, n), clip)
+        g = torch.from_numpy(g.astype(np.float32) / 255.0 * clip)[None]
+        f = osp.join(sd, 'da3', cache['meta']['avg_scale_dir'], f"{seg_key}.json")
+        ns_file = float(json.load(open(f))) if osp.isfile(f) else float(norm_scale)
+        r = ns_file / float(norm_scale)
+        if abs(r - 1.0) > 1e-4:
+            c = torch.linspace(-1 + 1 / n, 1 - 1 / n, n) * r
+            zz, yy, xx = torch.meshgrid(c, c, c, indexing='ij')
+            g = torch.nn.functional.grid_sample((g - clip)[None], torch.stack([xx, yy, zz], -1)[None], mode='bilinear',
+                                                align_corners=False)[0] + clip
+            g = (g * r).clamp(max=clip)                                   # 거리도 새 분모로
+        return g
+
     def _subject_box(self, scene_idx, seg_key, extrinsics, norm_scale):
         """[R357] subject_box_cond: `<scene>/da3/<subject_box_file>` (fit/bank/export_target_track.py --box) 의 중력 정렬 OBB 반축 벡터
         (world, 열 = l·w·h 축 × extent/2) -> (T,9) frame-s 카메라 좌표 / norm_scale (track 과 같은 게이지, 회전만). 중심은 target_track 이 준다.
@@ -2036,6 +2066,9 @@ class CamDataset(torch.utils.data.Dataset):
         # [R425] occ_grid_cond: 3D 점유 격자 (3,N,N,N) float [occupied·free·unknown] — frame-s 카메라 / norm_scale (기본 off = 키 없음).
         if getattr(self.cfg, 'occ_grid_cond', False):
             out['occ_grid'] = self._occ_grid(scene_idx, data_name.split('_')[-1], norm_scale)
+        # [R429] collision 보조 손실의 거리장 (1,N,N,N) — 손실 전용 (모델 입력 아님). collision_loss_w=0 (기본) 이면 키 없음.
+        if float(getattr(self.cfg, 'collision_loss_w', 0.0) or 0.0) > 0:
+            out['occ_edt'] = self._occ_edt(scene_idx, data_name.split('_')[-1], norm_scale)
         # [R167] val_traj_shape_metrics: val 의 subject 화면 위치 측정용. 모델·손실이 읽는 'target_track' 과
         #   **다른 키** 로 둔다 (build_track_cond 는 키만 있으면 concat 조건으로 쓰므로 같은 키면 네트워크 입력이 바뀐다).
         if getattr(self.cfg, 'val_traj_shape_metrics', False):

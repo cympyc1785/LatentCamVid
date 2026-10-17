@@ -597,6 +597,7 @@ def aim_loss(cfg, camera_vae, noise_scheduler, noisy_x, noise_pred, timesteps, d
 # [new 2026-09-25, R58/D286] cfg.video_onfly 의 frozen ViT + 학습 connector. main()/eval_testset 이
 # `models.molmo2_video_connector.build_video_onfly` 로 채운다. None(기본)이면 아래 분기가 안 돈다.
 VIDEO_ONFLY = None
+DPO_REF = None   # [R430] Diffusion-DPO 기준 모델 (main 이 채운다)
 
 
 def build_video_cond(data, device):
@@ -1118,6 +1119,14 @@ def train():
         print(f"(resume) {_kind} model from {cfg.load_ckpt_path} "
               f"(missing={len(_mm)}, unexpected={len(_uu)})")
 
+    # [R430] DPO 기준 모델 = warm-start 직후 가중치의 고정 사본 (eval · requires_grad False).
+    global DPO_REF
+    if float(getattr(cfg, 'dpo_beta', 0.0) or 0.0) > 0:
+        assert getattr(cfg, 'load_ckpt_path', None), "dpo 는 load_ckpt_path (기준 모델) 가 필요하다"
+        assert getattr(cfg, 'dpo_pairs_file', None), "dpo_beta>0 인데 dpo_pairs_file 이 없다"
+        import copy
+        DPO_REF = copy.deepcopy(model).eval().requires_grad_(False).to(device)
+        print(f"(loss) dpo: beta={cfg.dpo_beta} sft_w={getattr(cfg, 'dpo_sft_w', 1.0)} pairs={cfg.dpo_pairs_file}")
     model.train()
     # [new 2026-08-07] geo_encoder='custom' 은 frozen 이 아니다 (안쪽 DINOv2 만 frozen). 그
     # 파라미터를 optimizer 에 넣지 않으면 GeoTokenizer/ln/proj 가 랜덤 초기값에 영원히 머문다.
@@ -1795,6 +1804,7 @@ def train():
             _aim = None                                  # [D206] aim 보조 손실 (없으면 None)
             _sp = None                                   # [D261] 시작 pose 손실 (없으면 None)
             _col = None                                  # [R429] collision 보조 손실 (없으면 None)
+            _dpo = None                                  # [R430] DPO (없으면 None)
             if getattr(cfg, 'is_ar', False):
                 # chunk-wise AR: teacher-forced causal self-attn over past clean latents
                 _raw = accelerator.unwrap_model(model)
@@ -1874,6 +1884,25 @@ def train():
                     _col = collision_loss(cfg, camera_vae if cfg.use_vae else None, noisy_x, noise_pred[..., :traj_latents.shape[-1]], _tau, data, device)
                     if _col is not None:
                         loss = loss + _cw * _col[0]
+                # [R430] Diffusion-DPO (Wallace et al. CVPR 2024) 를 flow matching 에: 같은 조건·같은 (τ, ε) 로 선호 w / 비선호 l 궤적의 속도 오차를
+                #   현재 모델 θ 와 고정 기준 모델 ref 에서 재고 −log σ(−β[(e_θw − e_rw) − (e_θl − e_rl)]). GT 손실은 dpo_sft_w 배로 남긴다 (분포 유지).
+                _dpo = None
+                if float(getattr(cfg, 'dpo_beta', 0.0) or 0.0) > 0 and 'dpo_cam_w' in data:
+                    assert _fm, "dpo 는 objective=fm 전용"
+                    _lat = [(camera_vae.encode(data[_k].to(device)) / cfg.vae_latent_scale) if cfg.use_vae else data[_k].to(device)
+                            for _k in ('dpo_cam_w', 'dpo_cam_l')]
+                    _ep = torch.randn_like(_lat[0]); _tv = _tau.view(-1, 1, 1)
+                    _errs = []
+                    for _m, _grad in ((model, True), (DPO_REF, False)):
+                        for _x in _lat:
+                            _xt = (1.0 - _tv) * _x + _tv * _ep
+                            with torch.set_grad_enabled(_grad):
+                                _vp = _m(_xt, timesteps.float(), text_embeds, text_masks, pc_embeds, pc_masks, cond=_cond, start_pose=_spin, **_vkw)
+                            _errs.append(((_vp[..., :_x.shape[-1]] - (_ep - _x)) ** 2).mean(dim=(1, 2)))
+                    _d = (_errs[0] - _errs[2].detach()) - (_errs[1] - _errs[3].detach())
+                    _dl = -F.logsigmoid(-float(cfg.dpo_beta) * _d).mean()
+                    _dpo = (_dl.detach(), (_d < 0).float().mean().detach(), (_errs[0] - _errs[1]).mean().detach())
+                    loss = float(getattr(cfg, 'dpo_sft_w', 1.0)) * loss + _dl
                 # [new 2026-09-20, D206] aim 보조 손실. aim_loss_w=0 (기본) 이면 호출조차
                 # 안 하므로 VAE decode 비용도 0 이고 loss 가 예전과 비트 동일하다.
                 _aim_w = float(getattr(cfg, 'aim_loss_w', 0.0) or 0.0)
@@ -1897,6 +1926,8 @@ def train():
             _tE = _tick()                                # backward+step 끝
             # [R108] lr 은 schedule 과 무관하게 항상 기록 (사용자 "다른 모델 학습들도 train/lr 기록되게").
             _log = {"train/loss": loss.item(), "train/lr": _real_opt_lr.param_groups[0]['lr']}
+            if _dpo is not None:                                          # [R430] dpo 손실 · 선호 쪽 오차가 더 작아진 비율 · e_θw − e_θl
+                _log.update({"train/dpo_loss": float(_dpo[0]), "train/dpo_acc": float(_dpo[1]), "train/dpo_margin": float(_dpo[2])})
             if _col is not None:                                          # [R429]
                 _log.update({"train/col_loss": float(_col[0]), "train/col_frac": float(_col[1]), "train/col_n": float(_col[2])})
             if _FR > 0:   # [R236] 카메라·framing 손실을 따로 (L1 이 학습 안 되던 원인 추적)

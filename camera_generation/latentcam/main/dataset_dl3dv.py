@@ -2024,6 +2024,17 @@ class CamDataset(torch.utils.data.Dataset):
             norm_scale = self._cam_dist_mean_scale(extrinsics)
         out = self._target_out(extrinsics, intrinsics, norm_scale, h, w, caption, data_name)
         norm_scale = out['norm_scale']
+        # [R430] Diffusion-DPO 쌍: dpo_pairs_file (npz names · w2c (P,2,T,4,4) [선호, 비선호], world OpenCV) → GT 와 같은 cam_param 규약.
+        #   상대 기준은 **GT frame-s** (rel = E_pred @ inv(E_gt[0])) — 모델 출력 좌표 (track·box 조건과 같은 frame-s) 를 그대로 둔다. intrinsics 채널은 GT 값.
+        if getattr(self.cfg, 'dpo_pairs_file', None):
+            if not hasattr(self, '_dpo'):
+                z = np.load(self.cfg.dpo_pairs_file, allow_pickle=True)
+                self._dpo = {str(n): torch.from_numpy(np.asarray(e, np.float32)) for n, e in zip(z['names'], z['w2c'])}
+            pr = self._dpo.get(str(data_name))                     # 쌍이 없는 세그먼트 (eval 의 test 등) 는 키 없음 — 학습 list 는 쌍 목록이라 전부 있다
+            e0i = torch.linalg.inv(extrinsics[0].float())
+            for _k, E in ((('dpo_cam_w', pr[0]), ('dpo_cam_l', pr[1])) if pr is not None else ()):
+                rel = E @ e0i
+                out[_k] = torch.cat([rel[:, :3, 0], rel[:, :3, 1], rel[:, :3, 3] / norm_scale.float(), out['cam_param'][:, 9:]], -1).float()
 
         # [new 2026-08-27] subject OBB track concat 조건. 기본 target_track_dim=0 = 이 블록을
         # 아예 안 탄다 (기존 arm 비트 동일). extrinsics 는 위에서 이미 target 궤적으로 교체된

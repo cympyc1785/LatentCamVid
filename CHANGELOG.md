@@ -17,6 +17,8 @@
 
 ### Added
 
+- **`molmo2_track_lift.py --pairs_file`** (R445). 줄마다 `<video>__<anchor>` — 그 (영상, anchor) 쌍만 point·comb·lift 한다 (같은 영상의 다른 anchor 는 건너뜀). 기본 빈 값 = 예전과 같음.
+
 - **`--variant_whitelist`** (`fit/convert/vista4d_bank_to_dl3dv.py` · `exec/run_corpus_export.py`, R443). json `{video: [variant_id…]}` 에 적힌 변이만 내보낸다 (filter_variants ⑤, 히스토그램 키 `not_whitelisted`). 품질·preset 계열 균형으로 바깥에서 고른 v5f 50k 코퍼스용. 기본 None 이면 예전과 비트 동일.
 - **TRUMANS pilot bank config** `configs/bank/r442_trumans_v5f_pilot.json` (v5f 방법론 이식: cloud npz · collision both · anchor 사람만 · blend_gt_z_up · route --anchor_seg_root TRUMANS) · `r442b_trumans_meshmargin.json` (collision mesh · mesh_margin_frac 0.02 · framing 하한 전 preset) (R442).
 

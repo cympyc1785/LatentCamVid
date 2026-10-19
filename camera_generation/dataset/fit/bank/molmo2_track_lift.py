@@ -44,6 +44,7 @@ FPS = 2.0
 
 
 VIDEOS = None                     # [R386] --videos_file 로 영상 제한 (None = 코퍼스 전부)
+PAIRS = None                      # [R445] --pairs_file 로 (video, anchor) 쌍 제한 (None = 영상의 anchor 전부)
 DESC_TEMPLATE = "the {q}"         # [R434] --desc_template (부위 지정 질문). 기본 = 예전 문장
 
 
@@ -58,7 +59,8 @@ def pairs(corpus):
             continue
         z = np.load(p, allow_pickle=True)
         for a in sorted({str(x) for x in z["anchor_id"]}):
-            out.append((v, a))
+            if PAIRS is None or (v, a) in PAIRS:
+                out.append((v, a))
     return out
 
 
@@ -710,9 +712,12 @@ if __name__ == "__main__":
     # [R434] 부위 지정 (예 얼굴): Molmo2 질문 대상구 템플릿 · comb 의 SAM3 명사. 기본값이면 예전과 같은 질문·명사.
     ap.add_argument("--desc_template", default="the {q}")                    # 예 "the face of the {q}" → "Point to the face of the …"
     ap.add_argument("--label_override", default="")                          # 예 "face"
+    ap.add_argument("--pairs_file", default="")                              # [R445] 줄마다 "<video>__<anchor>" — 이 쌍만
     ap.add_argument("--check_out", default="/data1/cympyc1785/LatentCamVid/tmp/r343/molmo2_track_check.csv")
     a = ap.parse_args()
     if a.videos_file:                                   # [R386]
         VIDEOS = set(open(a.videos_file).read().split())
     DESC_TEMPLATE = a.desc_template
+    if a.pairs_file:                                    # [R445]
+        PAIRS = {tuple(x.split("__", 1)) for x in open(a.pairs_file).read().split()}
     {"gen": stage_gen, "lift": stage_lift, "check": stage_check, "point": stage_point, "sam3": stage_sam3, "sam3lift": stage_sam3lift, "sam3box": stage_sam3box, "sam3text": stage_sam3text, "comb": stage_comb}[a.stage](a)

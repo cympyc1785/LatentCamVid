@@ -314,6 +314,8 @@ occ_edt_file: occ_edt64.npz
 #   기준 모델 = load_ckpt_path 가중치 고정 사본. GT 손실은 dpo_sft_w 배. 0 = 끔 (예전).
 dpo_beta: 0.0
 dpo_sft_w: 1.0
+# [A3] true = collision hinge 를 dpo_sft_w 배에서 빼서 그대로 더한다 (sft 0 hard DPO 에서도 hinge 유지). false = 예전.
+dpo_hinge_keep: false
 dpo_pairs_file: null
 # [R361] subject 3D 점 집합 (CoTracker3 · GT mask, frame-s 카메라 / norm_scale) 을 set encoder (점별 MLP + max·mean pool) 로 프레임마다
 #   subject_pts_dim 특징 → cam latent 에 concat. <scene>/da3/subject_points.npz 필요 (dataset/fit/bank/export_subject_points.py). false = 예전.

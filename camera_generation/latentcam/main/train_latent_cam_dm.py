@@ -1882,7 +1882,7 @@ def train():
                 if _cw > 0:
                     assert _fm, "collision_loss 는 objective=fm 전용 (x0 = x_t − τ·v)"
                     _col = collision_loss(cfg, camera_vae if cfg.use_vae else None, noisy_x, noise_pred[..., :traj_latents.shape[-1]], _tau, data, device)
-                    if _col is not None:
+                    if _col is not None and not getattr(cfg, 'dpo_hinge_keep', False):
                         loss = loss + _cw * _col[0]
                 # [R430] Diffusion-DPO (Wallace et al. CVPR 2024) 를 flow matching 에: 같은 조건·같은 (τ, ε) 로 선호 w / 비선호 l 궤적의 속도 오차를
                 #   현재 모델 θ 와 고정 기준 모델 ref 에서 재고 −log σ(−β[(e_θw − e_rw) − (e_θl − e_rl)]). GT 손실은 dpo_sft_w 배로 남긴다 (분포 유지).
@@ -1903,6 +1903,9 @@ def train():
                     _dl = -F.logsigmoid(-float(cfg.dpo_beta) * _d).mean()
                     _dpo = (_dl.detach(), (_d < 0).float().mean().detach(), (_errs[0] - _errs[1]).mean().detach())
                     loss = float(getattr(cfg, 'dpo_sft_w', 1.0)) * loss + _dl
+                # [A3] dpo_hinge_keep=true: hinge 를 dpo_sft_w 배에서 빼서 그대로 더한다 (sft 0 인 hard DPO 에서도 hinge 유지). false = 예전 (sft_w 배).
+                if _cw > 0 and getattr(cfg, 'dpo_hinge_keep', False) and _col is not None:
+                    loss = loss + _cw * _col[0]
                 # [new 2026-09-20, D206] aim 보조 손실. aim_loss_w=0 (기본) 이면 호출조차
                 # 안 하므로 VAE decode 비용도 0 이고 loss 가 예전과 비트 동일하다.
                 _aim_w = float(getattr(cfg, 'aim_loss_w', 0.0) or 0.0)

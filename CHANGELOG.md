@@ -17,6 +17,8 @@
 
 ### Added
 
+- **`dpo_hinge_keep`** (train_latent_cam_dm, 기본 false). true 면 collision hinge 를 `dpo_sft_w` 배에서 빼서 그대로 더한다 — sft 0 인 hard DPO 에서도 hinge 가 걸린다 (A3 · R440). false 면 예전과 비트 동일.
+
 - **`pred_collision_rate.knn_scene(keep=)`** (R439). esdf_scene 과 같은 규약으로 프레임별 판정 (`coll`/`free`/`unk`) 을 `keep["cls"][(arm, entry)]` 에 남긴다. 기본 None 이라 기존 CLI 출력은 그대로.
 - dataset `fit/bank/molmo2_track_lift.py --desc_template · --label_override` (R434): 부위 지정 — Molmo2 질문 대상구 템플릿 (예 "the face of the {q}") · comb 의 SAM3 명사 (예 face). 기본값이면 예전 질문·명사 그대로, override 실행은 코퍼스 sam3_text_label 을 채우지 않는다.
 - latentcam Diffusion-DPO (R430, `dpo_beta` 기본 0): `dpo_pairs_file` (npz names · w2c (P,2,T,4,4) [선호, 비선호] world OpenCV) 의 쌍을 GT frame-s 기준 cam_param 으로 (dataset), 같은 (τ, ε) 에서 θ·ref 속도 오차로 −log σ(−β[(e_θw − e_rw) − (e_θl − e_rl)]) (flow matching). ref = load_ckpt_path 가중치 고정 사본, GT 손실은 `dpo_sft_w` 배. wandb train/dpo_loss·dpo_acc·dpo_margin. 쌍이 없는 세그먼트는 키 없음.

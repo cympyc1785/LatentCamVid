@@ -65,6 +65,10 @@ def board_folder(video: str, recon_root: str = RECON_ROOT_DEFAULT):
         return None
     cands = [d for d in glob(path.join(recon_root, f"{parts[1]}-*"))
              if _UUID_RE.match(path.basename(d))]
+    if not cands:
+        # [R446] `<uuid>_lph_ng` 처럼 접미사가 붙은 recording 폴더 — 이 board key 의 manifest 가 든 폴더만 받는다.
+        cands = [d for d in glob(path.join(recon_root, f"{parts[1]}-*"))
+                 if path.isfile(path.join(d, f"manifest_{parts[2]}.json"))]
     return (cands[0] if len(cands) == 1 else None), parts[2]
 
 

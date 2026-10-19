@@ -11,6 +11,8 @@
 
 ### Fixed
 
+- **`scene_graph.gt_trumans.board_folder`** (R446). recon 작업 폴더가 `<uuid>_lph_ng` 인 board 클립의 GT 중력을 못 찾아 graph 가 실패. uuid 폴더가 없을 때만 그 board key 의 manifest 가 든 폴더를 받는다 (예전 클립은 동작 같음).
+
 - **TRUMANS `.blend` 경로 규칙** (R446). 폴더에 `_` 접미사가 붙은 recording (`<uuid>_lph_ng/<uuid>.blend`, 4a080499 · 4a87a708) 을 못 찾아 board 원본이 0 개였다. `trumans_to_recon.main` · `lbm/blender_raycast.blend_of` · `bank_to_blender_poses.chunk_paths` 가 같은 규칙으로 찾는다 (사본 `<uuid> - 副本` 은 계속 제외).
 
 - **subject 점 조건이 readout 없는 arm 에서 모델에 안 들어가던 문제** (R382). `train_latent_cam_dm.py` · `eval_testset.py` 가 `subject_pts_*` kwargs 를 `peav_readout_layers>0` 블록 안에서만 넘겨, MTp · MTpf · R379 첫 기동분은 점 모듈 없이 학습됐다. 블록 밖으로 옮기고, `subject_pts_cond=true` 인데 모듈이 없으면 assert.

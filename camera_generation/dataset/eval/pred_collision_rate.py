@@ -86,7 +86,7 @@ def _cloud(recon, K):
     return D, sky, Cw, pts_s, pts_d, P
 
 
-def knn_scene(recon, K, S, trajs):
+def knn_scene(recon, K, S, trajs, keep=None):
     """[R374] `--method knn` — esdf 와 같은 3 상태 판정을 voxel 없이. occupied = 정적 점 KD-tree 최근접 거리 < r (동적은 esdf 와 같음),
     free = 질의 카메라 중심을 소스 프레임마다 투영해 `0 < z < depth − vox_frac·S` 인 프레임이 하나라도 있거나 소스 카메라 반경 r 안,
     나머지 unknown. 격자를 안 만들고 질의 점 (궤적 49 프레임) 만 재므로 esdf 의 voxel 양자화가 없다."""
@@ -120,6 +120,8 @@ def knn_scene(recon, K, S, trajs):
             tr = trees[int(round(f * (T - 1) / max(Tp - 1, 1)))]
             cd[f] = tr is not None and tr.query(C[f], distance_upper_bound=r)[0] < r
         nc = cs | cd; unk = ~nc & ~free; fr = ~nc & free
+        if keep is not None:                # [R439] 프레임별 판정 (esdf_scene keep 과 같은 규약)
+            keep.setdefault("cls", {})[(arm, name)] = ["coll" if c else ("free" if f_ else "unk") for c, f_ in zip(nc, free)]
         out.append({"arm": arm, "entry": name, "coll_any": float(nc.any()), "coll_frac": nc.mean(), "coll_static_frac": cs.mean(),
                     "coll_dyn_frac": cd.mean(), "unk_frac": unk.mean(), "unk_any": float(unk.any()), "free_frac": fr.mean(),
                     "coll_or_unk_any": float((nc | unk).any()), "vox": vox / S, "n_vox": 0, "occ_frac": 0.0, "free_vox_frac": 0.0})

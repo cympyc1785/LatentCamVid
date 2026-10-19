@@ -11,11 +11,16 @@
 
 ### Fixed
 
+- **TRUMANS `.blend` 경로 규칙** (R446). 폴더에 `_` 접미사가 붙은 recording (`<uuid>_lph_ng/<uuid>.blend`, 4a080499 · 4a87a708) 을 못 찾아 board 원본이 0 개였다. `trumans_to_recon.main` · `lbm/blender_raycast.blend_of` · `bank_to_blender_poses.chunk_paths` 가 같은 규칙으로 찾는다 (사본 `<uuid> - 副本` 은 계속 제외).
+
 - **subject 점 조건이 readout 없는 arm 에서 모델에 안 들어가던 문제** (R382). `train_latent_cam_dm.py` · `eval_testset.py` 가 `subject_pts_*` kwargs 를 `peav_readout_layers>0` 블록 안에서만 넘겨, MTp · MTpf · R379 첫 기동분은 점 모듈 없이 학습됐다. 블록 밖으로 옮기고, `subject_pts_cond=true` 인데 모듈이 없으면 assert.
 - **VAE worldtraj 캐시 translation 분모를 scene scale 로** (R175). `train_camera_vae.py --wt_norm avg_scale` (기본) — 창별 mean‖R_w2c p + t_w2c‖ (scene.ply 점, Dataset-v1 transforms avg_scale · worldtraj avg_scale/{k}.json 과 같은 정의, 3창 일치 확인). 새 stage `wt_scale` (병렬, → cache/wt_avg_scale.json), cameras.json 목록은 cache/wt_files.json 에 저장해 재사용. R125~R170 은 창 카메라 이동거리 s / m1 로 나눴다 (`--wt_norm cam_disp` 로 재현).
 - **VAE worldtraj 캐시의 cameras.json 해석 c2w → w2c** (R169). `train_camera_vae.py --stage cache_wt` 가 `rotation`/`position` 을 c2w 로 읽어 worldtraj 창(학습 228,130 · test 2,846)이 전부 역궤적이었다. 레포 규약(`main/dynamicverse_shim.py`, CamVLA `data/worldtraj`)과 scene.ply 투영 (images_pc_rendered 대비 색 오차 c2w 50~63 / w2c 18~21) 모두 w2c. `--wt_pose w2c|c2w` 신설, 기본 w2c · c2w 는 R125~R168 캐시 재현용.
 
 ### Added
+
+- **`fit/caption/trumans_action_gt.py`** (R448). TRUMANS board 클립 창마다 action 필드 (`out_trumans/<video>/action_gt.json`): TRUMANS 라벨 동사 + GT 로 움직인 물체 (Object_pose) + GT 손 (손목 근접), 라벨 밖 물체 움직임, 골반 궤적의 walk/sit/stand. `caption_action` 한 문장.
+- **`trumans_to_recon.py --allow_unlabeled`** · **`run_board_sources.py --allow_unlabeled --recordings`** (R446). board 모드에서 blend 프레임 수와 맞는 sequence 나 Actions 파일이 없으면 라벨 없는 action 1 개로 진행 (기본 꺼짐 = 예전처럼 중단). `--recordings` 는 render 를 그 recording 만.
 
 - **TRUMANS 전량 bank config** `configs/bank/r442c_trumans_full.json` (r442b + d271 앞단 graph/cloud/mesh, R442).
 

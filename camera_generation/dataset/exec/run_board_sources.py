@@ -116,7 +116,7 @@ def run_clip(a, row, cand, slot, exclude, gpu, log_dir):
            # D278 (사용자 지시 "바꿔줘"): probe(grid/verify) 를 recording 상주 Blender 서버에서.
            # grid probe JSON 이 새 Blender 판과 전체 일치 (00add26c c01 k029, 576 후보).
            "--probe_server",
-           "--eval_data", a.eval_data] + RECON_ARGS
+           "--eval_data", a.eval_data] + RECON_ARGS + (["--allow_unlabeled"] if a.allow_unlabeled else [])
     env = {"CUDA_VISIBLE_DEVICES": str(gpu), "OMP_NUM_THREADS": "8", "PATH": "/usr/bin:/bin"}
     import os
     env = {**os.environ, **env}
@@ -169,6 +169,8 @@ def do_chunk(a, row, gpu, log_dir, status_dir):
 def stage_render(a):
     rows = json.load(open(a.plan))
     rows = [r for i, r in enumerate(rows) if i % a.num_shards == a.shard_id]
+    if a.recordings:
+        rows = [r for r in rows if r["recording"][:8] in set(a.recordings)]
     log_dir = path.join(a.work, "log")
     status_dir = path.join(a.work, "status")
     makedirs(log_dir, exist_ok=True)
@@ -223,6 +225,8 @@ if __name__ == "__main__":
     q.add_argument("--min_az", default=60.0, type=float)     # 같은 반경이면 방위각 이만큼은 떨어져야
     q.add_argument("--gpus", default=[2, 3], nargs="+", type=int)
     q.add_argument("--workers_per_gpu", default=3, type=int)
+    q.add_argument("--allow_unlabeled", action="store_true", default=False)   # [R446] trumans_to_recon --allow_unlabeled 전달
+    q.add_argument("--recordings", nargs="*", default=None)                    # [R446] 이 recording (앞 8자) 만 render
     q.add_argument("--rgb_samples", default=16, type=int)      # D281 (사용자 지시): 32 -> 16 (PSNR 42.3 -> 39.6 dB, RGB 133.7 -> 103.6 s)
     q.add_argument("--timeout", default=3600, type=int)
     q.add_argument("--num_shards", default=1, type=int)

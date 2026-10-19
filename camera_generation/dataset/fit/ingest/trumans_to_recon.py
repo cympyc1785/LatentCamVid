@@ -843,6 +843,10 @@ def convert(render_dir, poses_world, out_recon, out_seg, out_seg_static, fps, sk
 def main(args):
     rec_dir = path.join(args.trumans, "Recordings_blend", args.recording)
     blend = path.join(rec_dir, f"{args.recording}.blend")
+    if not path.isfile(blend):
+        # [R446] 폴더명에 접미사가 붙은 recording (`<uuid>_lph_ng/<uuid>.blend`) — 폴더 안 .blend 가 하나면 그걸 쓴다.
+        found = __import__("glob").glob(path.join(rec_dir, "*.blend"))
+        blend = found[0] if len(found) == 1 else blend
     assert path.isfile(blend), f"blend 이 없다: {blend}"
 
     work = args.work or path.join(CINEMATRAJ_ROOT, "out", "trumans_recon", args.recording)
@@ -852,10 +856,20 @@ def main(args):
     started = time.time()
     probe_meta = blend_frame_count(args.blender, blend, path.join(work, "_frames.json"))
     n_frames = int(probe_meta["end"]) - int(probe_meta["start"]) + 1
-    sequence, _ = pick_sequence(args.trumans, args.recording, n_frames, args.sequence)
-    actions = read_actions(args.trumans, sequence)
+    try:
+        sequence, _ = pick_sequence(args.trumans, args.recording, n_frames, args.sequence)
+        actions = read_actions(args.trumans, sequence)
+    except (AssertionError, FileNotFoundError) as e:
+        # [R446] `--allow_unlabeled` (board 모드 전용): blend 프레임 수와 맞는 시퀀스가 없거나 Actions 파일이 없는
+        #   recording 도 blend 안의 애니메이션으로 렌더한다. action 은 blend 전체를 덮는 라벨 없는 1 개 (캡션 창 기록용).
+        #   끄면 (기본) 예전처럼 여기서 죽는다.
+        if not (args.allow_unlabeled and args.board_json):
+            raise
+        print(f"[unlabeled] {args.recording}: {str(e).splitlines()[0]}", flush=True)
+        sequence = None
+        actions = [{"id": 1, "start": int(probe_meta["start"]), "end": int(probe_meta["end"]), "text": "", "kind": "unlabeled"}]
     n_labeled = len(actions)
-    if args.walk_actions:
+    if args.walk_actions and sequence is not None:
         # **뒤에** append 한다 — 앞에 끼우면 `--action <i>` 가 밀려 시드 키가 바뀌고 기존
         # 96편이 재현이 안 된다. 그래서 인덱스 0..n_labeled-1 은 예전과 비트 단위로 같다.
         #    모션 레이트는 blend 의 render fps 가 아니다 (`--motion_fps` 주석 참고). 0 이면
@@ -1328,6 +1342,7 @@ if __name__ == "__main__":
     parser.add_argument("--list_actions", action="store_true")       # action 목록만 찍고 종료
     parser.add_argument("--out_video", default="", type=str)         # 비우면 tru_<uuid8>_a<NN>
     parser.add_argument("--sequence", default="", type=str)          # 비우면 프레임 수로 자동 판별
+    parser.add_argument("--allow_unlabeled", action="store_true", default=False)   # [R446] board 모드: 시퀀스·Actions 못 찾으면 라벨 없이
 
     # 보행 pseudo-action. Actions/*.txt 에 보행 라벨이 0건이라(모션엔 프레임의 19.0%) 이걸 끄면
     # 뱅크가 전부 제자리 조작 동작이 된다. 목록 **뒤에** 붙으므로 기존 --action 인덱스는 불변.

@@ -90,6 +90,9 @@ def chunk_paths(video: str, recon_root: str):
         manifest = path.join(folder, f"manifest_{key}.json")
         poses = path.join(folder, f"poses_{key}.npz")
         blend = path.join(RECORDINGS, recording, f"{recording}.blend")
+        if not path.exists(blend):                     # [R446] `<uuid>_lph_ng/<uuid>.blend` (lbm.blender_raycast.blend_of 와 같은 규칙)
+            from lbm.blender_raycast import blend_of
+            blend = blend_of(recording)
         for p in (manifest, poses, blend):
             assert path.exists(p), f"없다: {p}"
         return manifest, poses, blend

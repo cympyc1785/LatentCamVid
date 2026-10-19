@@ -35,8 +35,11 @@ def blend_of(recording: str) -> str:
     """recording uuid(또는 앞 8자) -> .blend 경로."""
     # 폴더 이름 == blend 이름인 것만 (`bank_to_blender_poses.chunk_paths` 와 같은 규약).
     # `<uuid> - 副本/` 같은 사본 폴더가 섞여 있다 (0a761819 실측).
-    hits = [h for h in glob(path.join(BLEND_ROOT, f"{recording}*", "*.blend"))
-            if path.basename(path.dirname(h)) == path.splitext(path.basename(h))[0]]
+    #    [R446] `<uuid>_lph_ng/<uuid>.blend` 처럼 폴더에 `_` 접미사만 붙은 것은 받는다 (사본 `<uuid> - 副本` 은 여전히 제외).
+    def _ok(h):
+        d, st = path.basename(path.dirname(h)), path.splitext(path.basename(h))[0]
+        return d == st or (d.startswith(st) and d[len(st):].startswith("_"))
+    hits = [h for h in glob(path.join(BLEND_ROOT, f"{recording}*", "*.blend")) if _ok(h)]
     assert len(hits) == 1, f"{recording}: blend {len(hits)}개 {hits[:3]}"
     return hits[0]
 

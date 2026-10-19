@@ -17,6 +17,8 @@
 
 ### Added
 
+- **TRUMANS 전량 bank config** `configs/bank/r442c_trumans_full.json` (r442b + d271 앞단 graph/cloud/mesh, R442).
+
 - **`molmo2_track_lift.py --pairs_file`** (R445). 줄마다 `<video>__<anchor>` — 그 (영상, anchor) 쌍만 point·comb·lift 한다 (같은 영상의 다른 anchor 는 건너뜀). 기본 빈 값 = 예전과 같음.
 
 - **`--variant_whitelist`** (`fit/convert/vista4d_bank_to_dl3dv.py` · `exec/run_corpus_export.py`, R443). json `{video: [variant_id…]}` 에 적힌 변이만 내보낸다 (filter_variants ⑤, 히스토그램 키 `not_whitelisted`). 품질·preset 계열 균형으로 바깥에서 고른 v5f 50k 코퍼스용. 기본 None 이면 예전과 비트 동일.

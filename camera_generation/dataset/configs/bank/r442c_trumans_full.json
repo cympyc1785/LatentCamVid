@@ -1,0 +1,46 @@
+{
+ "_why": "R442 전량 (사용자 10-19 \"진행\") — r442b (v5f 방법론 · collision mesh · mesh margin 0.02·S · framing 하한 전 preset) 를 TRUMANS s3f0k6 전량에. 앞단 graph/cloud/mesh 는 d271 과 글자 그대로 (마커 .graph_s115/.cloud_s115 — 같은 S 게이지). 이미 있는 클립은 마커·skip_done 으로 건너뛴다. export 때 사후 필터 (tmp/r442/post.py 규칙: 통과 status · static 포함 mesh 충돌 0 · in_frame ≥ 0.8 · 원본 고도 ≤ 60°).",
+ "extends": "r442b_trumans_meshmargin.json",
+ "generation": "r442bT",
+ "stages": [
+  "graph",
+  "cloud",
+  "mesh",
+  "route",
+  "tau",
+  "fit",
+  "emit"
+ ],
+ "require_markers": [],
+ "graph": {
+  "marker": ".graph_s115",
+  "args": [
+   "--gravity_source",
+   "gt",
+   "--ground_source",
+   "gt",
+   "--subject_source",
+   "gt",
+   "--scene_scale_mode",
+   "points_first_cam",
+   "--scene_scale_stride",
+   "1",
+   "--no_skip_done",
+   "--no_overlay",
+   "--no_topdown"
+  ]
+ },
+ "cloud": {
+  "marker": ".cloud_s115",
+  "args": [
+   "--no_skip_done",
+   "--scene_scale_mode",
+   "points_first_cam",
+   "--scene_scale_stride",
+   "1"
+  ]
+ },
+ "mesh": {
+  "args": []
+ }
+}

@@ -44,6 +44,7 @@ FPS = 2.0
 
 
 VIDEOS = None                     # [R386] --videos_file 로 영상 제한 (None = 코퍼스 전부)
+DESC_TEMPLATE = "the {q}"         # [R434] --desc_template (부위 지정 질문). 기본 = 예전 문장
 
 
 def pairs(corpus):
@@ -73,7 +74,7 @@ def phrase(v, aid):
         except Exception:
             q = "main subject"
     q = q[4:] if q.lower().startswith("the ") else q
-    return f"Track the {q}."
+    return f"Track {DESC_TEMPLATE.format(q=q)}."                          # [R434] 기본 "the {q}" = 예전 "Track the {q}." 와 같은 문장
 
 
 def parse(text):
@@ -387,7 +388,7 @@ def stage_comb(a):
         frames, _ = load_video(f"{E}/{v}/video.mp4"); T_, H, W, _ = frames.shape
         sid = pred.handle_request({"type": "start_session", "resource_path": [Image.fromarray(frames[i]) for i in range(T_)]})["session_id"]
         for aid in todo:
-            out = f"{od}/{v}__{aid}.npz"; label = nodes.get(aid, {}).get("label") or ""; ch = choose_point(a, v, aid); per = {}
+            out = f"{od}/{v}__{aid}.npz"; label = a.label_override or nodes.get(aid, {}).get("label") or ""; ch = choose_point(a, v, aid); per = {}
             if label:
                 pred.handle_request({"type": "reset_session", "session_id": sid})
                 pred.handle_request({"type": "add_prompt", "session_id": sid, "frame_index": 0, "text": label})
@@ -406,7 +407,7 @@ def stage_comb(a):
                     mm[f] = mk
                 return mm
             lp = f"{ld}/{v}__{aid}.npz"                      # R358 라벨 판도 같은 규칙으로 채움 (비어 있을 때만)
-            if label and not osp.isfile(lp):
+            if label and not osp.isfile(lp) and not a.label_override:          # [R434] 명사를 바꾼 실행은 코퍼스 sam3_text_label 을 채우지 않는다
                 if per:
                     best = max(per, key=lambda i: np.mean(per[i]["p"]) * len(per[i]["m"]))
                     np.savez_compressed(lp, ok=True, masks=np.packbits(masks_of(best), axis=-1), W=W, conf=float(np.mean(per[best]["p"])), n_obj=len(per), text=label)
@@ -706,8 +707,12 @@ if __name__ == "__main__":
     ap.add_argument("--sam3_out", default="/data1/cympyc1785/data/DynPose-LBM/latentcam_dynpose_d200/molmo2_sam3")
     ap.add_argument("--sam3_name", default="target_track_m2sam3.npz")
     ap.add_argument("--box_name", default="subject_box_vote.npz")          # [R391] sam3box 출력 이름
+    # [R434] 부위 지정 (예 얼굴): Molmo2 질문 대상구 템플릿 · comb 의 SAM3 명사. 기본값이면 예전과 같은 질문·명사.
+    ap.add_argument("--desc_template", default="the {q}")                    # 예 "the face of the {q}" → "Point to the face of the …"
+    ap.add_argument("--label_override", default="")                          # 예 "face"
     ap.add_argument("--check_out", default="/data1/cympyc1785/LatentCamVid/tmp/r343/molmo2_track_check.csv")
     a = ap.parse_args()
     if a.videos_file:                                   # [R386]
         VIDEOS = set(open(a.videos_file).read().split())
+    DESC_TEMPLATE = a.desc_template
     {"gen": stage_gen, "lift": stage_lift, "check": stage_check, "point": stage_point, "sam3": stage_sam3, "sam3lift": stage_sam3lift, "sam3box": stage_sam3box, "sam3text": stage_sam3text, "comb": stage_comb}[a.stage](a)

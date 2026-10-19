@@ -136,7 +136,7 @@ def load_raycast_pass(cine_out, raycast_name, video, bank_dir):
 
 
 def filter_variants(bank, bank_ids, drop_status, drop_suspect, picked_only, drop_hist,
-                    raycast_pass=None):
+                    raycast_pass=None, whitelist=None):
     """뱅크 하나에서 내보낼 변이 인덱스를 고른다. `drop_hist` 는 씬 전체에서 공유한다.
 
     세 축이 **서로 독립**이고 순서대로 적용된다:
@@ -195,6 +195,10 @@ def filter_variants(bank, bank_ids, drop_status, drop_suspect, picked_only, drop
         if raycast_pass is not None and vid not in raycast_pass:
             drop_hist["raycast_reject"] = drop_hist.get("raycast_reject", 0) + 1
             continue
+        # ⑤ [R443] `--variant_whitelist` — 바깥에서 고른 variant_id 집합 (품질·preset 계열 균형 선별). None = 예전과 비트 동일.
+        if whitelist is not None and vid not in whitelist:
+            drop_hist["not_whitelisted"] = drop_hist.get("not_whitelisted", 0) + 1
+            continue
         keep.append(i)
     return rows, keep
 
@@ -205,7 +209,7 @@ def convert_scene(job):
 
     (video, chunk, out_root, image_dir, image_scale, recon_root, cine_out, bank_dirs,
      refs, skip_done, dedup, captions_name, drop_status, drop_suspect, picked_only,
-     per_scene_cap, raycast_name, one_per_preset) = job
+     per_scene_cap, raycast_name, one_per_preset, whitelist) = job
     dst = path.join(out_root, *chunk.split("/"))
     da3, img = path.join(dst, "da3"), path.join(dst, image_dir)
     try:
@@ -233,7 +237,8 @@ def convert_scene(job):
             retry_suspect = tuple((bank.get("fallback") or {}).get("retry_suspect") or ())
             rows, kept = filter_variants(bank, bank_ids, drop_status, drop_suspect,
                                          picked_only, drop_hist,
-                                         load_raycast_pass(cine_out, raycast_name, video, bank_dir))
+                                         load_raycast_pass(cine_out, raycast_name, video, bank_dir),
+                                         None if whitelist is None else set(whitelist))
             n_drop += len(bank_ids) - len(kept)
             for i in kept:
                 row = rows[bank_ids[i]]
@@ -458,6 +463,8 @@ def main():
     # `<cine_out>/<video>/<name>/selection.json` 이 없는 씬은 0행이 된다 (raycast 가 전량 기각했거나
     # 안 돌았다). 기본 None = 예전과 비트 동일.
     parser.add_argument("--raycast_name", default=None, type=str)
+    # [R443] json {video: [variant_id, ...]} — 여기 적힌 변이만 내보낸다 (filter_variants ⑤). 목록에 없는 씬은 0행. 기본 None = 예전과 비트 동일.
+    parser.add_argument("--variant_whitelist", default=None, type=str)
     parser.add_argument("--workers", default=8, type=int)
     parser.add_argument("--skip_done", action="store_true", default=True)
     parser.add_argument("--no_skip_done", dest="skip_done", action="store_false")
@@ -479,6 +486,7 @@ def main():
     else:
         videos = list(args.videos)
 
+    wl = json.load(open(args.variant_whitelist, encoding="utf-8")) if args.variant_whitelist else None
     jobs, missing, bank_hist = [], [], {}
     for video in videos:
         avail = banks_of(video)
@@ -498,7 +506,7 @@ def main():
                      args.recon_root, args.cine_out, avail, args.avg_scale_refs,
                      args.skip_done, args.dedup, args.captions_name, list(args.drop_status),
                      list(args.drop_suspect), args.picked_only, args.per_scene_cap,
-                     args.raycast_name, args.one_per_preset))
+                     args.raycast_name, args.one_per_preset, None if wl is None else wl.get(video, [])))
 
     print(f"{'bank_dir':22s} {' '.join(bank_dirs)}")
     print(f"{'per_scene_cap':22s} {args.per_scene_cap or '(없음 — 재고 전량)'}")

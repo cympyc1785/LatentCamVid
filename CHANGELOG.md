@@ -17,6 +17,9 @@
 
 ### Added
 
+- **`--variant_whitelist`** (`fit/convert/vista4d_bank_to_dl3dv.py` · `exec/run_corpus_export.py`, R443). json `{video: [variant_id…]}` 에 적힌 변이만 내보낸다 (filter_variants ⑤, 히스토그램 키 `not_whitelisted`). 품질·preset 계열 균형으로 바깥에서 고른 v5f 50k 코퍼스용. 기본 None 이면 예전과 비트 동일.
+- **TRUMANS pilot bank config** `configs/bank/r442_trumans_v5f_pilot.json` (v5f 방법론 이식: cloud npz · collision both · anchor 사람만 · blend_gt_z_up · route --anchor_seg_root TRUMANS) · `r442b_trumans_meshmargin.json` (collision mesh · mesh_margin_frac 0.02 · framing 하한 전 preset) (R442).
+
 - **`dpo_hinge_keep`** (train_latent_cam_dm, 기본 false). true 면 collision hinge 를 `dpo_sft_w` 배에서 빼서 그대로 더한다 — sft 0 인 hard DPO 에서도 hinge 가 걸린다 (A3 · R440). false 면 예전과 비트 동일.
 
 - **`pred_collision_rate.knn_scene(keep=)`** (R439). esdf_scene 과 같은 규약으로 프레임별 판정 (`coll`/`free`/`unk`) 을 `keep["cls"][(arm, entry)]` 에 남긴다. 기본 None 이라 기존 CLI 출력은 그대로.

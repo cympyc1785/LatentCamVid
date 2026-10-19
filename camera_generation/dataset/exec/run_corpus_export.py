@@ -178,6 +178,8 @@ def stage_export(args, scenes, avail):
         cmd += ["--drop_suspect", *args.drop_suspect]
     if args.raycast_name:                  # D271 TRUMANS — 안 주면 예전 명령과 글자 그대로
         cmd += ["--raycast_name", args.raycast_name]
+    if args.variant_whitelist:             # [R443] 안 주면 예전 명령과 글자 그대로
+        cmd += ["--variant_whitelist", args.variant_whitelist]
     print(f"{'export -> ':22s} {args.out_root}")
     print(f"{'씬':22s} {len(scenes):,d}   상한 {args.per_scene_cap}   "
           f"drop_status {args.drop_status}   drop_suspect {args.drop_suspect or '없음'}")
@@ -274,6 +276,8 @@ if __name__ == "__main__":
     p.add_argument("--drop_suspect", nargs="*", default=[])
     # D271. TRUMANS mesh raycast 통과 변이만 내보낸다 (`vista4d_bank_to_dl3dv.py --raycast_name`).
     p.add_argument("--raycast_name", default=None, type=str)
+    # [R443] 품질·preset 계열 균형으로 미리 고른 변이만 (`vista4d_bank_to_dl3dv.py --variant_whitelist`).
+    p.add_argument("--variant_whitelist", default=None, type=str)
     # ── 경로 ──────────────────────────────────────────────────────────────────
     p.add_argument("--cine_out", default=path.join(CINE, "out_dynpose"), type=str)
     p.add_argument("--recon_root", default="/data1/cympyc1785/LatentCamVid/DATA/"

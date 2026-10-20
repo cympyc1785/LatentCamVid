@@ -21,6 +21,8 @@
 
 ### Added
 
+- **`fit_hole_ladder.py --shot_class_max`** (R464). 목표 shot 사다리의 가장 타이트한 칸 번호 상한 (`SHOT_CLASS_NAMES` 순서, 기본 -1 = 제한 없음 → 예전과 같음). 얼굴 뱅크 v5f 에서 3 (close_up) — R445 에서 extreme_close_up 목표는 90% shot_missed.
+
 - **`intent_planner.synthesize_intents_levels(video=, video_fps=)`** (R462). L1/L2/L3 intent 합성에 영상 입력 추가 — subject mask (빨간 overlay) 를 덧씌운 원본 구간 영상을 VLM 에 2 fps 로 넣고, 프롬프트에 "강조된 subject 기준, 보이는 행동·물체·배경에 근거" 를 붙인다. `video=None` 이면 기존 텍스트 전용 합성과 같다.
 - **`intent_planner.synthesize_intents_levels(context=)` · `context_block`** (R462). 캡션 단계에서 뽑아 둔 장면 맥락 (subject 서술·속성·행동, 다른 물체, camera pattern, framing) 을 프롬프트에 "What is known about the shot" 줄로 넣는다. `context=None` 이면 이전과 같다.
 

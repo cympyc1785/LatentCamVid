@@ -1405,6 +1405,8 @@ def main(args):
                 start_c = max(i for i in range(len(edges) - 1) if area_static >= edges[i])
                 rungs = [c for c in (start_c + shot_sign * k for k in range(1, args.shot_class_steps + 1))
                          if 0 <= c < len(edges) - 1
+                         # [R464] 가장 타이트한 목표 칸 상한 (얼굴 뱅크: extreme_close_up 목표 90% shot_missed → close_up=3 까지). -1 = 제한 없음
+                         and (args.shot_class_max < 0 or c <= args.shot_class_max)
                          # out 계열은 전역 하한 (--min_area_end, 사용자 0.02) 아래 칸으로는 안 간다
                          and not (shot_sign < 0 and args.min_area_end > 0 and edges[c + 1] <= args.min_area_end)]
                 shot_cls = edges
@@ -2248,6 +2250,7 @@ def build_parser():
     # [R289] 목표 shot scale 사다리. 빈 문자열 = 끔 (예전과 동일). --shot_signed 와 같이 쓴다 (in/out 판정).
     parser.add_argument("--shot_class_presets", default="", type=str)          # 예 'dolly_in|push_in|dolly_out|pull_out'
     parser.add_argument("--shot_class_edges", default="0.02,0.08,0.25,0.5", type=str)
+    parser.add_argument("--shot_class_max", default=-1, type=int)               # [R464] 목표 shot 칸 번호 상한 (SHOT_CLASS_NAMES 순서, -1 = 없음)
     parser.add_argument("--shot_class_steps", default=2, type=int)             # 시작 shot 에서 몇 단까지 변이를 만들지
     # D275. shot_scale 사다리에서 빼는 preset 군. targetless = 캡션 `targetless` 플래그
     # (pan/tilt/roll/free_pedestal) → 이동량 사다리 `--motion_ladder` (τ; 회전은 ×60°). none = 옛 동작.

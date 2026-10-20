@@ -151,6 +151,8 @@ def stage_captions(args, scenes, avail):
             cmd.append("--no_magnitude")
         if args.measured_end_shot:             # [R457] 안 주면 예전 명령과 글자 그대로
             cmd.append("--measured_end_shot")
+        if args.presets:                       # [R468] 캡션 문구 파일 (예 configs/caption_presets_v2.json). 안 주면 예전 그대로
+            cmd += ["--presets", args.presets]
         with open(log, "w", encoding="utf-8") as fh:
             res = run(cmd, cwd=CINE, stdout=fh, stderr=fh, text=True)
         got = sum(1 for v in videos
@@ -281,6 +283,7 @@ if __name__ == "__main__":
     # [R443] 품질·preset 계열 균형으로 미리 고른 변이만 (`vista4d_bank_to_dl3dv.py --variant_whitelist`).
     p.add_argument("--variant_whitelist", default=None, type=str)
     p.add_argument("--measured_end_shot", action="store_true", default=False)   # [R457] build_bank_captions --measured_end_shot
+    p.add_argument("--presets", default="")                                         # [R468] build_bank_captions --presets
     # ── 경로 ──────────────────────────────────────────────────────────────────
     p.add_argument("--cine_out", default=path.join(CINE, "out_dynpose"), type=str)
     p.add_argument("--recon_root", default="/data1/cympyc1785/LatentCamVid/DATA/"

@@ -110,6 +110,12 @@ def bucket(value: float, table: list, key: str = "max"):
 #             문장이 하나뿐이라 그 안에서 대상을 불러야 한다.
 TARGET_SLOT = "{target}"
 LEGACY_TARGET = "the subject"
+# [R457] `--measured_end_shot`: look-at dolly/push/pull 계열에 **측정한** 끝 shot 을 붙인다 (shot_target_class 가 없는 행만).
+#   shot 변화 방향이 preset 과 맞을 때만 (in → subject 면적 ×1.1 이상 커짐, out → 1/1.1 이하로 작아짐). 등급 경계는 fit 의
+#   --shot_class_edges 기본 (0.02, 0.08, 0.25, 0.5). 끄면 (기본) 예전 문장 그대로.
+MEASURED_END_SHOT = False
+SHOT_EDGES = (0.02, 0.08, 0.25, 0.5)
+SHOT_ORDER = ["extreme_wide", "wide", "medium", "close_up", "extreme_close_up"]
 
 # D122. 대명사. `nl_prompt` 가 대명사 자리에 **"it" 을 하드코딩**했고, 그래서 사람 target
 # 1,961건(전체 36%)이 "sliding sideways past the woman in a striped shirt scooping avocado,
@@ -225,6 +231,16 @@ def motion_of(variant: dict, spec: dict, mag_tables: dict, magnitude: bool = Fal
     # (사용자 2026-10-10 "shot scale 목적에 따라 다른 변이로 … 캡션에도 넣어줘"). 키가 없으면 예전 문장 그대로.
     if variant.get("shot_target_class"):
         phrase = f"{phrase}, ending on {shot_phrase(SHOT_CLASS_TEXT[variant['shot_target_class']])}"
+    elif MEASURED_END_SHOT and variant.get("aim") == "look_at":
+        pre = str(variant.get("preset", ""))
+        sign = 1 if re.search(r"dolly_in|push_in", pre) else -1 if re.search(r"dolly_out|pull_out", pre) else 0
+        try:
+            a0, a1 = float(variant.get("subject_area_start")), float(variant.get("subject_area_end"))
+        except (TypeError, ValueError):
+            a0 = a1 = float("nan")
+        if sign and a0 == a0 and a1 == a1 and a0 > 0 and ((sign > 0 and a1 > a0 * 1.1) or (sign < 0 and a1 < a0 / 1.1)):
+            end = SHOT_ORDER[sum(a1 >= e for e in SHOT_EDGES)]
+            phrase = f"{phrase}, ending on {shot_phrase(SHOT_CLASS_TEXT[end])}"
     if not magnitude:
         return f"the camera {phrase}"
     return f"the camera {adverb_of(variant, mag_tables)} {phrase}"
@@ -908,6 +924,8 @@ def main(args):
     # 부사가 요청이 아니라 실현치를 읽어서 요청↔실현 대비가 안 남는다, §모듈 docstring).
     # `--magnitude` 를 명시하면 D121~D175 문장이 그대로 돌아온다.
     magnitude = False if args.magnitude is None else bool(args.magnitude)
+    global MEASURED_END_SHOT
+    MEASURED_END_SHOT = bool(args.measured_end_shot)
 
     if args.videos_file:
         # 굽기가 도는 중에는 현재 라운드 목록을 뺀 편만 넘긴다 (샤드가 같은 `bank.json` 을
@@ -1099,6 +1117,7 @@ if __name__ == "__main__":
     # 사용자 지시 2026-09-10 — §:850 이 집행자다). D175 까지는 nl 이 켰었고 이 주석이 그
     # 옛 동작을 그대로 적고 있었다. 다시 켜려면 `--magnitude` 를 명시할 것.
     parser.add_argument("--magnitude", action="store_true", default=None)
+    parser.add_argument("--measured_end_shot", action="store_true", default=False)   # [R457] 측정한 끝 shot (look-at dolly/push/pull)
     parser.add_argument("--no_magnitude", dest="magnitude", action="store_false")
     # D119. shot scale 시간축. 뱅크에 `subject_area_seq` 가 있어야 효과가 있고(없으면 조용히
     # 예전 문구), 버킷이 실제로 바뀐 변이에서만 문장이 길어진다.

@@ -21,6 +21,8 @@
 
 ### Added
 
+- **`build_bank_captions.py --measured_end_shot`** · `run_corpus_export.py --measured_end_shot` (R457). look-at dolly/push/pull 계열 중 shot_target_class 가 없는 행에, 측정한 끝 shot (subject 면적 경계 0.02/0.08/0.25/0.5) 을 ", ending on a close-up" 처럼 붙인다. shot 변화 방향이 preset 과 맞을 때만 (in = 면적 ×1.1 이상, out = 1/1.1 이하). 기본 꺼짐 = 예전 문장 그대로.
+
 - **`run_bank.py` config `post_cleanup`** (R451). 뱅크가 끝난 편 (OK · SKIP) 의 지정 파일을 지운다 (FAIL 은 재시도용으로 남김). `r442c_trumans_full.json` 에 `["cloud.npz", ".cloud_s115"]` — TRUMANS cloud 는 편당 ~760 MB 라 10-20 /data1 이 가득 찼다. 마커도 같이 지워야 재실행 때 cloud 가 다시 돈다. 키가 없으면 예전과 같음.
 
 - **`fit/caption/trumans_action_gt.py`** (R448). TRUMANS board 클립 창마다 action 필드 (`out_trumans/<video>/action_gt.json`): TRUMANS 라벨 동사 + GT 로 움직인 물체 (Object_pose) + GT 손 (손목 근접), 라벨 밖 물체 움직임, 골반 궤적의 walk/sit/stand. `caption_action` 한 문장.

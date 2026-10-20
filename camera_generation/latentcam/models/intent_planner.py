@@ -460,7 +460,7 @@ JARGON = ["dolly", "truck", "trucking", "pedestal", "crane", "jib", "pan", "pann
           "establishing shot", "extreme", "over-the-shoulder", "pov", "point of view", "rack focus", "zoom", "dutch", "framing", "frame",
           "shot", "camera", "lens", "focal"]
 LEVEL_PROMPT = """{video_note}A video shows {scene}. A camera move will be generated for it. The exact move is:
-"{caption}" (primitives: {move}{shot}).
+"{caption}" (primitives: {move}{shot}).{context}
 Write three requests a person could give to get exactly this move, at three levels:
 L1: says directly how the camera should move, in everyday words (any words are fine).
 L2: says what to emphasize or where the viewer's attention should go, so that this move follows from it. {rule}
@@ -481,12 +481,22 @@ VIDEO_NOTE = ("You are given the source video. The subject the camera move is ab
               "Ground L2 and L3 in what is actually visible in the video (the subject's action, nearby objects, the setting).\n")
 
 
+CONTEXT_KEYS = (("subject", "Subject"), ("attributes", "Subject details"), ("action", "Subject action"), ("others", "Other things in the scene"),
+                ("pattern", "Camera pattern"), ("framing", "Framing"), ("end_shot", "Final framing"))
+
+
+def context_block(context: dict = None):
+    """[R462] 캡션을 만들 때 뽑아 둔 장면 맥락 (instance_desc 의 subject 서술·속성·행동, 다른 노드, preset 패턴, framing) → 프롬프트 줄들. 비면 ""."""
+    lines = [f"{name}: {', '.join(v) if isinstance(v, (list, tuple)) else v}" for k, name in CONTEXT_KEYS if (v := (context or {}).get(k))]
+    return ("\nWhat is known about the shot:\n" + "\n".join(f"- {l}" for l in lines)) if lines else ""
+
+
 def synthesize_intents_levels(plan: CanonicalCameraPlan, vocab: PresetVocab, client, caption: str, scene: str = "", jargon_ok: bool = False, tries: int = 3,
-                              video: str = None, video_fps: float = 2.0):
+                              video: str = None, video_fps: float = 2.0, context: dict = None):
     """canonical plan (+ 학습 캡션 문장) → {"L1","L2","L3"}. L2·L3 에 금지어가 나오면 최대 `tries` 번 다시 생성, 끝내 남으면 `jargon` 에 기록."""
     shot = f"; ends on {BC.SHOT_CLASS_TEXT[plan.end_shot]}" if plan.end_shot else ""
     prompt = LEVEL_PROMPT.format(scene=scene or (plan.target_text or "a scene"), caption=caption, move=vocab.describe(plan.preset), shot=shot,
-                                 rule="" if jargon_ok else NO_JARGON, video_note=VIDEO_NOTE if video else "")
+                                 rule="" if jargon_ok else NO_JARGON, video_note=VIDEO_NOTE if video else "", context=context_block(context))
     vkw = {"video": video, "video_fps": video_fps} if video else {}     # [R462] subject mask overlay 영상 (사용자 10-20 "영상은 당연히 넣어야지")
     out = {}
     for _ in range(tries):

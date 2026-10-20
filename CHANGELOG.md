@@ -22,6 +22,7 @@
 ### Added
 
 - **`intent_planner.synthesize_intents_levels(video=, video_fps=)`** (R462). L1/L2/L3 intent 합성에 영상 입력 추가 — subject mask (빨간 overlay) 를 덧씌운 원본 구간 영상을 VLM 에 2 fps 로 넣고, 프롬프트에 "강조된 subject 기준, 보이는 행동·물체·배경에 근거" 를 붙인다. `video=None` 이면 기존 텍스트 전용 합성과 같다.
+- **`intent_planner.synthesize_intents_levels(context=)` · `context_block`** (R462). 캡션 단계에서 뽑아 둔 장면 맥락 (subject 서술·속성·행동, 다른 물체, camera pattern, framing) 을 프롬프트에 "What is known about the shot" 줄로 넣는다. `context=None` 이면 이전과 같다.
 
 - **`intent_planner.synthesize_intents_levels`** · `jargon_hits` (SG3 · R459). canonical plan + 학습 캡션 → 수준별 intent {L1 움직임 직접 (용어 제한 없음), L2 강조·시선, L3 패턴·느낌}. L2·L3 는 촬영 전문 용어 금지 (나오면 최대 3 번 재생성, `jargon_ok=True` 면 허용 — 비교 변형). subject 지칭구에 든 단어는 금지어에서 뺀다. 기존 `synthesize_intents` 는 그대로.
 

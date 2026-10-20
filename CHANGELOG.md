@@ -21,6 +21,8 @@
 
 ### Added
 
+- **`intent_planner.synthesize_intents_levels(video=, video_fps=)`** (R462). L1/L2/L3 intent 합성에 영상 입력 추가 — subject mask (빨간 overlay) 를 덧씌운 원본 구간 영상을 VLM 에 2 fps 로 넣고, 프롬프트에 "강조된 subject 기준, 보이는 행동·물체·배경에 근거" 를 붙인다. `video=None` 이면 기존 텍스트 전용 합성과 같다.
+
 - **`intent_planner.synthesize_intents_levels`** · `jargon_hits` (SG3 · R459). canonical plan + 학습 캡션 → 수준별 intent {L1 움직임 직접 (용어 제한 없음), L2 강조·시선, L3 패턴·느낌}. L2·L3 는 촬영 전문 용어 금지 (나오면 최대 3 번 재생성, `jargon_ok=True` 면 허용 — 비교 변형). subject 지칭구에 든 단어는 금지어에서 뺀다. 기존 `synthesize_intents` 는 그대로.
 
 - **`build_bank_captions.py --measured_end_shot`** · `run_corpus_export.py --measured_end_shot` (R457). look-at dolly/push/pull 계열 중 shot_target_class 가 없는 행에, 측정한 끝 shot (subject 면적 경계 0.02/0.08/0.25/0.5) 을 ", ending on a close-up" 처럼 붙인다. shot 변화 방향이 preset 과 맞을 때만 (in = 면적 ×1.1 이상, out = 1/1.1 이하). 기본 꺼짐 = 예전 문장 그대로.

@@ -459,7 +459,7 @@ JARGON = ["dolly", "truck", "trucking", "pedestal", "crane", "jib", "pan", "pann
           "push in", "push-in", "pull out", "pull-out", "pull back", "tracking shot", "tracking", "close-up", "closeup", "medium shot", "wide shot",
           "establishing shot", "extreme", "over-the-shoulder", "pov", "point of view", "rack focus", "zoom", "dutch", "framing", "frame",
           "shot", "camera", "lens", "focal"]
-LEVEL_PROMPT = """A video shows {scene}. A camera move will be generated for it. The exact move is:
+LEVEL_PROMPT = """{video_note}A video shows {scene}. A camera move will be generated for it. The exact move is:
 "{caption}" (primitives: {move}{shot}).
 Write three requests a person could give to get exactly this move, at three levels:
 L1: says directly how the camera should move, in everyday words (any words are fine).
@@ -477,14 +477,20 @@ def jargon_hits(text: str, allow: str = ""):
     return [w for w in JARGON if f" {w} " in t and f" {w} " not in a]
 
 
-def synthesize_intents_levels(plan: CanonicalCameraPlan, vocab: PresetVocab, client, caption: str, scene: str = "", jargon_ok: bool = False, tries: int = 3):
+VIDEO_NOTE = ("You are given the source video. The subject the camera move is about is highlighted with a red overlay. "
+              "Ground L2 and L3 in what is actually visible in the video (the subject's action, nearby objects, the setting).\n")
+
+
+def synthesize_intents_levels(plan: CanonicalCameraPlan, vocab: PresetVocab, client, caption: str, scene: str = "", jargon_ok: bool = False, tries: int = 3,
+                              video: str = None, video_fps: float = 2.0):
     """canonical plan (+ 학습 캡션 문장) → {"L1","L2","L3"}. L2·L3 에 금지어가 나오면 최대 `tries` 번 다시 생성, 끝내 남으면 `jargon` 에 기록."""
     shot = f"; ends on {BC.SHOT_CLASS_TEXT[plan.end_shot]}" if plan.end_shot else ""
     prompt = LEVEL_PROMPT.format(scene=scene or (plan.target_text or "a scene"), caption=caption, move=vocab.describe(plan.preset), shot=shot,
-                                 rule="" if jargon_ok else NO_JARGON)
+                                 rule="" if jargon_ok else NO_JARGON, video_note=VIDEO_NOTE if video else "")
+    vkw = {"video": video, "video_fps": video_fps} if video else {}     # [R462] subject mask overlay 영상 (사용자 10-20 "영상은 당연히 넣어야지")
     out = {}
     for _ in range(tries):
-        raw, _ = client.chat_json(prompt, validate=lambda r: [] if all(isinstance(r.get(k), str) and r[k].strip() for k in ("L1", "L2", "L3")) else ["need L1, L2, L3 strings"])
+        raw, _ = client.chat_json(prompt, validate=lambda r: [] if all(isinstance(r.get(k), str) and r[k].strip() for k in ("L1", "L2", "L3")) else ["need L1, L2, L3 strings"], **vkw)
         out = {k: str((raw or {}).get(k, "")).strip() for k in ("L1", "L2", "L3")}
         bad = {k: jargon_hits(out[k], allow=scene) for k in ("L2", "L3")} if not jargon_ok else {}
         if not any(bad.values()):

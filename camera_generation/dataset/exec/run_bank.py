@@ -51,7 +51,7 @@ from importlib import import_module
 from importlib.util import module_from_spec, spec_from_file_location
 from io import StringIO
 from json import dump as json_dump, load as json_load
-from os import environ, execv, makedirs, path
+from os import environ, execv, makedirs, path, remove
 from subprocess import run as sp_run, PIPE
 from sys import executable, stderr
 from time import strftime, time
@@ -496,6 +496,14 @@ def main():
             status = f"ERROR({type(exc).__name__}: {exc})"
         if clear_cache is not None:
             clear_cache()                # 씬 경계 — 캐시는 한 편분만 들고 있는다
+        # [R451] `post_cleanup` (config, 기본 없음 = 예전과 같음): 뱅크가 끝난 편 (OK · SKIP) 의 중간 산출물을 지운다.
+        #   TRUMANS cloud.npz 는 편당 ~760 MB 라 전량이면 2.8 TB — 10-20 /data1 가득 사고. 마커 (.cloud_s115) 도 같이 지워야
+        #   재실행 때 cloud 단계가 다시 돈다 (마커만 남으면 tau 가 없는 cloud 를 읽다 죽는다). FAIL 은 재시도용으로 남긴다.
+        if cfg.get("post_cleanup") and (status.startswith("OK") or status.startswith("SKIP")):
+            for rel in cfg["post_cleanup"]:
+                p_ = path.join(cfg["output_root"], video, rel)
+                if path.isfile(p_):
+                    remove(p_)
         results.append((video, status, time() - t0))
         if not status.startswith("OK"):
             print(f"[{tag}] {status:24s} {video}", flush=True)

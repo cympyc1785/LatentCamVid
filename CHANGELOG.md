@@ -21,6 +21,8 @@
 
 ### Added
 
+- **`run_bank.py` config `post_cleanup`** (R451). 뱅크가 끝난 편 (OK · SKIP) 의 지정 파일을 지운다 (FAIL 은 재시도용으로 남김). `r442c_trumans_full.json` 에 `["cloud.npz", ".cloud_s115"]` — TRUMANS cloud 는 편당 ~760 MB 라 10-20 /data1 이 가득 찼다. 마커도 같이 지워야 재실행 때 cloud 가 다시 돈다. 키가 없으면 예전과 같음.
+
 - **`fit/caption/trumans_action_gt.py`** (R448). TRUMANS board 클립 창마다 action 필드 (`out_trumans/<video>/action_gt.json`): TRUMANS 라벨 동사 + GT 로 움직인 물체 (Object_pose) + GT 손 (손목 근접), 라벨 밖 물체 움직임, 골반 궤적의 walk/sit/stand. `caption_action` 한 문장.
 - **`trumans_to_recon.py --allow_unlabeled`** · **`run_board_sources.py --allow_unlabeled --recordings`** (R446). board 모드에서 blend 프레임 수와 맞는 sequence 나 Actions 파일이 없으면 라벨 없는 action 1 개로 진행 (기본 꺼짐 = 예전처럼 중단). `--recordings` 는 render 를 그 recording 만.
 

@@ -53,6 +53,7 @@ import fit.caption.build_bank_captions as BC  # noqa: E402
 from lbm.presets import PRESETS, resolve_preset  # noqa: E402
 
 PRESET_SET_DIR = path.join(LATENTCAM, "main", "conf", "preset_sets")
+PRESETS_V2 = path.join(path.dirname(BC.PRESETS_DEFAULT), "caption_presets_v2.json")   # [R468] 캡션 v2 문구
 # v5f fit `--shot_class_presets` (configs/bank/v5f_pushsubject.json). preset_set 파일이 없을 때 (`all`) 만 쓰는 기본값.
 SHOT_CLASS_PRESETS = r"^(track_)?(dolly_in_look_at|push_in_arc_(left|right)|pull_out_arc_(left|right))$"
 SHOT_CLASSES = tuple(BC.SHOT_CLASS_TEXT)                       # extreme_wide · wide · medium · close_up · extreme_close_up
@@ -70,24 +71,37 @@ SPECIAL = {"push_in_arc_left": ("dolly_in", "arc_left"), "push_in_arc_right": ("
            "static_hold": (), "static_look_at": (), "track_hold": (), "track_look_at": (), "static_zoom_in": ("zoom_in",),
            "dolly_in_look_at": ("dolly_in",), "free_pedestal_up": ("pedestal_up",), "free_pedestal_down": ("pedestal_down",)}
 
+# [R468] 캡션 v2 용어 (configs/caption_presets_v2.json, 사용자 10-20): primitive = preset 용어 7 개 (dolly·truck·pedestal·orbit·pan·tilt + track)
+#   crane = pedestal + look-at · push in/pull out = dolly in/out · arc = orbit + dolly. roll (deroll 로 정지) · v5f 0 행 preset · free_pedestal (pedestal 과 같은 궤적) 은 어휘에서 뺀다.
+PRIMS_V2 = ("dolly_in", "dolly_out", "truck_left", "truck_right", "pedestal_up", "pedestal_down", "orbit_left", "orbit_right",
+            "pan_left", "pan_right", "tilt_up", "tilt_down")
+SPECIAL_V2 = {**{k: v for k, v in SPECIAL.items() if not k.startswith(("free_pedestal", "static_zoom"))},
+              "push_in_arc_left": ("dolly_in", "orbit_left"), "push_in_arc_right": ("dolly_in", "orbit_right"),
+              "pull_out_arc_left": ("dolly_out", "orbit_left"), "pull_out_arc_right": ("dolly_out", "orbit_right"),
+              "crane_up": ("pedestal_up",), "crane_down": ("pedestal_down",),
+              "crane_up_dolly_out": ("pedestal_up", "dolly_out"), "crane_down_dolly_in": ("pedestal_down", "dolly_in")}
+EXCLUDE_V2 = re.compile(r"^(track_)?(roll_|s_curve|static_zoom_in|pan_right_zoom_out|free_pedestal_)")
+TERMS = {"v1": (PRIMS, SPECIAL), "v2": (PRIMS_V2, SPECIAL_V2)}
+
 
 # dolly + orbit 은 우리 어휘에서 arc 다 (true_orbit 은 등거리라 전후진과 같이 못 산다) — 사용자 말 "dolly in orbit left" 를 여기로 접는다.
-def fold_synonyms(key: frozenset):
-    """dolly 가 같이 있으면 orbit_* → arc_* (3 개 이상 조합의 nearest 제안에도 같은 규칙)."""
-    if key & {"dolly_in", "dolly_out"}:
+def fold_synonyms(key: frozenset, terms: str = "v1"):
+    """dolly 가 같이 있으면 orbit_* → arc_* (3 개 이상 조합의 nearest 제안에도 같은 규칙). v2 는 arc 가 없어 그대로."""
+    if terms == "v1" and key & {"dolly_in", "dolly_out"}:
         key = frozenset("arc_" + m.split("_")[1] if m.startswith("orbit_") else m for m in key)
     return key
 
 
-def moves_of(name: str):
-    """preset 이름 → (track, primitive 튜플)."""
+def moves_of(name: str, terms: str = "v1"):
+    """preset 이름 → (track, primitive 튜플). `terms` = v1 (예전) | v2 (R468 캡션 v2 용어)."""
+    prims, special = TERMS[terms]
     track = name.startswith("track_")
     base = name[len("track_"):] if track else name
-    if name in SPECIAL or base in SPECIAL:
-        return track, tuple(SPECIAL.get(name, SPECIAL.get(base)))
+    if name in special or base in special:
+        return track, tuple(special.get(name, special.get(base)))
     toks, rest = [], base
     while rest:
-        hit = next((p for p in sorted(PRIMS, key=len, reverse=True) if rest == p or rest.startswith(p + "_")), None)
+        hit = next((p for p in sorted(prims, key=len, reverse=True) if rest == p or rest.startswith(p + "_")), None)
         assert hit, f"preset '{name}' 을 primitive 로 못 푼다 (남은 '{rest}') — SPECIAL 에 추가할 것"
         toks.append(hit); rest = rest[len(hit) + 1:]
     return track, tuple(toks)
@@ -137,10 +151,11 @@ SIMILAR = {"crane_up": "pedestal_up", "pedestal_up": "crane_up", "crane_down": "
 class PresetVocab:
     """preset 어휘 (lbm.presets.PRESETS + configs/caption_presets.json) 를 `preset_set` 으로 좁힌다."""
 
-    def __init__(self, preset_set=None):
-        self.cfg = json.load(open(BC.PRESETS_DEFAULT))
+    def __init__(self, preset_set=None, terms: str = "v1"):
+        self.terms, self.prims = terms, TERMS[terms][0]
+        self.cfg = json.load(open(BC.PRESETS_DEFAULT if terms == "v1" else PRESETS_V2))
         allowed, shot_presets = load_preset_set(preset_set) if not isinstance(preset_set, (list, tuple)) else (list(preset_set), None)
-        names = [n for n in PRESETS if n not in LEGACY and n in self.cfg["presets"]]
+        names = [n for n in PRESETS if n not in LEGACY and n in self.cfg["presets"] and not (terms == "v2" and EXCLUDE_V2.match(n))]
         if allowed is not None:
             allowed = [resolve_preset(n) for n in allowed]
             miss = set(allowed) - set(names)
@@ -149,7 +164,7 @@ class PresetVocab:
         self.name = preset_set if isinstance(preset_set, str) else ("custom" if preset_set else "all")
         self.info, self.index = {}, {}
         for n in names:
-            track, mv = moves_of(n)
+            track, mv = moves_of(n, terms)
             aim = PRESETS[n][1]
             spec = self.cfg["presets"][n]
             slot = BC.TARGET_SLOT in spec["phrase"]
@@ -162,7 +177,7 @@ class PresetVocab:
         """primitive 조합 → (preset, 오류 목록). 같은 조합에 이름이 여럿이면 aim·target 유무로 가른다
         (`dolly_in` free vs `dolly_in_look_at` / `pedestal_up` (target 부름) vs `free_pedestal_up` (targetless)).
         `exclude` = 생성기가 이미 실패한 preset (재계획 루프)."""
-        key = fold_synonyms(frozenset(moves))
+        key = fold_synonyms(frozenset(moves), self.terms)
         cands = [c for c in self.index.get((bool(track), key), []) if c not in exclude]
         if not cands:
             pool = [k for k in self.index if any(c not in exclude for c in self.index[k])]
@@ -185,7 +200,10 @@ class PresetVocab:
 
     def describe(self, name: str):
         i = self.info[name]
-        return ("track + " if i["track"] else "") + (" + ".join(sorted(i["moves"])) or "hold")
+        d = ("track + " if i["track"] else "") + (" + ".join(sorted(i["moves"])) or "hold")
+        if self.terms == "v2":   # [R468] v2 는 같은 primitive 에 조준만 다른 preset 이 있다 (pedestal_up / crane_up) — 조준을 같이 적는다
+            d += " (keep target centered)" if i["aim"] == "look_at" else ""
+        return d
 
     def prompt_block(self):
         """VLM 에 보여 줄 어휘 — 허용 조합을 primitive 로 적는다 (이름은 안 보인다)."""
@@ -234,10 +252,10 @@ def canonicalize(raw: dict, vocab: PresetVocab, intent: str = "", exclude=(), ta
     track = bool(raw.get("track", False))
     if snap:
         track = track or "track" in moves
-        moves = [m for m in moves if m in PRIMS]          # 어휘 밖 primitive 는 버린다
-    bad = [m for m in moves if m not in PRIMS]
+        moves = [m for m in moves if m in vocab.prims]    # 어휘 밖 primitive 는 버린다
+    bad = [m for m in moves if m not in vocab.prims]
     if bad:
-        err.append(f"unknown moves {bad}; allowed primitives: {', '.join(PRIMS)}")
+        err.append(f"unknown moves {bad}; allowed primitives: {', '.join(vocab.prims)}")
     tgt = raw.get("target") or {}
     noun = str(tgt.get("noun") or "").strip().lower() if isinstance(tgt, dict) else ""
     text = str(tgt.get("text") or "").strip() if isinstance(tgt, dict) else ""
@@ -394,12 +412,12 @@ class IntentPlanner:
 
     def __init__(self, client=None, preset_set="all", video_mode: str = "video", video_fps: float = 2.0, n_frames: int = 8,
                  max_repairs: int = 3, feasibility=None, max_replans: int = 0, framing_on_free: bool = False,
-                 work_dir: str = path.join(REPO, "tmp", "intent_planner"), snap_on_fail: bool = False):
+                 work_dir: str = path.join(REPO, "tmp", "intent_planner"), snap_on_fail: bool = False, terms: str = "v1"):
         if client is None:
             from lbm.vlm import VLMClient
             client = VLMClient(temperature=0.1, max_tokens=512)
         assert video_mode in ("video", "frames"), video_mode
-        self.client, self.vocab = client, PresetVocab(preset_set)
+        self.client, self.vocab = client, PresetVocab(preset_set, terms)
         self.video_mode, self.video_fps, self.n_frames = video_mode, video_fps, n_frames
         self.max_repairs, self.feasibility, self.max_replans = max_repairs, feasibility, max_replans
         self.framing_on_free, self.work_dir = framing_on_free, work_dir
@@ -542,9 +560,29 @@ def roundtrip_score(gt: CanonicalCameraPlan, pred: CanonicalCameraPlan):
     return {"ok": True, **s}
 
 
+def selftest_roundtrip(terms: str = "v1"):
+    """[R468] ①② 만 (preset → primitive → resolve 왕복 · plan 문장 == 뱅크 캡션 빌더 문장) — terms 별."""
+    vocab = PresetVocab(terms=terms); bad = []
+    for n, inf in vocab.info.items():
+        tgt = not inf["targetless"]
+        raw = {"moves": list(inf["moves"]), "track": inf["track"], "keep_target_centered": inf["aim"] == "look_at",
+               "target": {"noun": "man", "text": "the man in a grey cap"} if tgt else {}}
+        p, e = canonicalize(raw, vocab)
+        if e or p.preset != n:
+            bad.append((n, p.preset if p else None, e)); continue
+        v = {"preset": n, "aim": inf["aim"], "anchor_id": "x", "anchor_label": "man", "subject_in_frame": 1.0, "subject_area_med": 0.1}
+        ref = BC.nl_prompt(BC.caption_of(v, "", vocab.cfg, False, None, None, False, {"x": "the man in a grey cap"} if tgt else {},
+                                         "nl", True, 0.85, None, False))
+        if plan_to_conditions(p, vocab, framing_on_free=True)["camera_text"] != ref:
+            bad.append((n, "문장 불일치"))
+    print(f"selftest_roundtrip {terms}: {len(vocab.info)} preset, 불일치 {len(bad)} {bad[:5]}")
+    return bad
+
+
 def selftest():
     """전 preset: ① 이름 → primitive → resolve 가 같은 이름으로 돌아오나 ② plan 문장 == 뱅크 캡션 빌더 문장 (framing_on_free=True 경로)
     ③ 피드백 루프 (가짜 생성기) 가 실패 preset 을 빼고 다시 고르나."""
+    selftest_roundtrip("v2")
     vocab = PresetVocab(); bad = []
     for n, inf in vocab.info.items():
         tgt = not inf["targetless"]

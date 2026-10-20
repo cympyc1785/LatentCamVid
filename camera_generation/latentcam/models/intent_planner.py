@@ -453,6 +453,45 @@ def synthesize_intents(plan: CanonicalCameraPlan, vocab: PresetVocab, client, n:
     return [str(x) for x in (raw or {}).get("intents", [])][:n]
 
 
+# [SG3 · R459] 수준별 intent (사용자 2026-10-20): L1 = 카메라 움직임을 직접 말함 (용어 제한 없음) · L2 = 무엇을 강조/보고 싶은지 ·
+#   L3 = 움직임의 패턴·느낌. L2·L3 는 촬영 전문 용어 금지 (jargon_ok=True 면 허용 — 나중 비교용 변형).
+JARGON = ["dolly", "truck", "trucking", "pedestal", "crane", "jib", "pan", "panning", "tilt", "tilting", "roll", "orbit", "orbiting", "arc", "arcing",
+          "push in", "push-in", "pull out", "pull-out", "pull back", "tracking shot", "tracking", "close-up", "closeup", "medium shot", "wide shot",
+          "establishing shot", "extreme", "over-the-shoulder", "pov", "point of view", "rack focus", "zoom", "dutch", "framing", "frame",
+          "shot", "camera", "lens", "focal"]
+LEVEL_PROMPT = """A video shows {scene}. A camera move will be generated for it. The exact move is:
+"{caption}" (primitives: {move}{shot}).
+Write three requests a person could give to get exactly this move, at three levels:
+L1: says directly how the camera should move, in everyday words (any words are fine).
+L2: says what to emphasize or where the viewer's attention should go, so that this move follows from it. {rule}
+L3: says the kind of motion pattern or feeling wanted (e.g. building tension, revealing, intimacy), so that this move follows from it. {rule}
+Each request is one natural sentence a non-expert would say, and must stay consistent with the move (direction, approach vs. retreat, following the subject).
+Return JSON: {{"L1": "...", "L2": "...", "L3": "..."}}"""
+NO_JARGON = "Do not use any filmmaking or camera terms (no words like camera, shot, zoom, pan, dolly, close-up, frame, orbit, track, angle)."
+
+
+def jargon_hits(text: str, allow: str = ""):
+    """금지어 목록 중 `text` 에 나온 것. `allow` (subject 지칭구 등) 에 든 단어는 뺀다 — "the white truck" 의 truck 은 촬영 용어가 아니다 (R459 실측 456 건)."""
+    t = " " + re.sub(r"[^a-z\- ]", " ", text.lower()) + " "
+    a = " " + re.sub(r"[^a-z\- ]", " ", allow.lower()) + " "
+    return [w for w in JARGON if f" {w} " in t and f" {w} " not in a]
+
+
+def synthesize_intents_levels(plan: CanonicalCameraPlan, vocab: PresetVocab, client, caption: str, scene: str = "", jargon_ok: bool = False, tries: int = 3):
+    """canonical plan (+ 학습 캡션 문장) → {"L1","L2","L3"}. L2·L3 에 금지어가 나오면 최대 `tries` 번 다시 생성, 끝내 남으면 `jargon` 에 기록."""
+    shot = f"; ends on {BC.SHOT_CLASS_TEXT[plan.end_shot]}" if plan.end_shot else ""
+    prompt = LEVEL_PROMPT.format(scene=scene or (plan.target_text or "a scene"), caption=caption, move=vocab.describe(plan.preset), shot=shot,
+                                 rule="" if jargon_ok else NO_JARGON)
+    out = {}
+    for _ in range(tries):
+        raw, _ = client.chat_json(prompt, validate=lambda r: [] if all(isinstance(r.get(k), str) and r[k].strip() for k in ("L1", "L2", "L3")) else ["need L1, L2, L3 strings"])
+        out = {k: str((raw or {}).get(k, "")).strip() for k in ("L1", "L2", "L3")}
+        bad = {k: jargon_hits(out[k], allow=scene) for k in ("L2", "L3")} if not jargon_ok else {}
+        if not any(bad.values()):
+            return {**out, "jargon": {}}
+    return {**out, "jargon": bad}
+
+
 def roundtrip_score(gt: CanonicalCameraPlan, pred: CanonicalCameraPlan):
     """왕복 일치 — preset · primitive 집합 · track · target 명사 · end shot."""
     if pred is None:

@@ -21,6 +21,8 @@
 
 ### Added
 
+- **`intent_planner.synthesize_intents_levels`** · `jargon_hits` (SG3 · R459). canonical plan + 학습 캡션 → 수준별 intent {L1 움직임 직접 (용어 제한 없음), L2 강조·시선, L3 패턴·느낌}. L2·L3 는 촬영 전문 용어 금지 (나오면 최대 3 번 재생성, `jargon_ok=True` 면 허용 — 비교 변형). subject 지칭구에 든 단어는 금지어에서 뺀다. 기존 `synthesize_intents` 는 그대로.
+
 - **`build_bank_captions.py --measured_end_shot`** · `run_corpus_export.py --measured_end_shot` (R457). look-at dolly/push/pull 계열 중 shot_target_class 가 없는 행에, 측정한 끝 shot (subject 면적 경계 0.02/0.08/0.25/0.5) 을 ", ending on a close-up" 처럼 붙인다. shot 변화 방향이 preset 과 맞을 때만 (in = 면적 ×1.1 이상, out = 1/1.1 이하). 기본 꺼짐 = 예전 문장 그대로.
 
 - **`run_bank.py` config `post_cleanup`** (R451). 뱅크가 끝난 편 (OK · SKIP) 의 지정 파일을 지운다 (FAIL 은 재시도용으로 남김). `r442c_trumans_full.json` 에 `["cloud.npz", ".cloud_s115"]` — TRUMANS cloud 는 편당 ~760 MB 라 10-20 /data1 이 가득 찼다. 마커도 같이 지워야 재실행 때 cloud 가 다시 돈다. 키가 없으면 예전과 같음.

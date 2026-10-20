@@ -129,6 +129,11 @@ def load_preset_set(spec):
     return spec.split(","), None
 
 
+SIMILAR = {"crane_up": "pedestal_up", "pedestal_up": "crane_up", "crane_down": "pedestal_down", "pedestal_down": "crane_down",
+           "orbit_left": "arc_left", "arc_left": "orbit_left", "orbit_right": "arc_right", "arc_right": "orbit_right",
+           "zoom_in": "dolly_in", "dolly_in": "zoom_in", "zoom_out": "dolly_out", "dolly_out": "zoom_out"}   # [R465] snap 순위용
+
+
 class PresetVocab:
     """preset 어휘 (lbm.presets.PRESETS + configs/caption_presets.json) 를 `preset_set` 으로 좁힌다."""
 
@@ -153,7 +158,7 @@ class PresetVocab:
                                 shot_ok=(n in shot_presets) if shot_presets is not None else bool(re.match(SHOT_CLASS_PRESETS, n)))
             self.index.setdefault((track, frozenset(mv)), []).append(n)
 
-    def resolve(self, track: bool, moves, look_at: bool, has_target: bool, exclude=()):
+    def resolve(self, track: bool, moves, look_at: bool, has_target: bool, exclude=(), snap: bool = False):
         """primitive 조합 → (preset, 오류 목록). 같은 조합에 이름이 여럿이면 aim·target 유무로 가른다
         (`dolly_in` free vs `dolly_in_look_at` / `pedestal_up` (target 부름) vs `free_pedestal_up` (targetless)).
         `exclude` = 생성기가 이미 실패한 preset (재계획 루프)."""
@@ -162,7 +167,13 @@ class PresetVocab:
         if not cands:
             pool = [k for k in self.index if any(c not in exclude for c in self.index[k])]
             near = sorted(pool, key=lambda k: (-len(k[1] & key), len(k[1] - key), k[0] != bool(track)))[:4]
+            if snap:   # [R465] snap 순위만: 비슷한 primitive (crane≈pedestal · orbit≈arc) 를 반쯤 맞은 것으로 친다 — 오류 문구의 nearest 는 그대로
+                sim = lambda k: len(k[1] & key) + 0.5 * len({SIMILAR.get(m) for m in key - k[1]} & set(k[1] - key))
+                near = sorted(pool, key=lambda k: (-sim(k), len(k[1] - key) - 0.5 * len({SIMILAR.get(m) for m in key - k[1]} & set(k[1] - key)), k[0] != bool(track)))[:4]
             why = "already failed in this scene" if self.index.get((bool(track), key)) else f"not in the '{self.name}' vocabulary"
+            if snap and near:      # [R465] 재질의 소진 뒤 fallback — 가장 가까운 조합 (공통 primitive 많고 · 남는 것 적고 · track 같은 순)
+                cands = [c for c in self.index[near[0]] if c not in exclude]
+        if not cands:
             return None, [f"no preset for track={bool(track)} moves={sorted(key)} ({why}); nearest: "
                           + ", ".join(self.describe(next(c for c in self.index[k] if c not in exclude)) for k in near)]
         if len(cands) > 1:
@@ -210,18 +221,23 @@ class CanonicalCameraPlan:
         return cls(**{k: d[k] for k in cls.__dataclass_fields__ if k in d})
 
 
-def canonicalize(raw: dict, vocab: PresetVocab, intent: str = "", exclude=(), target_point=None):
+def canonicalize(raw: dict, vocab: PresetVocab, intent: str = "", exclude=(), target_point=None, snap: bool = False):
     """VLM JSON → (CanonicalCameraPlan | None, 오류 목록). 오류는 그대로 VLM 재질의에 쓴다 (lbm.vlm.chat_json validate)."""
     err, warn = [], []
     moves = raw.get("moves") or []
     if isinstance(moves, str):
         moves = [moves]
+    if snap:   # [R465] "track + crane_up + dolly_out" 처럼 한 문자열에 조합을 몰아 쓴 응답을 primitive 로 쪼갠다
+        moves = [q for m in moves for q in re.split(r"\s*[+,/]\s*|_\+_", str(m)) if q.strip()]
     moves = [str(m).strip().lower().replace(" ", "_").replace("-", "_") for m in moves]
     moves = [m for m in moves if m not in ("hold", "static", "none", "")]
+    track = bool(raw.get("track", False))
+    if snap:
+        track = track or "track" in moves
+        moves = [m for m in moves if m in PRIMS]          # 어휘 밖 primitive 는 버린다
     bad = [m for m in moves if m not in PRIMS]
     if bad:
         err.append(f"unknown moves {bad}; allowed primitives: {', '.join(PRIMS)}")
-    track = bool(raw.get("track", False))
     tgt = raw.get("target") or {}
     noun = str(tgt.get("noun") or "").strip().lower() if isinstance(tgt, dict) else ""
     text = str(tgt.get("text") or "").strip() if isinstance(tgt, dict) else ""
@@ -230,10 +246,14 @@ def canonicalize(raw: dict, vocab: PresetVocab, intent: str = "", exclude=(), ta
     look_at = bool(raw.get("keep_target_centered", bool(noun)))
     if err:
         return None, err
-    preset, e = vocab.resolve(track, moves, look_at, bool(noun), exclude)
+    preset, e = vocab.resolve(track, moves, look_at, bool(noun), exclude, snap=snap)
+    if snap and not e:
+        warn.append("snapped (재질의 소진 뒤 가장 가까운 preset)")
     if e:
         return None, e
     info = vocab.info[preset]
+    if info["needs_target"] and not noun and snap:
+        noun, text = "subject", "the subject"; warn.append("snap: target 없음 → 'the subject'")
     if info["needs_target"] and not noun:
         return None, [f"'{vocab.describe(preset)}' needs a target (track / look-at / phrase names the subject); give target.noun and target.text"]
     if info["targetless"] and noun:
@@ -374,7 +394,7 @@ class IntentPlanner:
 
     def __init__(self, client=None, preset_set="all", video_mode: str = "video", video_fps: float = 2.0, n_frames: int = 8,
                  max_repairs: int = 3, feasibility=None, max_replans: int = 0, framing_on_free: bool = False,
-                 work_dir: str = path.join(REPO, "tmp", "intent_planner")):
+                 work_dir: str = path.join(REPO, "tmp", "intent_planner"), snap_on_fail: bool = False):
         if client is None:
             from lbm.vlm import VLMClient
             client = VLMClient(temperature=0.1, max_tokens=512)
@@ -383,6 +403,7 @@ class IntentPlanner:
         self.video_mode, self.video_fps, self.n_frames = video_mode, video_fps, n_frames
         self.max_repairs, self.feasibility, self.max_replans = max_repairs, feasibility, max_replans
         self.framing_on_free, self.work_dir = framing_on_free, work_dir
+        self.snap_on_fail = snap_on_fail        # [R465] 재질의 소진 시 마지막 응답을 가장 가까운 preset 으로 (기본 False = 예전처럼 None)
 
     def _ask(self, video, intent, feedback=(), exclude=(), target_point=None):
         if self.video_mode == "video":
@@ -396,12 +417,16 @@ class IntentPlanner:
         box = {}
 
         def validate(raw):
+            box["last"] = raw
             p, e = canonicalize(raw, self.vocab, intent, exclude, target_point)
             box["plan"] = p
             return e
 
         raw, info = self.client.chat_json(prompt, images=images, system=SYSTEM, validate=validate, max_repairs=self.max_repairs,
                                           label="intent_plan", echo_previous=False, **vkw)
+        if raw is None and self.snap_on_fail and isinstance(box.get("last"), dict):
+            p, _ = canonicalize(box["last"], self.vocab, intent, exclude, target_point, snap=True)
+            return p, {**info, "raw": box["last"], "snapped": p is not None}
         return (box.get("plan") if raw is not None else None), {**info, "raw": raw}
 
     def plan(self, video: str, intent: str, target_point=None):

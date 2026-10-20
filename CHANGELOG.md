@@ -21,6 +21,8 @@
 
 ### Added
 
+- **`IntentPlanner(snap_on_fail=)` · `canonicalize(snap=)` · `PresetVocab.resolve(snap=)`** (R465). 재질의를 다 써도 어휘 밖 조합이면 마지막 응답을 가장 가까운 preset 으로 붙인다 ("track + a + b" 한 문자열 분해 · 어휘 밖 primitive 버림 · crane≈pedestal · orbit≈arc · zoom≈dolly 를 반쯤 맞은 것으로 순위). R461 에서 학습 캡션을 넣어도 38% 가 None 이던 문제. 기본 False = 예전처럼 None.
+
 - **`fit_hole_ladder.py --shot_class_max`** (R464). 목표 shot 사다리의 가장 타이트한 칸 번호 상한 (`SHOT_CLASS_NAMES` 순서, 기본 -1 = 제한 없음 → 예전과 같음). 얼굴 뱅크 v5f 에서 3 (close_up) — R445 에서 extreme_close_up 목표는 90% shot_missed.
 
 - **`intent_planner.synthesize_intents_levels(video=, video_fps=)`** (R462). L1/L2/L3 intent 합성에 영상 입력 추가 — subject mask (빨간 overlay) 를 덧씌운 원본 구간 영상을 VLM 에 2 fps 로 넣고, 프롬프트에 "강조된 subject 기준, 보이는 행동·물체·배경에 근거" 를 붙인다. `video=None` 이면 기존 텍스트 전용 합성과 같다.

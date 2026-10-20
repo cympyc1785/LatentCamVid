@@ -473,6 +473,8 @@ class IntentPlanner:
 def plan_from_bank_row(row: dict, vocab: PresetVocab, target_text: str = ""):
     """뱅크 행 (prompts.json 항목 / bank.csv 행) → plan. 학습 데이터의 정답 plan — intent 합성의 출발점."""
     name = resolve_preset(row["preset"], row.get("aim"))
+    if name not in vocab.info and vocab.terms == "v2" and name.startswith("free_pedestal_"):
+        name = name[len("free_"):]           # [R468] v2 어휘는 free_pedestal ≡ pedestal (같은 궤적·같은 문장)
     info = vocab.info[name]
     noun = "" if info["targetless"] else str(row.get("anchor_label") or "")
     cf = row.get("caption_fields") or {}

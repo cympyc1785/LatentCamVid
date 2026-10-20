@@ -21,6 +21,8 @@
 
 ### Added
 
+- **`run_corpus_export.py --no_framing_on_free`** (R469). build_bank_captions 에 그대로 넘긴다 — free preset 에 ", keeping X in view" 를 안 붙인다 (캡션 v2 규칙: look-at 만 공통 절). 안 주면 예전 그대로. `plan_from_bank_row` 는 v2 어휘에서 free_pedestal_* 을 pedestal_* 로 읽는다.
+
 - **intent planner `terms="v2"`** (R468). `PresetVocab(terms=)` · `IntentPlanner(terms=)` · `moves_of(terms=)` — v2 는 캡션 v2 문구 (caption_presets_v2.json) 와 primitive 12 개 (crane = pedestal + look-at · push/pull arc = dolly + orbit), roll · v5f 0 행 preset · free_pedestal 을 어휘에서 뺌 (74 preset), 어휘 설명에 "(keep target centered)" 를 붙여 같은 primitive 의 free/look-at 을 가른다. `selftest_roundtrip(terms)` v2 74/74 일치. 기본 v1 = 예전과 같음.
 
 - **캡션 v2 문구 `configs/caption_presets_v2.json` · `run_corpus_export.py --presets`** (R468·R469). 동사 = preset 용어 (dolly·truck·pedestal·orbit·pan·tilt·track; crane = pedestal + look-at, push/pull = dolly, arc = orbit + dolly), look-at preset 만 ", keeping X centered", free 는 subject 위치를 약속하지 않음 ("past X"). 생성 스크립트 tmp/r468/phrases.py. `--presets` 를 안 주면 예전 문구 그대로.

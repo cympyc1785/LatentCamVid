@@ -21,6 +21,8 @@
 
 ### Added
 
+- **CLaTr 다중 텍스트 학습** (R466). `prepare_clatr_vista.py --prompts_file` (기본 prompts.json) · `--intents_file`/`--intent_levels` → `<name>__<lv>_caption.{json,npy}` 변형 문장 추가 (canonical 파일명 그대로). CLaTr `CaptionDataset` 의 `text_variants` (기본 없음 = 예전) — 학습 split 행마다 canonical·L1·L2·L3 중 하나를 고르고, 궤적 짝 검사는 원래 이름으로. hydra `+dataset.caption.text_variants=[caption,L1,L2,L3]`. 행 복제 대신 이 방식을 쓴 이유: train loader 가 shuffle 없이 정렬돼 같은 궤적이 한 배치에 붙으면 contrastive false negative.
+
 - **`IntentPlanner(snap_on_fail=)` · `canonicalize(snap=)` · `PresetVocab.resolve(snap=)`** (R465). 재질의를 다 써도 어휘 밖 조합이면 마지막 응답을 가장 가까운 preset 으로 붙인다 ("track + a + b" 한 문자열 분해 · 어휘 밖 primitive 버림 · crane≈pedestal · orbit≈arc · zoom≈dolly 를 반쯤 맞은 것으로 순위). R461 에서 학습 캡션을 넣어도 38% 가 None 이던 문제. 기본 False = 예전처럼 None.
 
 - **`fit_hole_ladder.py --shot_class_max`** (R464). 목표 shot 사다리의 가장 타이트한 칸 번호 상한 (`SHOT_CLASS_NAMES` 순서, 기본 -1 = 제한 없음 → 예전과 같음). 얼굴 뱅크 v5f 에서 3 (close_up) — R445 에서 extreme_close_up 목표는 90% shot_missed.

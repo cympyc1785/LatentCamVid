@@ -48,6 +48,10 @@ class CaptionDataset(Dataset):
         self.num_cams = num_cams
         self.num_segments = num_segments
 
+        # [R466] text_variants (기본 None = 예전): 학습 split 행마다 canonical('caption') 또는 intent 변형 ('L1'..) 중 하나를 매번 고른다.
+        # 변형 파일 = `<filename>__<v>_caption.{json,npy}` (prepare_clatr_vista.py --intents_file). test 는 canonical 그대로.
+        self.text_variants = list(kwargs.get("text_variants") or [])
+
         # For caption filtering (based on CLIP token similarity)
         self.clip_token_dir = self.dataset_dir / "caption_cam_clip" / "token"
         
@@ -56,7 +60,12 @@ class CaptionDataset(Dataset):
         return len(self.filenames)
 
     def __getitem__(self, index):
-        filename = self.filenames[index]
+        filename = base_filename = self.filenames[index]
+        if self.text_variants and str(filename).startswith("train"):
+            import random
+            v = random.choice(self.text_variants)
+            if v != "caption":
+                filename = f"{filename}__{v}"
 
         if hasattr(self, "raw_caption_dir"):
             raw_caption = load_caption(self.raw_caption_dir / (filename + "_caption.json"))
@@ -93,4 +102,4 @@ class CaptionDataset(Dataset):
         else:
             raise ValueError(f"Modality {self.modality} not supported")
 
-        return filename, feat_data, raw_data
+        return base_filename, feat_data, raw_data   # [R466] 변형을 골라도 궤적과 짝 검사는 원래 이름으로

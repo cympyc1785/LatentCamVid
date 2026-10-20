@@ -85,6 +85,7 @@ def stage_json(args):
         out_split = path.join(args.out, split)
         makedirs(out_split, exist_ok=True)
         names = []
+        levels = [x for x in args.intent_levels.split(',') if x] if args.intents_file else []
 
         for ent in entries:
             # 'vista4d/<scene>/<idx>'
@@ -94,12 +95,16 @@ def stage_json(args):
                 d = path.join(args.corpus, '/'.join(parts[:-1]), 'da3')
                 z = np.load(path.join(d, 'target_poses.npz'), allow_pickle=True)
                 keys = {str(k): i for i, k in enumerate(z['keys'].tolist())}
-                with open(path.join(d, 'prompts.json')) as f:
+                with open(path.join(d, args.prompts_file)) as f:       # [R466] 기본 prompts.json (예전과 같음)
                     prompts = json_load(f)
+                intents = {}
+                if args.intents_file and path.isfile(path.join(d, args.intents_file)):
+                    with open(path.join(d, args.intents_file)) as f:
+                        intents = json_load(f)
                 scene_cache[scene] = (np.asarray(z['extrinsics'], dtype=np.float32),
                                       np.asarray(z['intrinsics'], dtype=np.float32),
-                                      keys, prompts)
-            E, K, keys, prompts = scene_cache[scene]
+                                      keys, prompts, intents)
+            E, K, keys, prompts, intents = scene_cache[scene]
 
             v = keys.get(idx)
             if v is None:
@@ -130,6 +135,14 @@ def stage_json(args):
                 json_dump(transforms, f, ensure_ascii=False)
             with open(path.join(out_split, f'{name}_caption.json'), 'w') as f:
                 json_dump({CAPTION_KEY: cap}, f, ensure_ascii=False)
+            # [R466] intent 변형 문장 — `<name>__<lv>_caption.json` (없으면 canonical 로 채우고 셈). 원래 파일명은 그대로라 예전 eval 과 호환
+            for lv in levels:
+                r = intents.get(idx) or {}
+                t = str(r.get(lv, '')).strip() if 'error' not in r else ''
+                if not t:
+                    errors.append(f'{scene}/{idx}\tno_intent_{lv}'); t = cap
+                with open(path.join(out_split, f'{name}__{lv}_caption.json'), 'w') as f:
+                    json_dump({CAPTION_KEY: t}, f, ensure_ascii=False)
             names.append(name)
             if split == 'train':
                 trans_all.append(c2w[:, :3, 3].astype(np.float64))
@@ -185,6 +198,8 @@ def stage_clip(args):
     print('=== stage clip ===')
     for split in ('train', 'test'):
         names = _read_list(path.join(args.out, f'{split}_valid.txt'))
+        if args.intents_file:   # [R466] 변형 문장도 같은 seq/token 폴더에 `<name>__<lv>_caption.npy`
+            names = names + [f'{n}__{lv}' for lv in args.intent_levels.split(',') if lv for n in names]
         caps = []
         for n in names:
             with open(path.join(args.out, split, f'{n}_caption.json')) as f:
@@ -213,6 +228,9 @@ def main():
     ap.add_argument('--clip_version', default='ViT-B/32')      # CLaTr lm/clip.yaml 과 같음
     ap.add_argument('--batch_size', type=int, default=256)
     ap.add_argument('--print_stats', action='store_true')      # 표준화 통계 출력
+    ap.add_argument('--prompts_file', default='prompts.json')  # [R466] 예: prompts_es.json (끝 shot 캡션)
+    ap.add_argument('--intents_file', default='')              # [R466] 예: intents_r462vc.json → 수준별 변형 문장 추가 (비우면 예전과 같음)
+    ap.add_argument('--intent_levels', default='L1,L2,L3')
     args = ap.parse_args()
 
     makedirs(args.out, exist_ok=True)

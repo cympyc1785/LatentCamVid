@@ -333,6 +333,7 @@ class CamDataset(torch.utils.data.Dataset):
         self._subject_box_cache = {}    # [R357] subject_box_cond
         self._subject_pts_cache = {}    # [R361] subject_pts_cond
         self._occ_grid_cache = {}       # [R425] occ_grid_cond
+        self._depth_vid_cache = {}      # [R482] depth_vid_cond
         self._occ_edt_cache = {}        # [R429] collision_loss_w>0
         # [new 2026-09-20, D206] aim_loss_w>0: scene_idx -> {seg_key: 1.0 if aim=='look_at' else 0.0}
         # prompts.json 의 `aim` 필드 하나만 뽑아 둔 것. samples 튜플에는 **안 넣는다** —
@@ -1280,6 +1281,22 @@ class CamDataset(torch.utils.data.Dataset):
             uv, obs = uv[idx], obs[idx]
         return torch.cat([uv - 0.5, obs[:, None], torch.ones(T, 1)], -1)
 
+    def _depth_vid(self, scene_idx, s, e, norm_scale):
+        """[R482] `<scene>/da3/<depth_vid_file>` (camera_generation/dataset/fit/bank/depth_vid_cache.py: 소스 전 프레임 DA3 depth 를 (T,h,w)
+        float16 로 줄인 것, 하늘·무효 = 0) 의 세그먼트 구간 [s,e) → (2,e-s,h,w) [log1p(depth / norm_scale) · valid]. voxel 화 없음, 동적 물체 포함."""
+        z = self._depth_vid_cache.get(scene_idx)
+        if z is None:
+            p = osp.join(self.scene_dir_list[scene_idx], 'da3', str(getattr(self.cfg, 'depth_vid_file', None) or 'depth_vid36x64.npz'))
+            if not osp.isfile(p):
+                raise FileNotFoundError(f"depth_vid_cond 인데 파일이 없다: {p} — camera_generation/dataset/fit/bank/depth_vid_cache.py 를 먼저 돌릴 것")
+            z = np.load(p)['depth']
+            self._depth_vid_cache[scene_idx] = z
+        d = torch.from_numpy(z[s:e].astype(np.float32))
+        if d.shape[0] < e - s:                                              # 소스가 짧으면 마지막 프레임 반복
+            d = torch.cat([d, d[-1:].expand(e - s - d.shape[0], -1, -1)], 0)
+        v = (d > 0).float()
+        return torch.stack([torch.log1p(d / float(norm_scale)) * v, v], 0)
+
     def _occ_grid(self, scene_idx, seg_key, norm_scale):
         """[R425] `<scene>/da3/<occ_grid_file>` (camera_generation/dataset/fit/bank/occ_grid_cache.py) 의 세그먼트 격자 → (3,N,N,N) float 0..1.
         격자는 굽는 시점의 avg_scale 파일 (`__meta__.avg_scale_dir`) 로 나눠져 있다 — 학습 분모 (`norm_scale`, max_trans_norm 등으로 바뀔 수 있음) 와
@@ -2077,6 +2094,9 @@ class CamDataset(torch.utils.data.Dataset):
         # [R425] occ_grid_cond: 3D 점유 격자 (3,N,N,N) float [occupied·free·unknown] — frame-s 카메라 / norm_scale (기본 off = 키 없음).
         if getattr(self.cfg, 'occ_grid_cond', False):
             out['occ_grid'] = self._occ_grid(scene_idx, data_name.split('_')[-1], norm_scale)
+        # [R482] depth_vid_cond: 소스 depth 영상 (2,T,h,w) — voxel 화 없음 · 동적 포함 (기본 off = 키 없음).
+        if getattr(self.cfg, 'depth_vid_cond', False):
+            out['depth_vid'] = self._depth_vid(scene_idx, s, e, norm_scale)
         # [R429] collision 보조 손실의 거리장 (1,N,N,N) — 손실 전용 (모델 입력 아님). collision_loss_w=0 (기본) 이면 키 없음.
         if float(getattr(self.cfg, 'collision_loss_w', 0.0) or 0.0) > 0:
             out['occ_edt'] = self._occ_edt(scene_idx, data_name.split('_')[-1], norm_scale)

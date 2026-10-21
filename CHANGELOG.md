@@ -21,6 +21,8 @@
 
 ### Added
 
+- **depth 영상 조건 `depth_vid_cond`** (R482). 소스 영상 DA3 depth 를 voxel 화 없이 (동적 물체 포함) (2,T,h,w) [log1p(depth/norm_scale)·valid] 로 → 시공간 3D conv (t·y·x stride 2³) → (t,y,x) Fourier PE → Perceiver resampler (기본 64) → DiT 층마다 CA (0 초기화 gate, occ_grid 와 같은 주입). 캐시 `fit/bank/depth_vid_cache.py` (씬마다 `depth_vid36x64.npz`, 파일 추가만). 기본 false = 예전과 같은 모델·state_dict.
+
 - **`run_corpus_export.py --no_framing_on_free`** (R469). build_bank_captions 에 그대로 넘긴다 — free preset 에 ", keeping X in view" 를 안 붙인다 (캡션 v2 규칙: look-at 만 공통 절). 안 주면 예전 그대로. `plan_from_bank_row` 는 v2 어휘에서 free_pedestal_* 을 pedestal_* 로 읽는다.
 
 - **intent planner `terms="v2"`** (R468). `PresetVocab(terms=)` · `IntentPlanner(terms=)` · `moves_of(terms=)` — v2 는 캡션 v2 문구 (caption_presets_v2.json) 와 primitive 12 개 (crane = pedestal + look-at · push/pull arc = dolly + orbit), roll · v5f 0 행 preset · free_pedestal 을 어휘에서 뺌 (74 preset), 어휘 설명에 "(keep target centered)" 를 붙여 같은 primitive 의 free/look-at 을 가른다. `selftest_roundtrip(terms)` v2 74/74 일치. 기본 v1 = 예전과 같음.

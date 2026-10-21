@@ -629,6 +629,8 @@ def build_video_cond(data, device):
         kw['subject_pts'] = data['subject_pts'].to(device).float()
     if 'occ_grid' in data:             # [R425] 3D 점유 격자 → 모델 occ CA
         kw['occ_grid'] = data['occ_grid'].to(device).float()
+    if 'depth_vid' in data:            # [R482] 소스 depth 영상 → 모델 depth CA
+        kw['depth_vid'] = data['depth_vid'].to(device).float()
     if kw and 'video_points' in data:
         kw['video_points'] = data['video_points'].to(device).float()
         kw['video_points_valid'] = data['video_points_valid'].to(device).bool()
@@ -1008,6 +1010,11 @@ def train():
                            occ_grid_dropout=float(getattr(cfg, 'occ_grid_dropout', 0.0) or 0.0),
                            occ_grid_resampler=int(getattr(cfg, 'occ_grid_resampler', 0) or 0),
                            occ_grid_resampler_layers=int(getattr(cfg, 'occ_grid_resampler_layers', 2) or 2))
+        if getattr(cfg, 'depth_vid_cond', False):                  # [R482] depth 영상 (voxel 화 없음, 동적 포함)
+            _vid_kw.update(depth_vid_cond=True,
+                           depth_vid_dropout=float(getattr(cfg, 'depth_vid_dropout', 0.0) or 0.0),
+                           depth_vid_resampler=int(getattr(cfg, 'depth_vid_resampler', 64) or 0),
+                           depth_vid_resampler_layers=int(getattr(cfg, 'depth_vid_resampler_layers', 2) or 2))
     # [R429] collision 손실 배선 확인 (0 이면 안 찍힘).
     if float(getattr(cfg, 'collision_loss_w', 0.0) or 0.0) > 0:
         assert bool(getattr(cfg, 'use_vae', False)), "collision_loss 는 latent arm 전용"
@@ -1068,6 +1075,10 @@ def train():
         print(f"(model) subject_pts: dim={model.subject_pts_dim} mode={model.subject_pts_mode} "
               f"fourier={getattr(model, 'subject_pts_fourier', 0)} stats={getattr(model, 'subject_pts_stats', False)} "
               f"params={sum(p.numel() for n, p in model.named_parameters() if 'pts' in n or 'subj' in n)}")
+    if getattr(cfg, 'depth_vid_cond', False):                    # [R482] 같은 규칙
+        assert getattr(model, 'depth_vid_cond', False) and hasattr(model, 'dv_enc'), "depth_vid_cond=true 인데 모델에 depth 영상 모듈이 없다"
+        print(f"(model) depth_vid: dropout={model.dv_dropout} resampler={getattr(model, 'dv_rs', 0)} "
+              f"params={sum(p.numel() for n, p in model.named_parameters() if n.startswith('dv_'))}", flush=True)
     if getattr(cfg, 'occ_grid_cond', False):                     # [R425] 같은 규칙 — 격자 모듈이 없으면 기동 즉시 멈춘다
         assert getattr(model, 'occ_grid_cond', False) and hasattr(model, 'occ_enc'), "occ_grid_cond=true 인데 모델에 점유 격자 모듈이 없다"
         print(f"(model) occ_grid: half={model.occ_half} dropout={model.occ_dropout} resampler={getattr(model, 'occ_rs', 0)} "

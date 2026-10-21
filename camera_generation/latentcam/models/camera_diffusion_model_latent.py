@@ -202,6 +202,10 @@ class CameraDiffusionModel(nn.Module):
         occ_grid_dropout=0.0,
         occ_grid_resampler=0,
         occ_grid_resampler_layers=2,
+        depth_vid_cond=False,
+        depth_vid_dropout=0.0,
+        depth_vid_resampler=64,
+        depth_vid_resampler_layers=2,
         video_text_fuse="token",
         start_pose_dim=0,
         start_pose_tf_p=0.0,
@@ -271,6 +275,29 @@ class CameraDiffusionModel(nn.Module):
                 self.occ_rs_out = nn.LayerNorm(hidden_dim)
             self.occ_gate = nn.Parameter(torch.zeros(num_layers))
             self.occ_layers = nn.ModuleList([
+                nn.ModuleList([nn.LayerNorm(hidden_dim), CrossAttention(hidden_dim, num_heads),
+                               FusedMLP(hidden_dim, dropout, nn.GELU, hidden_layer_multiplier=4)])
+                for _ in range(num_layers)])
+        # [R482] depth_vid_cond: 소스 영상 depth 를 voxel 화 없이 그대로 (동적 물체 포함) — (B,2,T,h,w) [log1p(depth/norm_scale) · valid]
+        #   → 시공간 3D conv (t·y·x 모두 stride 2 × 3) → 토큰 + (t,y,x) Fourier PE → Perceiver resampler K → DiT 층마다 CA (0 초기화 gate).
+        #   occ_grid_cond 와 같은 주입 방식, 입력만 다르다 (사용자 10-21 "voxelize 없이 dynamic 도 포함해서 depth 그 자체에서 time 축 고려해서 conv").
+        self.depth_vid_cond = bool(depth_vid_cond)
+        if self.depth_vid_cond:
+            self.dv_dropout, self.dv_nf = float(depth_vid_dropout), 6
+            self.dv_enc = nn.Sequential(nn.Conv3d(2, 32, 3, 2, 1), nn.SiLU(), nn.Conv3d(32, 64, 3, 2, 1), nn.SiLU(),
+                                        nn.Conv3d(64, 128, 3, 2, 1), nn.SiLU())
+            self.dv_tok = nn.Linear(128, hidden_dim)
+            self.dv_pe = nn.Sequential(nn.Linear(3 + 3 * 2 * self.dv_nf, hidden_dim), nn.SiLU(), nn.Linear(hidden_dim, hidden_dim))
+            self.dv_rs = int(depth_vid_resampler)
+            if self.dv_rs > 0:
+                self.dv_rs_q = nn.Parameter(torch.randn(1, self.dv_rs, hidden_dim) * 0.02)
+                self.dv_rs_layers = nn.ModuleList([
+                    nn.ModuleList([nn.LayerNorm(hidden_dim), nn.LayerNorm(hidden_dim), CrossAttention(hidden_dim, num_heads),
+                                   nn.LayerNorm(hidden_dim), FusedMLP(hidden_dim, dropout, nn.GELU, hidden_layer_multiplier=4)])
+                    for _ in range(int(depth_vid_resampler_layers))])
+                self.dv_rs_out = nn.LayerNorm(hidden_dim)
+            self.dv_gate = nn.Parameter(torch.zeros(num_layers))
+            self.dv_layers = nn.ModuleList([
                 nn.ModuleList([nn.LayerNorm(hidden_dim), CrossAttention(hidden_dim, num_heads),
                                FusedMLP(hidden_dim, dropout, nn.GELU, hidden_layer_multiplier=4)])
                 for _ in range(num_layers)])
@@ -535,7 +562,7 @@ class CameraDiffusionModel(nn.Module):
 
     def forward(self, x_t, t, text_emb, text_mask, geo_emb=None, geo_mask=None, cond=None,
                 video_emb=None, video_mask=None, video_text_emb=None, video_text_mask=None,
-                start_pose=None, video_points=None, video_points_valid=None, subject_pts=None, occ_grid=None):
+                start_pose=None, video_points=None, video_points_valid=None, subject_pts=None, occ_grid=None, depth_vid=None):
         self.text_cross_attn_weight = None
         # [new 2026-09-03] video CA. `video_latent_dim==0` 이거나 video_emb 가 없으면 이 스트림은
         # 통째로 건너뛴다 = 기존 경로와 동일.
@@ -672,6 +699,28 @@ class CameraDiffusionModel(nn.Module):
                     q = q + rmlp(ln_m(q))
                 occ_tok = self.occ_rs_out(q)
 
+        dv_tok = None
+        if getattr(self, 'depth_vid_cond', False) and depth_vid is not None:   # [R482] 없으면 (추론에서 조건 없음) 토큰 없이 = gate 경로 생략
+            g = depth_vid.to(x_t.dtype)
+            if self.training and self.dv_dropout > 0:
+                drop = (torch.rand(B, device=device) < self.dv_dropout)
+                if drop.any():
+                    g = g.clone(); g[drop] = 0                                     # 전부 0 (valid 0) = 조건 없음
+            fd = self.dv_enc(g)                                                    # (B,128,t',h',w')
+            nt, nh, nw = fd.shape[-3:]
+            ax = [((torch.arange(n, device=device, dtype=fd.dtype) + 0.5) / n * 2 - 1) for n in (nt, nh, nw)]
+            cc = torch.stack(torch.meshgrid(*ax, indexing='ij'), -1).reshape(-1, 3)              # (t, y, x) ∈ [-1,1]
+            fr = (2.0 ** torch.arange(self.dv_nf, device=device, dtype=fd.dtype)) * math.pi
+            ang = cc[..., None] * fr
+            pe = self.dv_pe(torch.cat([cc, ang.sin().flatten(-2), ang.cos().flatten(-2)], -1))
+            dv_tok = self.dv_tok(fd.flatten(2).transpose(1, 2)) + pe[None]
+            if getattr(self, 'dv_rs', 0) > 0:
+                q = self.dv_rs_q.expand(B, -1, -1).to(dv_tok.dtype)
+                for ln_q, ln_kv, rca, ln_m, rmlp in self.dv_rs_layers:
+                    q = rca(ln_q(q), ln_kv(dv_tok))
+                    q = q + rmlp(ln_m(q))
+                dv_tok = self.dv_rs_out(q)
+
         h = self.cam_in(x_t)
 
         pos_emb = positional_encoding(T, h.shape[-1], device=device).unsqueeze(0).expand(B, -1, -1)
@@ -783,6 +832,11 @@ class CameraDiffusionModel(nn.Module):
                 onorm, occ_ca, omlp = self.occ_layers[_li]
                 ox = occ_ca(onorm(h), occ_tok.to(h.dtype))
                 h = h + self.occ_gate[_li] * (omlp(ox) + ox)
+
+            if dv_tok is not None:                                                        # [R482] depth 영상 CA (0 초기화 gate)
+                dnorm, dv_ca, dmlp = self.dv_layers[_li]
+                dx = dv_ca(dnorm(h), dv_tok.to(h.dtype))
+                h = h + self.dv_gate[_li] * (dmlp(dx) + dx)
 
             if has_geo_latent:
                 scale2, shift2 = self.mod2(t_embed).chunk(2, dim=-1)

@@ -36,6 +36,8 @@ C = "/data1/cympyc1785/data/DynPose-LBM/latentcam_dynpose_d200"
 CLIP_SEQ = "/data1/cympyc1785/data/DynPose-LBM/clatr_dynpose_d200_s91/seq"
 DIRECTOR = "/data1/cympyc1785/LatentCamVid/camera_generation/models/DIRECTOR"
 W = np.diag([1.0, -1.0, -1.0])
+PROMPTS = "prompts.json"      # [R476] --prompts_file (예 prompts_v2.json)
+STD = "d200s91"               # [R476] --std_name (DIRECTOR standardization yaml 이름 · infer 에서 같은 이름을 쓴다)
 TRACK = "target_track.npz"     # [R352] --track_file 로 바꾼다 (convert 의 char·p0 와 evaldir 의 p0 가 같은 파일을 써야 역변환이 맞다)
 
 
@@ -48,7 +50,7 @@ def convert_one(scene, idx, cache):
         cache.clear()
         cache[scene] = dict(E=tp["extrinsics"], keys={str(k): i for i, k in enumerate(tp["keys"].tolist())},
                             track=tt["track_world"], tvalid=tt["valid"], tkeys={str(k): i for i, k in enumerate(tt["keys"].tolist())},
-                            K=K, prompts=json.load(open(f"{sd}/prompts.json")))
+                            K=K, prompts=json.load(open(f"{sd}/{PROMPTS}")))
     d = cache[scene]
     i, j = d["keys"].get(idx), d["tkeys"].get(idx)
     if i is None or j is None or not d["tvalid"][j]:
@@ -77,7 +79,7 @@ def stage_convert(a):
     cache, why = {}, {}
     for split in (["test"] if a.split_list else ["train", "test"]):     # [R352] --split_list = test 하나만
         names = []
-        for line in open(a.split_list or f"{C}/seg_list_dynpose_s91_{split}.txt"):
+        for line in open(a.split_list or f"{C}/seg_list_dynpose_s91_{a.split_tag}{split}.txt"):
             line = line.strip()
             if not line:
                 continue
@@ -119,12 +121,12 @@ def stage_stats(a):
         nh.append(np.concatenate([ch[:1], np.diff(ch, axis=0)]))
     sh, nv, nh = np.stack(sh), np.concatenate(nv), np.concatenate(nh)
     f = lambda x: "[" + ", ".join(f"{v:.8g}" for v in x) + "]"
-    y = (f"name: 'd200s91'\nnum_interframes: 0\nnum_cams: 49\n"
+    y = (f"name: '{STD}'\nnum_interframes: 0\nnum_cams: 49\n"
          "num_total_frames: ${eval:'${dataset.standardization.num_interframes} * (${dataset.standardization.num_cams} - 1) + ${dataset.standardization.num_cams} '}\n\n"
          f"# prepare_et_d200.py --stage stats (Dataset-v1 s91 train {len(names)} 샘플, E.T. 좌표 char0 원점 · y-up)\n"
          f"norm_mean: {f(nv.mean(0))}\nnorm_std: {f(nv.std(0))}\n\nshift_mean: {f(sh.mean(0))}\nshift_std: {f(sh.std(0))}\n\n"
          f"norm_mean_h: {f(nh.mean(0))}\nnorm_std_h: {f(nh.std(0))}\n\nvelocity: true\n")
-    out = f"{DIRECTOR}/configs/dataset/standardization/d200s91.yaml"
+    out = f"{DIRECTOR}/configs/dataset/standardization/{STD}.yaml"
     open(out, "w").write(y)
     print(f"[stats] → {out}\n{y}", flush=True)
 
@@ -136,7 +138,7 @@ def stage_infer(a):
     from run_director_vista import build_diffuser, build_char_feat, make_get_matrix
     os.makedirs(a.eval_out, exist_ok=True)
     diffuser, config, device = build_diffuser(path.abspath(a.ckpt), "cuda",
-                                              ["dataset/standardization=d200s91", "diffuser/network/module=ca_director"])
+                                              [f"dataset/standardization={STD}", "diffuser/network/module=ca_director"])
     num_cams = int(config.dataset.num_cams); assert num_cams == 49, num_cams
     std = {k: list(v) for k, v in config.dataset.standardization.items() if k.startswith(("norm_", "shift_"))}
     get_matrix = make_get_matrix(config).get_matrix
@@ -205,6 +207,10 @@ if __name__ == "__main__":
     # [R314] infer / evaldir
     ap.add_argument("--ckpt", default="")
     ap.add_argument("--corpus", default=C)              # [R352] 다른 코퍼스 (기본 = Dataset-v1 d200)
+    ap.add_argument("--prompts_file", default=PROMPTS)  # [R476]
+    ap.add_argument("--std_name", default=STD)          # [R476]
+    ap.add_argument("--split_tag", default="")          # [R476] 예 "noroll_" → seg_list_dynpose_s91_noroll_{train,test}.txt
+    ap.add_argument("--clip_seq_root", default=CLIP_SEQ)  # [R476] <root>/<split>/<scene>__<idx>_caption.npy (예 clatr_dynpose_v5f50k_v2/seq)
     ap.add_argument("--track_file", default=TRACK)      # [R352] 예 target_track_molmo2.npz
     ap.add_argument("--split_list", default="")         # [R352] seg 목록 하나 (test 로 취급). "" = s91 train/test
     ap.add_argument("--clip_seq_dir", default="")       # [R352] 캡션 CLIP seq 폴더 (dynpose_<scene>_<idx>_caption.npy). "" = clatr d200 캐시
@@ -215,6 +221,6 @@ if __name__ == "__main__":
     ap.add_argument("--guidance_weight", type=float, default=1.4)
     ap.add_argument("--num_steps", type=int, default=10)
     a = ap.parse_args()
-    C, TRACK = a.corpus, a.track_file          # [R352] 모듈 전역 (convert_one · stage_evaldir 가 읽는다)
+    C, TRACK, PROMPTS, STD, CLIP_SEQ = a.corpus, a.track_file, a.prompts_file, a.std_name, a.clip_seq_root   # [R352·R476] 모듈 전역
     for st in a.stage.split(","):
         globals()[f"stage_{st}"](a)

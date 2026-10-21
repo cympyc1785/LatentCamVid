@@ -302,6 +302,13 @@ occ_grid_half: 2.0
 occ_grid_dropout: 0.1          # 학습 때 표본 단위로 격자를 '전부 unknown' (조건 없음) 으로
 occ_grid_resampler: 0          # K>0 = Perceiver resampler 로 격자 토큰 512 → K (DiT CA 는 K 개만). 0 = 512 그대로
 occ_grid_resampler_layers: 2
+# [R482] 소스 영상 depth 를 voxel 화 없이 (동적 물체 포함) 시공간 3D conv → resampler → DiT 층마다 CA. <scene>/da3/<depth_vid_file> 필요
+#   (camera_generation/dataset/fit/bank/depth_vid_cache.py). 입력 (2,T,h,w) = [log1p(depth / norm_scale) · valid], 세그먼트 frame_idx 구간. false = 예전.
+depth_vid_cond: false
+depth_vid_file: depth_vid36x64.npz
+depth_vid_dropout: 0.1
+depth_vid_resampler: 64
+depth_vid_resampler_layers: 2
 # [R429] 이 접두사로 시작하는 파라미터만 학습 (예 ['occ_'] = 격자 adapter 만, load_ckpt_path 로 base warm-start). null = 전부 학습 (예전).
 train_only_prefixes: null
 # [R429] ESDF hinge 보조 손실 (objective=fm, latent 전용): 예측 x0 → VAE decode → 카메라 중심의 정적 거리장 값 d (occ_edt_file, frame-s / norm_scale) 에

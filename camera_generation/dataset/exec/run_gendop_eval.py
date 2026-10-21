@@ -127,6 +127,21 @@ CORPORA = {
     # cloud.npz 는 0/1,017 이다 (D178 에서 디스크 저장을 없앴다) -> score 는
     # `--cloud_source memory` 여야 한다. npz 모드면 전 씬이 "cloud/graph 없음" 으로 빠져
     # 표가 통째로 nan 이 된다 (조용히 실패한다).
+    # [R476] Dataset-v5f50k (roll 제외 test 4,803, 캡션 v2). ref = R469 MTb v2 eval 폴더 (캡션·GT 를 여기서 가져간다)
+    "dynpose_v5f50k_v2": dict(
+        corpus="/data1/cympyc1785/data/DynPose-LBM/latentcam_dynpose_v5f50k",
+        split_name="seg_list_dynpose_s91_noroll_test.txt",
+        eval_data="/data1/cympyc1785/data/DynPose-100K/eval_data",
+        prefix="dynpose",
+        cloud_root=path.join(HERE, "out_dynpose_v5"),
+        out=path.join(HERE, "results", "20261021_r476_gendop_v5f50k"),
+        depth_norm="median",
+        ours={
+            "v5f_MTb_v2": EVAL_MY + "20261021_003902_dsv5f50kv2_molmo2_l21_noprobe_fm_vaeCrepenclin_zstd_track3d_box3d__last__seed42__v5test",
+            "v5f_MT_v2":  EVAL_MY + "20261021_003902_dsv5f50kv2_molmo2_l21_noprobe_fm_vaeCrepenclin_zstd_track3d__last__seed42__v5test",
+        },
+        ref="v5f_MTb_v2",
+    ),
     "dynpose_d200": dict(
         corpus="/data1/cympyc1785/data/DynPose-LBM/latentcam_dynpose_d200",
         split_name="seg_list_dynpose_s91_test.txt",

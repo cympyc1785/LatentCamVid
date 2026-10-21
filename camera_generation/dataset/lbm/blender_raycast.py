@@ -102,8 +102,19 @@ class RaycastClient:
         return out
 
     # ── API ─────────────────────────────────────────────────────────────────────────────
-    def load_clip(self, clip: str, frames):
-        return self._call({"op": "load_clip", "clip": clip, "frames": [int(f) for f in frames]})
+    def load_clip(self, clip: str, frames, verts: bool = False, n_verts: int = 40000):
+        """`verts=True` (R487) 면 프레임마다 사람 mesh 정점 표본도 캐시한다 (`screen` 용). 기본은 예전 요청 그대로."""
+        req = {"op": "load_clip", "clip": clip, "frames": [int(f) for f in frames]}
+        if verts:
+            req.update(verts=True, n_verts=int(n_verts))
+        return self._call(req)
+
+    def screen(self, clip: str, poses_list, frames, K, W, H, gw=128, gh=72, n_occ=24):
+        """[R487] 사람 mesh 실루엣 지표 (area · visible · center, 프레임별). poses 는 blend world OpenCV c2w."""
+        poses = [np.asarray(p, dtype=np.float64).round(7).tolist() for p in poses_list]
+        return self._call({"op": "screen", "clip": clip, "poses": poses, "frames": [int(f) for f in frames],
+                           "K": [float(x) for x in K], "W": float(W), "H": float(H),
+                           "gw": int(gw), "gh": int(gh), "n_occ": int(n_occ)})["rows"]
 
     def profile(self, clip: str, poses_list, per_frame: bool = False):
         poses = [np.asarray(p, dtype=np.float64).round(7).tolist() for p in poses_list]

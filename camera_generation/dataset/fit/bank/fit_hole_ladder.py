@@ -416,6 +416,34 @@ def ray_verdict(stats: dict):
     return None
 
 
+def mesh_screen_override(stats: dict, poses, renderer, center_box: float, occl_on: bool, grid=(128, 72)):
+    """[R487] TRUMANS `--subject_screen mesh`: subject 화면 지표를 점군 렌더 대신 **사람 GT mesh 실루엣**으로 덮어쓴다.
+
+    같은 측정 프레임(`measured_frames`)에서 raycast 서버가 정점 투영(저해상도 격자) + 정적 광선 가림을 잰다.
+    덮는 열은 점군 경로와 이름·뜻이 같다 (area_med/last/onscreen/in_frame, area_seq/start/end, visible_frac/min)
+    — 하류 판정식은 안 바뀐다. coverage(hole) 는 정의상 "소스가 본 것" 이라 그대로 점군이다. 꺼져 있으면 호출 안 됨.
+    """
+    frames = list(stats.get("measured_frames") or [])
+    if not frames or RAY_CLIENT is None:
+        return
+    K = np.asarray(renderer.K_src[frames[0]], dtype=np.float64)
+    row = RAY_CLIENT[0].screen(RAY_CLIENT[1], [RAY_CLIENT[2] @ np.asarray(poses)], frames,
+                               (K[0, 0], K[1, 1], K[0, 2], K[1, 2]), renderer.width, renderer.height,
+                               gw=grid[0], gh=grid[1])[0]
+    areas = np.asarray(row["area"], dtype=float)
+    lo, hi = (1 - center_box) / 2, 1 - (1 - center_box) / 2
+    inb = [c is not None and lo <= c[0] <= hi and lo <= c[1] <= hi for c in row["center"]]
+    stats.update({"subject_area_med": round(float(np.median(areas)), 4), "subject_area_last": round(float(areas[-1]), 4),
+                  "subject_onscreen_frac": round(float(np.mean(areas >= 0.002)), 3),
+                  "subject_in_frame": round(float(np.mean(inb)), 3), "subject_screen_source": "mesh"})
+    if "subject_area_seq" in stats:
+        stats.update({"subject_area_seq": [round(float(a), 4) for a in areas],
+                      "subject_area_start": round(float(areas[0]), 4), "subject_area_end": round(float(areas[-1]), 4)})
+    if occl_on:
+        vis = np.asarray(row["visible"], dtype=float)
+        stats.update({"subject_visible_frac": round(float(vis.mean()), 4), "subject_visible_min": round(float(vis.min()), 4)})
+
+
 def physical_verdict(stats: dict, max_behind: float, min_obb: float, max_elev: float,
                      min_ground: float, min_approach: float,
                      max_behind_dyn: float | None = None):
@@ -823,6 +851,7 @@ def main(args):
     renderer, recon = open_renderer(args, out_root, graph)
     global RAY_GATE, RAY_CLIENT
     RAY_CLIENT = None
+    assert args.subject_screen == "render" or args.ray_gate == "server", "--subject_screen mesh 는 --ray_gate server 가 필요하다 (R487)"
     if args.ray_gate == "server":
         from lbm.blender_raycast import RaycastClient
         grid = np.load(path.join(out_root, args.video, "mesh_grid.npz"), allow_pickle=True)
@@ -830,7 +859,8 @@ def main(args):
                     "min_subject_dist": args.ray_min_subject_dist,
                     "min_clear_frac": args.ray_min_clear_frac}
         client = RaycastClient(args.video.split("_")[1])
-        client.load_clip(args.video, np.asarray(grid["frame_list"]).tolist())
+        client.load_clip(args.video, np.asarray(grid["frame_list"]).tolist(),
+                         verts=(args.subject_screen == "mesh"))             # [R487] mesh 실루엣용 정점 캐시
         RAY_CLIENT = (client, args.video, np.asarray(grid["anchor_c2w"], dtype=np.float64))
         print(f"[ray] GT mesh raycast gate ON  {RAY_GATE}", flush=True)
     num_frames = int(graph["num_frames"])
@@ -1247,6 +1277,8 @@ def main(args):
                         _row = RAY_CLIENT[0].profile(RAY_CLIENT[1],
                                                      [RAY_CLIENT[2] @ np.asarray(poses)])[0]
                         stats.update({f"ray_{k}": float(v) for k, v in _row.items()})
+                        if args.subject_screen == "mesh" and not stats.get("gated"):
+                            mesh_screen_override(stats, poses, renderer, args.center_box, occl_on)
                     if stats.get("gated"):
                         gated_probes[0] += 1
                     stats["_knob"] = float(knob)     # D275 motion 사다리의 metric (손잡이 자체)
@@ -1583,6 +1615,8 @@ def main(args):
                                               area_timeline=args.area_timeline,
                                               composition=(dict(composition, anchor_id=anchor)
                                                            if composition else None))
+                if args.subject_screen == "mesh" and RAY_CLIENT is not None:     # [R487]
+                    mesh_screen_override(stats, poses, renderer, args.center_box, True)
                 calls_total += len(stats["measured_frames"])
                 rows.append({
                     # 이름은 **Δ** 로 매긴다 — excess 모드에서 `target_hole` 은 anchor 마다
@@ -2261,6 +2295,9 @@ def build_parser():
     parser.add_argument("--ray_min_floor_drop", default=0.30, type=float)
     parser.add_argument("--ray_min_subject_dist", default=0.80, type=float)
     parser.add_argument("--ray_min_clear_frac", default=0.90, type=float)
+    # [R487] subject 화면 지표 (면적·노출·중앙·가림) 출처. render = 소스 점군 렌더 (예전, 기본) · mesh = 사람 GT mesh 실루엣
+    #   (`--ray_gate server` 필요, TRUMANS 전용). coverage(hole) 는 어느 쪽이든 점군.
+    parser.add_argument("--subject_screen", default="render", choices=("render", "mesh"))
     parser.add_argument("--motion_ladder", default=[0.20, 0.35, 0.60], nargs="+", type=float)
     # D266. subject 중심이 중앙 박스(`--center_box`) 안이던 프레임 비율의 하한. 0 = 끔(기본,
     # 예전과 비트 동일). 가림(`--min_subject_visible`)과 달리 렌더가 안 늘어난다.

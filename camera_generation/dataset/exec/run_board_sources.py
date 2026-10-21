@@ -100,9 +100,12 @@ def far_enough(board_cands, i, j, min_az):
 
 def run_clip(a, row, cand, slot, exclude, gpu, log_dir):
     """clip 1개. -> (ok, preset, video)"""
-    video = f"tru_{row['recording'][:8]}_{row['chunk']}_k{cand:03d}_p{slot}"
-    man = path.join(HERE, "out", "trumans_recon", row["recording"],
-                     f"manifest_{row['chunk']}_k{cand:03d}_p{slot}.json")
+    # [R487] `--gen_tag` 를 주면 새 세대: 클립 이름 접미사 `_<tag>` + 작업 폴더 `out/trumans_recon_<tag>/` (기존 클립·manifest 와 안 겹친다).
+    #   안 주면 예전 이름·경로 그대로.
+    sfx = f"_{a.gen_tag}" if a.gen_tag else ""
+    video = f"tru_{row['recording'][:8]}_{row['chunk']}_k{cand:03d}_p{slot}{sfx}"
+    wdir = path.join(HERE, "out", "trumans_recon" + sfx, row["recording"])
+    man = path.join(wdir, f"manifest_{row['chunk']}_k{cand:03d}_p{slot}.json")
     if path.exists(man):                                   # 이미 만든 클립 (재실행 안전)
         m = json.load(open(man))
         return True, m["source_camera"]["preset"], video
@@ -117,6 +120,10 @@ def run_clip(a, row, cand, slot, exclude, gpu, log_dir):
            # grid probe JSON 이 새 Blender 판과 전체 일치 (00add26c c01 k029, 576 후보).
            "--probe_server",
            "--eval_data", a.eval_data] + RECON_ARGS + (["--allow_unlabeled"] if a.allow_unlabeled else [])
+    if a.gen_tag:                                          # [R487]
+        cmd += ["--out_video", video, "--work", wdir]
+    if a.track_gain is not None:                           # [R487] 소스 카메라 사람 추종 (trumans_to_recon 기본 0.6)
+        cmd += ["--track_gain", str(a.track_gain)]
     env = {"CUDA_VISIBLE_DEVICES": str(gpu), "OMP_NUM_THREADS": "8", "PATH": "/usr/bin:/bin"}
     import os
     env = {**os.environ, **env}
@@ -229,6 +236,8 @@ if __name__ == "__main__":
     q.add_argument("--recordings", nargs="*", default=None)                    # [R446] 이 recording (앞 8자) 만 render
     q.add_argument("--rgb_samples", default=16, type=int)      # D281 (사용자 지시): 32 -> 16 (PSNR 42.3 -> 39.6 dB, RGB 133.7 -> 103.6 s)
     q.add_argument("--timeout", default=3600, type=int)
+    q.add_argument("--gen_tag", default="", type=str)          # [R487] 새 세대 접미사 (예 g10). 비우면 예전 이름
+    q.add_argument("--track_gain", default=None, type=float)   # [R487] 비우면 trumans_to_recon 기본 (0.6)
     q.add_argument("--num_shards", default=1, type=int)
     q.add_argument("--shard_id", default=0, type=int)
     a = q.parse_args()

@@ -91,6 +91,7 @@ class Server:
         self.bvh, self.n_tris = build_static_bvh(self.scene, set(self.human) | {self.armature})
         self.t_bvh = time.time() - t0
         self.clips = {}                  # clip id -> (F,3,3) 조준점
+        self.verts = {}                  # [R487] clip id -> (F,N,3) 사람 mesh 정점 표본 (subject 화면 지표용)
 
     def hit(self, origin, direction, dist):
         d = Vector(direction)
@@ -99,15 +100,95 @@ class Server:
         got = self.bvh.ray_cast(Vector(origin), d.normalized(), dist)
         return float(got[3]) if got[0] is not None else float("inf")
 
+    def human_verts(self, dg, n_keep):
+        """[R487] 사람 mesh (armature 가 deform 하는 것 전부) 정점을 world 로, 고정 표본 `n_keep` 개."""
+        parts = []
+        for obj in self.human:
+            ev = obj.evaluated_get(dg)
+            mesh = ev.to_mesh()
+            if mesh is None:
+                continue
+            co = np.empty(len(mesh.vertices) * 3, dtype=np.float32)
+            mesh.vertices.foreach_get("co", co)
+            co = co.reshape(-1, 3)
+            M = np.asarray(ev.matrix_world, dtype=np.float32)
+            parts.append(co @ M[:3, :3].T + M[:3, 3])
+            ev.to_mesh_clear()
+        V = np.concatenate(parts, 0)
+        idx = np.random.default_rng(0).permutation(len(V))[:n_keep] if len(V) > n_keep else np.arange(len(V))
+        return V[np.sort(idx)]
+
     def load_clip(self, req):
         frames = [int(f) for f in req["frames"]]
-        aims = []
+        aims, verts = [], []
+        want_verts = bool(req.get("verts", False))
         for f in frames:
             self.scene.frame_set(f)
             dg = bpy.context.evaluated_depsgraph_get()
             aims.append(PROBE.body_points(self.body, dg))
+            if want_verts:
+                verts.append(self.human_verts(dg, int(req.get("n_verts", 40000))))
         self.clips[req["clip"]] = np.asarray(aims, dtype=np.float64)
+        if want_verts:
+            self.verts[req["clip"]] = verts
         return {"ok": True, "n": len(frames)}
+
+    def screen(self, req):
+        """[R487] 사람 mesh 실루엣으로 subject 화면 지표. 렌더 없이 정점 투영 (저해상도 격자 + 3x3 closing) +
+        실루엣 일부 픽셀에서 정적 BVH 광선으로 가림. 반환: 경로마다 프레임별 area · visible · center.
+
+        - area    : 실루엣 픽셀 / (gw*gh)  — 가림과 무관한 순수 실루엣 (v5f 의 subject 단독 렌더와 같은 뜻)
+        - visible : 실루엣 표본 픽셀 중 카메라→사람 표면 광선이 정적 표면에 안 막힌 비율 (사람 자기 가림은 제외)
+        - center  : 실루엣 무게중심 (0~1) 또는 None
+        """
+        V = self.verts[req["clip"]]
+        fx, fy, cx, cy = [float(x) for x in req["K"]]
+        W, H = float(req["W"]), float(req["H"])
+        gw, gh = int(req.get("gw", 128)), int(req.get("gh", 72))
+        n_occ, margin = int(req.get("n_occ", 24)), float(req.get("occ_margin", 0.05))
+        frames = [int(f) for f in req["frames"]]
+        out = []
+        for path_poses in req["poses"]:
+            P = np.asarray(path_poses, dtype=np.float64)
+            area, vis, cen = [], [], []
+            for f in frames:
+                c2w = P[f]; R, t = c2w[:3, :3], c2w[:3, 3]
+                pc = (V[f].astype(np.float64) - t) @ R          # world -> cam (OpenCV)
+                z = pc[:, 2]; ok = z > 1e-3
+                u = (fx * pc[:, 0] / np.where(ok, z, 1) + cx) * gw / W
+                v = (fy * pc[:, 1] / np.where(ok, z, 1) + cy) * gh / H
+                iu, iv = np.floor(u).astype(int), np.floor(v).astype(int)
+                ok &= (iu >= 0) & (iu < gw) & (iv >= 0) & (iv < gh)
+                mask = np.zeros((gh, gw), bool)
+                if ok.any():
+                    mask[iv[ok], iu[ok]] = True
+                    pad = np.pad(mask, 1)                    # 3x3 dilate -> erode (정점 사이 빈 픽셀 메움)
+                    dil = np.zeros_like(pad)
+                    for dy in (-1, 0, 1):
+                        for dx in (-1, 0, 1):
+                            dil |= np.roll(np.roll(pad, dy, 0), dx, 1)
+                    ero = np.ones_like(dil)
+                    for dy in (-1, 0, 1):
+                        for dx in (-1, 0, 1):
+                            ero &= np.roll(np.roll(dil, dy, 0), dx, 1)
+                    mask = ero[1:-1, 1:-1] | mask
+                n_pix = int(mask.sum())
+                area.append(n_pix / float(gw * gh))
+                if n_pix == 0:
+                    vis.append(0.0); cen.append(None); continue
+                ys, xs = np.nonzero(mask)
+                cen.append([float((xs.mean() + 0.5) / gw), float((ys.mean() + 0.5) / gh)])
+                # 가림: 정점 중 화면 안 것 일부 (균등 간격) 로 광선
+                cand = np.nonzero(ok)[0]
+                pick = cand[np.linspace(0, len(cand) - 1, min(n_occ, len(cand))).round().astype(int)]
+                seen = 0
+                for i in pick:
+                    p = V[f][i].astype(np.float64); d = p - t; dist = float(np.linalg.norm(d))
+                    if self.hit(t, d, max(dist - margin, 1e-3)) == float("inf"):
+                        seen += 1
+                vis.append(seen / float(len(pick)))
+            out.append({"area": area, "visible": vis, "center": cen})
+        return {"ok": True, "rows": out}
 
     def profile(self, req):
         aims = self.clips[req["clip"]]
@@ -172,6 +253,8 @@ class Server:
                                     out = self.load_clip(req)
                                 elif op == "profile":
                                     out = self.profile(req)
+                                elif op == "screen":
+                                    out = self.screen(req)
                                 elif op == "probe":
                                     # D278. `trumans_scene_probe.py` 를 **같은 인자로 in-process**
                                     # 실행 — 결과 JSON 은 probe 가 `--out` 에 쓴다. 매번 Blender 를

@@ -155,6 +155,8 @@ def stage_captions(args, scenes, avail):
             cmd += ["--presets", args.presets]
         if args.no_framing_on_free:            # [R469] free preset 에 ", keeping X in view" 를 안 붙인다 (캡션 v2 규칙: look-at 만 공통 절)
             cmd.append("--no_framing_on_free")
+        if args.desc_override:                 # [R486] build_bank_captions --desc_override ({video:{node:지칭구}}). 안 주면 예전 그대로
+            cmd += ["--desc_override", args.desc_override]
         with open(log, "w", encoding="utf-8") as fh:
             res = run(cmd, cwd=CINE, stdout=fh, stderr=fh, text=True)
         got = sum(1 for v in videos
@@ -287,6 +289,7 @@ if __name__ == "__main__":
     p.add_argument("--measured_end_shot", action="store_true", default=False)   # [R457] build_bank_captions --measured_end_shot
     p.add_argument("--presets", default="")                                         # [R468] build_bank_captions --presets
     p.add_argument("--no_framing_on_free", action="store_true", default=False)      # [R469] build_bank_captions --no_framing_on_free
+    p.add_argument("--desc_override", default="")                                   # [R486] build_bank_captions --desc_override
     # ── 경로 ──────────────────────────────────────────────────────────────────
     p.add_argument("--cine_out", default=path.join(CINE, "out_dynpose"), type=str)
     p.add_argument("--recon_root", default="/data1/cympyc1785/LatentCamVid/DATA/"

@@ -23,6 +23,11 @@
 
 ### Added
 
+- **R487 TRUMANS subject 화면 지표 = 사람 GT mesh 실루엣.** `fit/ingest/blender_raycast_server.py` 에 `screen` 요청 (load_clip `verts=True` 로 프레임별 사람 mesh 정점 표본 캐시 → 저해상도 격자 투영 + 3×3 closing 으로 면적·중심, 실루엣 정점 일부에 정적 BVH 광선으로 가림), `lbm/blender_raycast.RaycastClient.screen`, `fit_hole_ladder --subject_screen {render,mesh}` (기본 render = 예전; mesh 는 `--ray_gate server` 필요, 이분법·검증 두 곳에서 area/onscreen/in_frame/visible 열을 덮어씀. coverage 는 점군 그대로).
+- **`exec/run_board_sources.py --gen_tag --track_gain`** (R487). 새 세대 소스 클립을 이름 접미사·작업 폴더를 갈라 렌더하고 소스 카메라 사람 추종률을 넘긴다. 안 주면 예전 이름·0.6.
+- **`configs/bank/r487_trumans_v5f.json`** (R487). r442c + ray gate (clear_frac 0.6, subject_dist 0.8 유지) + `--subject_screen mesh` + min_subject_in_frame 범위 v5f 정규식 + route pool 24.
+- **`exec/run_corpus_export.py --desc_override`** (R486). build_bank_captions 로 지칭구 덮어쓰기 전달 (E2 얼굴 "the face of the …").
+
 - **`dataset/eval/arm_table.py`** (R476). 여러 arm 의 traj_time_metrics per_entry · CLaTr v2 json · 충돌 per_entry 를 look-at/free 로 나눠 한 표로 (ADE · rot · |fr_off−gt| · fr_err · in_box · shell/esdf coll). R484·R476 에서 두 번 손으로 짠 집계를 승격.
 
 - **`dataset/exec/native_captions.py`** (R476). 외부 baseline 의 원 캡션 파이프라인을 우리 test GT 카메라에 그대로 태운다 (LLM 만 로컬 Qwen3-VL). `--model gendop`: DataDoP 120 pose·fps 30 분절 → Movement → 4×4 grid(Filtering.py 규칙) + Movement → Concise, 위치는 0.323/S 게이지. `--model et`: E.T. 좌표(키 1.7 m)·25 fps 리샘플 → 카메라/char 분절 → cam+char 프롬프트 (T 0.6). 산출은 eval 폴더 모양 `test/<prefix>_<scene>_<idx>_caption.json`.

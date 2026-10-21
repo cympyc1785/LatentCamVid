@@ -23,6 +23,8 @@
 
 ### Added
 
+- **`dataset/eval/arm_table.py`** (R476). 여러 arm 의 traj_time_metrics per_entry · CLaTr v2 json · 충돌 per_entry 를 look-at/free 로 나눠 한 표로 (ADE · rot · |fr_off−gt| · fr_err · in_box · shell/esdf coll). R484·R476 에서 두 번 손으로 짠 집계를 승격.
+
 - **`dataset/exec/native_captions.py`** (R476). 외부 baseline 의 원 캡션 파이프라인을 우리 test GT 카메라에 그대로 태운다 (LLM 만 로컬 Qwen3-VL). `--model gendop`: DataDoP 120 pose·fps 30 분절 → Movement → 4×4 grid(Filtering.py 규칙) + Movement → Concise, 위치는 0.323/S 게이지. `--model et`: E.T. 좌표(키 1.7 m)·25 fps 리샘플 → 카메라/char 분절 → cam+char 프롬프트 (T 0.6). 산출은 eval 폴더 모양 `test/<prefix>_<scene>_<idx>_caption.json`.
 
 - **`dataset/exec/run_director3d_batch.py`** (R476). Director3D 공개 ckpt 의 Traj-DiT 단계만 배치로 돌려 (DDIM 100 step, 원본 샘플러 그대로) 29 카메라 → Director3D 자신의 SLERP/LERP 로 49 → GenDoP 어댑터 규약 npz (`director3d__<scene>__<idx>.npz`, OpenGL c2w). 렌더러 import (`diff_gaussian_rasterization`·`kiui`) 는 빈 모듈로 막고, SD2.1 은 tokenizer·text_encoder 만 올린다.

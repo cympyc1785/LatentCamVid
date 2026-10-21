@@ -21,6 +21,8 @@
 
 ### Added
 
+- **`dataset/exec/run_director3d_batch.py`** (R476). Director3D 공개 ckpt 의 Traj-DiT 단계만 배치로 돌려 (DDIM 100 step, 원본 샘플러 그대로) 29 카메라 → Director3D 자신의 SLERP/LERP 로 49 → GenDoP 어댑터 규약 npz (`director3d__<scene>__<idx>.npz`, OpenGL c2w). 렌더러 import (`diff_gaussian_rasterization`·`kiui`) 는 빈 모듈로 막고, SD2.1 은 tokenizer·text_encoder 만 올린다.
+
 - **depth 영상 조건 `depth_vid_cond`** (R482). 소스 영상 DA3 depth 를 voxel 화 없이 (동적 물체 포함) (2,T,h,w) [log1p(depth/norm_scale)·valid] 로 → 시공간 3D conv (t·y·x stride 2³) → (t,y,x) Fourier PE → Perceiver resampler (기본 64) → DiT 층마다 CA (0 초기화 gate, occ_grid 와 같은 주입). 캐시 `fit/bank/depth_vid_cache.py` (씬마다 `depth_vid36x64.npz`, 파일 추가만). 기본 false = 예전과 같은 모델·state_dict.
 
 - **`run_corpus_export.py --no_framing_on_free`** (R469). build_bank_captions 에 그대로 넘긴다 — free preset 에 ", keeping X in view" 를 안 붙인다 (캡션 v2 규칙: look-at 만 공통 절). 안 주면 예전 그대로. `plan_from_bank_row` 는 v2 어휘에서 free_pedestal_* 을 pedestal_* 로 읽는다.

@@ -21,6 +21,8 @@
 
 ### Added
 
+- **`dataset/exec/native_captions.py`** (R476). 외부 baseline 의 원 캡션 파이프라인을 우리 test GT 카메라에 그대로 태운다 (LLM 만 로컬 Qwen3-VL). `--model gendop`: DataDoP 120 pose·fps 30 분절 → Movement → 4×4 grid(Filtering.py 규칙) + Movement → Concise, 위치는 0.323/S 게이지. `--model et`: E.T. 좌표(키 1.7 m)·25 fps 리샘플 → 카메라/char 분절 → cam+char 프롬프트 (T 0.6). 산출은 eval 폴더 모양 `test/<prefix>_<scene>_<idx>_caption.json`.
+
 - **`dataset/exec/run_director3d_batch.py`** (R476). Director3D 공개 ckpt 의 Traj-DiT 단계만 배치로 돌려 (DDIM 100 step, 원본 샘플러 그대로) 29 카메라 → Director3D 자신의 SLERP/LERP 로 49 → GenDoP 어댑터 규약 npz (`director3d__<scene>__<idx>.npz`, OpenGL c2w). 렌더러 import (`diff_gaussian_rasterization`·`kiui`) 는 빈 모듈로 막고, SD2.1 은 tokenizer·text_encoder 만 올린다.
 
 - **depth 영상 조건 `depth_vid_cond`** (R482). 소스 영상 DA3 depth 를 voxel 화 없이 (동적 물체 포함) (2,T,h,w) [log1p(depth/norm_scale)·valid] 로 → 시공간 3D conv (t·y·x stride 2³) → (t,y,x) Fourier PE → Perceiver resampler (기본 64) → DiT 층마다 CA (0 초기화 gate, occ_grid 와 같은 주입). 캐시 `fit/bank/depth_vid_cache.py` (씬마다 `depth_vid36x64.npz`, 파일 추가만). 기본 false = 예전과 같은 모델·state_dict.

@@ -23,7 +23,9 @@ env: GenDoP (evo · torchtyping · cv2). 예:
     $PY exec/native_captions.py --model gendop --out <dir> --limit 4
 """
 import json
+import os
 import sys
+import threading
 import urllib.request
 from argparse import ArgumentParser
 from concurrent.futures import ThreadPoolExecutor
@@ -87,7 +89,9 @@ def datadop_grid(video, out_png, all_width=900):
             canvas.paste(imgs[r * 4 + c].resize((w, hs[r * 4 + c])), (c * w, y))
         y += rows[r]
     makedirs(path.dirname(out_png), exist_ok=True)
-    canvas.save(out_png)
+    tmp = f"{out_png}.{threading.get_ident()}.tmp.png"      # 같은 씬을 여러 스레드가 동시에 만들 때 반쯤 쓴 파일을 읽지 않게
+    canvas.save(tmp)
+    os.replace(tmp, out_png)
     return out_png
 
 
@@ -104,8 +108,9 @@ def gendop_one(a, job, ctx):
     tag = CD.tag_trajectory(poses, 120, None, False, convert=False)
     tag["gauge"] = {"S": S, "mul": a.datadop_depth / S}
     grid = path.join(a.out, "grids", f"{scene}.png")
-    if not path.isfile(grid):
-        datadop_grid(path.join(a.recon_root, scene, "video.mp4"), grid)
+    with ctx["grid_lock"]:
+        if not path.isfile(grid):
+            datadop_grid(path.join(a.recon_root, scene, "video.mp4"), grid)
     if a.no_llm:
         return tag, None
     pm, pr = ctx["prompts"]
@@ -223,6 +228,7 @@ def main():
         import caption_cameras_datadop as CD
         from lbm.vlm import VLMClient
         ctx["prompts"] = CD.load_prompts()
+        ctx["grid_lock"] = threading.Lock()
         # 원본은 OpenAI 기본 샘플링 (temperature 1.0) — 지정이 없으므로 그 기본값을 따른다
         ctx["client"] = None if a.no_llm else VLMClient(api_base=a.api_base, model=a.model_name, temperature=1.0, max_tokens=700, timeout=300)
         fn = gendop_one

@@ -23,6 +23,9 @@
 
 ### Added
 
+- **`trumans_to_recon.py --geom_only` · `run_board_sources.py --geom_only`** (R487 2단계 렌더 1단계). depth/index 만 렌더 (RGB 생략, video.mp4 회색 자리표시자 + `RGB_PENDING`), 변환 뒤 render 폴더의 depth/index npy 삭제 (cameras.json 은 남김). smoke 1 클립: 렌더 77 s, recon 6.4 MB.
+- **`scene_graph/gt_trumans.board_folder`** (R487). 세대 접미사 클립 (`tru_<rec8>_cNN_fNNNNN_kNNN_pN_<tag>`) 을 `<recon_root>_<tag>/` 작업 폴더로 해석. 접미사 없으면 예전 그대로.
+
 - **R487 TRUMANS subject 화면 지표 = 사람 GT mesh 실루엣.** `fit/ingest/blender_raycast_server.py` 에 `screen` 요청 (load_clip `verts=True` 로 프레임별 사람 mesh 정점 표본 캐시 → 저해상도 격자 투영 + 3×3 closing 으로 면적·중심, 실루엣 정점 일부에 정적 BVH 광선으로 가림), `lbm/blender_raycast.RaycastClient.screen`, `fit_hole_ladder --subject_screen {render,mesh}` (기본 render = 예전; mesh 는 `--ray_gate server` 필요, 이분법·검증 두 곳에서 area/onscreen/in_frame/visible 열을 덮어씀. coverage 는 점군 그대로).
 - **`exec/run_board_sources.py --gen_tag --track_gain`** (R487). 새 세대 소스 클립을 이름 접미사·작업 폴더를 갈라 렌더하고 소스 카메라 사람 추종률을 넘긴다. 안 주면 예전 이름·0.6.
 - **`configs/bank/r487_trumans_v5f.json`** (R487). r442c + ray gate (clear_frac 0.6, subject_dist 0.8 유지) + `--subject_screen mesh` + min_subject_in_frame 범위 v5f 정규식 + route pool 24.

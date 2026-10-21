@@ -764,13 +764,17 @@ def convert(render_dir, poses_world, out_recon, out_seg, out_seg_static, fps, sk
     with open(path.join(render_dir, "objects.json"), encoding="utf-8") as file:
         objects = json.load(file)
 
+    # [R487] `--geom_only` 렌더는 rgb/ 가 없다 — 프레임 목록을 depth 에서 읽고 video.mp4 는 회색 자리표시자 + RGB_PENDING.
+    geom_only = not path.isdir(path.join(render_dir, "rgb"))
     frames = sorted(int(path.basename(p)[6:11]) for p in
-                    __import__("glob").glob(path.join(render_dir, "rgb", "frame_*.png")))
+                    __import__("glob").glob(path.join(render_dir, "depth" if geom_only else "rgb",
+                                                      "frame_*.npy" if geom_only else "frame_*.png")))
     assert len(frames) == NUM_FRAMES, f"렌더 프레임 {len(frames)} != {NUM_FRAMES}"
 
-    rgb = np.stack([imageio.imread(path.join(render_dir, "rgb", f"frame_{f:05d}.png"))[:, :, :3]
-                    for f in frames])
     depth = np.stack([np.load(path.join(render_dir, "depth", f"frame_{f:05d}.npy")) for f in frames])
+    rgb = (np.full(depth.shape + (3,), 128, np.uint8) if geom_only else
+           np.stack([imageio.imread(path.join(render_dir, "rgb", f"frame_{f:05d}.png"))[:, :, :3]
+                     for f in frames]))
     index = np.stack([np.load(path.join(render_dir, "index", f"frame_{f:05d}.npy")) for f in frames])
     num_frames, height, width = depth.shape
 
@@ -783,6 +787,11 @@ def convert(render_dir, poses_world, out_recon, out_seg, out_seg_static, fps, sk
     makedirs(out_recon, exist_ok=True)
     imageio.mimwrite(path.join(out_recon, "video.mp4"), list(rgb), fps=fps,
                      codec="libx264", quality=8, macro_block_size=1)
+    pending = path.join(out_recon, "RGB_PENDING")
+    if geom_only:
+        open(pending, "w").write("video.mp4 는 회색 자리표시자 — depth/index 만 렌더 (R487 2단계). 선별되면 RGB 를 다시 렌더한다.\n")
+    elif path.exists(pending):
+        __import__("os").remove(pending)
     save_depths(path.join(out_recon, "depths"), depth, dtype=np.float16)
     save_masks(path.join(out_recon, "dynamic_mask"), dynamic_mask)
     save_masks(path.join(out_recon, "static_mask"), static_mask)
@@ -1201,7 +1210,7 @@ def main(args):
         rgb_dir = render_dir + "_rgb"
         common = ["--poses", poses_path, "--frames", str(start), str(end), str(step),
                   "--res", str(args.res[0]), str(args.res[1]), "--lens", str(args.lens)]
-        t_rgb = run_blender(
+        t_rgb = 0.0 if args.geom_only else run_blender(
             args.blender, blend, path.join(CINEMATRAJ_ROOT, "viz", "trumans_gt_render.py"),
             common + ["--passes", "rgb", "--rgb_engine", "cycles",
                       "--rgb_samples", str(args.rgb_samples), "--rgb_cdevice", args.rgb_cdevice,
@@ -1217,11 +1226,12 @@ def main(args):
         dst = path.join(render_dir, "rgb")
         if path.isdir(dst):
             shutil.rmtree(dst)
-        shutil.move(path.join(rgb_dir, "rgb"), dst)
-        shutil.copy(path.join(rgb_dir, "render_meta.json"), path.join(render_dir, "render_meta_rgb.json"))
-        shutil.rmtree(rgb_dir)
-        n_rgb = len([f for f in listdir(dst) if f.endswith(".png")])
-        assert n_rgb == NUM_FRAMES, f"rgb anim 프레임 {n_rgb} != {NUM_FRAMES}: {dst}"
+        if not args.geom_only:                             # [R487] geom_only 는 rgb/ 를 안 만든다 (convert 가 자리표시자)
+            shutil.move(path.join(rgb_dir, "rgb"), dst)
+            shutil.copy(path.join(rgb_dir, "render_meta.json"), path.join(render_dir, "render_meta_rgb.json"))
+            shutil.rmtree(rgb_dir)
+            n_rgb = len([f for f in listdir(dst) if f.endswith(".png")])
+            assert n_rgb == NUM_FRAMES, f"rgb anim 프레임 {n_rgb} != {NUM_FRAMES}: {dst}"
         timing["render"] = t_rgb + t_geo
         timing["render_rgb"], timing["render_geom"] = t_rgb, t_geo
     else:
@@ -1252,6 +1262,9 @@ def main(args):
     report = convert(render_dir, poses, out_recon, out_seg, out_seg_static,
                      float(out_fps), args.sky_depth, args.vista4d_root)
     timing["convert"] = time.time() - started
+    if args.geom_only:                                     # [R487] 디스크: depth/index npy 원본은 recon (EXR f16) 로 옮겼다.
+        for sub in ("depth", "index"):                     # cameras.json·objects.json 은 GT 중력/subject 가 읽으므로 남긴다
+            __import__("shutil").rmtree(path.join(render_dir, sub), ignore_errors=True)
 
     manifest = {
         "format": "trumans_recon_v1", "video": video,
@@ -1290,6 +1303,7 @@ def main(args):
             "poses_override": args.poses_override,
             "preset": preset, "seed": args.seed,
             "candidate": candidate, "aim_bias": args.aim_bias, "track_gain": args.track_gain,
+            "rgb_pending": bool(args.geom_only),
             "aim_keyframes": int(args.aim_keyframes),
             "kf_ease": args.source_kf_ease, "pos_keyframes": int(args.source_pos_keyframes),   # D283
             "stats": stats,
@@ -1446,6 +1460,9 @@ if __name__ == "__main__":
     parser.add_argument("--rgb_engine", default="eevee", choices=["eevee", "cycles"], type=str)
     # D276. cycles RGB 를 `--anim` 한 job + depth/index 별 job 으로 (균일 간격만). 끄면 예전 1-job.
     parser.add_argument("--rgb_anim", action="store_true", default=False)
+    # [R487] depth/index 만 렌더 (RGB 는 선별 뒤 2단계). `--rgb_anim --rgb_engine cycles` 경로에서만 뜻이 있다.
+    #   video.mp4 = 회색 자리표시자 + recon 폴더에 RGB_PENDING. 렌더 폴더(render_*)는 변환 뒤 지운다 (디스크).
+    parser.add_argument("--geom_only", action="store_true", default=False)
     # D278. probe(grid)/probe(verify) 를 recording 상주 Blender 서버(`lbm/blender_raycast.py`)에서.
     # 끄면 예전처럼 probe 마다 Blender 를 새로 띄운다.
     parser.add_argument("--probe_server", action="store_true", default=False)

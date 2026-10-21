@@ -124,6 +124,8 @@ def run_clip(a, row, cand, slot, exclude, gpu, log_dir):
         cmd += ["--out_video", video, "--work", wdir]
     if a.track_gain is not None:                           # [R487] 소스 카메라 사람 추종 (trumans_to_recon 기본 0.6)
         cmd += ["--track_gain", str(a.track_gain)]
+    if a.geom_only:                                        # [R487] depth/index 만 (RGB 는 선별 뒤)
+        cmd += ["--geom_only"]
     env = {"CUDA_VISIBLE_DEVICES": str(gpu), "OMP_NUM_THREADS": "8", "PATH": "/usr/bin:/bin"}
     import os
     env = {**os.environ, **env}
@@ -238,6 +240,7 @@ if __name__ == "__main__":
     q.add_argument("--timeout", default=3600, type=int)
     q.add_argument("--gen_tag", default="", type=str)          # [R487] 새 세대 접미사 (예 g10). 비우면 예전 이름
     q.add_argument("--track_gain", default=None, type=float)   # [R487] 비우면 trumans_to_recon 기본 (0.6)
+    q.add_argument("--geom_only", action="store_true", default=False)   # [R487] 1 단계: depth/index 만 렌더
     q.add_argument("--num_shards", default=1, type=int)
     q.add_argument("--shard_id", default=0, type=int)
     a = q.parse_args()

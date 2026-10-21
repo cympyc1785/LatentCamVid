@@ -52,6 +52,9 @@ RECON_ROOT_DEFAULT = path.join(path.dirname(path.dirname(path.abspath(__file__))
 # 옛 규약(`tru_<rec8>_a<NN>_<suffix>` + `<uuid>_<suffix>/`)과 이름이 겹치지 않으므로 분기로 판별한다.
 _UUID_RE = re.compile(r"^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$")
 _BOARD_KEY_RE = re.compile(r"^c\d+_f\d+_k\d+_p\d+$")
+# [R487] 새 세대 클립은 이름 끝에 `_<tag>` (예 `_g10`) 가 붙고 작업 폴더가 `<recon_root>_<tag>/` 다
+# (`run_board_sources --gen_tag`). 접미사가 없으면 예전 규약 그대로.
+_BOARD_GEN_RE = re.compile(r"^(c\d+_f\d+_k\d+_p\d+)_([a-z][a-z0-9]*)$")
 
 
 def board_folder(video: str, recon_root: str = RECON_ROOT_DEFAULT):
@@ -61,6 +64,11 @@ def board_folder(video: str, recon_root: str = RECON_ROOT_DEFAULT):
     폴더만** 고른다. 그래도 2개 이상이면 모호한 것이라 None (resolve_dirs 와 같은 원칙).
     """
     parts = video.split("_", 2)
+    if len(parts) == 3 and parts[0] == "tru":
+        gen = _BOARD_GEN_RE.match(parts[2])
+        if gen and not _BOARD_KEY_RE.match(parts[2]):        # [R487] 세대 접미사 → 그 세대의 작업 폴더
+            parts = [parts[0], parts[1], gen.group(1)]
+            recon_root = f"{recon_root.rstrip('/')}_{gen.group(2)}"
     if len(parts) != 3 or parts[0] != "tru" or not _BOARD_KEY_RE.match(parts[2]):
         return None
     cands = [d for d in glob(path.join(recon_root, f"{parts[1]}-*"))

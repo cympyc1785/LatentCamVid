@@ -378,6 +378,11 @@ def main():
                            occ_grid_dropout=float(getattr(cfg, 'occ_grid_dropout', 0.0) or 0.0),
                            occ_grid_resampler=int(getattr(cfg, 'occ_grid_resampler', 0) or 0),
                            occ_grid_resampler_layers=int(getattr(cfg, 'occ_grid_resampler_layers', 2) or 2))
+        if getattr(cfg, 'depth_vid_cond', False):                  # [R482] 학습 진입점과 같은 kwargs (안 넘기면 strict load 가 dv_* 에서 죽는다)
+            _vid_kw.update(depth_vid_cond=True,
+                           depth_vid_dropout=float(getattr(cfg, 'depth_vid_dropout', 0.0) or 0.0),
+                           depth_vid_resampler=int(getattr(cfg, 'depth_vid_resampler', 64) or 0),
+                           depth_vid_resampler_layers=int(getattr(cfg, 'depth_vid_resampler_layers', 2) or 2))
     # [R91] start pose head (D261/D296) — 학습 진입점과 같은 kwargs. 안 넘기면 strict load 가 start_query/start_out 에서 죽는다.
     _sp_kw = {}
     if bool(getattr(cfg, 'start_pose_pred', False)):

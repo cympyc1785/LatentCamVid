@@ -11,6 +11,8 @@
 
 ### Fixed
 
+- **`scripts/eval_testset.py`** (R482). `depth_vid_cond` 학습 run 의 모델 kwargs 를 안 넘겨 strict load 가 `dv_*` 키에서 죽던 것 — 학습 진입점과 같은 kwargs 추가.
+
 - **`dataset/exec/native_captions.py`** (R476). 같은 씬 4×4 grid 를 여러 스레드가 동시에 쓰다 반쯤 쓴 PNG 를 VLM 에 넘기던 경합 — lock + 임시파일 `os.replace`.
 
 - **`scene_graph.gt_trumans.board_folder`** (R446). recon 작업 폴더가 `<uuid>_lph_ng` 인 board 클립의 GT 중력을 못 찾아 graph 가 실패. uuid 폴더가 없을 때만 그 board key 의 manifest 가 든 폴더를 받는다 (예전 클립은 동작 같음).

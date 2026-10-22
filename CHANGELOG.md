@@ -25,6 +25,8 @@
 
 ### Added
 
+- **`dataset/exec/native_captions.py`** (R508). `--model pipeline` — 우리 fork `pipeline/GenDoP` tagging 설정 (49 pose · fps 10 · diff 0.6 · 원 스케일 · 창 15/최소 구간 12) 으로 Movement 문장을 만들어 `Concise Interaction` 에 넣는다. `--gendop_root` 인자 통과.
+
 - **`dataset/exec/run_director_batch.py`** (R507). `--char_static` — E.T. char 궤적을 첫 프레임 위치에 고정 (정지 궤적 ablation). 기본 꺼짐.
 
 - **`latentcam/models/intent_planner.py`** (R497·R498). `IntentPlanner.prim_defs` (기본 False = 예전) — v2 joint_struct 프롬프트의 조합 설명 괄호를 가장 작은 단위 정의 문단 (`PRIM_DEFS_V2`: dolly·truck·pedestal·orbit·pan·tilt·track·keep centered·hold; track 은 "따라가라는 요청일 때만, 움직이는 subject 만으로는 아님" — R499; hold = "위 이동 단위 없음" — R500) 으로 바꾼다. `extra_context` (프롬프트 끝 추가 정보) · joint_struct `video=None` (텍스트만). v2 재계획 피드백 문구 (`FAIL_FIX_V2`) 에서 push in / crane / arc 를 v2 용어로. `IntentPlanner.lean` (R501, 기본 False): joint_struct 에서 end_shot 출력 제거 · target.text 길이 제약 제거 · 영상 없으면 system 문구에서 video 제거. `IntentPlanner.examples` (R501, 기본 False): 손으로 쓴 few-shot 8 개 (`JS_EXAMPLES_V2`) — 시험 결과 손해라 기본 꺼짐. (R503·R504, 전부 기본 꺼짐) `end_shot_explicit` — intent 가 끝 shot 크기를 명시했을 때만 end_shot · `examples="v2b"` — 실제 train L1s 문장 few-shot 11 개 (`JS_EXAMPLES_V2B`, 출력과 같은 JSON) · `target_loose` — target.text 완전 일치 대신 내용어 70% (`target_overlap`) · `prompt_style="clear"` — 단계식 프롬프트 (`JOINT_STRUCT_CLEAR`), reasoning 키를 move 앞에 두어 선택 전에 생각을 쓰게 함. joint_struct 마무리를 `_finish_js` 로 분리. (R506) clear ablation 옵션 `clear_steps` (Step 1-3 문단 유무) · `reason_pos` (reasoning 키 first/last/none).

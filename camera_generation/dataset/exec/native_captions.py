@@ -18,6 +18,11 @@ R476 (사용자 2026-10-21 "공개 ckpt 돌리는건 해당 모델들이 받는 
   ③ `caption_trajectories` 와 같은 outline·프롬프트 (`llm/prompt/cam+mesh.yaml` = cam+char 판), 샘플링 T 0.6 · top_p 0.95 · top_k 50 ·
      max 300, 숫자가 섞이면 "Remove frame indices." 로 한 번 되묻는다 → `Concise Interaction` 키에 저장.
 
+--model pipeline  (R508, 사용자 10-22 "우리 pipeline 대로 · 49 프레임 10 fps") — 우리 fork `/data1/cympyc1785/pipeline/GenDoP` 의 tagging 설정 그대로
+  ① GT c2w (OpenGL, DA3 world 원 스케일 — pipeline 도 정규화 없이 cameras.json 원 스케일로 태깅) 49 pose 그대로, fps 10,
+     static 0.02 · diff 0.6 · angular 0.005, 분절 창 15 · 최소 구간 12 (fork segmentation.py 에 고정)
+  ② outline → LLM → `Movement` (`llm/cam+rotate.yaml`, pipeline 과 같은 프롬프트) — pipeline 은 Movement 만 만든다 → 그 문장을 `Concise Interaction` 에.
+
 env: GenDoP (evo · torchtyping · cv2). 예:
     PY=/data1/cympyc1785/miniconda3/envs/GenDoP/bin/python
     $PY exec/native_captions.py --model gendop --out <dir> --limit 4
@@ -119,6 +124,24 @@ def gendop_one(a, job, ctx):
     return tag, {"Movement": movement, "Detailed Interaction": detailed, TEXT_KEY: concise}
 
 
+PIPE_ROOT = "/data1/cympyc1785/pipeline/GenDoP"
+PIPE_SEG = dict(cam_static_threshold=0.02, cam_diff_threshold=0.6, angular_static_threshold=0.005, fps=10.0,
+                smoothing_window_size=18, min_chunk_size=10)   # 창·최소 구간은 fork segmentation.py:443-444 가 15·12 로 덮는다
+
+
+def pipeline_one(a, job, ctx):
+    """[R508] 우리 pipeline (fork GenDoP Dataset_Tagging_custom) 설정 — 49 pose · fps 10 · 원 스케일 · Movement 만."""
+    import caption_cameras_datadop as CD
+    scene, idx = job
+    poses = load_ref(a.ref_eval_dir, a.prefix, scene, idx)
+    tag = CD.tag_trajectory(poses, poses.shape[0], PIPE_SEG, False, convert=False)
+    tag["gendop_root"] = CD.GENDOP_ROOT
+    if a.no_llm:
+        return tag, None
+    movement = CD.ask_movement(ctx["client"], ctx["prompts"][0], tag["outline"])
+    return tag, {"Movement": movement, TEXT_KEY: movement}
+
+
 # ------------------------------------------------------------------------------------- E.T.
 
 def et_tracks(a, scene, idx, cache):
@@ -203,7 +226,8 @@ def et_one(a, job, ctx):
 
 def main():
     ap = ArgumentParser(description=__doc__)
-    ap.add_argument("--model", required=True, choices=["gendop", "et"])
+    ap.add_argument("--model", required=True, choices=["gendop", "et", "pipeline"])
+    ap.add_argument("--gendop_root", default=None)   # caption_cameras_datadop 이 import 시 sys.argv 에서 읽는다 (pipeline 은 PIPE_ROOT 자동)
     ap.add_argument("--split", default="/data1/cympyc1785/data/DynPose-LBM/latentcam_dynpose_v5f50k/seg_list_dynpose_s91_noroll_test.txt")
     ap.add_argument("--ref_eval_dir", default="/data1/cympyc1785/LatentCamVid/camera_generation/latentcam/eval_my/"
                     "20261021_003902_dsv5f50kv2_molmo2_l21_noprobe_fm_vaeCrepenclin_zstd_track3d_box3d__last__seed42__v5test")
@@ -224,7 +248,16 @@ def main():
     for p in (path.join(HERE, "fit", "caption"), path.join(HERE, "exec")):
         sys.path.insert(0, p)
     ctx = {}
-    if a.model == "gendop":
+    if a.model == "pipeline":                    # [R508]
+        if a.gendop_root is None:
+            sys.argv += ["--gendop_root", PIPE_ROOT]
+        import caption_cameras_datadop as CD
+        from lbm.vlm import VLMClient
+        assert path.realpath(CD.GENDOP_ROOT) == path.realpath(a.gendop_root or PIPE_ROOT), CD.GENDOP_ROOT
+        ctx["prompts"] = CD.load_prompts()
+        ctx["client"] = None if a.no_llm else VLMClient(api_base=a.api_base, model=a.model_name, temperature=1.0, max_tokens=700, timeout=300)
+        fn = pipeline_one
+    elif a.model == "gendop":
         import caption_cameras_datadop as CD
         from lbm.vlm import VLMClient
         ctx["prompts"] = CD.load_prompts()

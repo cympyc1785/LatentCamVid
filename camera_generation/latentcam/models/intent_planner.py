@@ -455,6 +455,50 @@ JS_EXAMPLES_V2 = [
     ("Follow the man in a blue shirt while moving closer to him, keeping him centered.", "track + dolly_in (keep target centered)", "the man in a blue shirt"),
     ("Circle around the bronze statue to the right, keeping it centered.", "orbit_right (keep target centered)", "the bronze statue"),
 ]
+# [R503] few-shot 2 판 — 실제 train split L1s 문장 (test 와 겹치지 않음) 중 용어가 GT 와 맞는 것만 (사용자 10-22 "예시는 더 좋은 걸로").
+#   출력과 같은 JSON 형태 · target.text 는 문장 속 지칭구 전체 원문 (자르지 않음) · subject 없는 문장은 빈 값.
+JS_EXAMPLES_V2B = [
+    ("Move the camera to the left, passing by the pink electric guitar being held by a man.", "truck_left", "guitar", "the pink electric guitar being held by a man"),
+    ("Pan the camera to the right across the scene.", "pan_right", "", ""),
+    ("Tilt the camera downward to show the counter and the dish below.", "tilt_down", "", ""),
+    ("Pull the camera back away from the white goal with a net on the grass field.", "dolly_out", "goal", "the white goal with a net on the grass field"),
+    ("Keep the woman in a black coat and pink scarf walking down a hallway centered in the frame while the camera slowly moves downward.",
+     "pedestal_down (keep target centered)", "woman", "the woman in a black coat and pink scarf walking down a hallway"),
+    ("Keep the camera steady and centered on the woman in a red top and black shorts walking through the room.",
+     "hold (keep target centered)", "woman", "the woman in a red top and black shorts walking through the room"),
+    ("Follow the woman in a blue shirt and patterned headband walking on a dirt path with the camera, keeping her in frame as she moves.",
+     "track + hold", "woman", "the woman in a blue shirt and patterned headband walking on a dirt path"),
+    ("Follow the man in a purple and white checkered shirt holding the shower head while moving sideways to the right.",
+     "track + truck_right", "man", "the man in a purple and white checkered shirt holding the shower head"),
+    ("Follow the man in a black shirt with a green logo gesturing with his arm as the camera moves closer to him, keeping him centered in the frame.",
+     "track + dolly_in (keep target centered)", "man", "the man in a black shirt with a green logo gesturing with his arm"),
+    ("Move the camera closer to the larger white paper with purple and yellow markings on the left, keeping it in the center of the frame.",
+     "dolly_in (keep target centered)", "paper", "the larger white paper with purple and yellow markings on the left"),
+    ("Circle around the person in a pink shirt and white hat carrying a blue golf bag, keeping them in the center of the frame as they walk across the grassy field.",
+     "orbit_left (keep target centered)", "person", "the person in a pink shirt and white hat carrying a blue golf bag"),
+]
+def target_overlap(text: str, intent: str) -> float:
+    """[R504] target 문구의 내용어 중 intent 에 있는 비율 (관사·소문자·구두점 무시)."""
+    tok = lambda z: [w for w in re.findall(r"[a-z0-9]+", z.lower()) if w not in ("the", "a", "an")]
+    t, it = tok(text), set(tok(intent))
+    return sum(w in it for w in t) / max(len(t), 1)
+
+
+# [R504] 이해하기 쉬운 판 (사용자 10-22 "prompt 를 좀 더 이해하기 쉽게") — 단계 지시 + reasoning 을 move 앞에 (생각 → 선택 순서로 생성되게).
+JOINT_STRUCT_CLEAR = """{video_line}Turn the user's camera request into ONE camera move from a fixed list.
+
+Request: "{intent}"
+
+Step 1 - Subject: find the words in the request that name the subject the camera is about (a person, animal or object) and copy that phrase. If the request names no subject, leave it empty.
+Step 2 - Blocks: using the definitions below, decide which building blocks the request asks for. Add a block only if the request asks for it.
+Step 3 - Move: pick the one combination from the list that has exactly those blocks.
+{video_rule}
+{defs}
+
+Allowed combinations:
+{vocab}
+
+Return JSON with the keys in this order: {{"reasoning": "<one or two short sentences: the subject phrase and the blocks the request asks for>", "move": "<one combination copied exactly>",{shot_key} "target": {{"noun": "<one lowercase noun; empty if no subject>", "text": "<the subject phrase from the request; empty if no subject>"}}}}"""
 TARGET_PROMPT = """The video above is the source shot.
 User intent for a camera move: "{intent}"
 Which subject in the video is the intent about? Return JSON:
@@ -501,7 +545,10 @@ class IntentPlanner:
         self.target_from_intent = False         # [R496] True 면 target.text 는 intent 안의 문구를 그대로 (파싱만) — set by caller
         self.prim_defs = False                  # [R498] True (v2) 면 joint_struct 프롬프트에 단위 정의 (PRIM_DEFS_V2) — set by caller, 기본 = 예전
         self.lean = False                       # [R501] True 면 joint_struct 정리판 (end_shot 없음 · target 길이 제약 없음 · 영상 없으면 system 에 video 없음)
-        self.examples = False                   # [R501] True (v2) 면 joint_struct 에 JS_EXAMPLES_V2 few-shot
+        self.target_loose = False               # [R504] True 면 target.text 완전 일치 대신 내용어 70% 이상 (target_overlap)
+        self.prompt_style = ""                  # [R504] "clear" = JOINT_STRUCT_CLEAR (단계 지시 · reasoning 먼저 · 단위 정의 · lean)
+        self.end_shot_explicit = False          # [R503] lean 에서도 end_shot 을 두되 intent 가 끝 shot 크기를 명시했을 때만 (아니면 빈 값)
+        self.examples = False                   # [R501] True / "v2b" (R503 실제 train 문장판) True (v2) 면 joint_struct 에 JS_EXAMPLES_V2 few-shot
         self.extra_context = ""                 # [R497] joint_struct 프롬프트 끝에 붙일 추가 정보 (예: subject 움직임 태그). 빈 문자열 = 예전   # [R493] joint_struct = 영상 + intent 한 번에, 움직임은 split 과 같은 enum
         self.mode = mode
 
@@ -557,7 +604,11 @@ class IntentPlanner:
 
     def _js_validate(self, x, combos, intent):
         err = [] if x.get("move") in combos else ["move must be one of the list"]
-        if self.target_from_intent:             # [R496] subject 는 intent 문구 그대로만
+        if self.target_from_intent and self.target_loose:   # [R504] 완전 일치 대신 단어 대부분 (관사·어미 차이 허용)
+            t = str(((x.get("target") or {}).get("text")) or "").strip()
+            if t and target_overlap(t, intent) < 0.7:
+                err.append("target.text must be the phrase from the user intent that names the subject (use the intent's own words)")
+        elif self.target_from_intent:             # [R496] subject 는 intent 문구 그대로만
             t = str(((x.get("target") or {}).get("text")) or "").strip()
             if t and t.lower().rstrip(".") not in intent.lower():
                 err.append("target.text must be copied word for word from the user intent (a span of it), or empty if the intent names no subject")
@@ -571,7 +622,30 @@ class IntentPlanner:
             "move": {"type": "string", "enum": allowed}, "end_shot": {"type": "string", "enum": [""] + list(SHOT_CLASSES)},
             "target": {"type": "object", "properties": {"noun": {"type": "string"}, "text": {"type": "string"}}, "required": ["noun", "text"]},
             "rationale": {"type": "string"}}, "required": ["move", "end_shot", "target"]}
-        if self.lean:                           # [R501] end_shot 출력 빼기
+        if self.prompt_style == "clear":        # [R504]
+            assert self.vocab.terms == "v2" and self.target_from_intent
+            props = {"reasoning": {"type": "string"}, "move": schema["properties"]["move"]}
+            if self.end_shot_explicit:
+                props["end_shot"] = schema["properties"]["end_shot"]
+            props["target"] = schema["properties"]["target"]
+            schema = {"type": "object", "properties": props, "required": list(props)}
+            vkw = {"video": video, "video_fps": self.video_fps} if (self.video_mode == "video" and video) else {}
+            prompt = JOINT_STRUCT_CLEAR.format(
+                video_line="The video above is the source shot.\n" if video else "", intent=intent, defs=PRIM_DEFS_V2,
+                video_rule=("Use the video only to understand the subject and the space; take the blocks from the request.\n" if video else ""),
+                vocab="\n".join(f"- {c}" for c in allowed),
+                shot_key=(f' "end_shot": "<one of {list(SHOT_CLASSES)} only if the request explicitly names the final shot size, else empty>",' if self.end_shot_explicit else ""))
+            if self.examples == "v2b":
+                prompt += "\n\nExamples:\n" + "\n".join(f'Request: "{i}"\n' + json.dumps({"move": m, "target": {"noun": n, "text": t}}) for i, m, n, t in JS_EXAMPLES_V2B)
+            if self.extra_context:
+                prompt += "\n\n" + self.extra_context
+            r, info = self.client.chat_json(prompt, system=SYSTEM_TEXT if not video else SYSTEM, validate=lambda x: self._js_validate(x, combos, intent),
+                                            max_repairs=self.max_repairs, label="intent_joint_clear", echo_previous=False, json_schema=schema, **vkw)
+            if r is None:
+                return None, {**info, "raw": None}
+            r = {**r, "rationale": r.get("reasoning", "")}
+            return self._finish_js(r, combos, intent, exclude, target_point, info)
+        if self.lean and not self.end_shot_explicit:   # [R501] end_shot 출력 빼기
             del schema["properties"]["end_shot"]; schema["required"] = ["move", "target"]
         vkw = {"video": video, "video_fps": self.video_fps} if (self.video_mode == "video" and video) else {}
         prompt = JOINT_STRUCT_PROMPT.format(intent=intent, vocab="\n".join(f"- {c}" for c in allowed), shots=list(SHOT_CLASSES))
@@ -585,11 +659,16 @@ class IntentPlanner:
             prompt = prompt.replace("The video above is the source shot.\n", "").replace(
                 "Use the video to understand the subject, its motion and the space around it, but take the KIND of move from the intent:\n", "Take the KIND of move from the intent:\n")
         if self.lean:                           # [R501]
-            prompt = prompt.replace('"end_shot": "<one of ' + str(list(SHOT_CLASSES)) + ' or empty>",\n  ', "")
+            prompt = prompt.replace('"end_shot": "<one of ' + str(list(SHOT_CLASSES)) + ' or empty>",\n  ',
+                                    "" if not self.end_shot_explicit else
+                                    '"end_shot": "<one of ' + str(list(SHOT_CLASSES)) + ' ONLY if the intent explicitly names the final shot size (e.g. ending on a close-up); otherwise empty>",\n  ')
             if self.target_from_intent:
                 prompt = prompt.replace('"text": "<referring expression, 8-14 words; empty if no subject>"', '"text": "<the phrase naming the subject; empty if no subject>"')
-            assert "end_shot" not in prompt and (not self.target_from_intent or "8-14" not in prompt), prompt
-        if self.examples:                       # [R501]
+            assert ("end_shot" not in prompt or self.end_shot_explicit) and (not self.target_from_intent or "8-14" not in prompt), prompt
+        if self.examples == "v2b":              # [R503] 실제 문장 · 출력과 같은 JSON 형태
+            assert self.vocab.terms == "v2" and all(m in combos for _, m, _, _ in JS_EXAMPLES_V2B)
+            prompt += "\n\nExamples:\n" + "\n".join(f'Intent: "{i}"\n' + json.dumps({"move": m, "target": {"noun": n, "text": t}}) for i, m, n, t in JS_EXAMPLES_V2B)
+        elif self.examples:                     # [R501]
             assert self.vocab.terms == "v2" and all(m in combos for _, m, _ in JS_EXAMPLES_V2)
             prompt += "\n\nExamples (intent -> move, target.text):\n" + "\n".join(f'- "{i}" -> {m}, "{t}"' for i, m, t in JS_EXAMPLES_V2)
         if self.target_from_intent:             # [R496]
@@ -601,6 +680,9 @@ class IntentPlanner:
                                         max_repairs=self.max_repairs, label="intent_joint_struct", echo_previous=False, json_schema=schema, **vkw)
         if r is None:
             return None, {**info, "raw": None}
+        return self._finish_js(r, combos, intent, exclude, target_point, info)
+
+    def _finish_js(self, r, combos, intent, exclude, target_point, info):
         track, moves, look_at = combos[r["move"]]
         raw = {"moves": moves, "track": track, "keep_target_centered": look_at, "target": r.get("target") or {},
                "end_shot": r.get("end_shot", ""), "rationale": r.get("rationale", "")}

@@ -2958,3 +2958,12 @@ scene 당 정확히 1개로 하려면 `pick_external` 을 scene 단위로 한 �
 - **주의** noun 단독 정답률은 GT mask 가 같은 noun 으로 SAM3 를 돌려 만든 것이라 유리하고, 선정 규칙 (평균 점수 × 프레임 수) 에 좌우된다 — 출력 비교는 영상 (R380·R381).
 - **바꾸는 법** `--comb_rule earliest` (R366, 출력 `molmo2_comb`). vote 출력은 `molmo2_comb_vote`. test 때 GT 아닌 조건으로 평가하는 것은 방식 확정 뒤 (plans G5).
 
+
+## intent → 카메라 (SG3)
+
+### D60 생성기는 canonical plan 으로 학습 · intent 는 test 때 planner 로 변환 (사용자 2026-10-22)
+
+- **선택지** (ii) intent 문장을 학습 조건에 섞어 생성기가 모호함을 흡수 (E4) · (iii) 생성기는 canonical 캡션으로만 학습하고 intent → planner → canonical 로 추론
+- **채택** (iii). 사용자: "train 때 굳이 불일치를 수용할 필요는 없을 것 같아". 근거 수치 — E4 (ii) ADE 0.577 vs MTb 0.264, 수준별 L1 0.437 · L2 0.640 · L3 0.665 (R472·R483);
+  (iii) 의 병목은 planner 정확도 (joint roundtrip preset L0 0.49) 이고 split 으로 L0 0.81 · L1 0.48 (R491) 까지 올라 개선 여지가 생성기 쪽보다 planner 쪽에 있다.
+- **바꾸는 법** E4 (ii) 인자는 `tmp/r472/run.py e4_args` 에 남아 있다.

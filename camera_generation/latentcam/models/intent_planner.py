@@ -438,7 +438,7 @@ PRIM_DEFS_V2 = """Building blocks (each combination below is made only of these)
 - orbit_left / orbit_right: the camera travels on a circle around the subject to the left / right at about the same distance.
 - pan_left / pan_right: the camera stays in place and only turns its view to the left / right.
 - tilt_up / tilt_down: the camera stays in place and only turns its view up / down.
-- track: the camera position follows the subject's own motion through the scene (it moves because the subject moves).
+- track: the camera travels along with the subject as the subject moves through the scene. Use it only when the intent asks the camera to follow / travel with the subject; a subject that is moving (e.g. "a car driving forward") is NOT by itself a request to track.
 - (keep target centered): the camera re-aims at the subject every frame so it stays in the middle of the frame. This is aiming only; it does not move the camera closer.
 - hold: the camera makes no move of its own (with "track +", it only follows the subject).
 A combination joined with "+" means all of its blocks happen at the same time. Use only the blocks the intent asks for."""

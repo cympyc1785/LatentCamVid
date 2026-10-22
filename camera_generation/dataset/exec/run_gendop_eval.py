@@ -378,7 +378,7 @@ def stage_inputs(C, overwrite=False, text_only=False):
 
 
 def stage_infer(C, gpu, limit=None, depth_norm=None, pose_length=30, arms=None,
-                overwrite=False, text_dir=None, text_tag=None, batch_size=1):
+                overwrite=False, text_dir=None, text_tag=None, batch_size=1, batch_eos_fallback=False):
     depth_norm = depth_norm or C["depth_norm"]
     # 기본은 ref arm 의 eval 폴더(= latentcam 이 실제로 받은 문장). `--text_dir` 를 주면
     # 같은 모양의 다른 폴더로 갈아끼운다 (예: `gendop_style_captions.py` 가 만든 분포 정합 문장).
@@ -400,6 +400,8 @@ def stage_infer(C, gpu, limit=None, depth_norm=None, pose_length=30, arms=None,
             cmd += ["--pose_length", str(pose_length), "--no_strict_pose_length"]
         if batch_size != 1:
             cmd += ["--batch_size", str(batch_size)]
+        if batch_eos_fallback:                          # [R508] EOS 허용 배치 (gendop_release_infer --batch_eos_fallback)
+            cmd += ["--batch_eos_fallback"]
         if overwrite:
             cmd += ["--overwrite"]
         if arm["cond"] != "text":
@@ -536,6 +538,7 @@ def main():
     # infer 단계에서 한 generate 에 넣을 엔트리 수. 1 = 예전 런과 비트동일.
     # GenDoP 생성은 10*pose_length+1 스텝 autoregressive 라 B=1 이면 GPU 가 논다.
     ap.add_argument("--batch_size", type=int, default=1)
+    ap.add_argument("--batch_eos_fallback", action="store_true")
     a = ap.parse_args()
     assert not (a.text_dir and not a.text_tag), "--text_dir 를 주면 --text_tag 도 줄 것"
     # infer/evaldir 는 `arms or ARMS` 라 빈 리스트가 조용히 "전부"로 되살아난다. score 전용.
@@ -549,7 +552,7 @@ def main():
         rc = rc or stage_inputs(C, a.overwrite, a.text_only)
     if a.stage in ("infer", "all"):
         rc = rc or stage_infer(C, a.gpu, a.limit, a.depth_norm, a.pose_length, arms,
-                               a.overwrite, a.text_dir, a.text_tag, a.batch_size)
+                               a.overwrite, a.text_dir, a.text_tag, a.batch_size, a.batch_eos_fallback)
     if a.stage in ("evaldir", "all"):
         rc = rc or stage_evaldir(C, a.pose_length, arms, a.text_tag, a.rescale, a.resample,
                                  a.scale_token, a.text_dir)

@@ -300,12 +300,16 @@ def main(args):
     args.forbid_eos = (opt.pose_length != 30) if args.forbid_eos is None else args.forbid_eos
     if args.forbid_eos:
         forbid_eos_in_logits(opt.eos_token_id)
-    if args.batch_size > 1 and not args.forbid_eos:
+    if args.batch_size > 1 and not args.forbid_eos and not args.batch_eos_fallback:
         # EOS 가 살아 있으면 길이가 엔트리마다 달라 pad(0) 가 섞이고, models.py:358-359 의
         # `output_ids - 3` / `assert >= 0` 이 터진다. 조용히 죽는 대신 배치를 포기한다.
         print(f"[gendop] batch_size {args.batch_size} -> 1 (forbid_eos 가 꺼져 있어 "
-              f"길이가 엔트리마다 다르다; --forbid_eos 를 주면 배치가 된다)", flush=True)
+              f"길이가 엔트리마다 다르다; --forbid_eos 또는 --batch_eos_fallback 을 주면 배치가 된다)", flush=True)
         args.batch_size = 1
+    elif args.batch_size > 1 and not args.forbid_eos:
+        # [R508] pipeline/GenDoP eval_batch.py 처럼 EOS 를 살린 채 배치로 generate — 배치 안 길이가 모두 같으면 그대로 쓰고,
+        # 어느 하나가 일찍 끝나 assert 가 터지면 그 배치만 한 개씩 다시 돈다 (EOS 의미는 batch_size=1 과 같고, 샘플만 다르다).
+        print(f"[gendop] batch_size {args.batch_size} + EOS 허용 (길이 불일치 배치는 1 개씩 재생성)", flush=True)
     # kiui.seed_everything 은 함수 안 import 를 거부한다 — 같은 일을 직접 한다.
     import random
     random.seed(args.seed)
@@ -331,6 +335,7 @@ def main(args):
     done, skipped, degen, no_rgbd, lengths, zero_quat = 0, 0, [], [], {}, []
     no_caption = []      # --text_from_eval_dir 접두사/이름 규약이 어긋난 엔트리
     pending = []         # 이번 배치에 들어갈 엔트리 (batch_size=1 이면 항상 1개)
+    n_fallback = [0]     # [R508] --batch_eos_fallback 으로 한 개씩 다시 돈 배치 수
 
     def flush():
         """모아둔 엔트리를 한 번의 generate 로 돌리고 각각 npz 로 쓴다."""
@@ -347,7 +352,16 @@ def main(args):
                      torch.stack([job["rgb"] for job in pending]).to(device),
                      torch.stack([job["depth"] for job in pending])]
         with torch.no_grad(), torch.autocast(device_type="cuda", dtype=torch.float16):
-            tokens = model.generate(conds, max_new_tokens=opt.test_max_seq_length, clean=True)
+            try:
+                tokens = model.generate(conds, max_new_tokens=opt.test_max_seq_length, clean=True)
+            except AssertionError:
+                if not (args.batch_eos_fallback and len(pending) > 1):
+                    raise
+                n_fallback[0] += 1                       # [R508] 배치 안 길이 불일치 → 한 개씩
+                tokens = []
+                for i in range(len(pending)):
+                    ci = [texts[i]] if pending[0]["rgbd"] is None else [[texts[i]], conds[1][i:i + 1], conds[2][i:i + 1]]
+                    tokens += model.generate(ci, max_new_tokens=opt.test_max_seq_length, clean=True)
         for job, token in zip(pending, tokens):
             token = (torch.as_tensor(np.asarray(token)) if not torch.is_tensor(token)
                      else token.cpu())
@@ -416,7 +430,7 @@ def main(args):
                    "pose_length": opt.pose_length,
                    "strict_pose_length": args.strict_pose_length,
                    "forbid_eos": args.forbid_eos,
-                   "batch_size": args.batch_size,
+                   "batch_size": args.batch_size, "batch_eos_fallback": bool(args.batch_eos_fallback), "batch_fallbacks": n_fallback[0],
                    "n_poses_hist": {str(k): v for k, v in sorted(lengths.items())},
                    "cond_mode": opt.cond_mode,
                    "num_cond_tokens": opt.num_cond_tokens, "n_entries": len(rows),
@@ -499,4 +513,6 @@ if __name__ == "__main__":
     # 한 generate 에 넣을 엔트리 수. 1 = 기존 동작(비트동일). forbid_eos 가 꺼져 있으면 1 로
     # 강등된다 (docstring §batch_size). 디코드 스텝 수는 B 와 무관해 거의 배수 이득이다.
     parser.add_argument("--batch_size", type=int, default=1)
+    # [R508] EOS 를 막지 않고 배치 (pipeline/GenDoP eval_batch.py 방식) — 길이 불일치 배치만 한 개씩 재생성. 기본 꺼짐 = 예전 (1 로 강등).
+    parser.add_argument("--batch_eos_fallback", action="store_true")
     main(parser.parse_args())

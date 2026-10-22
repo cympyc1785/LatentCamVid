@@ -25,6 +25,8 @@
 
 ### Added
 
+- **`dataset/eval/gendop_release_infer.py` · `exec/run_gendop_eval.py`** (R508). `--batch_eos_fallback` — GenDoP 을 EOS 허용 그대로 배치 generate (pipeline/GenDoP `eval_batch.py` 방식), 배치 안 길이 불일치로 assert 가 나면 그 배치만 한 개씩 재생성. 재생성 배치 수를 config `batch_fallbacks` 에 남긴다. 기본 꺼짐 = 예전 (batch_size 1 로 강등).
+
 - **`dataset/exec/native_captions.py`** (R508). `--model pipeline` — 우리 fork `pipeline/GenDoP` tagging 설정 (49 pose · fps 10 · diff 0.6 · 원 스케일 · 창 15/최소 구간 12) 으로 Movement 문장을 만들어 `Concise Interaction` 에 넣는다. `--gendop_root` 인자 통과.
 
 - **`dataset/exec/run_director_batch.py`** (R507). `--char_static` — E.T. char 궤적을 첫 프레임 위치에 고정 (정지 궤적 ablation). 기본 꺼짐.

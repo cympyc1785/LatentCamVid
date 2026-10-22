@@ -25,6 +25,8 @@
 
 ### Added
 
+- **`IntentPlanner(mode="joint_struct")`** (R493). 영상 + intent 한 번에 보되 움직임은 split 과 같은 74 조합 enum (구조화 출력) 에서만 고르고 subject 도 같이 낸다. 사용자 10-22 "영상도 planner 입력으로 · joint struct 기준으로".
+
 - **`IntentPlanner(mode="split")`** (R491). 움직임은 intent 텍스트만 보고 74 조합 enum 중 하나를 고르고 (vLLM 구조화 출력), 영상은 subject 지칭에만 쓴다. 기본 `joint` = 예전. roundtrip (300 seg) preset 일치 L0 0.49→0.81 · L1 0.28→0.48 · snap 0.
 - **`lbm/vlm.VLMClient.chat/chat_json(json_schema=...)`** (R491). vLLM `response_format` json_schema 전달. 안 주면 payload 예전 그대로.
 

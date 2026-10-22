@@ -407,6 +407,19 @@ Choose the ONE camera move that best fulfils the intent from these allowed combi
 
 Decide only from what the intent asks for. Do not add motion the intent does not ask for.
 Return JSON: {{"move": "<one combination copied exactly>", "end_shot": "<one of {shots} or empty>", "rationale": "<one sentence>"}}"""
+JOINT_STRUCT_PROMPT = """The video above is the source shot.
+User intent for a camera move: "{intent}"
+
+Choose the ONE camera move that best fulfils the intent from these allowed combinations
+("track +" = the camera position follows the subject's own motion; "(keep target centered)" = the camera re-aims at the subject every frame;
+"hold" = the camera does not move):
+{vocab}
+
+Use the video to understand the subject, its motion and the space around it, but take the KIND of move from the intent:
+do not add a move the intent does not ask for. Then name the subject the intent is about.
+Return JSON: {{"move": "<one combination copied exactly>", "end_shot": "<one of {shots} or empty>",
+  "target": {{"noun": "<one lowercase noun; empty if no subject>", "text": "<referring expression, 8-14 words; empty if no subject>"}},
+  "rationale": "<one sentence>"}}"""
 TARGET_PROMPT = """The video above is the source shot.
 User intent for a camera move: "{intent}"
 Which subject in the video is the intent about? Return JSON:
@@ -449,7 +462,7 @@ class IntentPlanner:
         self.framing_on_free, self.work_dir = framing_on_free, work_dir
         self.snap_on_fail = snap_on_fail        # [R465] 재질의 소진 시 마지막 응답을 가장 가까운 preset 으로 (기본 False = 예전처럼 None)
         # [R491] mode: joint (기본, 예전) = 영상+intent 한 번에 · split = 움직임은 텍스트만 (구조화 enum) + subject 는 영상
-        assert mode in ("joint", "split"), mode
+        assert mode in ("joint", "split", "joint_struct"), mode   # [R493] joint_struct = 영상 + intent 한 번에, 움직임은 split 과 같은 enum
         self.mode = mode
 
     def _ask(self, video, intent, feedback=(), exclude=(), target_point=None):
@@ -502,12 +515,36 @@ class IntentPlanner:
             return p, {"raw": raw, "snapped": p is not None, "errors": e, "move": info_m, "target": info_t}
         return p, {"raw": raw, "snapped": False, "errors": e, "move": info_m, "target": info_t}
 
+    def _ask_joint_struct(self, video, intent, exclude=(), target_point=None):
+        """[R493] 영상도 움직임 결정에 보되 (사용자 10-22 "영상도 planner 입력으로"), 선택지는 split 과 같은 구조화 enum."""
+        combos = self.vocab.combos()
+        allowed = [c for c in sorted(combos) if not exclude or any(n not in exclude for n in self.vocab.info if self.vocab.describe(n) == c)]
+        schema = {"type": "object", "properties": {
+            "move": {"type": "string", "enum": allowed}, "end_shot": {"type": "string", "enum": [""] + list(SHOT_CLASSES)},
+            "target": {"type": "object", "properties": {"noun": {"type": "string"}, "text": {"type": "string"}}, "required": ["noun", "text"]},
+            "rationale": {"type": "string"}}, "required": ["move", "end_shot", "target"]}
+        vkw = {"video": video, "video_fps": self.video_fps} if self.video_mode == "video" else {}
+        r, info = self.client.chat_json(JOINT_STRUCT_PROMPT.format(intent=intent, vocab="\n".join(f"- {c}" for c in allowed), shots=list(SHOT_CLASSES)),
+                                        system=SYSTEM, validate=lambda x: [] if x.get("move") in combos else ["move must be one of the list"],
+                                        max_repairs=self.max_repairs, label="intent_joint_struct", echo_previous=False, json_schema=schema, **vkw)
+        if r is None:
+            return None, {**info, "raw": None}
+        track, moves, look_at = combos[r["move"]]
+        raw = {"moves": moves, "track": track, "keep_target_centered": look_at, "target": r.get("target") or {},
+               "end_shot": r.get("end_shot", ""), "rationale": r.get("rationale", "")}
+        p, e = canonicalize(raw, self.vocab, intent, exclude, target_point)
+        if p is None and self.snap_on_fail:
+            p, _ = canonicalize(raw, self.vocab, intent, exclude, target_point, snap=True)
+            return p, {**info, "raw": raw, "snapped": p is not None, "errors": e}
+        return p, {**info, "raw": raw, "snapped": False, "errors": e}
+
     def plan(self, video: str, intent: str, target_point=None):
         """-> (plan | None, conditions | None, info). None 이면 재질의 소진 — 호출자가 fallback 을 정한다 (hard-fail 안 함).
         `target_point` = [t_sec, x, y] 사용자 pointing (주면 subject_query.mode = point)."""
         feedback, exclude, history = [], [], []
         for attempt in range(self.max_replans + 1):
             p, info = (self._ask_split(video, intent, exclude, target_point) if self.mode == "split"
+                       else self._ask_joint_struct(video, intent, exclude, target_point) if self.mode == "joint_struct"
                        else self._ask(video, intent, feedback, exclude, target_point))
             if p is None:
                 return None, None, {**info, "history": history}

@@ -355,6 +355,12 @@ FAIL_TEXT = {
     "arc_blocked": ("there is no room to arc around the subject on that side", "try the other side or a straight dolly"),
     "static": ("the move collapses to almost no motion in this scene", "pick a different move"),
 }
+# [R498] v2 는 용어 하나에 뜻 하나 (사용자 10-22 "같은 의미인데 다른 단어를 섞으면 VLM 이 못 알아듣는다") — push in / crane / arc 를 v2 primitive 로
+FAIL_FIX_V2 = {"obb": "keep more distance from the subject, e.g. dolly_out instead of dolly_in",
+               "ground": "avoid moving down (pedestal_down)",
+               "hole": "prefer moves that stay near the source viewpoint (smaller orbits, dolly instead of orbit)",
+               "shot_dir": "check dolly_in vs dolly_out",
+               "arc_blocked": "there is no room to orbit around the subject on that side"}
 
 
 def explain_failure(report: dict, vocab: PresetVocab):
@@ -362,6 +368,9 @@ def explain_failure(report: dict, vocab: PresetVocab):
     status = str(report.get("status") or ""); binding = str(report.get("binding") or "")
     keys = [k for k in [binding, *re.split(r"[+_]", status), status.split("_limited")[0], status] if k in FAIL_TEXT]
     what, fix = FAIL_TEXT[keys[0]] if keys else (f"the trajectory generator rejected it (status={status or '?'})", "pick a different move")
+    if keys and vocab.terms == "v2" and keys[0] in FAIL_FIX_V2:
+        fix = FAIL_FIX_V2[keys[0]] if keys[0] != "arc_blocked" else fix
+        what = FAIL_FIX_V2["arc_blocked"] if keys[0] == "arc_blocked" else what
     move = vocab.describe(report["preset"]) if report.get("preset") in vocab.info else report.get("preset", "?")
     lines = [f"The move '{move}' failed in this scene: {what}."]
     fr = report.get("frames") or []
@@ -420,6 +429,19 @@ do not add a move the intent does not ask for. Then name the subject the intent 
 Return JSON: {{"move": "<one combination copied exactly>", "end_shot": "<one of {shots} or empty>",
   "target": {{"noun": "<one lowercase noun; empty if no subject>", "text": "<referring expression, 8-14 words; empty if no subject>"}},
   "rationale": "<one sentence>"}}"""
+# [R498] v2 가장 작은 단위 정의 (사용자 10-22 "조합 말고 track 은 뭐고 dolly in 은 뭐다 — 가장 작은 단위 설명을 주면 알아서 조합").
+# 조합 목록은 그대로 enum 으로 두고, 그 앞에 단위 정의를 붙인다. 정의에 쓰는 말도 v2 용어 하나씩만.
+PRIM_DEFS_V2 = """Building blocks (each combination below is made only of these):
+- dolly_in / dolly_out: the camera itself travels forward / backward along its viewing direction, so the distance to the subject shrinks / grows.
+- truck_left / truck_right: the camera itself slides sideways to its left / right; its viewing direction does not turn.
+- pedestal_up / pedestal_down: the camera itself rises / lowers vertically; its viewing direction does not tilt.
+- orbit_left / orbit_right: the camera travels on a circle around the subject to the left / right at about the same distance.
+- pan_left / pan_right: the camera stays in place and only turns its view to the left / right.
+- tilt_up / tilt_down: the camera stays in place and only turns its view up / down.
+- track: the camera position follows the subject's own motion through the scene (it moves because the subject moves).
+- (keep target centered): the camera re-aims at the subject every frame so it stays in the middle of the frame. This is aiming only; it does not move the camera closer.
+- hold: the camera makes no move of its own (with "track +", it only follows the subject).
+A combination joined with "+" means all of its blocks happen at the same time. Use only the blocks the intent asks for."""
 TARGET_PROMPT = """The video above is the source shot.
 User intent for a camera move: "{intent}"
 Which subject in the video is the intent about? Return JSON:
@@ -463,7 +485,9 @@ class IntentPlanner:
         self.snap_on_fail = snap_on_fail        # [R465] 재질의 소진 시 마지막 응답을 가장 가까운 preset 으로 (기본 False = 예전처럼 None)
         # [R491] mode: joint (기본, 예전) = 영상+intent 한 번에 · split = 움직임은 텍스트만 (구조화 enum) + subject 는 영상
         assert mode in ("joint", "split", "joint_struct"), mode
-        self.target_from_intent = False         # [R496] True 면 target.text 는 intent 안의 문구를 그대로 (파싱만) — set by caller   # [R493] joint_struct = 영상 + intent 한 번에, 움직임은 split 과 같은 enum
+        self.target_from_intent = False         # [R496] True 면 target.text 는 intent 안의 문구를 그대로 (파싱만) — set by caller
+        self.prim_defs = False                  # [R498] True (v2) 면 joint_struct 프롬프트에 단위 정의 (PRIM_DEFS_V2) — set by caller, 기본 = 예전
+        self.extra_context = ""                 # [R497] joint_struct 프롬프트 끝에 붙일 추가 정보 (예: subject 움직임 태그). 빈 문자열 = 예전   # [R493] joint_struct = 영상 + intent 한 번에, 움직임은 split 과 같은 enum
         self.mode = mode
 
     def _ask(self, video, intent, feedback=(), exclude=(), target_point=None):
@@ -532,10 +556,21 @@ class IntentPlanner:
             "move": {"type": "string", "enum": allowed}, "end_shot": {"type": "string", "enum": [""] + list(SHOT_CLASSES)},
             "target": {"type": "object", "properties": {"noun": {"type": "string"}, "text": {"type": "string"}}, "required": ["noun", "text"]},
             "rationale": {"type": "string"}}, "required": ["move", "end_shot", "target"]}
-        vkw = {"video": video, "video_fps": self.video_fps} if self.video_mode == "video" else {}
+        vkw = {"video": video, "video_fps": self.video_fps} if (self.video_mode == "video" and video) else {}
         prompt = JOINT_STRUCT_PROMPT.format(intent=intent, vocab="\n".join(f"- {c}" for c in allowed), shots=list(SHOT_CLASSES))
+        if self.prim_defs:                      # [R498] 조합 목록 앞 괄호 설명 → 단위 정의 문단
+            assert self.vocab.terms == "v2", "prim_defs 는 v2 어휘만"
+            prompt = prompt.replace('Choose the ONE camera move that best fulfils the intent from these allowed combinations\n'
+                                    '("track +" = the camera position follows the subject\'s own motion; "(keep target centered)" = the camera re-aims at the subject every frame;\n'
+                                    '"hold" = the camera does not move):\n', PRIM_DEFS_V2 + "\n\nChoose the ONE camera move that best fulfils the intent from these allowed combinations:\n")
+            assert "Building blocks" in prompt
+        if not video:                           # [R497] 영상 없이 (텍스트만) — 같은 enum·스키마, 영상 문장만 뺀다
+            prompt = prompt.replace("The video above is the source shot.\n", "").replace(
+                "Use the video to understand the subject, its motion and the space around it, but take the KIND of move from the intent:\n", "Take the KIND of move from the intent:\n")
         if self.target_from_intent:             # [R496]
             prompt += "\nFor target.text, copy the phrase that names the subject word for word from the user intent (empty if the intent names no subject)."
+        if self.extra_context:                  # [R497]
+            prompt += "\n\n" + self.extra_context
         r, info = self.client.chat_json(prompt,
                                         system=SYSTEM, validate=lambda x: self._js_validate(x, combos, intent),
                                         max_repairs=self.max_repairs, label="intent_joint_struct", echo_previous=False, json_schema=schema, **vkw)

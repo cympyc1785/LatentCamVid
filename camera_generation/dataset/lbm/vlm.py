@@ -128,7 +128,8 @@ class VLMClient:
 
     # ---------------------------------------------------------------- chat
     def chat(self, prompt: str, images=(), system: str | None = None, label: str = "",
-             video: str | None = None, video_fps: float | None = None, video_mm: dict | None = None):
+             video: str | None = None, video_fps: float | None = None, video_mm: dict | None = None,
+             json_schema: dict | None = None):
         """(text, meta). 이미지는 data URL 로 실린다. 텍스트가 **이미지 뒤**에 온다.
 
         순서를 이렇게 두는 이유: contract 텍스트가 "이 board 에서 골라라"라고 지시하는데
@@ -149,6 +150,8 @@ class VLMClient:
                    "temperature": self.temperature, "max_tokens": self.max_tokens}
         if video is not None and video_fps is not None:
             payload["mm_processor_kwargs"] = {"fps": float(video_fps), **(video_mm or {})}
+        if json_schema is not None:   # [R491] vLLM 구조화 출력 (스키마 밖 토큰을 못 낸다). 안 주면 payload 가 예전 그대로
+            payload["response_format"] = {"type": "json_schema", "json_schema": {"name": "out", "schema": json_schema}}
 
         started = time.time()
         response = self._post("/chat/completions", payload)
@@ -166,7 +169,8 @@ class VLMClient:
                   validate=None, max_repairs: int = 3, label: str = "",
                   echo_previous: bool = True, repair_hint: str = "",
                   hint_first: bool = False, video: str | None = None,
-                  video_fps: float | None = None, video_mm: dict | None = None):
+                  video_fps: float | None = None, video_mm: dict | None = None,
+                  json_schema: dict | None = None):
         """스키마를 만족하는 dict 를 얻을 때까지 되묻는다. (payload, info).
 
         `validate(payload) -> list[str]` 이 위반 목록을 돌려주면 그걸 그대로 붙여 재질의한다.
@@ -195,7 +199,7 @@ class VLMClient:
         while True:
             text, meta = self.chat(turn_prompt, images=images, system=system,
                                    label=f"{label}#{repairs}", video=video,
-                                   video_fps=video_fps, video_mm=video_mm)
+                                   video_fps=video_fps, video_mm=video_mm, json_schema=json_schema)
             payload, parse_error = parse_json_candidates(text)
             violations = [parse_error] if parse_error else \
                 (list(validate(payload)) if validate else [])

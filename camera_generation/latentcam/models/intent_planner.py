@@ -209,6 +209,13 @@ class PresetVocab:
         """VLM 에 보여 줄 어휘 — 허용 조합을 primitive 로 적는다 (이름은 안 보인다)."""
         return "\n".join(f"- {r}" for r in sorted({self.describe(n) for n in self.info}))
 
+    def combos(self):
+        """[R491] 구조화 선택지: describe 문자열 → (track, moves, look_at). 같은 문자열 preset 들은 resolve 가 aim·target 으로 가른다."""
+        out = {}
+        for n, i in self.info.items():
+            out.setdefault(self.describe(n), (i["track"], sorted(i["moves"]), i["aim"] == "look_at"))
+        return out
+
 
 # ───────────────────────────────────────────────────────────────── plan
 @dataclass
@@ -389,6 +396,24 @@ Return JSON:
   "rationale": "<one sentence>"}}"""
 
 
+# [R491] 개선 planner — 움직임은 **텍스트만** 보고 고르고 (영상 과추론 제거), 영상은 subject 지칭에만 쓴다.
+#   선택지는 vLLM 구조화 출력 enum 으로 묶어 어휘 밖 출력을 막는다 (재질의·snap 이 필요 없어진다).
+MOVE_PROMPT = """User intent for a camera move: "{intent}"
+
+Choose the ONE camera move that best fulfils the intent from these allowed combinations
+("track +" = the camera position follows the subject's own motion; "(keep target centered)" = the camera re-aims at the subject every frame;
+"hold" = the camera does not move):
+{vocab}
+
+Decide only from what the intent asks for. Do not add motion the intent does not ask for.
+Return JSON: {{"move": "<one combination copied exactly>", "end_shot": "<one of {shots} or empty>", "rationale": "<one sentence>"}}"""
+TARGET_PROMPT = """The video above is the source shot.
+User intent for a camera move: "{intent}"
+Which subject in the video is the intent about? Return JSON:
+{{"target": {{"noun": "<one lowercase noun, e.g. man, dog, car; empty if the intent is not about any subject>",
+             "text": "<referring expression that singles it out in the video, 8-14 words; empty if no subject>"}}}}"""
+
+
 def sample_frames(video: str, n: int, work_dir: str):
     import cv2
     cap = cv2.VideoCapture(video); total = int(cap.get(cv2.CAP_PROP_FRAME_COUNT)); fps = cap.get(cv2.CAP_PROP_FPS) or 24.0
@@ -412,7 +437,8 @@ class IntentPlanner:
 
     def __init__(self, client=None, preset_set="all", video_mode: str = "video", video_fps: float = 2.0, n_frames: int = 8,
                  max_repairs: int = 3, feasibility=None, max_replans: int = 0, framing_on_free: bool = False,
-                 work_dir: str = path.join(REPO, "tmp", "intent_planner"), snap_on_fail: bool = False, terms: str = "v1"):
+                 work_dir: str = path.join(REPO, "tmp", "intent_planner"), snap_on_fail: bool = False, terms: str = "v1",
+                 mode: str = "joint"):
         if client is None:
             from lbm.vlm import VLMClient
             client = VLMClient(temperature=0.1, max_tokens=512)
@@ -422,6 +448,9 @@ class IntentPlanner:
         self.max_repairs, self.feasibility, self.max_replans = max_repairs, feasibility, max_replans
         self.framing_on_free, self.work_dir = framing_on_free, work_dir
         self.snap_on_fail = snap_on_fail        # [R465] 재질의 소진 시 마지막 응답을 가장 가까운 preset 으로 (기본 False = 예전처럼 None)
+        # [R491] mode: joint (기본, 예전) = 영상+intent 한 번에 · split = 움직임은 텍스트만 (구조화 enum) + subject 는 영상
+        assert mode in ("joint", "split"), mode
+        self.mode = mode
 
     def _ask(self, video, intent, feedback=(), exclude=(), target_point=None):
         if self.video_mode == "video":
@@ -447,12 +476,39 @@ class IntentPlanner:
             return p, {**info, "raw": box["last"], "snapped": p is not None}
         return (box.get("plan") if raw is not None else None), {**info, "raw": raw}
 
+    def _ask_split(self, video, intent, exclude=(), target_point=None):
+        """[R491] 1) 텍스트만: 움직임 enum (+ end_shot)  2) 영상: subject 지칭.  → 예전과 같은 raw dict 로 합쳐 `canonicalize`."""
+        combos = self.vocab.combos()
+        allowed = [c for c in sorted(combos) if not exclude or any(n not in exclude for n in self.vocab.info if self.vocab.describe(n) == c)]
+        schema_m = {"type": "object", "properties": {"move": {"type": "string", "enum": allowed},
+                                                     "end_shot": {"type": "string", "enum": [""] + list(SHOT_CLASSES)},
+                                                     "rationale": {"type": "string"}}, "required": ["move", "end_shot"]}
+        mv, info_m = self.client.chat_json(MOVE_PROMPT.format(intent=intent, vocab="\n".join(f"- {c}" for c in allowed), shots=list(SHOT_CLASSES)),
+                                           system=SYSTEM, validate=lambda r: [] if r.get("move") in combos else [f"move must be one of the list"],
+                                           max_repairs=self.max_repairs, label="intent_move", echo_previous=False, json_schema=schema_m)
+        if mv is None:
+            return None, {**info_m, "raw": None}
+        track, moves, look_at = combos[mv["move"]]
+        schema_t = {"type": "object", "properties": {"target": {"type": "object", "properties": {"noun": {"type": "string"}, "text": {"type": "string"}},
+                                                                "required": ["noun", "text"]}}, "required": ["target"]}
+        vkw = {"video": video, "video_fps": self.video_fps} if self.video_mode == "video" else {}
+        tg, info_t = self.client.chat_json(TARGET_PROMPT.format(intent=intent), system=SYSTEM, max_repairs=self.max_repairs,
+                                           label="intent_target", echo_previous=False, json_schema=schema_t, **vkw)
+        raw = {"moves": moves, "track": track, "keep_target_centered": look_at, "target": (tg or {}).get("target") or {},
+               "end_shot": mv.get("end_shot", ""), "rationale": mv.get("rationale", "")}
+        p, e = canonicalize(raw, self.vocab, intent, exclude, target_point)
+        if p is None and self.snap_on_fail:          # target 이 필요한 move 인데 subject 를 못 짚은 경우 → 'the subject'
+            p, _ = canonicalize(raw, self.vocab, intent, exclude, target_point, snap=True)
+            return p, {"raw": raw, "snapped": p is not None, "errors": e, "move": info_m, "target": info_t}
+        return p, {"raw": raw, "snapped": False, "errors": e, "move": info_m, "target": info_t}
+
     def plan(self, video: str, intent: str, target_point=None):
         """-> (plan | None, conditions | None, info). None 이면 재질의 소진 — 호출자가 fallback 을 정한다 (hard-fail 안 함).
         `target_point` = [t_sec, x, y] 사용자 pointing (주면 subject_query.mode = point)."""
         feedback, exclude, history = [], [], []
         for attempt in range(self.max_replans + 1):
-            p, info = self._ask(video, intent, feedback, exclude, target_point)
+            p, info = (self._ask_split(video, intent, exclude, target_point) if self.mode == "split"
+                       else self._ask(video, intent, feedback, exclude, target_point))
             if p is None:
                 return None, None, {**info, "history": history}
             cond = plan_to_conditions(p, self.vocab, self.framing_on_free)

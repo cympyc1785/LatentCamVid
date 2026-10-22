@@ -25,6 +25,9 @@
 
 ### Added
 
+- **`IntentPlanner(mode="split")`** (R491). 움직임은 intent 텍스트만 보고 74 조합 enum 중 하나를 고르고 (vLLM 구조화 출력), 영상은 subject 지칭에만 쓴다. 기본 `joint` = 예전. roundtrip (300 seg) preset 일치 L0 0.49→0.81 · L1 0.28→0.48 · snap 0.
+- **`lbm/vlm.VLMClient.chat/chat_json(json_schema=...)`** (R491). vLLM `response_format` json_schema 전달. 안 주면 payload 예전 그대로.
+
 - **`trumans_to_recon.py --geom_only` · `run_board_sources.py --geom_only`** (R487 2단계 렌더 1단계). depth/index 만 렌더 (RGB 생략, video.mp4 회색 자리표시자 + `RGB_PENDING`), 변환 뒤 render 폴더의 depth/index npy 삭제 (cameras.json 은 남김). smoke 1 클립: 렌더 77 s, recon 6.4 MB.
 - **`scene_graph/gt_trumans.board_folder`** (R487). 세대 접미사 클립 (`tru_<rec8>_cNN_fNNNNN_kNNN_pN_<tag>`) 을 `<recon_root>_<tag>/` 작업 폴더로 해석. 접미사 없으면 예전 그대로.
 

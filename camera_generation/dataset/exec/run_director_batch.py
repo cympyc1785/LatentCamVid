@@ -128,6 +128,8 @@ def main():
     # [R352] subject 궤적 출처: "" = scene_graph node track.center_smooth (기존). 파일명이면 <corpus>/<dataset>/<scene>/da3/<file>
     #   (target_track.npz 형식, world) 의 그 세그먼트 궤적을 T_wg 역변환으로 G frame 에 놓는다 (예 target_track_molmo2.npz). 높이 게이지는 node OBB 그대로.
     ap.add_argument("--track_file", default="")
+    # [R507] char 궤적을 첫 프레임 위치에 고정 (정지 궤적) — 사용자 10-22 "정지 궤적으로 준거". 스케일 게이지 (height) 는 그대로.
+    ap.add_argument("--char_static", action="store_true")
     a = ap.parse_args()
 
     # `run_director_vista.main` 이 하던 일 — 그 파일은 함수만 빌려 쓰므로 여기서 직접 건다.
@@ -236,6 +238,8 @@ def main():
                 continue
             T_wg_ = np.asarray(graph["frames"]["T_wg"], dtype=np.float64)
             centers_u = (tz["track_world"][ti].astype(np.float64) - T_wg_[:3, 3]) @ np.linalg.inv(T_wg_[:3, :3]).T
+        if a.char_static:                                  # [R507]
+            centers_u = np.repeat(centers_u[:1], centers_u.shape[0], axis=0)
         F_ = centers_u.shape[0]
         height_u = float(node["obb"]["extent"][2])
         path_u = float(np.linalg.norm(np.diff(centers_u, axis=0), axis=1).sum())

@@ -824,12 +824,22 @@ Return JSON: {{"L1": "..."}}"""
 
 
 def synthesize_l1_verbatim(plan: CanonicalCameraPlan, vocab: PresetVocab, client, caption: str, subject: str = "", scene: str = "", tries: int = 3,
-                           video: str = None, video_fps: float = 2.0, context: dict = None):
-    """[R496] L1 만, subject 는 `subject` 문자열을 그대로 포함 (대소문자 무시). subject 가 비면 (targetless) 규칙 없음."""
+                           video: str = None, video_fps: float = 2.0, context: dict = None, feedback: str = "", defs: bool = False):
+    """[R496] L1 만, subject 는 `subject` 문자열을 그대로 포함 (대소문자 무시). subject 가 비면 (targetless) 규칙 없음.
+    [R509] `feedback` = 앞 시도가 검수 (judge_l1) 에서 떨어진 이유 · `defs` = v2 단위 정의를 붙인다. 둘 다 기본값이면 예전 프롬프트 그대로."""
     rule = (f'Refer to the subject using exactly this phrase, copied word for word: "{subject}".' if subject else
             "The move is not about any particular subject; do not name one.")
     prompt = L1_VERBATIM_PROMPT.format(scene=scene or (plan.target_text or "a scene"), caption=caption, move=vocab.describe(plan.preset),
                                        subject_rule=rule, video_note=VIDEO_NOTE if video else "", context=context_block(context))
+    banned = []
+    if defs:   # [R509] 고친 L1 이 L0 용어로 돌아가지 않게 — 기술 용어 (dolly·truck·pedestal·crane) 금지, pan·tilt·orbit 은 그 단위가 실제로 있을 때만
+        moves = " ".join(plan.moves)
+        banned = ["dolly", "truck", "pedestal", "crane"] + [w for w in ("pan", "tilt", "orbit") if w not in moves]
+        prompt += ("\n\n" + PRIM_DEFS_V2 + "\nEvery block of the move must be in the request, described with words that mean that block "
+                   "(e.g. do not say \"pan\" for truck or \"tilt\"/\"camera angle\" for pedestal), and nothing else may be added. "
+                   "Use everyday words, not the block names: do not use the words " + ", ".join(f'\"{w}\"' for w in banned) + ".")
+    if feedback:
+        prompt += "\n\n" + feedback
     vkw = {"video": video, "video_fps": video_fps} if video else {}
 
     def ok(r):
@@ -838,9 +848,38 @@ def synthesize_l1_verbatim(plan: CanonicalCameraPlan, vocab: PresetVocab, client
             return ["need L1 string"]
         if subject and subject.lower().rstrip(".") not in t.lower():
             return [f'L1 must contain the exact phrase "{subject}"']
+        bad = [w for w in banned if re.search(rf"\b{w}", t.lower().replace(subject.lower(), ""))]
+        if bad:
+            return [f"do not use the words {bad}; say it in everyday words"]
         return []
     raw, info = client.chat_json(prompt, validate=ok, max_repairs=tries, echo_previous=False, **vkw)
     return {"L1": str((raw or {}).get("L1", "")).strip(), "verbatim": raw is not None, "subject": subject}
+
+
+L1_ISSUES = ["wrong_term", "missing_block", "extra_block", "centered_added", "centered_missing", "track_added", "track_missing",
+             "direction_flipped", "subject_changed", "other"]
+L1_JUDGE_PROMPT = """{defs}
+
+Reference camera move (correct): {combo}
+Reference sentence: "{l0}"
+Candidate sentence: "{l1}"
+
+Does the candidate sentence ask for exactly the same camera move as the reference, block by block, using the definitions above?
+Check each: a block described with a word that means a different block (e.g. "pan" for truck_*, "tilt"/"camera angle" for pedestal_*), a missing block, an extra block,
+"(keep target centered)" added or missing, "track" added or missing (a moving subject alone is not track), a flipped direction, a different subject.
+Different wording for the same block is fine (e.g. "slide left" = truck_left, "move closer" = dolly_in, "circle around" = orbit).
+Return JSON in this order: {{"reasoning": "<short>", "verdict": "<same | different>", "issues": [<zero or more of {issues}>]}}"""
+
+
+def judge_l1(plan: CanonicalCameraPlan, vocab: PresetVocab, client, l0: str, l1: str):
+    """이 코드가 답하는 질문: L1 intent 문장이 GT canonical 카메라 움직임과 같은 단위만 담고 있나? (R505 에서 처음, R509 L1s 고침 루프에서 재사용)
+    -> {"verdict": same|different|None, "issues": [...], "reasoning": str}. 텍스트만."""
+    schema = {"type": "object", "properties": {"reasoning": {"type": "string"}, "verdict": {"type": "string", "enum": ["same", "different"]},
+              "issues": {"type": "array", "items": {"type": "string", "enum": L1_ISSUES}}}, "required": ["reasoning", "verdict", "issues"]}
+    r, _ = client.chat_json(L1_JUDGE_PROMPT.format(defs=PRIM_DEFS_V2, combo=vocab.describe(plan.preset), l0=l0, l1=l1, issues=L1_ISSUES),
+                            system="Answer with raw JSON only.", validate=lambda x: [] if x.get("verdict") in ("same", "different") else ["verdict"],
+                            max_repairs=1, label="judge_l1", echo_previous=False, json_schema=schema)
+    return r or {"verdict": None, "issues": [], "reasoning": ""}
 
 
 def roundtrip_score(gt: CanonicalCameraPlan, pred: CanonicalCameraPlan):

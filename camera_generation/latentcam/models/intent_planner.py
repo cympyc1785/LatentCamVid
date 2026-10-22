@@ -546,6 +546,8 @@ class IntentPlanner:
         self.prim_defs = False                  # [R498] True (v2) 면 joint_struct 프롬프트에 단위 정의 (PRIM_DEFS_V2) — set by caller, 기본 = 예전
         self.lean = False                       # [R501] True 면 joint_struct 정리판 (end_shot 없음 · target 길이 제약 없음 · 영상 없으면 system 에 video 없음)
         self.target_loose = False               # [R504] True 면 target.text 완전 일치 대신 내용어 70% 이상 (target_overlap)
+        self.clear_steps = True                 # [R506] clear 의 Step 1-3 문단 (False = 빼기, ablation)
+        self.reason_pos = "first"               # [R506] clear 의 reasoning 키 위치 first (move 앞) · last (뒤) · none (없음)
         self.prompt_style = ""                  # [R504] "clear" = JOINT_STRUCT_CLEAR (단계 지시 · reasoning 먼저 · 단위 정의 · lean)
         self.end_shot_explicit = False          # [R503] lean 에서도 end_shot 을 두되 intent 가 끝 shot 크기를 명시했을 때만 (아니면 빈 값)
         self.examples = False                   # [R501] True / "v2b" (R503 실제 train 문장판) True (v2) 면 joint_struct 에 JS_EXAMPLES_V2 few-shot
@@ -624,10 +626,14 @@ class IntentPlanner:
             "rationale": {"type": "string"}}, "required": ["move", "end_shot", "target"]}
         if self.prompt_style == "clear":        # [R504]
             assert self.vocab.terms == "v2" and self.target_from_intent
-            props = {"reasoning": {"type": "string"}, "move": schema["properties"]["move"]}
+            assert self.reason_pos in ("first", "last", "none"), self.reason_pos
+            props = {"reasoning": {"type": "string"}} if self.reason_pos == "first" else {}
+            props["move"] = schema["properties"]["move"]
             if self.end_shot_explicit:
                 props["end_shot"] = schema["properties"]["end_shot"]
             props["target"] = schema["properties"]["target"]
+            if self.reason_pos == "last":
+                props["reasoning"] = {"type": "string"}
             schema = {"type": "object", "properties": props, "required": list(props)}
             vkw = {"video": video, "video_fps": self.video_fps} if (self.video_mode == "video" and video) else {}
             prompt = JOINT_STRUCT_CLEAR.format(
@@ -635,6 +641,14 @@ class IntentPlanner:
                 video_rule=("Use the video only to understand the subject and the space; take the blocks from the request.\n" if video else ""),
                 vocab="\n".join(f"- {c}" for c in allowed),
                 shot_key=(f' "end_shot": "<one of {list(SHOT_CLASSES)} only if the request explicitly names the final shot size, else empty>",' if self.end_shot_explicit else ""))
+            if not self.clear_steps:            # [R506] 단계 문단 빼기
+                prompt = re.sub(r"Step 1 - Subject:.*?exactly those blocks\.\n", "", prompt, flags=re.S)
+                assert "Step 1" not in prompt
+            rk = '"reasoning": "<one or two short sentences: the subject phrase and the blocks the request asks for>",'
+            if self.reason_pos != "first":      # [R506]
+                prompt = prompt.replace(rk + " ", "", 1) if self.reason_pos == "none" else prompt.replace(rk + " ", "", 1).replace(
+                    "empty if no subject>\"}}", "empty if no subject>\"}, " + rk.rstrip(",") + "}", 1)
+                assert prompt.count('"reasoning"') == (1 if self.reason_pos == "last" else 0), prompt[-500:]
             if self.examples == "v2b":
                 prompt += "\n\nExamples:\n" + "\n".join(f'Request: "{i}"\n' + json.dumps({"move": m, "target": {"noun": n, "text": t}}) for i, m, n, t in JS_EXAMPLES_V2B)
             if self.extra_context:

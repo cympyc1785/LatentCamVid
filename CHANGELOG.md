@@ -25,7 +25,7 @@
 
 ### Added
 
-- **`latentcam/models/intent_planner.py`** (R497·R498). `IntentPlanner.prim_defs` (기본 False = 예전) — v2 joint_struct 프롬프트의 조합 설명 괄호를 가장 작은 단위 정의 문단 (`PRIM_DEFS_V2`: dolly·truck·pedestal·orbit·pan·tilt·track·keep centered·hold; track 은 "따라가라는 요청일 때만, 움직이는 subject 만으로는 아님" — R499) 으로 바꾼다. `extra_context` (프롬프트 끝 추가 정보) · joint_struct `video=None` (텍스트만). v2 재계획 피드백 문구 (`FAIL_FIX_V2`) 에서 push in / crane / arc 를 v2 용어로.
+- **`latentcam/models/intent_planner.py`** (R497·R498). `IntentPlanner.prim_defs` (기본 False = 예전) — v2 joint_struct 프롬프트의 조합 설명 괄호를 가장 작은 단위 정의 문단 (`PRIM_DEFS_V2`: dolly·truck·pedestal·orbit·pan·tilt·track·keep centered·hold; track 은 "따라가라는 요청일 때만, 움직이는 subject 만으로는 아님" — R499; hold = "위 이동 단위 없음" — R500) 으로 바꾼다. `extra_context` (프롬프트 끝 추가 정보) · joint_struct `video=None` (텍스트만). v2 재계획 피드백 문구 (`FAIL_FIX_V2`) 에서 push in / crane / arc 를 v2 용어로. `IntentPlanner.lean` (R501, 기본 False): joint_struct 에서 end_shot 출력 제거 · target.text 길이 제약 제거 · 영상 없으면 system 문구에서 video 제거. `IntentPlanner.examples` (R501, 기본 False): 손으로 쓴 few-shot 8 개 (`JS_EXAMPLES_V2`) — 시험 결과 손해라 기본 꺼짐.
 
 - **`intent_planner.synthesize_l1_verbatim`** (R496). L1 intent 만 다시 합성하되 subject 지칭구 (캡션 target_text) 를 원문 그대로 포함하게 강제 (검증·재질의). v5f50k noroll 47,949 전량 성공 → `prompts_intent_L1s.json`.
 - **`IntentPlanner.target_from_intent`** (R496). joint_struct 에서 target.text 를 intent 안의 문구 그대로만 허용 (planner 는 카메라 패턴만, subject 는 파싱). 기본 False = 예전.

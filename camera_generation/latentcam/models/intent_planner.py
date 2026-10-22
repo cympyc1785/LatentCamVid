@@ -440,8 +440,21 @@ PRIM_DEFS_V2 = """Building blocks (each combination below is made only of these)
 - tilt_up / tilt_down: the camera stays in place and only turns its view up / down.
 - track: the camera travels along with the subject as the subject moves through the scene. Use it only when the intent asks the camera to follow / travel with the subject; a subject that is moving (e.g. "a car driving forward") is NOT by itself a request to track.
 - (keep target centered): the camera re-aims at the subject every frame so it stays in the middle of the frame. This is aiming only; it does not move the camera closer.
-- hold: the camera makes no move of its own (with "track +", it only follows the subject).
+- hold: none of the moves above (no dolly, truck, pedestal, orbit, pan or tilt). Alone, the camera stays still; "track + hold" means the camera only follows the subject.
 A combination joined with "+" means all of its blocks happen at the same time. Use only the blocks the intent asks for."""
+# [R501] lean 판 (사용자 10-22 "정리한 버전으로"): 영상 없으면 system 에서 video 를 빼고, end_shot 출력 없음, target.text 길이 제약 없음 (원문 복사만).
+SYSTEM_TEXT = "You are a cinematographer planning ONE camera move. Answer with raw JSON only."
+# [R501] few-shot — 손으로 쓴 예 (데이터셋 문장 아님). 헷갈리던 쌍 (truck/pan · pedestal/tilt · centered≠dolly_in · 움직이는 subject≠track) 위주.
+JS_EXAMPLES_V2 = [
+    ("Slide the camera to the left past the old stone wall.", "truck_left", "the old stone wall"),
+    ("Turn the camera to the right past the red food truck.", "pan_right", "the red food truck"),
+    ("Tilt the camera up past the clock tower.", "tilt_up", "the clock tower"),
+    ("Lower the camera while keeping the woman in a red coat in the center of the frame.", "pedestal_down (keep target centered)", "the woman in a red coat"),
+    ("Keep the dog running across the grass centered in the frame without moving the camera.", "hold (keep target centered)", "the dog running across the grass"),
+    ("Follow the cyclist in a yellow jacket as he rides down the road.", "track + hold", "the cyclist in a yellow jacket"),
+    ("Follow the man in a blue shirt while moving closer to him, keeping him centered.", "track + dolly_in (keep target centered)", "the man in a blue shirt"),
+    ("Circle around the bronze statue to the right, keeping it centered.", "orbit_right (keep target centered)", "the bronze statue"),
+]
 TARGET_PROMPT = """The video above is the source shot.
 User intent for a camera move: "{intent}"
 Which subject in the video is the intent about? Return JSON:
@@ -487,6 +500,8 @@ class IntentPlanner:
         assert mode in ("joint", "split", "joint_struct"), mode
         self.target_from_intent = False         # [R496] True 면 target.text 는 intent 안의 문구를 그대로 (파싱만) — set by caller
         self.prim_defs = False                  # [R498] True (v2) 면 joint_struct 프롬프트에 단위 정의 (PRIM_DEFS_V2) — set by caller, 기본 = 예전
+        self.lean = False                       # [R501] True 면 joint_struct 정리판 (end_shot 없음 · target 길이 제약 없음 · 영상 없으면 system 에 video 없음)
+        self.examples = False                   # [R501] True (v2) 면 joint_struct 에 JS_EXAMPLES_V2 few-shot
         self.extra_context = ""                 # [R497] joint_struct 프롬프트 끝에 붙일 추가 정보 (예: subject 움직임 태그). 빈 문자열 = 예전   # [R493] joint_struct = 영상 + intent 한 번에, 움직임은 split 과 같은 enum
         self.mode = mode
 
@@ -556,6 +571,8 @@ class IntentPlanner:
             "move": {"type": "string", "enum": allowed}, "end_shot": {"type": "string", "enum": [""] + list(SHOT_CLASSES)},
             "target": {"type": "object", "properties": {"noun": {"type": "string"}, "text": {"type": "string"}}, "required": ["noun", "text"]},
             "rationale": {"type": "string"}}, "required": ["move", "end_shot", "target"]}
+        if self.lean:                           # [R501] end_shot 출력 빼기
+            del schema["properties"]["end_shot"]; schema["required"] = ["move", "target"]
         vkw = {"video": video, "video_fps": self.video_fps} if (self.video_mode == "video" and video) else {}
         prompt = JOINT_STRUCT_PROMPT.format(intent=intent, vocab="\n".join(f"- {c}" for c in allowed), shots=list(SHOT_CLASSES))
         if self.prim_defs:                      # [R498] 조합 목록 앞 괄호 설명 → 단위 정의 문단
@@ -567,12 +584,20 @@ class IntentPlanner:
         if not video:                           # [R497] 영상 없이 (텍스트만) — 같은 enum·스키마, 영상 문장만 뺀다
             prompt = prompt.replace("The video above is the source shot.\n", "").replace(
                 "Use the video to understand the subject, its motion and the space around it, but take the KIND of move from the intent:\n", "Take the KIND of move from the intent:\n")
+        if self.lean:                           # [R501]
+            prompt = prompt.replace('"end_shot": "<one of ' + str(list(SHOT_CLASSES)) + ' or empty>",\n  ', "")
+            if self.target_from_intent:
+                prompt = prompt.replace('"text": "<referring expression, 8-14 words; empty if no subject>"', '"text": "<the phrase naming the subject; empty if no subject>"')
+            assert "end_shot" not in prompt and (not self.target_from_intent or "8-14" not in prompt), prompt
+        if self.examples:                       # [R501]
+            assert self.vocab.terms == "v2" and all(m in combos for _, m, _ in JS_EXAMPLES_V2)
+            prompt += "\n\nExamples (intent -> move, target.text):\n" + "\n".join(f'- "{i}" -> {m}, "{t}"' for i, m, t in JS_EXAMPLES_V2)
         if self.target_from_intent:             # [R496]
             prompt += "\nFor target.text, copy the phrase that names the subject word for word from the user intent (empty if the intent names no subject)."
         if self.extra_context:                  # [R497]
             prompt += "\n\n" + self.extra_context
         r, info = self.client.chat_json(prompt,
-                                        system=SYSTEM, validate=lambda x: self._js_validate(x, combos, intent),
+                                        system=SYSTEM_TEXT if (self.lean and not video) else SYSTEM, validate=lambda x: self._js_validate(x, combos, intent),
                                         max_repairs=self.max_repairs, label="intent_joint_struct", echo_previous=False, json_schema=schema, **vkw)
         if r is None:
             return None, {**info, "raw": None}

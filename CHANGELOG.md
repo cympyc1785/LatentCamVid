@@ -25,6 +25,10 @@
 
 ### Added
 
+- **`intent_planner.synthesize_l1_verbatim`** (R496). L1 intent 만 다시 합성하되 subject 지칭구 (캡션 target_text) 를 원문 그대로 포함하게 강제 (검증·재질의). v5f50k noroll 47,949 전량 성공 → `prompts_intent_L1s.json`.
+- **`IntentPlanner.target_from_intent`** (R496). joint_struct 에서 target.text 를 intent 안의 문구 그대로만 허용 (planner 는 카메라 패턴만, subject 는 파싱). 기본 False = 예전.
+- **`dataset_dl3dv._mix_caption` · `prompts_file_mix` / `prompts_mix_prob`** (R495 B). 학습 샘플마다 확률로 캡션을 다른 prompts 파일 (같은 세그먼트 키) 문장으로 교체. 기본 null / 0 = 예전.
+
 - **`IntentPlanner(mode="joint_struct")`** (R493). 영상 + intent 한 번에 보되 움직임은 split 과 같은 74 조합 enum (구조화 출력) 에서만 고르고 subject 도 같이 낸다. 사용자 10-22 "영상도 planner 입력으로 · joint struct 기준으로".
 
 - **`IntentPlanner(mode="split")`** (R491). 움직임은 intent 텍스트만 보고 74 조합 enum 중 하나를 고르고 (vLLM 구조화 출력), 영상은 subject 지칭에만 쓴다. 기본 `joint` = 예전. roundtrip (300 seg) preset 일치 L0 0.49→0.81 · L1 0.28→0.48 · snap 0.

@@ -462,7 +462,8 @@ class IntentPlanner:
         self.framing_on_free, self.work_dir = framing_on_free, work_dir
         self.snap_on_fail = snap_on_fail        # [R465] 재질의 소진 시 마지막 응답을 가장 가까운 preset 으로 (기본 False = 예전처럼 None)
         # [R491] mode: joint (기본, 예전) = 영상+intent 한 번에 · split = 움직임은 텍스트만 (구조화 enum) + subject 는 영상
-        assert mode in ("joint", "split", "joint_struct"), mode   # [R493] joint_struct = 영상 + intent 한 번에, 움직임은 split 과 같은 enum
+        assert mode in ("joint", "split", "joint_struct"), mode
+        self.target_from_intent = False         # [R496] True 면 target.text 는 intent 안의 문구를 그대로 (파싱만) — set by caller   # [R493] joint_struct = 영상 + intent 한 번에, 움직임은 split 과 같은 enum
         self.mode = mode
 
     def _ask(self, video, intent, feedback=(), exclude=(), target_point=None):
@@ -515,6 +516,14 @@ class IntentPlanner:
             return p, {"raw": raw, "snapped": p is not None, "errors": e, "move": info_m, "target": info_t}
         return p, {"raw": raw, "snapped": False, "errors": e, "move": info_m, "target": info_t}
 
+    def _js_validate(self, x, combos, intent):
+        err = [] if x.get("move") in combos else ["move must be one of the list"]
+        if self.target_from_intent:             # [R496] subject 는 intent 문구 그대로만
+            t = str(((x.get("target") or {}).get("text")) or "").strip()
+            if t and t.lower().rstrip(".") not in intent.lower():
+                err.append("target.text must be copied word for word from the user intent (a span of it), or empty if the intent names no subject")
+        return err
+
     def _ask_joint_struct(self, video, intent, exclude=(), target_point=None):
         """[R493] 영상도 움직임 결정에 보되 (사용자 10-22 "영상도 planner 입력으로"), 선택지는 split 과 같은 구조화 enum."""
         combos = self.vocab.combos()
@@ -524,8 +533,11 @@ class IntentPlanner:
             "target": {"type": "object", "properties": {"noun": {"type": "string"}, "text": {"type": "string"}}, "required": ["noun", "text"]},
             "rationale": {"type": "string"}}, "required": ["move", "end_shot", "target"]}
         vkw = {"video": video, "video_fps": self.video_fps} if self.video_mode == "video" else {}
-        r, info = self.client.chat_json(JOINT_STRUCT_PROMPT.format(intent=intent, vocab="\n".join(f"- {c}" for c in allowed), shots=list(SHOT_CLASSES)),
-                                        system=SYSTEM, validate=lambda x: [] if x.get("move") in combos else ["move must be one of the list"],
+        prompt = JOINT_STRUCT_PROMPT.format(intent=intent, vocab="\n".join(f"- {c}" for c in allowed), shots=list(SHOT_CLASSES))
+        if self.target_from_intent:             # [R496]
+            prompt += "\nFor target.text, copy the phrase that names the subject word for word from the user intent (empty if the intent names no subject)."
+        r, info = self.client.chat_json(prompt,
+                                        system=SYSTEM, validate=lambda x: self._js_validate(x, combos, intent),
                                         max_repairs=self.max_repairs, label="intent_joint_struct", echo_previous=False, json_schema=schema, **vkw)
         if r is None:
             return None, {**info, "raw": None}
@@ -644,6 +656,35 @@ def synthesize_intents_levels(plan: CanonicalCameraPlan, vocab: PresetVocab, cli
         if not any(bad.values()):
             return {**out, "jargon": {}}
     return {**out, "jargon": bad}
+
+
+# [R496] L1 재합성 — subject 지칭구를 **원문 그대로** 쓰게 한다 (사용자 10-22: L1 은 1:1 대응이어야 하고 subject 는 파싱만).
+L1_VERBATIM_PROMPT = """{video_note}A video shows {scene}. A camera move will be generated for it. The exact move is:
+"{caption}" (primitives: {move}).{context}
+Write one request a person could give to get exactly this move: it says directly how the camera should move, in everyday words.
+{subject_rule}
+It must stay consistent with the move (direction, approach vs. retreat, following the subject) and be one natural sentence.
+Return JSON: {{"L1": "..."}}"""
+
+
+def synthesize_l1_verbatim(plan: CanonicalCameraPlan, vocab: PresetVocab, client, caption: str, subject: str = "", scene: str = "", tries: int = 3,
+                           video: str = None, video_fps: float = 2.0, context: dict = None):
+    """[R496] L1 만, subject 는 `subject` 문자열을 그대로 포함 (대소문자 무시). subject 가 비면 (targetless) 규칙 없음."""
+    rule = (f'Refer to the subject using exactly this phrase, copied word for word: "{subject}".' if subject else
+            "The move is not about any particular subject; do not name one.")
+    prompt = L1_VERBATIM_PROMPT.format(scene=scene or (plan.target_text or "a scene"), caption=caption, move=vocab.describe(plan.preset),
+                                       subject_rule=rule, video_note=VIDEO_NOTE if video else "", context=context_block(context))
+    vkw = {"video": video, "video_fps": video_fps} if video else {}
+
+    def ok(r):
+        t = str((r or {}).get("L1", "")).strip()
+        if not t:
+            return ["need L1 string"]
+        if subject and subject.lower().rstrip(".") not in t.lower():
+            return [f'L1 must contain the exact phrase "{subject}"']
+        return []
+    raw, info = client.chat_json(prompt, validate=ok, max_repairs=tries, echo_previous=False, **vkw)
+    return {"L1": str((raw or {}).get("L1", "")).strip(), "verbatim": raw is not None, "subject": subject}
 
 
 def roundtrip_score(gt: CanonicalCameraPlan, pred: CanonicalCameraPlan):

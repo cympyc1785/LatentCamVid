@@ -1985,8 +1985,27 @@ class CamDataset(torch.utils.data.Dataset):
         }
         return out
 
+    def _mix_caption(self, scene_idx, data_name, caption):
+        """[R495 B] 학습 샘플마다 확률 `prompts_mix_prob` 로 캡션을 `prompts_file_mix` 의 문장으로 바꾼다 (같은 세그먼트 키).
+        기본 (prob 0 / 파일 없음) 이면 원래 캡션 그대로 — 예전과 같다. test/val 은 안 바꾼다."""
+        p = float(getattr(self.cfg, 'prompts_mix_prob', 0.0) or 0.0)
+        name = getattr(self.cfg, 'prompts_file_mix', None)
+        if self.type != 'train' or p <= 0.0 or not name or random.random() >= p:
+            return caption
+        if not hasattr(self, '_mix_cache'):
+            self._mix_cache = {}
+        if scene_idx not in self._mix_cache:
+            path = osp.join(self.scene_dir_list[scene_idx], 'da3', name) if self.pose_source == 'da3' \
+                else osp.join(self.scene_dir_list[scene_idx], name)
+            self._mix_cache[scene_idx] = json.load(open(path)) if osp.isfile(path) else {}
+        e = self._mix_cache[scene_idx].get(data_name.split('_')[-1])
+        pcs = e.get('prompt_camera_with_scene_video') if isinstance(e, dict) else None
+        alt = pcs.get('concise', "") if isinstance(pcs, dict) else ""
+        return alt or caption
+
     def __getitem__(self, idx):
         scene_idx, s, e, caption, data_name = self.samples[idx]
+        caption = self._mix_caption(scene_idx, data_name, caption)
         extrinsics = self.extrinsics_list[scene_idx][s:e]     # (T,4,4) w2c
         intrinsics = self.intrinsics_list[scene_idx][s:e]     # (T,3,3)
         h, w = self.hw_list[scene_idx]

@@ -11,6 +11,8 @@
 
 ### Fixed
 
+- **`dataset/fit/bank/occ_grid_cache.py`** (R521). 세그먼트 ESDF (`occ_edt*`) 리샘플이 world 격자 밖을 `mode="nearest"` 로 가장자리 값 복사 → 관측 안 된 바깥에 축 방향 '장애물 근처' 줄무늬. `--edt_outside extend` 추가 (격자 안 가장 가까운 점의 거리 + 밖으로 나간 거리). 기본값은 기존 동작 (nearest) 유지.
+
 - **`scripts/eval_testset.py`** (R482). `depth_vid_cond` 학습 run 의 모델 kwargs 를 안 넘겨 strict load 가 `dv_*` 키에서 죽던 것 — 학습 진입점과 같은 kwargs 추가.
 
 - **`dataset/exec/native_captions.py`** (R476). 같은 씬 4×4 grid 를 여러 스레드가 동시에 쓰다 반쯤 쓴 PNG 를 VLM 에 넘기던 경합 — lock + 임시파일 `os.replace`.

@@ -142,6 +142,20 @@ CORPORA = {
         },
         ref="v5f_MTb_v2",
     ),
+    # [R527] main 비교표 (D61) — v5f_full (= v5f_all, roll 제외 test 6,111, 캡션 v2). ref = R489 v5f_all MTb eval 폴더.
+    "dynpose_v5f_all_v2": dict(
+        corpus="/data1/cympyc1785/data/DynPose-LBM/latentcam_dynpose_v5f_all",
+        split_name="seg_list_dynpose_s91_noroll_test.txt",
+        eval_data="/data1/cympyc1785/data/DynPose-100K/eval_data",
+        prefix="dynpose",
+        cloud_root=path.join(HERE, "out_dynpose_v5"),
+        out=path.join(HERE, "results", "20261023_r527_baseline_v5fall"),
+        depth_norm="median",
+        ours={
+            "v5fall_MTb_v2": EVAL_MY + "20261022_032720_dsv5fallv2_molmo2_l21_noprobe_fm_vaeCrepenclin_zstd_track3d_box3d__last__seed42__v5alltest",
+        },
+        ref="v5fall_MTb_v2",
+    ),
     "dynpose_d200": dict(
         corpus="/data1/cympyc1785/data/DynPose-LBM/latentcam_dynpose_d200",
         split_name="seg_list_dynpose_s91_test.txt",

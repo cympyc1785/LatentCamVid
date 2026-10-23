@@ -29,6 +29,8 @@
 
 ### Added
 
+- **`dataset/exec/run_gendop_eval.py`** (R527). corpus `dynpose_v5f_all_v2` (v5f_all test 6,111, ref = R489 eval 폴더) — main 비교표 (D61) 용.
+
 - **`dataset/exec/native_captions.py`** (R525). `--pose_source corpus` — eval 폴더 없이 코퍼스 `target_poses.npz` 에서 GT pose (train 포함). ref 경로와 같은 태그 확인.
 
 - **`dataset/eval/gendop_release_infer.py` · `exec/run_gendop_eval.py`** (R508). `--batch_eos_fallback` — GenDoP 을 EOS 허용 그대로 배치 generate (pipeline/GenDoP `eval_batch.py` 방식), 배치 안 길이 불일치로 assert 가 나면 그 배치만 한 개씩 재생성. 재생성 배치 수를 config `batch_fallbacks` 에 남긴다. 기본 꺼짐 = 예전 (batch_size 1 로 강등).

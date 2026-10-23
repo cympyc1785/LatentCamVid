@@ -499,6 +499,11 @@ Allowed combinations:
 {vocab}
 
 Return JSON with the keys in this order: {{"reasoning": "<one or two short sentences: the subject phrase and the blocks the request asks for>", "move": "<one combination copied exactly>",{shot_key} "target": {{"noun": "<one lowercase noun; empty if no subject>", "text": "<the subject phrase from the request; empty if no subject>"}}}}"""
+# [R517] 2 단계 planner (사용자 10-23 "target subject 문구는 따로 뽑고 camera pattern 만 또 따로") — ① 텍스트만으로 subject 문구 ② 카메라 패턴만.
+TARGET_ONLY_PROMPT = """Request for a camera move: "{intent}"
+Find the words in the request that name the subject the camera is about (a person, animal or object) and copy that phrase.
+If the request names no subject, leave both fields empty.
+Return JSON: {{"noun": "<one lowercase noun; empty if no subject>", "text": "<the subject phrase copied from the request; empty if no subject>"}}"""
 TARGET_PROMPT = """The video above is the source shot.
 User intent for a camera move: "{intent}"
 Which subject in the video is the intent about? Return JSON:
@@ -546,6 +551,7 @@ class IntentPlanner:
         self.prim_defs = False                  # [R498] True (v2) 면 joint_struct 프롬프트에 단위 정의 (PRIM_DEFS_V2) — set by caller, 기본 = 예전
         self.lean = False                       # [R501] True 면 joint_struct 정리판 (end_shot 없음 · target 길이 제약 없음 · 영상 없으면 system 에 video 없음)
         self.target_loose = False               # [R504] True 면 target.text 완전 일치 대신 내용어 70% 이상 (target_overlap)
+        self.two_stage = False                  # [R517] True (clear 전용) 면 ① subject 문구 (텍스트만) ② 카메라 패턴 (영상·추가 맥락 포함) 을 따로 묻는다
         self.clear_steps = True                 # [R506] clear 의 Step 1-3 문단 (False = 빼기, ablation)
         self.reason_pos = "first"               # [R506] clear 의 reasoning 키 위치 first (move 앞) · last (뒤) · none (없음)
         self.prompt_style = ""                  # [R504] "clear" = JOINT_STRUCT_CLEAR (단계 지시 · reasoning 먼저 · 단위 정의 · lean)
@@ -641,6 +647,8 @@ class IntentPlanner:
                 video_rule=("Use the video only to understand the subject and the space; take the blocks from the request.\n" if video else ""),
                 vocab="\n".join(f"- {c}" for c in allowed),
                 shot_key=(f' "end_shot": "<one of {list(SHOT_CLASSES)} only if the request explicitly names the final shot size, else empty>",' if self.end_shot_explicit else ""))
+            if self.two_stage:                  # [R517]
+                return self._ask_two_stage(prompt, video, vkw, intent, combos, allowed, exclude, target_point)
             if not self.clear_steps:            # [R506] 단계 문단 빼기
                 prompt = re.sub(r"Step 1 - Subject:.*?exactly those blocks\.\n", "", prompt, flags=re.S)
                 assert "Step 1" not in prompt
@@ -694,6 +702,31 @@ class IntentPlanner:
                                         max_repairs=self.max_repairs, label="intent_joint_struct", echo_previous=False, json_schema=schema, **vkw)
         if r is None:
             return None, {**info, "raw": None}
+        return self._finish_js(r, combos, intent, exclude, target_point, info)
+
+    def _ask_two_stage(self, prompt, video, vkw, intent, combos, allowed, exclude, target_point):
+        """[R517] ① subject 문구 — 텍스트만 (영상 없이), target_loose 규칙으로 검사 ② 카메라 패턴만 — clear 프롬프트에서 Step 1 과 target 을 뺀 판."""
+        tschema = {"type": "object", "properties": {"noun": {"type": "string"}, "text": {"type": "string"}}, "required": ["noun", "text"]}
+
+        def tval(x):
+            t = str(x.get("text") or "").strip()
+            return [] if not t or target_overlap(t, intent) >= 0.7 else ["text must be the phrase from the request that names the subject (use the request's own words)"]
+        tr, tinfo = self.client.chat_json(TARGET_ONLY_PROMPT.format(intent=intent), system=SYSTEM_TEXT, validate=tval, max_repairs=self.max_repairs,
+                                          label="intent_target_only", echo_previous=False, json_schema=tschema)
+        mp = re.sub(r"Step 1 - Subject:.*?\n", "", prompt, count=1).replace("Step 2 - Blocks", "Step 1 - Blocks").replace("Step 3 - Move", "Step 2 - Move")
+        mp = mp[:mp.index("Return JSON with the keys in this order:")] + (
+            'Return JSON with the keys in this order: {"reasoning": "<one or two short sentences: the blocks the request asks for>", '
+            '"move": "<one combination copied exactly>"}')
+        if self.extra_context:
+            mp += "\n\n" + self.extra_context
+        assert "Step 1 - Subject" not in mp and '"target"' not in mp
+        mschema = {"type": "object", "properties": {"reasoning": {"type": "string"}, "move": {"type": "string", "enum": allowed}}, "required": ["reasoning", "move"]}
+        mr, minfo = self.client.chat_json(mp, system=SYSTEM_TEXT if not video else SYSTEM, validate=lambda x: [] if x.get("move") in combos else ["move must be one of the list"],
+                                          max_repairs=self.max_repairs, label="intent_move_only", echo_previous=False, json_schema=mschema, **vkw)
+        info = {**minfo, "target_info": tinfo}
+        if mr is None:
+            return None, {**info, "raw": None}
+        r = {"move": mr["move"], "target": tr or {"noun": "", "text": ""}, "rationale": mr.get("reasoning", "")}
         return self._finish_js(r, combos, intent, exclude, target_point, info)
 
     def _finish_js(self, r, combos, intent, exclude, target_point, info):

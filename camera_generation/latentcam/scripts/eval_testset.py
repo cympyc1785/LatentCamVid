@@ -371,18 +371,19 @@ def main():
                 subject_pts_mode=str(getattr(cfg, 'subject_pts_mode', 'pool') or 'pool'),   # [R379]
                 subject_pts_fourier=int(getattr(cfg, 'subject_pts_fourier', 0) or 0),   # [R382]
                 subject_pts_stats=bool(getattr(cfg, 'subject_pts_stats', False)))   # [R382]
-        # [R425] 점유 격자 CA — readout·subject 점과 무관하게 cfg 만 본다 (R382 교훈: 조건 kwargs 를 다른 분기 안에 두지 않는다).
-        if getattr(cfg, 'occ_grid_cond', False):
-            _vid_kw.update(occ_grid_cond=True,
-                           occ_grid_half=float(getattr(cfg, 'occ_grid_half', 2.0) or 2.0),
-                           occ_grid_dropout=float(getattr(cfg, 'occ_grid_dropout', 0.0) or 0.0),
-                           occ_grid_resampler=int(getattr(cfg, 'occ_grid_resampler', 0) or 0),
-                           occ_grid_resampler_layers=int(getattr(cfg, 'occ_grid_resampler_layers', 2) or 2))
-        if getattr(cfg, 'depth_vid_cond', False):                  # [R482] 학습 진입점과 같은 kwargs (안 넘기면 strict load 가 dv_* 에서 죽는다)
-            _vid_kw.update(depth_vid_cond=True,
-                           depth_vid_dropout=float(getattr(cfg, 'depth_vid_dropout', 0.0) or 0.0),
-                           depth_vid_resampler=int(getattr(cfg, 'depth_vid_resampler', 64) or 0),
-                           depth_vid_resampler_layers=int(getattr(cfg, 'depth_vid_resampler_layers', 2) or 2))
+    # [R425] 점유 격자 CA — readout·subject 점과 무관하게 cfg 만 본다 (R382 교훈: 조건 kwargs 를 다른 분기 안에 두지 않는다).
+    # [R529 FIX] 학습 진입점과 같이 `if _vld > 0:` 밖으로 (Molmo2 없는 arm 도 depth/격자 모듈)
+    if getattr(cfg, 'occ_grid_cond', False):
+        _vid_kw.update(occ_grid_cond=True,
+                       occ_grid_half=float(getattr(cfg, 'occ_grid_half', 2.0) or 2.0),
+                       occ_grid_dropout=float(getattr(cfg, 'occ_grid_dropout', 0.0) or 0.0),
+                       occ_grid_resampler=int(getattr(cfg, 'occ_grid_resampler', 0) or 0),
+                       occ_grid_resampler_layers=int(getattr(cfg, 'occ_grid_resampler_layers', 2) or 2))
+    if getattr(cfg, 'depth_vid_cond', False):                  # [R482] 학습 진입점과 같은 kwargs (안 넘기면 strict load 가 dv_* 에서 죽는다)
+        _vid_kw.update(depth_vid_cond=True,
+                       depth_vid_dropout=float(getattr(cfg, 'depth_vid_dropout', 0.0) or 0.0),
+                       depth_vid_resampler=int(getattr(cfg, 'depth_vid_resampler', 64) or 0),
+                       depth_vid_resampler_layers=int(getattr(cfg, 'depth_vid_resampler_layers', 2) or 2))
     # [R91] start pose head (D261/D296) — 학습 진입점과 같은 kwargs. 안 넘기면 strict load 가 start_query/start_out 에서 죽는다.
     _sp_kw = {}
     if bool(getattr(cfg, 'start_pose_pred', False)):

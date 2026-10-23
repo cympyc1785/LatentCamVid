@@ -11,6 +11,8 @@
 
 ### Fixed
 
+- **`latentcam/main/train_latent_cam_dm.py` · `scripts/eval_testset.py`** (R529). occ_grid / depth_vid 모델 kwargs 가 영상 feature (`video_latent_dim>0`) 분기 안에 있어 Molmo2 없는 arm 에서 빠지던 것 — 분기 밖으로. 영상 있는 arm 은 동작 동일.
+
 - **`latentcam/main/cache_umt5_embeddings.py`** (R526). `merge_caches` 공용 함수 추가 — tmp 드라이버의 umt5 캐시 합치기가 offsets 를 한 칸 밀려 붙여 뒤 캐시 문장이 앞 문장 임베딩을 받던 버그를 고친 판.
 
 - **`dataset/fit/bank/occ_grid_cache.py`** (R521). 세그먼트 ESDF (`occ_edt*`) 리샘플이 world 격자 밖을 `mode="nearest"` 로 가장자리 값 복사 → 관측 안 된 바깥에 축 방향 '장애물 근처' 줄무늬. `--edt_outside extend` 추가 (격자 안 가장 가까운 점의 거리 + 밖으로 나간 거리). 기본값은 기존 동작 (nearest) 유지.

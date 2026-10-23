@@ -1003,18 +1003,20 @@ def train():
                 subject_pts_mode=str(getattr(cfg, 'subject_pts_mode', 'pool') or 'pool'),   # [R379]
                 subject_pts_fourier=int(getattr(cfg, 'subject_pts_fourier', 0) or 0),   # [R382]
                 subject_pts_stats=bool(getattr(cfg, 'subject_pts_stats', False)))   # [R382]
-        # [R425] 점유 격자 CA — readout·subject 점과 무관하게 cfg 만 본다 (R382 교훈: 조건 kwargs 를 다른 분기 안에 두지 않는다).
-        if getattr(cfg, 'occ_grid_cond', False):
-            _vid_kw.update(occ_grid_cond=True,
-                           occ_grid_half=float(getattr(cfg, 'occ_grid_half', 2.0) or 2.0),
-                           occ_grid_dropout=float(getattr(cfg, 'occ_grid_dropout', 0.0) or 0.0),
-                           occ_grid_resampler=int(getattr(cfg, 'occ_grid_resampler', 0) or 0),
-                           occ_grid_resampler_layers=int(getattr(cfg, 'occ_grid_resampler_layers', 2) or 2))
-        if getattr(cfg, 'depth_vid_cond', False):                  # [R482] depth 영상 (voxel 화 없음, 동적 포함)
-            _vid_kw.update(depth_vid_cond=True,
-                           depth_vid_dropout=float(getattr(cfg, 'depth_vid_dropout', 0.0) or 0.0),
-                           depth_vid_resampler=int(getattr(cfg, 'depth_vid_resampler', 64) or 0),
-                           depth_vid_resampler_layers=int(getattr(cfg, 'depth_vid_resampler_layers', 2) or 2))
+    # [R425] 점유 격자 CA — readout·subject 점과 무관하게 cfg 만 본다 (R382 교훈: 조건 kwargs 를 다른 분기 안에 두지 않는다).
+    # [R529 FIX] 이 두 블록이 `if _vld > 0:` (영상 feature) 안에 있어 Molmo2 없는 arm 은 depth/격자 모듈 없이 만들어졌다 → 밖으로.
+    #   영상 있는 arm 은 같은 kwargs 가 들어가 예전과 같다.
+    if getattr(cfg, 'occ_grid_cond', False):
+        _vid_kw.update(occ_grid_cond=True,
+                       occ_grid_half=float(getattr(cfg, 'occ_grid_half', 2.0) or 2.0),
+                       occ_grid_dropout=float(getattr(cfg, 'occ_grid_dropout', 0.0) or 0.0),
+                       occ_grid_resampler=int(getattr(cfg, 'occ_grid_resampler', 0) or 0),
+                       occ_grid_resampler_layers=int(getattr(cfg, 'occ_grid_resampler_layers', 2) or 2))
+    if getattr(cfg, 'depth_vid_cond', False):                  # [R482] depth 영상 (voxel 화 없음, 동적 포함)
+        _vid_kw.update(depth_vid_cond=True,
+                       depth_vid_dropout=float(getattr(cfg, 'depth_vid_dropout', 0.0) or 0.0),
+                       depth_vid_resampler=int(getattr(cfg, 'depth_vid_resampler', 64) or 0),
+                       depth_vid_resampler_layers=int(getattr(cfg, 'depth_vid_resampler_layers', 2) or 2))
     # [R429] collision 손실 배선 확인 (0 이면 안 찍힘).
     if float(getattr(cfg, 'collision_loss_w', 0.0) or 0.0) > 0:
         assert bool(getattr(cfg, 'use_vae', False)), "collision_loss 는 latent arm 전용"

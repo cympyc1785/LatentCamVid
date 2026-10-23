@@ -31,6 +31,8 @@
 
 ### Added
 
+- **`latentcam/scripts/eval/eval_chain.py`** (R535). 학습 끝난 run 하나를 eval_testset → clatr_score_dir → traj_time_metrics → pred_collision_rate (shell·esdf) 로 한 번에 평가·채점 — R489e·R492·R534 드라이버마다 복사하던 체인을 승격. 산출물 있으면 단계 건너뜀, 충돌 채점은 OMP/MKL 4 스레드 (R527 esdf 멈춤 방지). 표 합치기는 기존 `dataset/eval/arm_table.py`.
+
 - **`dataset/exec/run_gendop_eval.py`** (R527). corpus `dynpose_v5f_all_v2` (v5f_all test 6,111, ref = R489 eval 폴더) — main 비교표 (D61) 용.
 
 - **`dataset/exec/native_captions.py`** (R525). `--pose_source corpus` — eval 폴더 없이 코퍼스 `target_poses.npz` 에서 GT pose (train 포함). ref 경로와 같은 태그 확인.

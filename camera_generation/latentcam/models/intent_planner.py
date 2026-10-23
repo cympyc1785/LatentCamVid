@@ -504,6 +504,13 @@ TARGET_ONLY_PROMPT = """Request for a camera move: "{intent}"
 Find the words in the request that name the subject the camera is about (a person, animal or object) and copy that phrase.
 If the request names no subject, leave both fields empty.
 Return JSON: {{"noun": "<one lowercase noun; empty if no subject>", "text": "<the subject phrase copied from the request; empty if no subject>"}}"""
+# [R523] 문구 전체판 (사용자 10-23 "동작 묘사를 포함한 문구 전체를 그대로 옮겨라. 근데 카메라 모션은 제외하고")
+TARGET_ONLY_FULL_PROMPT = """Request for a camera move: "{intent}"
+Find the words in the request that name the subject the camera is about (a person, animal or object) and copy that whole phrase word for word,
+including its descriptive words and what the subject itself is doing (e.g. "the man in a red shirt running hands through hair"),
+but do not include anything about the camera or its motion (how the camera moves, follows, keeps it centered, passes by, etc.).
+If the request names no subject, leave both fields empty.
+Return JSON: {{"noun": "<one lowercase noun; empty if no subject>", "text": "<the subject phrase copied from the request; empty if no subject>"}}"""
 TARGET_PROMPT = """The video above is the source shot.
 User intent for a camera move: "{intent}"
 Which subject in the video is the intent about? Return JSON:
@@ -551,6 +558,7 @@ class IntentPlanner:
         self.prim_defs = False                  # [R498] True (v2) 면 joint_struct 프롬프트에 단위 정의 (PRIM_DEFS_V2) — set by caller, 기본 = 예전
         self.lean = False                       # [R501] True 면 joint_struct 정리판 (end_shot 없음 · target 길이 제약 없음 · 영상 없으면 system 에 video 없음)
         self.target_loose = False               # [R504] True 면 target.text 완전 일치 대신 내용어 70% 이상 (target_overlap)
+        self.target_full = False                # [R523] True 면 2 단계의 subject 질문을 TARGET_ONLY_FULL_PROMPT (동작 포함 문구 전체, 카메라 모션 제외) 로
         self.two_stage = False                  # [R517] True (clear 전용) 면 ① subject 문구 (텍스트만) ② 카메라 패턴 (영상·추가 맥락 포함) 을 따로 묻는다
         self.clear_steps = True                 # [R506] clear 의 Step 1-3 문단 (False = 빼기, ablation)
         self.reason_pos = "first"               # [R506] clear 의 reasoning 키 위치 first (move 앞) · last (뒤) · none (없음)
@@ -711,7 +719,7 @@ class IntentPlanner:
         def tval(x):
             t = str(x.get("text") or "").strip()
             return [] if not t or target_overlap(t, intent) >= 0.7 else ["text must be the phrase from the request that names the subject (use the request's own words)"]
-        tr, tinfo = self.client.chat_json(TARGET_ONLY_PROMPT.format(intent=intent), system=SYSTEM_TEXT, validate=tval, max_repairs=self.max_repairs,
+        tr, tinfo = self.client.chat_json((TARGET_ONLY_FULL_PROMPT if self.target_full else TARGET_ONLY_PROMPT).format(intent=intent), system=SYSTEM_TEXT, validate=tval, max_repairs=self.max_repairs,
                                           label="intent_target_only", echo_previous=False, json_schema=tschema)
         mp = re.sub(r"Step 1 - Subject:.*?\n", "", prompt, count=1).replace("Step 2 - Blocks", "Step 1 - Blocks").replace("Step 3 - Move", "Step 2 - Move")
         mp = mp[:mp.index("Return JSON with the keys in this order:")] + (

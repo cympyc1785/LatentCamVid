@@ -92,6 +92,31 @@ def captions_from_prompts(root, prompts_file='prompts.json'):
     return out
 
 
+def merge_caches(paths, out):
+    """이 코드가 답하는 질문: umt5 캐시 여러 개 (예: canonical v2 + intent L1s2) 를 하나로 어떻게 합치나?
+    [R526] tmp 드라이버들 (r495·r510·r513 merge_B) 이 offsets 를 `cat(a.offsets, b.offsets + L_a)` 로 붙여 뒤 캐시 문장이 **한 칸 앞 문장**
+    의 임베딩을 받던 버그를 고친 공용판. offsets 는 (U+1,) 누적합이라 앞 캐시의 마지막 원소 (= 총 길이) 를 빼고 이어야 한다.
+    by_text 는 앞 캐시가 이긴다 (같은 문장이면 같은 임베딩이라 무관). 반환: 추가된 문장 수."""
+    import torch
+    objs = [torch.load(p, map_location="cpu", weights_only=False) for p in paths]
+    a = objs[0]
+    for b in objs[1:]:
+        assert a["format"] == b["format"] and a["dim"] == b["dim"] and a["text_len"] == b["text_len"]
+    emb, lens, offs, by, add = [], [], [torch.zeros(1, dtype=torch.int64)], {}, 0
+    n_tot, L_tot = 0, 0
+    for k, o in enumerate(objs):
+        for t, i in o["by_text"].items():
+            if t not in by:
+                by[t] = n_tot + int(i); add += k > 0
+        emb.append(o["emb"]); lens.append(torch.as_tensor(o["lens"]))
+        offs.append(torch.as_tensor(o["offsets"])[1:].long() + L_tot)
+        n_tot += len(o["lens"]); L_tot += o["emb"].shape[0]
+    out_obj = dict(a); out_obj.update(by_text=by, emb=torch.cat(emb), lens=torch.cat(lens), offsets=torch.cat(offs))
+    assert len(out_obj["offsets"]) == n_tot + 1 and int(out_obj["offsets"][-1]) == L_tot
+    torch.save(out_obj, out)
+    return add
+
+
 def main():
     ap = ArgumentParser()
     ap.add_argument('--gpu', default='0')

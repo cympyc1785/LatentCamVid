@@ -133,7 +133,12 @@ def pipeline_one(a, job, ctx):
     """[R508] 우리 pipeline (fork GenDoP Dataset_Tagging_custom) 설정 — 49 pose · fps 10 · 원 스케일 · Movement 만."""
     import caption_cameras_datadop as CD
     scene, idx = job
-    poses = load_ref(a.ref_eval_dir, a.prefix, scene, idx)
+    if a.pose_source == "corpus":                 # [R525] train 세그먼트는 eval 폴더가 없다 — 코퍼스 target_poses (world w2c) → 첫 프레임 기준 OpenGL c2w (eval ref 와 같은 꼴)
+        z = np.load(path.join(a.corpus, "dynpose", scene, "da3", "target_poses.npz"), allow_pickle=True)
+        c2w = np.linalg.inv(z["extrinsics"][[str(x) for x in z["keys"]].index(idx)].astype(np.float64))
+        poses = np.linalg.inv(c2w[0]) @ c2w @ GL2CV
+    else:
+        poses = load_ref(a.ref_eval_dir, a.prefix, scene, idx)
     tag = CD.tag_trajectory(poses, poses.shape[0], PIPE_SEG, False, convert=False)
     tag["gendop_root"] = CD.GENDOP_ROOT
     if a.no_llm:
@@ -227,7 +232,8 @@ def et_one(a, job, ctx):
 def main():
     ap = ArgumentParser(description=__doc__)
     ap.add_argument("--model", required=True, choices=["gendop", "et", "pipeline"])
-    ap.add_argument("--gendop_root", default=None)   # caption_cameras_datadop 이 import 시 sys.argv 에서 읽는다 (pipeline 은 PIPE_ROOT 자동)
+    ap.add_argument("--gendop_root", default=None)
+    ap.add_argument("--pose_source", choices=["ref", "corpus"], default="ref")   # [R525] corpus = <corpus>/dynpose/<v>/da3/target_poses.npz (train 포함)   # caption_cameras_datadop 이 import 시 sys.argv 에서 읽는다 (pipeline 은 PIPE_ROOT 자동)
     ap.add_argument("--split", default="/data1/cympyc1785/data/DynPose-LBM/latentcam_dynpose_v5f50k/seg_list_dynpose_s91_noroll_test.txt")
     ap.add_argument("--ref_eval_dir", default="/data1/cympyc1785/LatentCamVid/camera_generation/latentcam/eval_my/"
                     "20261021_003902_dsv5f50kv2_molmo2_l21_noprobe_fm_vaeCrepenclin_zstd_track3d_box3d__last__seed42__v5test")

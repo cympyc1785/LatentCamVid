@@ -11,6 +11,8 @@
 
 ### Fixed
 
+- **`latentcam/main/cache_umt5_embeddings.py`** (R526). `merge_caches` 공용 함수 추가 — tmp 드라이버의 umt5 캐시 합치기가 offsets 를 한 칸 밀려 붙여 뒤 캐시 문장이 앞 문장 임베딩을 받던 버그를 고친 판.
+
 - **`dataset/fit/bank/occ_grid_cache.py`** (R521). 세그먼트 ESDF (`occ_edt*`) 리샘플이 world 격자 밖을 `mode="nearest"` 로 가장자리 값 복사 → 관측 안 된 바깥에 축 방향 '장애물 근처' 줄무늬. `--edt_outside extend` 추가 (격자 안 가장 가까운 점의 거리 + 밖으로 나간 거리). 기본값은 기존 동작 (nearest) 유지.
 
 - **`scripts/eval_testset.py`** (R482). `depth_vid_cond` 학습 run 의 모델 kwargs 를 안 넘겨 strict load 가 `dv_*` 키에서 죽던 것 — 학습 진입점과 같은 kwargs 추가.
@@ -26,6 +28,8 @@
 - **VAE worldtraj 캐시의 cameras.json 해석 c2w → w2c** (R169). `train_camera_vae.py --stage cache_wt` 가 `rotation`/`position` 을 c2w 로 읽어 worldtraj 창(학습 228,130 · test 2,846)이 전부 역궤적이었다. 레포 규약(`main/dynamicverse_shim.py`, CamVLA `data/worldtraj`)과 scene.ply 투영 (images_pc_rendered 대비 색 오차 c2w 50~63 / w2c 18~21) 모두 w2c. `--wt_pose w2c|c2w` 신설, 기본 w2c · c2w 는 R125~R168 캐시 재현용.
 
 ### Added
+
+- **`dataset/exec/native_captions.py`** (R525). `--pose_source corpus` — eval 폴더 없이 코퍼스 `target_poses.npz` 에서 GT pose (train 포함). ref 경로와 같은 태그 확인.
 
 - **`dataset/eval/gendop_release_infer.py` · `exec/run_gendop_eval.py`** (R508). `--batch_eos_fallback` — GenDoP 을 EOS 허용 그대로 배치 generate (pipeline/GenDoP `eval_batch.py` 방식), 배치 안 길이 불일치로 assert 가 나면 그 배치만 한 개씩 재생성. 재생성 배치 수를 config `batch_fallbacks` 에 남긴다. 기본 꺼짐 = 예전 (batch_size 1 로 강등).
 

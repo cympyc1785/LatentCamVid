@@ -558,6 +558,7 @@ class IntentPlanner:
         self.prim_defs = False                  # [R498] True (v2) 면 joint_struct 프롬프트에 단위 정의 (PRIM_DEFS_V2) — set by caller, 기본 = 예전
         self.lean = False                       # [R501] True 면 joint_struct 정리판 (end_shot 없음 · target 길이 제약 없음 · 영상 없으면 system 에 video 없음)
         self.target_loose = False               # [R504] True 면 target.text 완전 일치 대신 내용어 70% 이상 (target_overlap)
+        self.move_slots = False                 # [R549] True 면 two_stage 의 move 질문을 축별 필수 슬롯 (LAMP 식) 으로 — 기본 False = 기존 조합 enum
         self.retrieved = None                   # [R540] two_stage 의 move 질문에 붙일 [(요청, 정답 조합 문자열)] — None 이면 기존 프롬프트 그대로
         self.target_full = False                # [R523] True 면 2 단계의 subject 질문을 TARGET_ONLY_FULL_PROMPT (동작 포함 문구 전체, 카메라 모션 제외) 로
         self.two_stage = False                  # [R517] True (clear 전용) 면 ① subject 문구 (텍스트만) ② 카메라 패턴 (영상·추가 맥락 포함) 을 따로 묻는다
@@ -726,6 +727,8 @@ class IntentPlanner:
         mp = mp[:mp.index("Return JSON with the keys in this order:")] + (
             'Return JSON with the keys in this order: {"reasoning": "<one or two short sentences: the blocks the request asks for>", '
             '"move": "<one combination copied exactly>"}')
+        if self.move_slots:                     # [R549] LAMP 식 축별 필수 슬롯 — 조합을 고르는 대신 모든 축을 채우고 코드가 preset 을 정한다
+            return self._ask_slots(mp, video, vkw, intent, combos, exclude, target_point, tinfo, tr)
         if self.retrieved:                      # [R540] 호출마다 바꾸는 유사 train 요청 → 정답 조합 (호출자가 검색해 넣는다)
             assert all(m in combos for _, m in self.retrieved), [m for _, m in self.retrieved if m not in combos]
             mp += "\n\nSimilar past requests and their correct move:\n" + "\n".join(f'Request: "{i}"\n{json.dumps({"move": m})}' for i, m in self.retrieved)
@@ -740,6 +743,54 @@ class IntentPlanner:
             return None, {**info, "raw": None}
         r = {"move": mr["move"], "target": tr or {"noun": "", "text": ""}, "rationale": mr.get("reasoning", "")}
         return self._finish_js(r, combos, intent, exclude, target_point, info)
+
+    SLOT_AXES = {"forward": ("in", "out", "dolly"), "side": ("left", "right", "truck"), "vertical": ("up", "down", "pedestal"),
+                 "orbit": ("left", "right", "orbit"), "pan": ("left", "right", "pan"), "tilt": ("up", "down", "tilt")}
+
+    @classmethod
+    def combo_to_slots(cls, track, moves, look_at):
+        s = {"follow": "yes" if track else "no", "centered": "yes" if look_at else "no"}
+        for ax, (a, b, prim) in cls.SLOT_AXES.items():
+            s[ax] = next((d for d in (a, b) if f"{prim}_{d}" in moves), "no")
+        return s
+
+    def _ask_slots(self, mp, video, vkw, intent, combos, exclude, target_point, tinfo, tr):
+        """[R549] move 질문을 축별 슬롯으로 (LAMP 의 t_x/t_y/t_z/yaw/tilt 각 축 'no' 포함 필수 출력을 차용). 모든 키 필수 →
+        slots → (track, moves, look_at) → canonicalize(snap) 로 preset. retrieved 예시도 슬롯 JSON 으로 바꿔 보인다."""
+        mp = mp[:mp.index("Return JSON with the keys in this order:")] + (
+            "Do not copy a combination. Instead describe the request on EVERY axis below (each key is required; use \"no\" when the request does not ask for it):\n"
+            "- follow: yes if the camera position follows the subject's own motion (track), else no\n"
+            "- centered: yes if the camera keeps re-aiming at the subject every frame (keep target centered), else no\n"
+            "- forward: in (dolly in, move closer) / out (dolly out, move away) / no\n"
+            "- side: left / right (truck, slide sideways) / no\n"
+            "- vertical: up / down (pedestal, raise or lower the camera body) / no\n"
+            "- orbit: left / right (circle around the subject) / no\n"
+            "- pan: left / right (turn the camera in place) / no\n"
+            "- tilt: up / down (tip the camera in place) / no\n"
+            'Return JSON with the keys in this order: {"reasoning": "<one or two short sentences>", "follow": ..., "centered": ..., "forward": ..., '
+            '"side": ..., "vertical": ..., "orbit": ..., "pan": ..., "tilt": ...}')
+        if self.retrieved:
+            mp += "\n\nSimilar past requests and their correct axes:\n" + "\n".join(
+                f'Request: "{i}"\n{json.dumps(self.combo_to_slots(*combos[m]))}' for i, m in self.retrieved)
+        if self.extra_context:
+            mp += "\n\n" + self.extra_context
+        yn = {"type": "string", "enum": ["yes", "no"]}
+        props = {"reasoning": {"type": "string"}, "follow": yn, "centered": yn,
+                 **{ax: {"type": "string", "enum": [a, b, "no"]} for ax, (a, b, _) in self.SLOT_AXES.items()}}
+        schema = {"type": "object", "properties": props, "required": list(props)}
+        sr, sinfo = self.client.chat_json(mp, system=SYSTEM_TEXT if not video else SYSTEM, validate=lambda x: [], max_repairs=self.max_repairs,
+                                          label="intent_move_slots", echo_previous=False, json_schema=schema, **vkw)
+        info = {**sinfo, "target_info": tinfo}
+        if sr is None:
+            return None, {**info, "raw": None}
+        moves = [f"{prim}_{sr[ax]}" for ax, (_, _, prim) in self.SLOT_AXES.items() if sr.get(ax, "no") != "no"]
+        raw = {"moves": moves, "track": sr.get("follow") == "yes", "keep_target_centered": sr.get("centered") == "yes",
+               "target": tr or {"noun": "", "text": ""}, "end_shot": "", "rationale": sr.get("reasoning", ""), "slots": sr}
+        p, e = canonicalize(raw, self.vocab, intent, exclude, target_point)
+        if p is None and self.snap_on_fail:
+            p, _ = canonicalize(raw, self.vocab, intent, exclude, target_point, snap=True)
+            return p, {**info, "raw": raw, "snapped": p is not None, "errors": e}
+        return p, {**info, "raw": raw, "snapped": False, "errors": e}
 
     def _finish_js(self, r, combos, intent, exclude, target_point, info):
         track, moves, look_at = combos[r["move"]]

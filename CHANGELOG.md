@@ -31,6 +31,8 @@
 
 ### Added
 
+- **`latentcam/models/intent_planner.py`** (R549). `IntentPlanner.move_slots` — two_stage 의 move 질문을 LAMP 식 축별 필수 슬롯 (follow·centered·forward·side·vertical·orbit·pan·tilt, 'no' 포함) 으로 받고 코드가 preset 을 정한다. `combo_to_slots` 로 retrieved 예시도 슬롯 형태. 74 조합 왕복 일치 확인. 기본 False 면 기존 조합 enum 그대로.
+
 - **`latentcam/models/intent_planner.py`** (R540). `IntentPlanner.retrieved` — two_stage 의 move 질문에 호출마다 바뀌는 유사 요청 → 정답 조합 예시를 붙인다 (검색은 호출자). 기본 None 이면 기존 프롬프트 그대로.
 
 - **`latentcam/scripts/eval/eval_chain.py`** (R535). 학습 끝난 run 하나를 eval_testset → clatr_score_dir → traj_time_metrics → pred_collision_rate (shell·esdf) 로 한 번에 평가·채점 — R489e·R492·R534 드라이버마다 복사하던 체인을 승격. 산출물 있으면 단계 건너뜀, 충돌 채점은 OMP/MKL 4 스레드 (R527 esdf 멈춤 방지). 표 합치기는 기존 `dataset/eval/arm_table.py`.

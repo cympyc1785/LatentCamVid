@@ -31,6 +31,8 @@
 
 ### Added
 
+- **`latentcam/models/intent_planner.py`** (R540). `IntentPlanner.retrieved` — two_stage 의 move 질문에 호출마다 바뀌는 유사 요청 → 정답 조합 예시를 붙인다 (검색은 호출자). 기본 None 이면 기존 프롬프트 그대로.
+
 - **`latentcam/scripts/eval/eval_chain.py`** (R535). 학습 끝난 run 하나를 eval_testset → clatr_score_dir → traj_time_metrics → pred_collision_rate (shell·esdf) 로 한 번에 평가·채점 — R489e·R492·R534 드라이버마다 복사하던 체인을 승격. 산출물 있으면 단계 건너뜀, 충돌 채점은 OMP/MKL 4 스레드 (R527 esdf 멈춤 방지). 표 합치기는 기존 `dataset/eval/arm_table.py`.
 
 - **`dataset/exec/run_gendop_eval.py`** (R527). corpus `dynpose_v5f_all_v2` (v5f_all test 6,111, ref = R489 eval 폴더) — main 비교표 (D61) 용.

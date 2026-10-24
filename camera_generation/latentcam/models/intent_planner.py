@@ -558,6 +558,7 @@ class IntentPlanner:
         self.prim_defs = False                  # [R498] True (v2) 면 joint_struct 프롬프트에 단위 정의 (PRIM_DEFS_V2) — set by caller, 기본 = 예전
         self.lean = False                       # [R501] True 면 joint_struct 정리판 (end_shot 없음 · target 길이 제약 없음 · 영상 없으면 system 에 video 없음)
         self.target_loose = False               # [R504] True 면 target.text 완전 일치 대신 내용어 70% 이상 (target_overlap)
+        self.retrieved = None                   # [R540] two_stage 의 move 질문에 붙일 [(요청, 정답 조합 문자열)] — None 이면 기존 프롬프트 그대로
         self.target_full = False                # [R523] True 면 2 단계의 subject 질문을 TARGET_ONLY_FULL_PROMPT (동작 포함 문구 전체, 카메라 모션 제외) 로
         self.two_stage = False                  # [R517] True (clear 전용) 면 ① subject 문구 (텍스트만) ② 카메라 패턴 (영상·추가 맥락 포함) 을 따로 묻는다
         self.clear_steps = True                 # [R506] clear 의 Step 1-3 문단 (False = 빼기, ablation)
@@ -725,6 +726,9 @@ class IntentPlanner:
         mp = mp[:mp.index("Return JSON with the keys in this order:")] + (
             'Return JSON with the keys in this order: {"reasoning": "<one or two short sentences: the blocks the request asks for>", '
             '"move": "<one combination copied exactly>"}')
+        if self.retrieved:                      # [R540] 호출마다 바꾸는 유사 train 요청 → 정답 조합 (호출자가 검색해 넣는다)
+            assert all(m in combos for _, m in self.retrieved), [m for _, m in self.retrieved if m not in combos]
+            mp += "\n\nSimilar past requests and their correct move:\n" + "\n".join(f'Request: "{i}"\n{json.dumps({"move": m})}' for i, m in self.retrieved)
         if self.extra_context:
             mp += "\n\n" + self.extra_context
         assert "Step 1 - Subject" not in mp and '"target"' not in mp

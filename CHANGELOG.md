@@ -31,6 +31,8 @@
 
 ### Added
 
+- **`latentcam/models/intent_planner.py`** (R551). `IntentPlanner.relation_first` — move_slots 와 함께, follow (track) 여부를 먼저 따로 묻고 (유사 예시의 follow 정답 포함) 슬롯 답의 follow 를 그 값으로 고정 (LAMP 의 관계 계열 먼저). 기본 False 면 기존 그대로.
+
 - **`latentcam/models/intent_planner.py`** (R549). `IntentPlanner.move_slots` — two_stage 의 move 질문을 LAMP 식 축별 필수 슬롯 (follow·centered·forward·side·vertical·orbit·pan·tilt, 'no' 포함) 으로 받고 코드가 preset 을 정한다. `combo_to_slots` 로 retrieved 예시도 슬롯 형태. 74 조합 왕복 일치 확인. 기본 False 면 기존 조합 enum 그대로.
 
 - **`latentcam/models/intent_planner.py`** (R540). `IntentPlanner.retrieved` — two_stage 의 move 질문에 호출마다 바뀌는 유사 요청 → 정답 조합 예시를 붙인다 (검색은 호출자). 기본 None 이면 기존 프롬프트 그대로.

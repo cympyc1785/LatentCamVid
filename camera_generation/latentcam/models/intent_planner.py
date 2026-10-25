@@ -558,6 +558,7 @@ class IntentPlanner:
         self.prim_defs = False                  # [R498] True (v2) 면 joint_struct 프롬프트에 단위 정의 (PRIM_DEFS_V2) — set by caller, 기본 = 예전
         self.lean = False                       # [R501] True 면 joint_struct 정리판 (end_shot 없음 · target 길이 제약 없음 · 영상 없으면 system 에 video 없음)
         self.target_loose = False               # [R504] True 면 target.text 완전 일치 대신 내용어 70% 이상 (target_overlap)
+        self.relation_first = False             # [R551] move_slots 와 함께: follow (track) 여부를 먼저 따로 묻고 슬롯 답에 고정 (LAMP 관계 계열 먼저)
         self.move_slots = False                 # [R549] True 면 two_stage 의 move 질문을 축별 필수 슬롯 (LAMP 식) 으로 — 기본 False = 기존 조합 enum
         self.retrieved = None                   # [R540] two_stage 의 move 질문에 붙일 [(요청, 정답 조합 문자열)] — None 이면 기존 프롬프트 그대로
         self.target_full = False                # [R523] True 면 2 단계의 subject 질문을 TARGET_ONLY_FULL_PROMPT (동작 포함 문구 전체, 카메라 모션 제외) 로
@@ -775,14 +776,33 @@ class IntentPlanner:
         if self.extra_context:
             mp += "\n\n" + self.extra_context
         yn = {"type": "string", "enum": ["yes", "no"]}
+        follow, finfo = None, None
+        if self.relation_first:                 # [R551] LAMP base_behavior (tail_track / orbit_track / free-form 을 먼저 고름) 차용 — follow 만 먼저 따로 묻고 고정
+            q = ("Read the camera request below and decide ONE thing: does the camera position travel along with the subject's own motion "
+                 "(the subject walks/drives/moves through the scene and the camera body moves with it, like a tracking or following shot)?\n"
+                 "Answer no when the camera only circles around, moves toward/away from, rises/lowers, slides past, or re-aims at the subject while "
+                 "the subject itself is not being carried along with the camera — the word 'follow' in the request alone is not enough.\n"
+                 f'Request: "{intent}"\n'
+                 'Return JSON: {"reasoning": "<one short sentence>", "follow": "yes" or "no"}')
+            if self.retrieved:
+                q += "\n\nSimilar past requests and the correct answer:\n" + "\n".join(
+                    f'Request: "{i}"\n{json.dumps({"follow": "yes" if combos[m][0] else "no"})}' for i, m in self.retrieved)
+            fr, finfo = self.client.chat_json(q, system=SYSTEM_TEXT, validate=lambda x: [], max_repairs=self.max_repairs, label="intent_follow_first",
+                                              echo_previous=False, json_schema={"type": "object", "properties": {"reasoning": {"type": "string"}, "follow": yn},
+                                                                                "required": ["reasoning", "follow"]})
+            if fr is not None:
+                follow = fr.get("follow")
+                mp += f'\n\nAlready decided: follow = "{follow}". Use exactly this value for "follow".'
         props = {"reasoning": {"type": "string"}, "follow": yn, "centered": yn,
                  **{ax: {"type": "string", "enum": [a, b, "no"]} for ax, (a, b, _) in self.SLOT_AXES.items()}}
         schema = {"type": "object", "properties": props, "required": list(props)}
         sr, sinfo = self.client.chat_json(mp, system=SYSTEM_TEXT if not video else SYSTEM, validate=lambda x: [], max_repairs=self.max_repairs,
                                           label="intent_move_slots", echo_previous=False, json_schema=schema, **vkw)
-        info = {**sinfo, "target_info": tinfo}
+        info = {**sinfo, "target_info": tinfo, "follow_info": finfo}
         if sr is None:
             return None, {**info, "raw": None}
+        if follow is not None:
+            sr = {**sr, "follow": follow}
         moves = [f"{prim}_{sr[ax]}" for ax, (_, _, prim) in self.SLOT_AXES.items() if sr.get(ax, "no") != "no"]
         raw = {"moves": moves, "track": sr.get("follow") == "yes", "keep_target_centered": sr.get("centered") == "yes",
                "target": tr or {"noun": "", "text": ""}, "end_shot": "", "rationale": sr.get("reasoning", ""), "slots": sr}

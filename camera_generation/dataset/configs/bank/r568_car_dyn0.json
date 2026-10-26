@@ -1,0 +1,25 @@
+{
+  "_why": "[R568 2026-10-26] 사용자 \"car-roundabout 은 dyn_0 으로 다시 돌려줘\" — d215/d224/d225 의 car anchor dyn_1 은 배경 차 (ID 전환), 회색 Mini = dyn_0. d225 와 같은 설정에서 anchor 만 dyn_0.",
+  "extends": "d224_forced.json",
+  "generation": "r568",
+  "tau_bank_dir": "bank_r568",
+  "bank_dir": "hole_bank_r568",
+  "route": {
+    "out": "preset_route_r568.json",
+    "args": [
+      "--num_external",
+      "0",
+      "--free_moving",
+      "off",
+      "--anchor_ids_file",
+      "/data1/cympyc1785/LatentCamVid/tmp/r568/anchors.json",
+      "--slot_plan",
+      "full",
+      "--track_mode",
+      "add",
+      "--track_min_drift_u",
+      "0.05",
+      "--skip_if_empty"
+    ]
+  }
+}

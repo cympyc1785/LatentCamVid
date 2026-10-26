@@ -31,6 +31,8 @@
 
 ### Added
 
+- **`dataset/configs/bank/r568_car_dyn0.json`** (R568). car-roundabout 을 anchor dyn_0 (회색 Mini) 으로 굽는 세대 — d215/d224/d225 의 car anchor dyn_1 이 배경 차 (SAM3 ID 전환) 였다. d224_forced 에서 anchor 파일만 바꿈.
+
 - **`latentcam/scripts/eval/eval_chain.py --drop_track`** (R554). eval 단계에 `eval_testset --drop-track` (track·box 조건 끄고 추론) 을 넘긴다. 기본 끔 = 예전 그대로.
 
 - **`dataset/exec/run_gendop_eval.py` arm `gendop_rgbd_v5fall`** (R557). v5f_all v2 캡션으로 이어 학습한 GenDoP text_rgbd (ep0029) 를 `--arm` 으로만 고른다. arm 미지정 기본값 (`DEFAULT_ARMS`) 은 예전 두 arm 그대로.

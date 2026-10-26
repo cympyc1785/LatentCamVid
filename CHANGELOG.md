@@ -31,6 +31,8 @@
 
 ### Added
 
+- **`latentcam/scripts/eval/eval_chain.py --drop_track`** (R554). eval 단계에 `eval_testset --drop-track` (track·box 조건 끄고 추론) 을 넘긴다. 기본 끔 = 예전 그대로.
+
 - **`dataset/exec/run_gendop_eval.py` arm `gendop_rgbd_v5fall`** (R557). v5f_all v2 캡션으로 이어 학습한 GenDoP text_rgbd (ep0029) 를 `--arm` 으로만 고른다. arm 미지정 기본값 (`DEFAULT_ARMS`) 은 예전 두 arm 그대로.
 
 - **`dataset/fit/bank/fit_hole_ladder.py` `--negatives_from`** (R563). 충돌 음성 데이터 모드 — 뱅크의 `collision/obb_limited` 행 (shot_missed 아래 숨은 것 포함) 마다 손잡이만 키워 처음 물리 게이트 (G1/G5/G6/G7) 에 걸리는 궤적을 경계 ×`--neg_levels` (1.0/1.25/1.5) 로 `<bank_dir>/negatives.npz` 에 저장. 렌더 0회, 뱅크 파일은 안 쓴다. 궤적 생성은 probe 에서 뗀 `knob_poses` 를 fit 과 공유 (기본 끔 · 회귀 1편 status/knob 동일).

@@ -45,6 +45,7 @@ def main():
     ap.add_argument("--suffix", default="v5alltest")                 # eval_my/<run>__last__seed42__<suffix>
     ap.add_argument("--eval_dir", default=None)                      # 직접 지정하면 suffix 무시
     ap.add_argument("--set", action="append", default=[])            # eval_testset --set 그대로
+    ap.add_argument("--drop_track", action="store_true")             # [R554] eval_testset --drop-track (box·track 조건 끄고 추론). 기본 끔 = 예전 그대로
     ap.add_argument("--clatr", action="append", default=None)        # name=ckpt (여러 개). 기본 v5fall_v2
     ap.add_argument("--corpus_root", default=VA)
     ap.add_argument("--graph_root", default="out_dynpose_v5")
@@ -62,7 +63,7 @@ def main():
     if "eval" in st and (a.force or not os.path.isfile(f"{ev}/metrics.json")):
         sets = sum([["--set", s] for s in a.set], [])
         sh("eval", [PL, "scripts/eval_testset.py", "--run", f"results/{a.run}", "--ckpt", a.ckpt, "--sample-seed", a.seed, "--gpu", a.gpu,
-                    "--out", ev, *sets], LC, out, {**os.environ, "OMP_NUM_THREADS": "4"})
+                    "--out", ev, *sets, *(["--drop-track"] if a.drop_track else [])], LC, out, {**os.environ, "OMP_NUM_THREADS": "4"})
     if "clatr" in st:
         for n, ck in clatr.items():
             if a.force or not os.path.isfile(f"{out}/clatr_{n}.json"):

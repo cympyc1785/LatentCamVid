@@ -326,7 +326,13 @@ CORPORA = {
 ARMS = [
     dict(tag="gendop_text", ckpt="text_motion.safetensors", cond="text"),
     dict(tag="gendop_rgbd", ckpt="text_rgbd.safetensors", cond="depth+image+text"),
+    # [R557] text_rgbd 를 v5f_all v2 캡션으로 이어 학습한 판 (30 epoch, last). `--arm` 으로 고를 때만 돈다 — 기본 (arm 미지정) 은 위 둘.
+    dict(tag="gendop_rgbd_v5fall", cond="depth+image+text", default=False,
+         ckpt=path.join(path.dirname(path.dirname(path.abspath(__file__))),
+                        "results/20261026_r557_gendop_v5fall/text_rgbd_v5fall_v2/ep0029/model.safetensors")),
 ]
+
+DEFAULT_ARMS = [x for x in ARMS if x.get("default", True)]   # [R557] arm 미지정 = 예전 두 arm 그대로
 
 PY_GENDOP = "/data1/cympyc1785/miniconda3/envs/GenDoP/bin/python"
 PY_LATENT = "/data1/cympyc1785/miniconda3/envs/latentcam/bin/python"
@@ -397,7 +403,7 @@ def stage_infer(C, gpu, limit=None, depth_norm=None, pose_length=30, arms=None,
     # 기본은 ref arm 의 eval 폴더(= latentcam 이 실제로 받은 문장). `--text_dir` 를 주면
     # 같은 모양의 다른 폴더로 갈아끼운다 (예: `gendop_style_captions.py` 가 만든 분포 정합 문장).
     text_dir = text_dir or C["ours"][C["ref"]]
-    for arm in arms or ARMS:
+    for arm in arms or DEFAULT_ARMS:
         cmd = [PY_GENDOP, "eval/gendop_release_infer.py",
                "--resume", path.join(CKPT, arm["ckpt"]),
                "--cond_mode", arm["cond"],
@@ -435,7 +441,7 @@ def stage_evaldir(C, pose_length=30, arms=None, text_tag=None, rescale=True,
     suffix = eval_suffix(pose_length, text_tag, rescale, resample, scale_token)
     # gendop_slerp 은 GenDoP 의 core/utils 를 import 하므로 그 env 로 돌려야 한다
     py = PY_LATENT if resample == "index_pick" else PY_GENDOP
-    for arm in arms or ARMS:
+    for arm in arms or DEFAULT_ARMS:
         cmd = [py, "eval/gendop_preds_to_eval_dir.py",
                "--pred_dir", pred_dir(C, arm, pose_length, text_tag),
                "--ref_eval_dir", C["ours"][C["ref"]],
@@ -476,7 +482,7 @@ def stage_score(C, gpu, pose_length=30, arms=None, text_tag=None, rescale=True,
            "--cloud_source", cloud_source]
     for label, d in C["ours"].items():
         cmd += ["--eval_dir", f"{label}={d}"]
-    for arm in (ARMS if arms is None else arms):
+    for arm in (DEFAULT_ARMS if arms is None else arms):
         cmd += ["--eval_dir",
                 f"{arm['tag']}{suffix}="
                 + path.join(C["out"], f"eval_dir_{arm['tag']}{suffix}")]
@@ -559,7 +565,7 @@ def main():
     assert not (a.arm == "none" and a.stage != "score"), "--arm none 은 --stage score 에서만"
 
     C = CORPORA[a.corpus]
-    arms = [] if a.arm == "none" else [x for x in ARMS
+    arms = [] if a.arm == "none" else [x for x in (DEFAULT_ARMS if a.arm is None else ARMS)
                                        if a.arm is None or x["tag"] == a.arm]
     rc = 0
     if a.stage in ("inputs", "all"):

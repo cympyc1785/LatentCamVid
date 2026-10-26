@@ -1,0 +1,44 @@
+{
+  "_why": "[R570 2026-10-27] 사용자 \"데이터셋 만들 때처럼 너무 멀리 떨어진 점 trim 했어?\" — bmx-bumps 그래프는 s115 (trim 없음). v5 그래프 인자 (obb_trim_quantile 0.02 · prefer_person_label · points_first_cam) 로 새 출력 폴더 out_v5trim 에 다시 굽는다 (기존 out/ 은 안 건드림). anchor 는 그래프 뒤 tmp/r570/anchors.json.",
+  "extends": "r569_bmx_person.json",
+  "generation": "r570",
+  "output_root": "out_v5trim",
+  "tau_bank_dir": "bank_r570",
+  "bank_dir": "hole_bank_r570",
+  "graph": {
+    "marker": ".graph_v5",
+    "args": [
+      "--scene_scale_mode",
+      "points_first_cam",
+      "--scene_scale_stride",
+      "1",
+      "--gravity_source",
+      "geocalib",
+      "--no_skip_done",
+      "--no_overlay",
+      "--no_topdown",
+      "--obb_trim_quantile",
+      "0.02",
+      "--prefer_person_label"
+    ]
+  },
+  "route": {
+    "out": "preset_route_r570.json",
+    "args": [
+      "--num_external",
+      "0",
+      "--free_moving",
+      "off",
+      "--anchor_ids_file",
+      "/data1/cympyc1785/LatentCamVid/tmp/r570/anchors.json",
+      "--slot_plan",
+      "full",
+      "--track_mode",
+      "add",
+      "--track_min_drift_u",
+      "0.05",
+      "--skip_if_empty"
+    ]
+  },
+  "require_markers": []
+}

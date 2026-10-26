@@ -375,6 +375,139 @@ def decision_at(graph, node, preset: str, knob: float, kind: str, args, mult: fl
                          start_cand=start_cand)
 
 
+def knob_poses(graph, node, preset: str, knob: float, kind: str, args, num_frames: int,
+               span: float, smode: str, cand: dict | None = None):
+    """손잡이 값 → (poses 49, extra, mult). fit `probe` 의 궤적 생성부를 그대로 뗀 것 —
+    [R563] 음성 데이터 (`--negatives_from`) 가 **같은 궤적 생성**을 쓰도록 공유한다. 동작은 예전과 비트 동일."""
+    _node, _preset, _kind, _cand, _span, _smode = node, preset, kind, cand, span, smode
+    mult = 1.0
+    for attempt in range(args.shape_doublings + 1):
+        decision = decision_at(graph, _node, _preset, knob, _kind, args, mult,
+                               start_cand=_cand)
+        poses, extra = build_poses(
+            decision, graph, board=None, num_frames=num_frames,
+            orbit_span_frac=_span, start_mode=_smode,
+            aim_anchor=args.aim_anchor, aim_ramp_frames=args.aim_ramp_frames,
+            traj_basis=args.traj_basis, aim_keyframes=args.aim_keyframes,
+            keyframe_aim=args.keyframe_aim, keyframe_ease=args.keyframe_ease,
+            # D90. 안 넘기면 `build_poses` 서명 기본값(12/0.5)이 쓰이는데
+            # `emit_bank` 는 자기 CLI 기본값(4)으로 되만들어 회전만 어긋난다
+            # (위치는 정확히 일치해서 더 안 보인다). 명시해서 `fixed` 에 싣는다.
+            smooth_passes=args.smooth_passes,
+            smooth_lambda=args.smooth_lambda,
+            preset_tracking=args.preset_tracking, deroll=args.deroll,
+            orbit_fixed_sweep=args.orbit_fixed_sweep,
+            push_mode=args.push_mode, push_arc_ratio=args.push_arc_ratio,
+            push_arc_deg=args.push_arc_deg, push_arc_min_deg=args.push_arc_min_deg,
+            # D171. 0 이면 `build_poses` 가 예전 저역통과 경로를 그대로 탄다.
+            follow_keyframes=args.follow_keyframes,
+            follow_kf_interp=args.follow_kf_interp,
+            tau_denom=args.tau_denom)
+        # `fit_tau` 가 max_scale 에 붙었으면 τ 를 못 맞춘 것이다 — 모양을 키워 다시.
+        # 마지막 시도에서는 **곱하지 않고** 끝낸다: 여기서 곱하면 `_cache` 에
+        # 남는 `mult` 가 방금 만든 `poses` 를 만든 값보다 headroom 배 크고,
+        # `emit_bank` 가 그 배율로 되만들어 궤적이 2배로 벌어진다 (실측:
+        # basketball-four `dyn_0__pull_out_arc__hole0.5`, 최대 8.918 어긋남).
+        # 이 가지는 `status == "shape_limited"` 행에서만 밟힌다.
+        if (_kind != "tau"
+                or extra["info"]["tau"]["scale"] < FIT_TAU_MAX_SCALE - 1e-9
+                or attempt == args.shape_doublings):
+            break
+        mult *= args.shape_headroom
+    return poses, extra, mult
+
+
+NEG_STAT_KEYS = ("behind_frac", "behind_frames", "behind_static_frac", "behind_dyn_frac", "obb_slack", "obb_node",
+                 "ground_clear", "below_ground_frames", "elev_abs_max", "approach_gap")
+
+
+def load_negative_targets(bank_folder: str, gates) -> dict:
+    """[R563] 이 코드가 답하는 질문: 뱅크의 어느 행이 "안전 게이트 때문에 크기가 깎인" 행인가 → (anchor, preset) 별 변이 목록.
+
+    `status` 를 **접두사**로 본다 (`collision_limited+tau_floor` 도 잡는다). `--drop_shot_miss` 가 status 를
+    `shot_missed` 로 덮은 행은 csv 의 `status_before_shot_miss` 로 원래 판정을 되찾는다 (그 아래 숨은 limited 가 절반 가까이)."""
+    with open(path.join(bank_folder, "bank.json"), encoding="utf-8") as file:
+        variants = json.load(file)["variants"]
+    before = {}
+    csv_path = path.join(bank_folder, "bank.csv")
+    if path.isfile(csv_path):
+        import csv
+        with open(csv_path, encoding="utf-8") as file:
+            before = {r["variant_id"]: r.get("status_before_shot_miss", "") for r in csv.DictReader(file)}
+    out = {}
+    for v in variants:
+        st = str(v.get("status", ""))
+        orig = before.get(v["variant_id"]) or st if st.startswith("shot_missed") else st
+        if any(orig.startswith(f"{g}_limited") for g in gates):
+            out.setdefault((v["anchor_id"], v["preset"]), []).append(dict(v, pos_status=st, orig_status=orig))
+    return out
+
+
+def negative_search(v: dict, graph, node, kind: str, args, num_frames: int, span: float, smode: str,
+                    renderer, behind: dict, verdict) -> tuple:
+    """[R563] 안전 게이트로 깎인 행 하나 → 손잡이만 키워 **처음 물리 게이트에 걸리는** 궤적 (음성 데이터).
+
+    궤적 = `knob_poses` (fit 과 같은 생성), 판정 = `physical_verdict` (fit `over()` 의 앞 다섯 게이트와 같은 식).
+    렌더 0회. 손잡이를 ×`neg_step` 씩 `neg_max_ratio` 배까지 키워 처음 걸리는 값을 찾고, [통과, 걸림] 을
+    `neg_iterations` 번 이분해 경계로 좁힌다. → (meta dict, poses 또는 None)"""
+    k0 = float(v["knob_raw"])
+    orig_arc = args.push_arc_deg
+    if v.get("push_arc_deg") is not None:           # [R302] arc 행은 행마다 실제 쓴 각도
+        args.push_arc_deg = float(v["push_arc_deg"])
+    try:
+        def at(k):
+            poses, _, mult = knob_poses(graph, node, v["preset"], k, kind, args, num_frames, span, smode)
+            geo = geometry_stats(renderer, poses, behind)
+            return verdict(geo), geo, poses, mult
+        pos = at(k0)
+        lo, hit, k, n = k0, None, k0, 1
+        while k < k0 * args.neg_max_ratio - 1e-12:
+            k = min(k * args.neg_step, k0 * args.neg_max_ratio); r = at(k); n += 1
+            if r[0] is not None:
+                hit = (k, r); break
+            lo = k
+        if hit is not None:
+            for _ in range(args.neg_iterations):
+                m = 0.5 * (lo + hit[0]); r = at(m); n += 1
+                if r[0] is not None:
+                    hit = (m, r)
+                else:
+                    lo = m
+    finally:
+        args.push_arc_deg = orig_arc
+    meta = {"variant_id": v["variant_id"], "anchor_id": v["anchor_id"], "preset": v["preset"],
+            "pos_status": v["pos_status"], "orig_status": v["orig_status"], "binding": v.get("binding"),
+            "knob_pos": k0, "pos_gate": pos[0], "knob_pass": lo, "probes": n,
+            "push_arc_deg": v.get("push_arc_deg"),
+            "pos_geo": {kk: pos[1].get(kk) for kk in NEG_STAT_KEYS if kk in pos[1]}}
+    if hit is None:
+        meta.update(found=False)
+        return meta, None
+    k, (gate, geo, poses, mult) = hit
+    meta.update(found=True, knob_neg=k, ratio=k / k0, shape_mult=mult, gate=gate,
+                neg_geo={kk: geo.get(kk) for kk in NEG_STAT_KEYS if kk in geo})
+    # 경계 음성은 1 프레임·slack −0.0001 수준이라 양성과 거의 같다 (R563 파일럿). 경계 손잡이의 배수
+    # `--neg_levels` 마다 궤적을 같이 남긴다 (1.0 = 경계). 단계별 판정·위반량도 같이.
+    out, levels = [], []
+    orig_arc = args.push_arc_deg
+    if v.get("push_arc_deg") is not None:
+        args.push_arc_deg = float(v["push_arc_deg"])
+    try:
+        for f in args.neg_levels:
+            if f == 1.0:
+                g, gg, pp, mm = gate, geo, poses, mult
+            else:
+                pp, _, mm = knob_poses(graph, node, v["preset"], k * f, kind, args, num_frames, span, smode)
+                gg = geometry_stats(renderer, pp, behind); g = verdict(gg)
+            out.append(np.asarray(pp, dtype=np.float32))
+            levels.append({"mult": f, "knob": k * f, "ratio": k * f / k0, "shape_mult": mm, "gate": g,
+                           "geo": {kk: gg.get(kk) for kk in NEG_STAT_KEYS if kk in gg}})
+    finally:
+        args.push_arc_deg = orig_arc
+    meta["levels"] = levels
+    return meta, np.stack(out)
+
+
 def behind_over(stats: dict, max_behind: float, max_behind_dyn: float) -> bool:
     """G1 판정. `--collision_time_match` 면 **정적·동적을 각자의 예산과 따로** 비교한 뒤 OR.
 
@@ -845,6 +978,13 @@ def main(args):
         tau_bank = json.load(file)
     folder = path.join(out_root, args.video, args.bank_dir)
     makedirs(folder, exist_ok=True)
+    # [R563] 음성 데이터 모드. 끄면 (기본 "") 아래 분기가 하나도 안 돈다 — 예전과 비트 동일.
+    neg = (load_negative_targets(path.join(out_root, args.video, args.negatives_from), args.negatives_gates)
+           if args.negatives_from else None)
+    if neg is not None:
+        assert path.abspath(folder) != path.abspath(path.join(out_root, args.video, args.negatives_from)), \
+            "--bank_dir 를 --negatives_from 과 다르게 (원본 뱅크를 덮지 않는다)"
+        neg_meta, neg_poses = [], []
 
     #    `--cloud_source npz`(기본) 는 예전과 같이 cloud.npz 를 읽고, `memory` 는 recon 에서
     #    그 자리에 굽는다 (`lbm/render.py:open_renderer`).
@@ -1213,40 +1353,8 @@ def main(args):
                 행의 열로 나가 `emit_bank` 가 같은 절단을 되풀 수 있게 한다.
                 """
                 if knob not in _cache:
-                    mult = 1.0
-                    for attempt in range(args.shape_doublings + 1):
-                        decision = decision_at(graph, _node, _preset, knob, _kind, args, mult,
-                                               start_cand=_cand)
-                        poses, extra = build_poses(
-                            decision, graph, board=None, num_frames=num_frames,
-                            orbit_span_frac=_span, start_mode=_smode,
-                            aim_anchor=args.aim_anchor, aim_ramp_frames=args.aim_ramp_frames,
-                            traj_basis=args.traj_basis, aim_keyframes=args.aim_keyframes,
-                            keyframe_aim=args.keyframe_aim, keyframe_ease=args.keyframe_ease,
-                            # D90. 안 넘기면 `build_poses` 서명 기본값(12/0.5)이 쓰이는데
-                            # `emit_bank` 는 자기 CLI 기본값(4)으로 되만들어 회전만 어긋난다
-                            # (위치는 정확히 일치해서 더 안 보인다). 명시해서 `fixed` 에 싣는다.
-                            smooth_passes=args.smooth_passes,
-                            smooth_lambda=args.smooth_lambda,
-                            preset_tracking=args.preset_tracking, deroll=args.deroll,
-                            orbit_fixed_sweep=args.orbit_fixed_sweep,
-                            push_mode=args.push_mode, push_arc_ratio=args.push_arc_ratio,
-                            push_arc_deg=args.push_arc_deg, push_arc_min_deg=args.push_arc_min_deg,
-                            # D171. 0 이면 `build_poses` 가 예전 저역통과 경로를 그대로 탄다.
-                            follow_keyframes=args.follow_keyframes,
-                            follow_kf_interp=args.follow_kf_interp,
-                            tau_denom=args.tau_denom)
-                        # `fit_tau` 가 max_scale 에 붙었으면 τ 를 못 맞춘 것이다 — 모양을 키워 다시.
-                        # 마지막 시도에서는 **곱하지 않고** 끝낸다: 여기서 곱하면 `_cache` 에
-                        # 남는 `mult` 가 방금 만든 `poses` 를 만든 값보다 headroom 배 크고,
-                        # `emit_bank` 가 그 배율로 되만들어 궤적이 2배로 벌어진다 (실측:
-                        # basketball-four `dyn_0__pull_out_arc__hole0.5`, 최대 8.918 어긋남).
-                        # 이 가지는 `status == "shape_limited"` 행에서만 밟힌다.
-                        if (_kind != "tau"
-                                or extra["info"]["tau"]["scale"] < FIT_TAU_MAX_SCALE - 1e-9
-                                or attempt == args.shape_doublings):
-                            break
-                        mult *= args.shape_headroom
+                    poses, extra, mult = knob_poses(graph, _node, _preset, knob, _kind, args, num_frames,
+                                                    _span, _smode, _cand)
                     verdict = (lambda geo: physical_verdict(
                         geo, max_behind, min_obb, _max_elev, _min_ground,
                         _min_approach, max_behind_dyn))
@@ -1295,6 +1403,19 @@ def main(args):
                         stats.get("ground_clear", float("nan")),
                         stats.get("approach_gap", float("nan")),
                         stats.get("subject_visible_frac", float("nan")))
+
+            if neg is not None:              # [R563] 이분법 대신 음성 탐색만, 렌더 0회
+                _verdict = (lambda geo, _e=max_elev, _g=min_ground, _a=min_approach: physical_verdict(
+                    geo, max_behind, min_obb, _e, _g, _a, max_behind_dyn))
+                for _v in (neg.pop((anchor, preset), []) if start_cand is None else []):
+                    _m, _p = negative_search(_v, graph, node, kind, args, num_frames, span_frac,
+                                             args.start_mode, renderer, behind, _verdict)
+                    neg_meta.append(_m)
+                    if _p is not None:
+                        neg_poses.append(_p)
+                    print(f"[neg] {_m['variant_id']:<48} {_m['orig_status']:<22} pos_gate={_m['pos_gate']} "
+                          f"-> {_m.get('gate')} x{_m.get('ratio', float('nan')):.3f}", flush=True)
+                continue
 
             # [new 2026-09-27, R62] 시작 카메라 선판정. `off`(기본)면 이 블록이 안 돌아 예전과 비트 동일.
             #   only   : 판정만 하고 fit 은 전부 건너뛴다 → start_screen.csv
@@ -1724,6 +1845,20 @@ def main(args):
             timing.append({"anchor_id": anchor, "preset": preset,
                            "rungs": len(rungs), "solve_calls": calls_total - _calls0,
                            "seconds": round(perf_counter() - _t_preset, 3)})
+
+    if neg is not None:                  # [R563] 음성 데이터만 쓰고 끝 (뱅크 파일은 안 쓴다)
+        missing = sorted(f"{a}/{p}" for (a, p), vs in neg.items() for _ in vs)
+        out = path.join(folder, "negatives.npz")
+        np.savez_compressed(out, cam_c2w=(np.stack(neg_poses) if neg_poses     # (n, levels, F, 4, 4)
+                                           else np.zeros((0, len(args.neg_levels), num_frames, 4, 4), np.float32)),
+                            variant_id=np.array([m["variant_id"] for m in neg_meta if m["found"]]),
+                            meta=json.dumps({"format": "lbm_negatives_v1", "video": args.video,
+                                             "source_bank": args.negatives_from, "gates": args.negatives_gates,
+                                             "step": args.neg_step, "max_ratio": args.neg_max_ratio,
+                                             "iterations": args.neg_iterations, "levels": args.neg_levels, "unvisited": missing,
+                                             "rows": neg_meta}, ensure_ascii=False))
+        print(f"[neg] {len(neg_meta)} 행 · 찾음 {len(neg_poses)} · 미방문 {len(missing)} → {out}", flush=True)
+        return
 
     if not rows:
         # D67. 여기 오는 경우가 둘이라 구분해야 한다.
@@ -2238,6 +2373,14 @@ def build_parser():
     parser.add_argument("--bank_dir", default="hole_bank", type=str)
     # [R295] 진단용: 디렉토리를 주면 변이마다 이분법이 시험한 손잡이별 궤적·게이트 값·판정을 <dir>/<variant>.npz 로 남긴다.
     parser.add_argument("--trace_probes", default="", type=str)
+    # [R563] 음성 (충돌) 데이터: 이 뱅크 폴더의 `<gate>_limited` 행마다 손잡이만 키워 처음 걸리는 궤적을
+    # `<bank_dir>/negatives.npz` 로 쓴다 (이분법·렌더·뱅크 출력 없음). "" (기본) = 끔.
+    parser.add_argument("--negatives_from", default="", type=str)
+    parser.add_argument("--negatives_gates", nargs="+", default=["collision", "obb"])
+    parser.add_argument("--neg_step", default=1.25, type=float)
+    parser.add_argument("--neg_max_ratio", default=3.0, type=float)
+    parser.add_argument("--neg_iterations", default=6, type=int)
+    parser.add_argument("--neg_levels", nargs="+", type=float, default=[1.0, 1.25, 1.5])   # 경계 손잡이의 배수
     # D77. 읽어들일 τ 뱅크 폴더 (`sample_camera_bank.py --bank_dir` 과 같은 값). 기본 "bank" 가
     # 예전 하드코딩과 동일하다 — 새 preset 축을 넣은 τ 뱅크를 옆에 두려고만 노출한다.
     parser.add_argument("--tau_bank_dir", default="bank", type=str)

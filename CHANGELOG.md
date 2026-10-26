@@ -31,6 +31,8 @@
 
 ### Added
 
+- **`dataset/fit/bank/fit_hole_ladder.py` `--negatives_from`** (R563). 충돌 음성 데이터 모드 — 뱅크의 `collision/obb_limited` 행 (shot_missed 아래 숨은 것 포함) 마다 손잡이만 키워 처음 물리 게이트 (G1/G5/G6/G7) 에 걸리는 궤적을 경계 ×`--neg_levels` (1.0/1.25/1.5) 로 `<bank_dir>/negatives.npz` 에 저장. 렌더 0회, 뱅크 파일은 안 쓴다. 궤적 생성은 probe 에서 뗀 `knob_poses` 를 fit 과 공유 (기본 끔 · 회귀 1편 status/knob 동일).
+
 - **`dataset/fit/ingest/trumans_rgb_fill.py`** (R558). `--geom_only` (R487 1 단계) TRUMANS 클립에 조건 영상 (RGB) 을 나중에 채운다 — manifest 의 저장된 카메라로 Cycles RGB 만 (`--anim`, 16 spp, 1 단계와 같은 설정) 다시 렌더해 recon video.mp4 를 바꾸고 RGB_PENDING 을 지운다. depth 와 프레임 정렬 확인 (1 클립 188 s). png 는 지운다 (`--keep_png`).
 
 - **`latentcam/models/intent_planner.py`** (R551). `IntentPlanner.relation_first` — move_slots 와 함께, follow (track) 여부를 먼저 따로 묻고 (유사 예시의 follow 정답 포함) 슬롯 답의 follow 를 그 값으로 고정 (LAMP 의 관계 계열 먼저). 기본 False 면 기존 그대로.

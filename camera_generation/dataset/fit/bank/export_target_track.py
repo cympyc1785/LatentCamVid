@@ -48,8 +48,9 @@ if CINEMATRAJ_ROOT not in sys.path:
 DL3DV_ROOT_DEFAULT = "/data1/cympyc1785/data/Vista4D-Eval-Data/latentcam_da3"
 
 
-def node_track_world(node, T_wg, num_frames):
-    """노드 -> (T,3) world 궤적. dyn 은 track.center_smooth, stat 은 obb.center 상수."""
+def node_track_world(node, T_wg, num_frames, fill="hold"):
+    """노드 -> (T,3) world 궤적. dyn 은 track.center_smooth, stat 은 obb.center 상수.
+    [R567] `fill="interp"` 면 안 보인 프레임을 앞뒤 관측 사이 선형 보간 (양 끝 밖은 hold). 기본 "hold" = 예전과 같다."""
     if node.get("track") and node["track"].get("center_smooth"):
         center_g = np.asarray(node["track"]["center_smooth"], dtype=np.float64)   # (T?,3) G
         frames = np.asarray(node["track"]["frames"], dtype=int)
@@ -57,8 +58,12 @@ def node_track_world(node, T_wg, num_frames):
             # track 이 안 보인 프레임은 가장 가까운 관측으로 채운다 (보간이 아니라 hold —
             # conf 낮은 구간을 지어내지 않는다).
             full = np.empty((num_frames, 3), dtype=np.float64)
-            for f in range(num_frames):
-                full[f] = center_g[np.abs(frames - f).argmin()]
+            if fill == "interp":
+                for c in range(3):
+                    full[:, c] = np.interp(np.arange(num_frames), frames, center_g[:, c])
+            else:
+                for f in range(num_frames):
+                    full[f] = center_g[np.abs(frames - f).argmin()]
             center_g = full
     else:
         center_g = np.tile(np.asarray(node["obb"]["center"], dtype=np.float64), (num_frames, 1))
@@ -158,7 +163,7 @@ def main(args):
             if anchor not in cache:
                 node = nodes.get(anchor)
                 cache[anchor] = None if node is None else \
-                    node_track_world(node, T_wg, num_frames).astype(np.float32)
+                    node_track_world(node, T_wg, num_frames, fill=args.fill).astype(np.float32)
             if cache[anchor] is None:
                 missing.add(anchor)
                 continue
@@ -242,6 +247,7 @@ if __name__ == "__main__":
     parser.add_argument("--bbox_seg_root", default=None)
     # [R357] subject 3D OBB 반축 (`subject_box.npz`) 도 내보내기. --only_box 면 target_track.npz 는 그대로 둔다.
     parser.add_argument("--box", action="store_true")
+    parser.add_argument("--fill", default="hold", choices=["hold", "interp"])   # [R567] 안 보인 프레임 중심: 가까운 관측 유지 (기본) / 선형 보간
     parser.add_argument("--only_box", action="store_true")
     parser.add_argument("--only_bbox", action="store_true")      # target_track.npz 는 건드리지 않고 subject_bbox.npz 만
     main(parser.parse_args())

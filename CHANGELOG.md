@@ -31,6 +31,8 @@
 
 ### Added
 
+- **`dataset/fit/bank/export_target_track.py --fill {hold,interp}`** (R567). track 이 안 보인 프레임의 중심을 가까운 관측 유지 (기본, 예전 그대로) 또는 앞뒤 관측 사이 선형 보간으로 채운다. scene graph 의 `center_smooth` 가 이미 49 프레임이면 두 값이 같다.
+
 - **`dataset/configs/bank/r569_bmx_person.json`** (R569). bmx-bumps 를 anchor dyn_1 (person) 으로 굽는 세대 (사용자 "bicycle 을 타고 있는 사람 기준"). r568 과 같고 anchor 파일만 다름.
 
 - **`dataset/configs/bank/r568_car_dyn0.json`** (R568). car-roundabout 을 anchor dyn_0 (회색 Mini) 으로 굽는 세대 — d215/d224/d225 의 car anchor dyn_1 이 배경 차 (SAM3 ID 전환) 였다. d224_forced 에서 anchor 파일만 바꿈.

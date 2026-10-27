@@ -334,6 +334,19 @@ def framing_target(traj, data, t_lat, device):
     return fr * m.unsqueeze(-1), m
 
 
+TRACK_XATTN = False   # [R577] track_kw 가 cfg.track_cond_mode == 'xattn' 일 때 켠다 — build_track_cond 가 49 프레임 그대로 돌려준다
+
+
+def track_kw(cfg, track_dim):
+    """[R577] 모델 생성자의 track 조건 인자. cfg.track_cond_mode: concat (기본, 예전 cond_dim=track_dim) | xattn (cond_dim 0 + 별도 CA)."""
+    global TRACK_XATTN
+    TRACK_XATTN = str(getattr(cfg, 'track_cond_mode', 'concat') or 'concat') == 'xattn' and track_dim > 0
+    if TRACK_XATTN:
+        print(f"(model) track_cond_mode=xattn: track·box {track_dim}-d 를 프레임별 토큰으로 별도 CA (cam_in concat 없음)")
+        return dict(cond_dim=0, track_xattn_dim=track_dim)
+    return dict(cond_dim=track_dim)
+
+
 def build_track_cond(data, t_lat, device, dropout_p=0.0):
     """[new 2026-08-27] data['target_track'] (B,T,4)[xyz,valid] -> (B,t_lat,4) concat 조건.
 
@@ -349,9 +362,12 @@ def build_track_cond(data, t_lat, device, dropout_p=0.0):
     if tt is None and sb is None and su is None and sx is None:
         return None
     tt = torch.cat([x.to(device).float() for x in (tt, sb, su, sx) if x is not None], -1)
-    tt = tt.transpose(1, 2)                                         # (B,C,T)
-    cond = F.interpolate(tt, size=int(t_lat), mode='linear',
-                         align_corners=True).transpose(1, 2)        # (B,t_lat,4)
+    if TRACK_XATTN:                                                 # [R577] 보간하지 않고 (B,F,C) 프레임별 그대로 — 모델이 CA 로 읽는다
+        cond = tt.clone()
+    else:
+        tt = tt.transpose(1, 2)                                     # (B,C,T)
+        cond = F.interpolate(tt, size=int(t_lat), mode='linear',
+                             align_corners=True).transpose(1, 2)    # (B,t_lat,4)
     if dropout_p > 0:
         drop = torch.rand(cond.shape[0], device=device) < float(dropout_p)
         cond[drop] = 0.0
@@ -1066,10 +1082,10 @@ def train():
         print(f"(model) framing aux: cam_in/out = cam_dim {cfg.cam_dim} + {_FR} (u,v,0.5logz) · w={getattr(cfg, 'framing_aux_w', 1.0)} "
               f"· sample guidance w={getattr(cfg, 'framing_guidance_w', 0.0)} box={getattr(cfg, 'framing_guidance_box', 0.35)}")
     if cfg.point_encoder != 'custom':
-        model = CameraDiffusionModel(cam_dim=cfg.cam_dim + _FR, cond_dim=_track_dim,
+        model = CameraDiffusionModel(cam_dim=cfg.cam_dim + _FR, **track_kw(cfg, _track_dim),
                                      **_geo_kw, **_vid_kw, **_sp_kw)
     else:
-        model = CameraDiffusionModel(cam_dim=cfg.cam_dim + _FR, cond_dim=_track_dim,
+        model = CameraDiffusionModel(cam_dim=cfg.cam_dim + _FR, **track_kw(cfg, _track_dim),
                                      pc_encoder=pc_encoder, **_geo_kw, **_vid_kw, **_sp_kw)
     # [R382 FIX] 조건을 켰는데 모듈이 없으면 조용히 조건 없는 모델이 학습된다 (MTp 사고) — 기동 즉시 멈춘다.
     if getattr(cfg, 'subject_pts_cond', False):

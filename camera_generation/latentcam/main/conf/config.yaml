@@ -278,6 +278,7 @@ prompts_mix_prob: 0.0
 # world 궤적을 frame-s 카메라 좌표 + norm_scale 게이지로 옮긴 (T,4)[xyz,valid] 를 latent 토큰
 # 길이로 interp 해 x_t 채널에 concat 한다 (4 = xyz+valid). 0 = 기존 구조/동작 비트 동일.
 target_track_dim: 0
+track_cond_mode: concat   # [R577] concat (기본, cam_in 에 49→13 보간 concat) | xattn (49 프레임 토큰 별도 cross-attention)
 # [R326] subject 궤적 파일 (<scene>/da3/ 아래). 기본 = VLM+SAM3+DA3 OBB 중심. target_track_molmo2.npz = Molmo2 tracking + DA3 lifting.
 target_track_file: target_track.npz
 target_track_dropout: 0.1     # per-sample null 드랍 (추론에서 track 없이 쓸 수 있게)

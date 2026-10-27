@@ -23,6 +23,15 @@ def positional_encoding(seq_len, dim, device='cpu'):
     pe[:, 1::2] = torch.cos(angle_rads[:, 1::2])
     return pe  # (N, D)
 
+
+def positional_encoding_at(pos, dim):
+    """[R577] 실수 위치 pos (N,) 의 sinusoid — positional_encoding 과 같은 식 (정수 위치면 값이 같다)."""
+    i = torch.arange(dim, device=pos.device).float()[None, :]
+    ang = pos.float()[:, None] / (10000 ** (2 * (i // 2) / dim))
+    pe = torch.zeros(pos.shape[0], dim, device=pos.device)
+    pe[:, 0::2] = torch.sin(ang[:, 0::2]); pe[:, 1::2] = torch.cos(ang[:, 1::2])
+    return pe
+
 class FusedMLP(nn.Sequential):
     def __init__(
         self,
@@ -203,6 +212,7 @@ class CameraDiffusionModel(nn.Module):
         occ_grid_resampler=0,
         occ_grid_resampler_layers=2,
         depth_vid_cond=False,
+        track_xattn_dim=0,
         depth_vid_dropout=0.0,
         depth_vid_resampler=64,
         depth_vid_resampler_layers=2,
@@ -306,6 +316,17 @@ class CameraDiffusionModel(nn.Module):
         self.subject_pts_stats = bool(subject_pts_stats) and self.subject_pts_dim > 0
         _pts_cat = (self.subject_pts_dim if self.subject_pts_mode == 'pool' else 0) + (13 if self.subject_pts_stats else 0)
         self.cam_in = nn.Linear(cam_dim + self.cond_dim + _pts_cat, hidden_dim)
+        # [R577] track_xattn_dim>0: subject track·box 조건 (B,F=49,C) 을 cam 토큰에 concat 하지 않고 **별도 CA 의 key/value** 로.
+        #   프레임별 토큰 → MLP → hidden + 시간 PE (프레임 f 를 cam 토큰 축 위치 f·(T−1)/(F−1) 에 둔 sinusoid — cam 토큰 PE 와 같은 축) →
+        #   DiT 층마다 CA (0 초기화 gate). 0 (기본) = 모듈 없음, 예전 concat 경로·state_dict 그대로.
+        self.track_xattn_dim = int(track_xattn_dim)
+        if self.track_xattn_dim > 0:
+            self.tx_in = nn.Sequential(nn.Linear(self.track_xattn_dim, hidden_dim), nn.SiLU(), nn.Linear(hidden_dim, hidden_dim))
+            self.tx_gate = nn.Parameter(torch.zeros(num_layers))
+            self.tx_layers = nn.ModuleList([
+                nn.ModuleList([nn.LayerNorm(hidden_dim), CrossAttention(hidden_dim, num_heads),
+                               FusedMLP(hidden_dim, dropout, nn.GELU, hidden_layer_multiplier=4)])
+                for _ in range(num_layers)])
 
         self.time_mlp = TimeEmbedding(time_emb_dim)
         self.time_proj = nn.Linear(time_emb_dim, hidden_dim)
@@ -699,6 +720,12 @@ class CameraDiffusionModel(nn.Module):
                     q = q + rmlp(ln_m(q))
                 occ_tok = self.occ_rs_out(q)
 
+        tx_tok = None
+        if getattr(self, 'track_xattn_dim', 0) > 0 and cond is not None and cond.shape[1] > 1:   # [R577] cond = (B,F,C) 프레임별 (보간 전)
+            Fq = cond.shape[1]
+            tpos = torch.arange(Fq, device=device, dtype=torch.float32) * (T - 1) / max(Fq - 1, 1)
+            tx_tok = self.tx_in(cond.to(x_t.dtype)) + positional_encoding_at(tpos, self.cam_in.out_features).to(x_t.dtype)[None]
+            cond = None                                                                     # concat 경로로는 안 간다 (cond_dim 0)
         dv_tok = None
         if getattr(self, 'depth_vid_cond', False) and depth_vid is not None:   # [R482] 없으면 (추론에서 조건 없음) 토큰 없이 = gate 경로 생략
             g = depth_vid.to(x_t.dtype)
@@ -837,6 +864,11 @@ class CameraDiffusionModel(nn.Module):
                 dnorm, dv_ca, dmlp = self.dv_layers[_li]
                 dx = dv_ca(dnorm(h), dv_tok.to(h.dtype))
                 h = h + self.dv_gate[_li] * (dmlp(dx) + dx)
+
+            if tx_tok is not None:                                                        # [R577] track·box CA (0 초기화 gate)
+                tnorm, tx_ca, tmlp = self.tx_layers[_li]
+                tx_ = tx_ca(tnorm(h), tx_tok.to(h.dtype))
+                h = h + self.tx_gate[_li] * (tmlp(tx_) + tx_)
 
             if has_geo_latent:
                 scale2, shift2 = self.mod2(t_embed).chunk(2, dim=-1)

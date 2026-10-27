@@ -178,7 +178,7 @@ def main(args):
             # 다른 문장을 재게 된다. 기본값 None 은 ref_eval_dir 라 예전 런과 비트 동일이다.
             cap_src = args.caption_dir or args.ref_eval_dir
             shutil.copyfile(path.join(cap_src, "test", f"{name}_caption.json"), cap_out)
-        rows.append((name, r_pred, r_gt, r_gt / r_pred))
+        rows.append((name, r_pred, r_gt, r_gt / r_pred if r_pred >= 1e-9 else float("nan")))
         n_ok += 1
 
     print(f"{'prefix/video':14s}{args.prefix} / {args.video or '(전 scene)'}")
@@ -188,7 +188,7 @@ def main(args):
     print(f"{'npz 없음':14s}{n_missing}")
     print(f"{'degenerate':14s}{n_degen}   (rmax 0 -> 스킵)")
     if rows:
-        g = np.array([r[3] for r in rows])
+        g = np.array([r[3] for r in rows if np.isfinite(r[3])] or [np.nan])
         print(f"\n{'rmax gain (GT/GenDoP)':24s}median {np.median(g):.4f}  "
               f"min {g.min():.4f}  max {g.max():.4f}")
         print("\n[표본]")

@@ -1281,6 +1281,22 @@ class CamDataset(torch.utils.data.Dataset):
             uv, obs = uv[idx], obs[idx]
         return torch.cat([uv - 0.5, obs[:, None], torch.ones(T, 1)], -1)
 
+    def _scene_points4d(self, scene_idx, s, e, extrinsics, norm_scale):
+        """[R582] `<scene>/da3/scene_points4d.npz` → 정적 (N,3) · 동적 (e-s,Nd,3) 를 frame-s 카메라 좌표 / norm_scale 로.
+        정적은 FPS 순서 앞 `pc_static_n` 개 (앞에서 자르면 균일한 부분집합), 동적은 구간 [s,e) 의 프레임별 앞 `pc_dyn_n` 개."""
+        p = osp.join(self.scene_dir_list[scene_idx], 'da3', str(getattr(self.cfg, 'scene_points4d_file', None) or 'scene_points4d.npz'))
+        if not osp.isfile(p):
+            raise FileNotFoundError(f"scene_points4d_cond 인데 파일이 없다: {p} — scripts/data/cache_patch_points.py --mode scene4d 를 먼저 돌릴 것")
+        z = np.load(p); E = extrinsics[0].float(); ns = norm_scale.reshape(1).float()
+        tf = lambda P: (P @ E[:3, :3].T + E[:3, 3]) / ns
+        n_s, n_d = int(getattr(self.cfg, 'pc_static_n', 1024)), int(getattr(self.cfg, 'pc_dyn_n', 256))
+        sv = torch.from_numpy(z['static_valid'][:n_s]); st = tf(torch.from_numpy(z['static'][:n_s].astype(np.float32))) * sv[:, None]
+        dy = torch.from_numpy(z['dyn'][s:e, :n_d].astype(np.float32)); dv = torch.from_numpy(z['dyn_valid'][s:e, :n_d])
+        if dy.shape[0] < e - s:                                              # 소스가 짧으면 마지막 프레임 반복 (_depth_vid 와 같은 규칙)
+            k = e - s - dy.shape[0]
+            dy = torch.cat([dy, dy[-1:].expand(k, -1, -1)], 0); dv = torch.cat([dv, dv[-1:].expand(k, -1)], 0)
+        return {'pc_static': st, 'pc_static_valid': sv, 'pc_dyn': tf(dy) * dv[..., None], 'pc_dyn_valid': dv}
+
     def _depth_vid(self, scene_idx, s, e, norm_scale):
         """[R482] `<scene>/da3/<depth_vid_file>` (camera_generation/dataset/fit/bank/depth_vid_cache.py: 소스 전 프레임 DA3 depth 를 (T,h,w)
         float16 로 줄인 것, 하늘·무효 = 0) 의 세그먼트 구간 [s,e) → (2,e-s,h,w) [log1p(depth / norm_scale) · valid]. voxel 화 없음, 동적 물체 포함."""
@@ -2095,6 +2111,9 @@ class CamDataset(torch.utils.data.Dataset):
             _P = torch.from_numpy(_pp['points']).float(); _E = extrinsics[0].float()
             out['video_points'] = (_P @ _E[:3, :3].T + _E[:3, 3]) / norm_scale.reshape(1, 1, 1).float()
             out['video_points_valid'] = torch.from_numpy(_pp['valid'])
+        # [R582] scene_points4d_cond: 조건용 4D 점 구름 (scripts/data/cache_patch_points.py --mode scene4d) — 같은 게이지 (기본 off = 키 없음).
+        if getattr(self.cfg, 'scene_points4d_cond', False):
+            out.update(self._scene_points4d(scene_idx, s, e, extrinsics, norm_scale))
         # [R312] readout heatmap 지도용 subject bbox — 조건(`subject_bbox`)과 **다른 키** (build_track_cond 는 키가 있으면 조건으로 쓴다).
         if float(getattr(self.cfg, 'peav_readout_heat_w', 0.0) or 0.0) > 0:
             out['readout_bbox'] = self._subject_bbox(scene_idx, data_name.split('_')[-1], extrinsics.shape[0])

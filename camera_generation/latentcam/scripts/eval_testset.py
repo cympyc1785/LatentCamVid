@@ -395,7 +395,8 @@ def main():
                       start_pose_noise=float(getattr(cfg, 'start_pose_noise', 0.0) or 0.0))
     if str(getattr(cfg, 'backbone', 'dit') or 'dit') == 'mmdit':   # [R580] MMDiT 판
         from models.camera_diffusion_model_mmdit_v2 import CameraDiffusionMMDiT
-        model = CameraDiffusionMMDiT(cam_dim=cfg.cam_dim + int(getattr(cfg, 'framing_aux_dim', 0) or 0), cond_dim=_track_dim, **_geo_kw, **_vid_kw, **_sp_kw)
+        model = CameraDiffusionMMDiT(cam_dim=cfg.cam_dim + int(getattr(cfg, 'framing_aux_dim', 0) or 0), cond_dim=_track_dim, **_geo_kw, **_vid_kw, **_sp_kw,
+                                     **T.mmdit_kw(cfg))   # [R582]
     else:
         model = CameraDiffusionModel(cam_dim=cfg.cam_dim + int(getattr(cfg, 'framing_aux_dim', 0) or 0),   # [R236/F6] framing 보조 채널
                                      **T.track_kw(cfg, _track_dim), **_geo_kw, **_vid_kw, **_sp_kw)   # [R577] track_cond_mode

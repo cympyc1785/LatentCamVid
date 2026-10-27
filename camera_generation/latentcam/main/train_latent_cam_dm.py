@@ -647,12 +647,31 @@ def build_video_cond(data, device):
         kw['occ_grid'] = data['occ_grid'].to(device).float()
     if 'depth_vid' in data:            # [R482] 소스 depth 영상 → 모델 depth CA
         kw['depth_vid'] = data['depth_vid'].to(device).float()
+    if 'pc_static' in data:            # [R582] 4D 점 구름 → MMDiT 기하 stream
+        for k in ('pc_static', 'pc_dyn'):
+            kw[k] = data[k].to(device).float()
+        for k in ('pc_static_valid', 'pc_dyn_valid'):
+            kw[k] = data[k].to(device).bool()
     if kw and 'video_points' in data:
         kw['video_points'] = data['video_points'].to(device).float()
         kw['video_points_valid'] = data['video_points_valid'].to(device).bool()
     if kw and getattr(cfg, 'video_text_in_stream', False) and 'peav_text' in data:
         kw['video_text_emb'] = data['peav_text'].to(device).float()
         kw['video_text_mask'] = data['peav_text_mask'].to(device).bool()
+    return kw
+
+
+def mmdit_kw(cfg):
+    """[R582] MMDiT 전용 kwargs (train·eval 공용). 4D 점 구름 · Molmo2 패치 3D PE 를 켜고, depth 영상을 껐으면 모듈도 안 만든다.
+    R580 (depth_vid_cond=true, 점 없음) 은 빈 dict 라 예전과 같다."""
+    kw = {}
+    if not getattr(cfg, 'depth_vid_cond', False):
+        kw['depth_vid_cond'] = False
+    if getattr(cfg, 'scene_points4d_cond', False):
+        kw.update(pc_cond=True, pc_dyn_queries=int(getattr(cfg, 'pc_dyn_queries', 8)), pc_dropout=float(getattr(cfg, 'pc_dropout', 0.1)))
+    if getattr(cfg, 'video_point_pe', False):
+        assert getattr(cfg, 'video_patch_points', False), "video_point_pe 는 video_patch_points=true (patch_points_8x8) 가 필요"
+        kw['video_point_pe'] = True
     return kw
 
 
@@ -1089,8 +1108,11 @@ def train():
               f"· sample guidance w={getattr(cfg, 'framing_guidance_w', 0.0)} box={getattr(cfg, 'framing_guidance_box', 0.35)}")
     if str(getattr(cfg, 'backbone', 'dit') or 'dit') == 'mmdit':   # [R580] MMDiT 판 (camera·text·Molmo2·기하 4 stream joint attention)
         from models.camera_diffusion_model_mmdit_v2 import CameraDiffusionMMDiT
-        model = CameraDiffusionMMDiT(cam_dim=cfg.cam_dim + _FR, cond_dim=_track_dim, **_geo_kw, **_vid_kw, **_sp_kw)
+        model = CameraDiffusionMMDiT(cam_dim=cfg.cam_dim + _FR, cond_dim=_track_dim, **_geo_kw, **_vid_kw, **_sp_kw, **mmdit_kw(cfg))
         print(f"(model) backbone=mmdit: 4 stream (camera · text · Molmo2 · depth+srccam), params {sum(p.numel() for p in model.parameters()) / 1e6:.1f}M")
+        if model.pc_cond or model.video_point_pe:                  # [R582] 모듈 확인 (R382 규칙)
+            print(f"(model) scene_points4d: pc_cond={model.pc_cond} queries={model.pc_dq_n} dropout={model.pc_dropout} video_point_pe={model.video_point_pe} "
+                  f"depth_vid={model.depth_vid_cond} params={sum(p.numel() for n, p in model.named_parameters() if n.startswith(('pc_', 'vp_')))}", flush=True)
     elif cfg.point_encoder != 'custom':
         model = CameraDiffusionModel(cam_dim=cfg.cam_dim + _FR, **track_kw(cfg, _track_dim),
                                      **_geo_kw, **_vid_kw, **_sp_kw)

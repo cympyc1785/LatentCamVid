@@ -279,7 +279,14 @@ prompts_mix_prob: 0.0
 # 길이로 interp 해 x_t 채널에 concat 한다 (4 = xyz+valid). 0 = 기존 구조/동작 비트 동일.
 target_track_dim: 0
 backbone: dit   # [R580] dit (기본, CameraDiffusionModel) | mmdit (camera_diffusion_model_mmdit_v2: 4 stream joint attention)
-depth_vid_srccam: false   # [R578] true = 소스 카메라 토큰 (srccam_cond 필요) 을 depth resampler key/value 에 같이 넣고 geo CA 는 안 씀
+depth_vid_srccam: false
+scene_points4d_cond: false   # [R582] true = 4D 점 구름 (da3/scene_points4d.npz 정적 + 동적) 을 MMDiT 기하 stream 에 (backbone=mmdit 전용)
+scene_points4d_file: scene_points4d.npz
+pc_static_n: 1024            # 정적 점 토큰 수 (FPS 순서 앞)
+pc_dyn_n: 256                # 프레임당 동적 점 수
+pc_dyn_queries: 8            # 프레임당 동적 토큰 수 (attention pool)
+pc_dropout: 0.1
+video_point_pe: false        # [R582] true = Molmo2 패치 토큰에 patch_points_8x8 3D PE (video_patch_points: true 필요, mmdit 전용)   # [R578] true = 소스 카메라 토큰 (srccam_cond 필요) 을 depth resampler key/value 에 같이 넣고 geo CA 는 안 씀
 track_cond_mode: concat   # [R577] concat (기본, cam_in 에 49→13 보간 concat) | xattn (49 프레임 토큰 별도 cross-attention)
 # [R326] subject 궤적 파일 (<scene>/da3/ 아래). 기본 = VLM+SAM3+DA3 OBB 중심. target_track_molmo2.npz = Molmo2 tracking + DA3 lifting.
 target_track_file: target_track.npz

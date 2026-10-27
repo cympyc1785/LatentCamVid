@@ -13,6 +13,11 @@ R583 (사용자 10-27 "학습 빼고는 돌려놔줘" · "어댑터는 WorldDire
      WD 는 이동을 장면 크기 (점 거리 평균) 대비로 내므로 깊이 기준 비가 맞는 환산이다.
 텍스트는 REF eval 폴더 `_caption.json` "Concise Interaction" (메인 표와 같은 plan text). 출력 npz 는 gendop_preds_to_eval_dir.py 가 읽는 `c2w` (OpenGL, 49).
 
+[R583b] `--points ours_all|ours_static` (사용자 "WT scene.ply 는 inpainting 영상 recon 이라 우리와 다르다 — 우리 점 구름으로 전체 / dynamic 제거 두 판"):
+  점 = recon_and_seg depth 49 프레임 역투영 + 영상 색 (sky·무효 제외, stride `--pt_stride`), ours_static 은 dynamic_mask 2px dilation 영역 제외.
+  scene 당 `--n_points` (WT scene.ply 와 같은 1M) 무작위 (seed 42). 우리 world 라 첫 카메라 = recon cam0 w2c, 깊이 비 s = 1, offset 없음.
+  `--stage points` (vista4d env) 가 <pts_dir>/<scene>.npz (xyz f32 · rgb u8 · dyn bool) 를 미리 굽고 infer 가 읽는다.
+
 stage align (env vista4d: OpenEXR depth): scene 마다 offset · s · 정렬 진단 → <out>/align.json
 stage infer (env /data1/cympyc1785/venvs/wdconcerto = latentcam + concerto): scene 마다 점 임베딩 1 회 → 그 scene seg 를 한 배치로 샘플 → <out>/worlddirector__<scene>__<idx>.npz
 """
@@ -131,6 +136,77 @@ def stage_align():
     print(f"=== align {len(ok)}/{len(scenes)} ok · 정렬 의심 (rot_err_med>10° 또는 s IQR/중앙>0.5) {bad} ===", flush=True)
 
 
+def points_one(scene):
+    """[R583b] recon depth 역투영 점 (world = recon cameras) + 색 + dynamic 여부. 전체를 저장하고 infer 가 판별로 고른다."""
+    import cv2
+    from scipy.ndimage import binary_dilation
+    sys.path.insert(0, f"{R}/video_generation/models/Vista4D")
+    from utils.media import load_cameras, load_depths, load_masks
+    out = osp.join(A.pts_dir, f"{scene}.npz")
+    if osp.isfile(out):
+        return scene, "skip"
+    try:
+        rc = osp.join(RECON, scene)
+        depth = load_depths(osp.join(rc, "depths"), dtype=np.float32, desc=None)
+        sky = np.asarray(load_masks(osp.join(rc, "sky_mask"), desc=None)).astype(bool)
+        dyn = np.asarray(load_masks(osp.join(rc, "dynamic_mask"), desc=None)).astype(bool)[:len(depth)]
+        dyn = binary_dilation(dyn, np.ones((1, 5, 5), bool))
+        C, K = load_cameras(osp.join(rc, "cameras.npz")); C, K = np.asarray(C, np.float64), np.asarray(K, np.float64)
+        cap, rgb = cv2.VideoCapture(osp.join(rc, "video.mp4")), []
+        while True:
+            ok, im = cap.read()
+            if not ok:
+                break
+            rgb.append(cv2.cvtColor(im, cv2.COLOR_BGR2RGB))
+        F_, H, W = depth.shape; st = A.pt_stride
+        vv, uu = np.meshgrid(np.arange(0, H, st) + 0.0, np.arange(0, W, st) + 0.0, indexing="ij")
+        X, Cc, Dy = [], [], []
+        for f in range(F_):
+            d = depth[f, ::st, ::st]; ok = np.isfinite(d) & (d > 0) & ~sky[f, ::st, ::st]
+            kf = K[f]; fx, fy, cx, cy = (kf[0], kf[1], kf[2], kf[3]) if kf.ndim == 1 else (kf[0, 0], kf[1, 1], kf[0, 2], kf[1, 2])
+            z = d[ok]; pc = np.stack([(uu[ok] - cx) / fx * z, (vv[ok] - cy) / fy * z, z, np.ones_like(z)], 1)
+            X.append((pc @ C[f].T)[:, :3].astype(np.float32))
+            im = rgb[min(f, len(rgb) - 1)]
+            if im.shape[:2] != (H, W):
+                im = cv2.resize(im, (W, H))
+            Cc.append(im[::st, ::st][ok]); Dy.append(dyn[f, ::st, ::st][ok])
+        X, Cc, Dy = np.concatenate(X), np.concatenate(Cc), np.concatenate(Dy)
+        if len(X) > A.n_store:                                               # 저장량 제한 (infer 가 여기서 다시 n_points 를 뽑는다)
+            keep = np.sort(np.random.default_rng(A.seed).choice(len(X), A.n_store, replace=False)); X, Cc, Dy = X[keep], Cc[keep], Dy[keep]
+        np.savez(out, xyz=X, rgb=Cc.astype(np.uint8), dyn=Dy,
+                 w2c0=np.linalg.inv(C[0]).astype(np.float64), K0=(np.array([[K[0][0], 0, K[0][2]], [0, K[0][1], K[0][3]], [0, 0, 1]]) if K.ndim == 2 else K[0]))
+        return scene, "ok"
+    except Exception as e:      # noqa: BLE001
+        return scene, f"error {str(e)[:150]}"
+
+
+def stage_points():
+    os.makedirs(A.pts_dir, exist_ok=True)
+    scenes = sorted(ref_entries(A.ref))[:A.limit or None]
+    bad = 0
+    with Pool(A.workers) as p:
+        for i, (s, r) in enumerate(p.imap_unordered(points_one, scenes)):
+            bad += r.startswith("error")
+            if i % 100 == 0 or r.startswith("error"):
+                print(f"[points {i}/{len(scenes)}] {s} {r}", flush=True)
+    print(f"=== points done {len(scenes)} (error {bad}) ===", flush=True)
+
+
+def load_scene_points(sc, rng):
+    """→ (xyz world float64, rgb 0..1 float32, 첫 카메라 w2c, K, s, offset). WT 판은 원래대로 scene.ply · cameras.json[offset] · 깊이 비."""
+    if A.points == "wt":
+        a = json.load(open(osp.join(A.out, "align.json")))[sc]; o = a["offset"]
+        E, K = wt_cameras(osp.join(wt_dir(sc), "cameras.json"))
+        P, Col = load_ply(osp.join(wt_dir(sc), "scene.ply"))
+        return P, Col, E[o], K[o], a["s"], o
+    z = np.load(osp.join(A.pts_dir, f"{sc}.npz"))
+    keep = np.ones(len(z["xyz"]), bool) if A.points == "ours_all" else ~z["dyn"]
+    idx = np.flatnonzero(keep)
+    if len(idx) > A.n_points:
+        idx = np.sort(rng.choice(idx, A.n_points, replace=False))
+    return z["xyz"][idx].astype(np.float64), z["rgb"][idx].astype(np.float32) / 255.0, z["w2c0"], z["K0"], 1.0, 0
+
+
 def stage_infer():
     import types
     import torch
@@ -152,9 +228,12 @@ def stage_infer():
     from core_pkg.models.vae_intr import CameraVAE
 
     dev = "cuda:0"
-    al = json.load(open(osp.join(A.out, "align.json")))
     ents = ref_entries(A.ref)
-    scenes = [s for s in sorted(ents) if s in al and "error" not in al[s]]
+    if A.points == "wt":
+        al = json.load(open(osp.join(A.out, "align.json")))
+        scenes = [s for s in sorted(ents) if s in al and "error" not in al[s]]
+    else:
+        scenes = [s for s in sorted(ents) if osp.isfile(osp.join(A.pts_dir, f"{s}.npz"))]
     if A.limit:
         scenes = scenes[:A.limit]
     # SCVideo dataset_large.py:23-40 의 Concerto transform 그대로
@@ -179,11 +258,9 @@ def stage_infer():
         idxs = [i for i in ents[sc] if not osp.isfile(osp.join(A.out, f"worlddirector__{sc}__{i}.npz"))]
         if not idxs:
             continue
-        a = al[sc]; wt = wt_dir(sc); o = a["offset"]
-        E, K = wt_cameras(osp.join(wt, "cameras.json"))
-        P, Col = load_ply(osp.join(wt, "scene.ply"))
+        P, Col, E0, K0, s_ratio, o = load_scene_points(sc, np.random.default_rng(A.seed))
         # dataset_large.py:255-293 + data_utils.normalize_camera_extrinsics_and_points (첫 카메라 = WT cameras[offset])
-        e0 = torch.tensor(E[o], dtype=torch.float64)
+        e0 = torch.tensor(E0, dtype=torch.float64)
         pc = torch.tensor(P) @ e0[:3, :3].T + e0[:3, 3]
         avg_scale = pc.norm(dim=-1).mean()
         npc = pc / avg_scale
@@ -195,7 +272,7 @@ def stage_infer():
                              "normal": np.zeros_like(coord.numpy())})
         batch = dict(pobj)          # 샘플 1 개면 base.point_collate_fn 결과와 같다 (cat 항등, offset cumsum 항등). base.py 는 학습 데이터 경로를 import 해서 못 쓴다
         inv = pobj["inverse"]
-        Kt = torch.tensor(K[o], dtype=torch.float32)[None]
+        Kt = torch.tensor(K0, dtype=torch.float32)[None]
         ray = get_ray_sim_per_point(torch.eye(4)[None], Kt, scatter_mean(pts, inv, dim=0), c2w=False, device=dev)
         with torch.no_grad():
             emb, _, p2v_list, pmask, _ = pc_encoder(batch, [ray])
@@ -217,20 +294,25 @@ def stage_infer():
             out = vae.decode(x * 0.96032625)
             w2c = out_to_trajectory(out, torch.full((B, 1), float(avg_scale), device=dev), torch.eye(4, device=dev)[None].expand(B, -1, -1), dev)
         w2c = w2c.double().cpu().numpy()
-        w2c[:, :, :3, 3] /= a["s"]                                          # WT 단위 → DA3 단위
+        w2c[:, :, :3, 3] /= s_ratio                                         # WT 단위 → DA3 단위 (우리 점이면 1)
         for b, i in enumerate(idxs):
             c2w_gl = np.linalg.inv(w2c[b]) @ GL2CV
             np.savez(osp.join(A.out, f"worlddirector__{sc}__{i}.npz"), c2w=c2w_gl.astype(np.float32), scale=np.float32(1.0), text=texts[b],
-                     avg_scale_wt=float(avg_scale), s=a["s"], offset=o, n_vox=int(pe.shape[1]))
+                     avg_scale_wt=float(avg_scale), s=s_ratio, offset=o, points=A.points, n_vox=int(pe.shape[1]))
         if si % 20 == 0:
-            print(f"[infer {si}/{len(scenes)}] {sc} segs {B} vox {pe.shape[1]} avg_scale_wt {float(avg_scale):.3f} s {a['s']:.3f}", flush=True)
+            print(f"[infer {si}/{len(scenes)}] {sc} segs {B} vox {pe.shape[1]} avg_scale {float(avg_scale):.3f} s {s_ratio:.3f} pts {len(P)}", flush=True)
     print(f"=== infer done {len(scenes)} scenes ===", flush=True)
 
 
 def main():
     global A
     ap = argparse.ArgumentParser()
-    ap.add_argument("--stage", choices=["align", "infer"], required=True)
+    ap.add_argument("--stage", choices=["align", "points", "infer"], required=True)
+    ap.add_argument("--points", choices=["wt", "ours_all", "ours_static"], default="wt")   # [R583b] 점 구름 출처
+    ap.add_argument("--pts_dir", default=f"{R}/tmp/r583/pts")
+    ap.add_argument("--pt_stride", type=int, default=2)
+    ap.add_argument("--n_points", type=int, default=1_000_000)     # infer 가 쓰는 점 수 (WT scene.ply 와 같은 1M)
+    ap.add_argument("--n_store", type=int, default=1_500_000)      # points 단계가 scene 당 저장하는 점 수 (static 만 골라도 1M 가 남게)
     ap.add_argument("--out", default=f"{R}/camera_generation/dataset/results/20261023_r527_baseline_v5fall/pred_worlddirector_wt")
     ap.add_argument("--ref", default=REF)
     ap.add_argument("--ckpt", default=f"{SCV}/results/ckpts/225.pth")
@@ -243,7 +325,7 @@ def main():
     ap.add_argument("--limit", type=int, default=0)
     A = ap.parse_args()
     os.makedirs(A.out, exist_ok=True)
-    {"align": stage_align, "infer": stage_infer}[A.stage]()
+    {"align": stage_align, "points": stage_points, "infer": stage_infer}[A.stage]()
 
 
 if __name__ == "__main__":

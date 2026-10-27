@@ -11,7 +11,7 @@
 
 ### Added
 
-- **`dataset/exec/run_worlddirector_batch.py`** (R583). WorldDirector (SCVideo attn_sup, WorldTraj ckpt `results/ckpts/225.pth`) 를 원래 세팅으로 v5f_all test 에 추론 — WT scene.ply → 첫 카메라 정규화 (점 거리 평균 · ‖p‖≤1.25 · ×1.8 · z-up) → Concerto large outdoor → 772 토큰, umT5 len512, DDIM 50, VAE vae_intr (0.96032625). 우리 쪽 맞춤은 첫 카메라 (WT 영상 프레임 offset, L1) 와 단위 (WT/DA3 깊이 비) 뿐. `--stage align` (vista4d env) · `--stage infer` (venv wdconcerto = latentcam + concerto + flash-attn 2.8.3).
+- **`dataset/exec/run_worlddirector_batch.py`** (R583). WorldDirector (SCVideo attn_sup, WorldTraj ckpt `results/ckpts/225.pth`) 를 원래 세팅으로 v5f_all test 에 추론 — WT scene.ply → 첫 카메라 정규화 (점 거리 평균 · ‖p‖≤1.25 · ×1.8 · z-up) → Concerto large outdoor → 772 토큰, umT5 len512, DDIM 50, VAE vae_intr (0.96032625). 우리 쪽 맞춤은 첫 카메라 (WT 영상 프레임 offset, L1) 와 단위 (WT/DA3 깊이 비) 뿐. `--stage align` (vista4d env) · `--stage infer` (venv wdconcerto = latentcam + concerto + flash-attn 2.8.3). `--points ours_all|ours_static` + `--stage points`: WT scene.ply 대신 우리 recon depth 역투영 점 (전체 / dynamic 2px dilation 제외), 첫 카메라 = recon cam0, 깊이 비 1.
 
 - **`latentcam/models/camera_diffusion_model_mmdit_v2.py` · `main/dataset_dl3dv.py` · `main/train_latent_cam_dm.py` · `scripts/eval_testset.py` · `conf/config.yaml`** (R582). 4D 점 구름 조건 — `scene_points4d_cond` (정적 FPS 앞 `pc_static_n` 점 토큰, 시간 PE 없음 + 동적 프레임당 `pc_dyn_n` 점 → `pc_dyn_queries` 개 attention pool + 시간 PE, 각각 `pc_dropout`) 와 `video_point_pe` (Molmo2 패치 토큰에 patch_points_8x8 3D Fourier PE, 마지막 층 0 초기화). backbone=mmdit 전용, 좌표 = frame-s 카메라 / norm_scale. `mmdit_kw(cfg)` 를 train·eval 이 같이 쓰고, depth_vid_cond=false 면 depth 모듈을 만들지 않는다. 기본 off 는 R580 과 동일.
 

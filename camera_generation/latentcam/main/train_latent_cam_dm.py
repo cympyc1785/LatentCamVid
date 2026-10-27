@@ -1087,7 +1087,11 @@ def train():
         assert bool(getattr(cfg, 'val_traj_shape_metrics', False)), "framing_aux 는 val_subject_track (val_traj_shape_metrics=true) 이 필요"
         print(f"(model) framing aux: cam_in/out = cam_dim {cfg.cam_dim} + {_FR} (u,v,0.5logz) · w={getattr(cfg, 'framing_aux_w', 1.0)} "
               f"· sample guidance w={getattr(cfg, 'framing_guidance_w', 0.0)} box={getattr(cfg, 'framing_guidance_box', 0.35)}")
-    if cfg.point_encoder != 'custom':
+    if str(getattr(cfg, 'backbone', 'dit') or 'dit') == 'mmdit':   # [R580] MMDiT 판 (camera·text·Molmo2·기하 4 stream joint attention)
+        from models.camera_diffusion_model_mmdit_v2 import CameraDiffusionMMDiT
+        model = CameraDiffusionMMDiT(cam_dim=cfg.cam_dim + _FR, cond_dim=_track_dim, **_geo_kw, **_vid_kw, **_sp_kw)
+        print(f"(model) backbone=mmdit: 4 stream (camera · text · Molmo2 · depth+srccam), params {sum(p.numel() for p in model.parameters()) / 1e6:.1f}M")
+    elif cfg.point_encoder != 'custom':
         model = CameraDiffusionModel(cam_dim=cfg.cam_dim + _FR, **track_kw(cfg, _track_dim),
                                      **_geo_kw, **_vid_kw, **_sp_kw)
     else:

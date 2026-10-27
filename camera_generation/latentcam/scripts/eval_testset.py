@@ -393,8 +393,12 @@ def main():
         _sp_kw = dict(start_pose_dim=int(getattr(cfg, 'start_pose_dim', 9)),
                       start_pose_tf_p=float(getattr(cfg, 'start_pose_tf_p', 0.0) or 0.0),
                       start_pose_noise=float(getattr(cfg, 'start_pose_noise', 0.0) or 0.0))
-    model = CameraDiffusionModel(cam_dim=cfg.cam_dim + int(getattr(cfg, 'framing_aux_dim', 0) or 0),   # [R236/F6] framing 보조 채널
-                                 **T.track_kw(cfg, _track_dim), **_geo_kw, **_vid_kw, **_sp_kw)   # [R577] track_cond_mode
+    if str(getattr(cfg, 'backbone', 'dit') or 'dit') == 'mmdit':   # [R580] MMDiT 판
+        from models.camera_diffusion_model_mmdit_v2 import CameraDiffusionMMDiT
+        model = CameraDiffusionMMDiT(cam_dim=cfg.cam_dim + int(getattr(cfg, 'framing_aux_dim', 0) or 0), cond_dim=_track_dim, **_geo_kw, **_vid_kw, **_sp_kw)
+    else:
+        model = CameraDiffusionModel(cam_dim=cfg.cam_dim + int(getattr(cfg, 'framing_aux_dim', 0) or 0),   # [R236/F6] framing 보조 채널
+                                     **T.track_kw(cfg, _track_dim), **_geo_kw, **_vid_kw, **_sp_kw)   # [R577] track_cond_mode
     # [new 2026-09-25, R58/D286] video_onfly arm: 학습된 connector 는 ckpt 의 `video_connector.*` 로
     # 들어 있으므로 load 전에 같은 submodule 을 붙인다. frozen ViT 는 Molmo2 체크포인트에서 온다.
     # video_onfly 가 null 이면 None 이고 모델은 기존과 동일.

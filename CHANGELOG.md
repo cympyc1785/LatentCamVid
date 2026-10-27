@@ -9,6 +9,10 @@
 
 ## [Unreleased]
 
+### Added
+
+- **`latentcam/scripts/data/cache_patch_points.py`** (R582). `--mode scene4d` — 조건용 4D 점 구름 `da3/scene_points4d.npz`. 정적 = dynamic·sky 뺀 픽셀 8x8 블록 최소 depth 를 49 프레임 합쳐 voxel 2 프레임 이상만 → FPS 4096, 동적 = dynamic_mask 블록 중앙값 프레임당 FPS 256 (시간축 유지). 기본 `patch8` 동작은 동일.
+
 ### Fixed
 
 - **`dataset/eval/gendop_preds_to_eval_dir.py`** (R581). `--keep_static` 추가 — `--no_rescale` 일 때 이동 0 (pan·tilt·정지 문장에 회전만 낸) GenDoP 궤적을 스킵하지 않는다. 0 나눗셈은 rescale 에서만 생기므로, 빼면 GenDoP CineSync 만 test 가 6111→5336 으로 줄었다. 기본 (플래그 없음) 동작은 동일.

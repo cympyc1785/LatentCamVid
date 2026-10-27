@@ -18,6 +18,7 @@ env: vista4d.  예) python scripts/data/cache_patch_points.py --corpus /data1/cy
   정적: 프레임마다 dynamic·sky 를 뺀 픽셀을 b x b 블록 **최소 depth** (얇은 장애물 보존) 로 올려 49 프레임을 world 에서 합치고,
         voxel (중앙 depth / vox_div) 에서 **2 프레임 이상** 맞은 칸만 남긴다 (최소값이 고르는 경계 flying pixel 은 시점마다 흩어져 빠진다) → FPS n_static.
   동적: 프레임마다 dynamic_mask 픽셀을 b x b 블록 중앙값 (mask 안 픽셀만) 으로 올려 FPS n_dyn (시간축 유지).
+  `--dyn_erode k`: 동적은 mask 를 k px erosion, 정적은 k px dilation 바깥만 (경계 혼합 depth 꼬리 제거).
   출력: <corpus>/dynpose/<video>/da3/scene_points4d.npz  static (Ns,3) f16 · static_valid (Ns,) · dyn (49,Nd,3) f16 · dyn_valid (49,Nd) — world.
 """
 import argparse
@@ -70,17 +71,23 @@ def one_scene4d(video):
     F_, H, W = depth.shape; b = A.block; h, w = H // b, W // b
     rng = np.random.default_rng(0)
     ok = np.isfinite(depth) & (depth > 0) & ~sky
+    if A.dyn_erode > 0:     # mask 경계 픽셀은 앞(물체)·뒤(배경) depth 가 섞여 카메라 쪽 꼬리가 된다 → 동적은 erosion, 정적은 dilation 바깥만
+        from scipy.ndimage import binary_dilation, binary_erosion
+        st_el = np.ones((1, 2 * A.dyn_erode + 1, 2 * A.dyn_erode + 1), bool)
+        dyn_in, dyn_out_m = binary_erosion(dyn, st_el), binary_dilation(dyn, st_el)
+    else:
+        dyn_in = dyn_out_m = dyn
     vv, uu = np.meshgrid((np.arange(h) + 0.5) * b - 0.5, (np.arange(w) + 0.5) * b - 0.5, indexing="ij")
     st_pts, st_f = [], []
     dyn_out = np.zeros((F_, A.n_dyn, 3), np.float16); dyn_val = np.zeros((F_, A.n_dyn), bool)
     for f in range(F_):
         d = depth[f, :h * b, :w * b].reshape(h, b, w, b)
-        ms = (ok[f] & ~dyn[f])[:h * b, :w * b].reshape(h, b, w, b)
+        ms = (ok[f] & ~dyn_out_m[f])[:h * b, :w * b].reshape(h, b, w, b)
         zmin = np.where(ms, d, np.inf).min((1, 3)); cnt = ms.sum((1, 3))
         sel = np.isfinite(zmin) & (cnt >= max(2, b * b // 8))
         if sel.any():
             st_pts.append(_unproject(zmin[sel], uu[sel], vv[sel], K[f], C[f])); st_f.append(np.full(int(sel.sum()), f))
-        md = (ok[f] & dyn[f])[:h * b, :w * b].reshape(h, b, w, b)
+        md = (ok[f] & dyn_in[f])[:h * b, :w * b].reshape(h, b, w, b)
         cd = md.sum((1, 3)); seld = cd >= max(2, b * b // 4)
         if seld.any():
             zd = np.nanmedian(np.where(md, d, np.nan).transpose(0, 2, 1, 3).reshape(h, w, -1)[seld], 1)
@@ -151,6 +158,7 @@ def main():
     ap.add_argument("--vox_div", type=float, default=100.0)  # 정적 voxel = 중앙 depth / vox_div
     ap.add_argument("--n_static", type=int, default=4096)
     ap.add_argument("--n_dyn", type=int, default=256)        # 프레임당
+    ap.add_argument("--dyn_erode", type=int, default=0)      # dynamic_mask 경계 px (동적 erosion · 정적 dilation). 0 = 경계 처리 없음
     A = ap.parse_args()
     vids = (open(A.videos).read().split() if A.videos else sorted(os.listdir(osp.join(A.corpus, "dynpose"))))
     bad = 0

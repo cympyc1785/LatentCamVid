@@ -11,7 +11,7 @@
 
 ### Added
 
-- **`latentcam/scripts/data/cache_patch_points.py`** (R582). `--mode scene4d` — 조건용 4D 점 구름 `da3/scene_points4d.npz`. 정적 = dynamic·sky 뺀 픽셀 8x8 블록 최소 depth 를 49 프레임 합쳐 voxel 2 프레임 이상만 → FPS 4096, 동적 = dynamic_mask 블록 중앙값 프레임당 FPS 256 (시간축 유지). 기본 `patch8` 동작은 동일.
+- **`latentcam/scripts/data/cache_patch_points.py`** (R582). `--mode scene4d` — 조건용 4D 점 구름 `da3/scene_points4d.npz`. 정적 = dynamic·sky 뺀 픽셀 8x8 블록 최소 depth 를 49 프레임 합쳐 voxel 2 프레임 이상만 → FPS 4096, 동적 = dynamic_mask 블록 중앙값 프레임당 FPS 256 (시간축 유지). 기본 `patch8` 동작은 동일. `--dyn_erode k` (기본 0): 동적은 mask k px erosion, 정적은 k px dilation 바깥만 — mask 경계의 앞뒤 섞인 depth 꼬리 제거.
 
 ### Fixed
 

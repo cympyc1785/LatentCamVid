@@ -31,6 +31,8 @@
 
 ### Added
 
+- **`latentcam` `depth_vid_srccam`** (R578). 소스 카메라 토큰 (srccam_cond) 을 depth 영상 토큰과 같은 resampler 의 key/value 에 함께 넣는다 (공유 정규화 시간 PE + 종류 임베딩), geo CA 는 안 씀. 모델 `depth_vid_srccam_dim`. 기본 false = 예전과 같다.
+
 - **`latentcam` `track_cond_mode: xattn`** (R577). subject track·box 조건을 cam 토큰에 concat (49→13 보간) 하는 대신 49 프레임 토큰 → MLP + cam 토큰 축에 맞춘 시간 PE → DiT 층마다 별도 cross-attention (0 초기화 gate). 모델 `track_xattn_dim` · `train_latent_cam_dm.track_kw` / `build_track_cond` · `eval_testset` 생성자. 기본 `concat` = 예전과 같다.
 
 - **`dataset/viz/render_pred_depth_warp.py --no_gt`** (R572). GT(ref) 열을 빼고 렌더한다 (GT 가 비교 대상이 아닌 실험용, 예: face dolly-in 의 GT 는 몸 행). 기본은 예전처럼 GT 열 포함.

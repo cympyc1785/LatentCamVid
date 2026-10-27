@@ -383,7 +383,10 @@ def main():
         _vid_kw.update(depth_vid_cond=True,
                        depth_vid_dropout=float(getattr(cfg, 'depth_vid_dropout', 0.0) or 0.0),
                        depth_vid_resampler=int(getattr(cfg, 'depth_vid_resampler', 64) or 0),
-                       depth_vid_resampler_layers=int(getattr(cfg, 'depth_vid_resampler_layers', 2) or 2))
+                       depth_vid_resampler_layers=int(getattr(cfg, 'depth_vid_resampler_layers', 2) or 2),
+                       # [R578] depth_vid_srccam: 소스 카메라 토큰 (srccam_cond 필요) 을 depth resampler 입력에 같이 — 0 = 예전
+                       depth_vid_srccam_dim=((54 if str(getattr(cfg, 'srccam_cond', '')) == 'plucker' else 11)
+                                             if getattr(cfg, 'depth_vid_srccam', False) else 0))
     # [R91] start pose head (D261/D296) — 학습 진입점과 같은 kwargs. 안 넘기면 strict load 가 start_query/start_out 에서 죽는다.
     _sp_kw = {}
     if bool(getattr(cfg, 'start_pose_pred', False)):

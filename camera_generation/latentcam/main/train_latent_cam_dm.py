@@ -1028,11 +1028,17 @@ def train():
                        occ_grid_dropout=float(getattr(cfg, 'occ_grid_dropout', 0.0) or 0.0),
                        occ_grid_resampler=int(getattr(cfg, 'occ_grid_resampler', 0) or 0),
                        occ_grid_resampler_layers=int(getattr(cfg, 'occ_grid_resampler_layers', 2) or 2))
+    if getattr(cfg, 'depth_vid_srccam', False):                # [R578]
+        assert getattr(cfg, 'depth_vid_cond', False) and getattr(cfg, 'srccam_cond', None), "depth_vid_srccam 은 depth_vid_cond 와 srccam_cond 가 둘 다 필요"
+        print("(model) depth_vid_srccam: 소스 카메라 토큰을 depth resampler key/value 에 같이 (공유 시간 PE + 종류 임베딩), geo CA 는 안 씀")
     if getattr(cfg, 'depth_vid_cond', False):                  # [R482] depth 영상 (voxel 화 없음, 동적 포함)
         _vid_kw.update(depth_vid_cond=True,
                        depth_vid_dropout=float(getattr(cfg, 'depth_vid_dropout', 0.0) or 0.0),
                        depth_vid_resampler=int(getattr(cfg, 'depth_vid_resampler', 64) or 0),
-                       depth_vid_resampler_layers=int(getattr(cfg, 'depth_vid_resampler_layers', 2) or 2))
+                       depth_vid_resampler_layers=int(getattr(cfg, 'depth_vid_resampler_layers', 2) or 2),
+                       # [R578] depth_vid_srccam: 소스 카메라 토큰 (srccam_cond 필요) 을 depth resampler 입력에 같이 — 0 = 예전
+                       depth_vid_srccam_dim=((54 if str(getattr(cfg, 'srccam_cond', '')) == 'plucker' else 11)
+                                             if getattr(cfg, 'depth_vid_srccam', False) else 0))
     # [R429] collision 손실 배선 확인 (0 이면 안 찍힘).
     if float(getattr(cfg, 'collision_loss_w', 0.0) or 0.0) > 0:
         assert bool(getattr(cfg, 'use_vae', False)), "collision_loss 는 latent arm 전용"

@@ -216,6 +216,7 @@ class CameraDiffusionModel(nn.Module):
         depth_vid_dropout=0.0,
         depth_vid_resampler=64,
         depth_vid_resampler_layers=2,
+        depth_vid_srccam_dim=0,
         video_text_fuse="token",
         start_pose_dim=0,
         start_pose_tf_p=0.0,
@@ -306,6 +307,12 @@ class CameraDiffusionModel(nn.Module):
                                    nn.LayerNorm(hidden_dim), FusedMLP(hidden_dim, dropout, nn.GELU, hidden_layer_multiplier=4)])
                     for _ in range(int(depth_vid_resampler_layers))])
                 self.dv_rs_out = nn.LayerNorm(hidden_dim)
+            # [R578] depth_vid_srccam_dim>0: 소스 카메라 프레임 토큰 (srccam Plücker 54-d, 데이터는 geo_emb 로 온다) 을 depth 토큰과 **같은 resampler** 의
+            #   key/value 에 함께 넣는다. 시간 좌표는 depth 토큰과 같은 정규화 t ∈ [-1,1] (dv_pe 공유, y·x = 0) + 종류 임베딩. 이때 geo CA 는 안 쓴다.
+            self.dv_srccam_dim = int(depth_vid_srccam_dim)
+            if self.dv_srccam_dim > 0:
+                self.dv_cam_in = nn.Sequential(nn.Linear(self.dv_srccam_dim, hidden_dim), nn.SiLU(), nn.Linear(hidden_dim, hidden_dim))
+                self.dv_type = nn.Parameter(torch.zeros(2, hidden_dim))
             self.dv_gate = nn.Parameter(torch.zeros(num_layers))
             self.dv_layers = nn.ModuleList([
                 nn.ModuleList([nn.LayerNorm(hidden_dim), CrossAttention(hidden_dim, num_heads),
@@ -741,6 +748,17 @@ class CameraDiffusionModel(nn.Module):
             ang = cc[..., None] * fr
             pe = self.dv_pe(torch.cat([cc, ang.sin().flatten(-2), ang.cos().flatten(-2)], -1))
             dv_tok = self.dv_tok(fd.flatten(2).transpose(1, 2)) + pe[None]
+            if getattr(self, 'dv_srccam_dim', 0) > 0 and geo_emb is not None:      # [R578] 소스 카메라 토큰을 같은 resampler 입력에
+                Fc = geo_emb.shape[1]
+                tc = (torch.arange(Fc, device=device, dtype=fd.dtype) + 0.5) / Fc * 2 - 1
+                cc2 = torch.stack([tc, torch.zeros_like(tc), torch.zeros_like(tc)], -1)
+                ang2 = cc2[..., None] * fr
+                pe2 = self.dv_pe(torch.cat([cc2, ang2.sin().flatten(-2), ang2.cos().flatten(-2)], -1))
+                cam_tok = self.dv_cam_in(geo_emb.to(fd.dtype)) + pe2[None] + self.dv_type[1].to(fd.dtype)
+                if geo_mask is not None:
+                    cam_tok = cam_tok * geo_mask.unsqueeze(-1).to(cam_tok.dtype)
+                dv_tok = torch.cat([dv_tok + self.dv_type[0].to(fd.dtype), cam_tok], 1)
+                has_geo_latent = False                                             # geo CA 자리는 비운다 (소스 카메라는 resampler 로만)
             if getattr(self, 'dv_rs', 0) > 0:
                 q = self.dv_rs_q.expand(B, -1, -1).to(dv_tok.dtype)
                 for ln_q, ln_kv, rca, ln_m, rmlp in self.dv_rs_layers:

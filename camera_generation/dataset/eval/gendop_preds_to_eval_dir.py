@@ -35,6 +35,7 @@ GenDoP 은 **자기 world, DataDoP 게이지, 30 pose** 로 낸다. GT/k6 는 **
 
 `degenerate=True` 인 entry 는 rmax 가 0 이라 3번에서 0 나눗셈이 된다 -> 스킵하고 표에 센다
 (조용히 항등 궤적을 렌더하면 "GenDoP 이 정지 궤적을 냈다"로 오독된다).
+`--no_rescale --keep_static` 이면 나누지 않으므로 스킵하지 않고 그대로 쓴다 (test 개수를 다른 arm 과 맞출 때).
 
 env: `index_pick` 은 아무거나 (numpy 만 쓴다). `gendop_slerp` 은 `GenDoP`
      (`core/utils.py` 가 torch·trimesh·megfile 을 import 한다).
@@ -155,7 +156,7 @@ def main(args):
         pred_rel = (pred_rel[idx_pick] if args.resample == "index_pick"
                     else gendop_resample(pred_rel, args.n_poses, args.gendop_root))
         r_pred, r_gt = rmax_of(pred_rel), rmax_of(gt_rel)
-        if r_pred < 1e-9:
+        if r_pred < 1e-9 and (args.rescale or not args.keep_static):
             n_degen += 1                      # degenerate: 정지 궤적으로 오독되지 않게 뺀다
             continue
         if args.rescale:
@@ -219,6 +220,9 @@ if __name__ == "__main__":
     # 빌린 raw 대조군이지만, 게이지가 씬 단위와 무관하므로 수치는 "게이지 차"를 같이 잰다.
     parser.add_argument("--rescale", dest="rescale", action="store_true", default=True)
     parser.add_argument("--no_rescale", dest="rescale", action="store_false")
+    # [R581] `--no_rescale` 일 때 이동 0 (pan·tilt·정지 문장에 회전만 낸) 궤적도 남긴다. rescale 이
+    # 없으면 0 나눗셈이 없으므로 스킵할 이유가 없다 — 빼면 GenDoP 만 test 개수가 줄어든다 (6111 -> 5336).
+    parser.add_argument("--keep_static", action="store_true")
     # scale 토큰(`coords[:,9]` -> `exp(x/bins*4-2)`) 적용 스위치. `--no_scale_token` 이 **공식 배포
     # 경로**다 — `eval.py:239 pose_normalize` 는 scale 이 안 걸린 `camera_pose` 로 pred JSON 을
     # 쓴다 (`:233` 의 `c2ws[:,:3,3] *= scale_value` 는 numpy 사본에만 걸리고 그 사본은 궤적 PNG

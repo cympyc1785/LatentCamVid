@@ -11,6 +11,8 @@
 
 ### Fixed
 
+- **`dataset/eval/gendop_preds_to_eval_dir.py`** (R581). `--keep_static` 추가 — `--no_rescale` 일 때 이동 0 (pan·tilt·정지 문장에 회전만 낸) GenDoP 궤적을 스킵하지 않는다. 0 나눗셈은 rescale 에서만 생기므로, 빼면 GenDoP CineSync 만 test 가 6111→5336 으로 줄었다. 기본 (플래그 없음) 동작은 동일.
+
 - **`latentcam/main/train_latent_cam_dm.py` · `scripts/eval_testset.py`** (R529). occ_grid / depth_vid 모델 kwargs 가 영상 feature (`video_latent_dim>0`) 분기 안에 있어 Molmo2 없는 arm 에서 빠지던 것 — 분기 밖으로. 영상 있는 arm 은 동작 동일.
 
 - **`latentcam/main/cache_umt5_embeddings.py`** (R526). `merge_caches` 공용 함수 추가 — tmp 드라이버의 umt5 캐시 합치기가 offsets 를 한 칸 밀려 붙여 뒤 캐시 문장이 앞 문장 임베딩을 받던 버그를 고친 판.

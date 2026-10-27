@@ -178,8 +178,9 @@ def main(args):
         target, motion = (split_target_motion(load_condition_text(first_dir, name))
                           if entry else (None, ""))
         columns = []                                             # (라벨, 캡션, c2w)
-        columns.append(("GT" if not entry else f"GT  {entry['preset']}",
-                        "" if not entry else f"target: {target}", ref_c2w))
+        if not args.no_gt:                                       # [R572] --no_gt: GT 열 빼기 (기본은 예전처럼 넣는다)
+            columns.append(("GT" if not entry else f"GT  {entry['preset']}",
+                            "" if not entry else f"target: {target}", ref_c2w))
         for label, folder in arms:
             ref2, _ = load_transforms(path.join(folder, "test", f"{name}_transforms_ref.json"))
             assert np.abs(ref2 - ref_c2w).max() < 1e-5, f"{label} 의 ref 가 다르다 — split 이 어긋났다"
@@ -287,6 +288,7 @@ def build_parser():
     # 코퍼스 갈아끼우는 손잡이 3종. 기본값은 전부 vista4d 라 기존 호출은 한 톨도 안 다르다.
     # dynpose 는 세 개를 같이 넘긴다 (entry 이름이 `dynpose_<uuid>_<i>`, 점군은 `out_dynpose/`,
     # recon 은 `DynPose-LBM/eval_data/recon_and_seg/`).
+    parser.add_argument("--no_gt", action="store_true")   # [R572] GT(ref) 열을 그리지 않는다
     parser.add_argument("--name_prefix", default="vista4d")   # entry 접두사 = 코퍼스 하위 폴더명
     parser.add_argument("--cloud_root", default=path.join(CLOUD_ROOT, "out"))
     add_cloud_source_args(parser)

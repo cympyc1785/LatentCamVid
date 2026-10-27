@@ -31,6 +31,8 @@
 
 ### Added
 
+- **`dataset/viz/render_pred_depth_warp.py --no_gt`** (R572). GT(ref) 열을 빼고 렌더한다 (GT 가 비교 대상이 아닌 실험용, 예: face dolly-in 의 GT 는 몸 행). 기본은 예전처럼 GT 열 포함.
+
 - **`dataset/configs/bank/r570_bmx_v5trim.json`** (R570). bmx-bumps 그래프를 v5 인자 (obb_trim_quantile 0.02 · prefer_person_label) 로 새 출력 폴더 `out_v5trim` 에 다시 굽고 anchor person 뱅크까지. 기존 `out/` 은 안 건드린다.
 
 - **`dataset/fit/bank/export_target_track.py --fill {hold,interp}`** (R567). track 이 안 보인 프레임의 중심을 가까운 관측 유지 (기본, 예전 그대로) 또는 앞뒤 관측 사이 선형 보간으로 채운다. scene graph 의 `center_smooth` 가 이미 49 프레임이면 두 값이 같다.

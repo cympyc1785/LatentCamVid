@@ -33,7 +33,8 @@ class CameraDiffusionMMDiT(nn.Module):
     def __init__(self, cam_dim=64, cond_dim=0, time_emb_dim=512, hidden_dim=512, num_layers=8, num_heads=8, text_dim=4096,
                  video_latent_dim=2560, video_text_dim=2560, video_queries=4, video_patches=64, geo_latent_dim=54,
                  depth_vid_cond=True, depth_vid_dropout=0.1, srccam_dropout=0.1, dropout=0.1,
-                 pc_cond=False, pc_dyn_queries=8, pc_dropout=0.1, video_point_pe=False, **_unused):
+                 pc_cond=False, pc_dyn_queries=8, pc_dropout=0.1, video_point_pe=False,
+                 depth_vid_dense=False, depth_vid_dense_depth=True, depth_vid_dense_plucker=True, depth_vid_dense_q=16, **_unused):
         super().__init__()
         self.cond_dim, self.hidden_dim, self.num_layers = int(cond_dim), hidden_dim, num_layers
         self.cam_in = nn.Linear(cam_dim + self.cond_dim, hidden_dim)
@@ -54,7 +55,12 @@ class CameraDiffusionMMDiT(nn.Module):
         self.video_type = nn.Parameter(torch.zeros(2, hidden_dim))          # [prefill 문장, 영상]
         # ④ geometry
         self.depth_vid_cond, self.dv_dropout, self.sc_dropout, self.dv_nf = bool(depth_vid_cond), float(depth_vid_dropout), float(srccam_dropout), 6
-        if self.depth_vid_cond:
+        self.dv_dense = None
+        if self.depth_vid_cond and depth_vid_dense:      # [R588] Molmo2 378² 좌표 dense depth + 픽셀 Plücker → 시간칸 13 × Q 토큰 (Conv3d 대신)
+            from models.dense_depth_encoder import DenseDepthEncoder
+            self.dv_dense = DenseDepthEncoder(hidden_dim, num_heads, use_depth=bool(depth_vid_dense_depth), use_plucker=bool(depth_vid_dense_plucker),
+                                              queries=int(depth_vid_dense_q))
+        elif self.depth_vid_cond:
             self.dv_enc = nn.Sequential(nn.Conv3d(2, 32, 3, 2, 1), nn.SiLU(), nn.Conv3d(32, 64, 3, 2, 1), nn.SiLU(),
                                         nn.Conv3d(64, 128, 3, 2, 1), nn.SiLU())
             self.dv_tok = nn.Linear(128, hidden_dim)
@@ -99,7 +105,7 @@ class CameraDiffusionMMDiT(nn.Module):
 
     def forward(self, x_t, t, text_emb, text_mask, geo_emb=None, geo_mask=None, cond=None, video_emb=None, video_mask=None,
                 video_text_emb=None, video_text_mask=None, depth_vid=None, pc_static=None, pc_static_valid=None, pc_dyn=None,
-                pc_dyn_valid=None, video_points=None, video_points_valid=None, **_unused):
+                pc_dyn_valid=None, video_points=None, video_points_valid=None, dv_cam=None, **_unused):
         B, T, _ = x_t.shape
         dev, dt = x_t.device, x_t.dtype
         Fsrc = 49
@@ -141,7 +147,14 @@ class CameraDiffusionMMDiT(nn.Module):
         h_vid, m_vid = torch.cat(vparts, 1), torch.cat(vmasks, 1)
         # ④ geometry (depth + srccam), 학습 중 stream 별 dropout = mask
         gparts, gmasks = [self.geo_null.to(dt).expand(B, -1, -1)], [torch.ones(B, 1, dtype=torch.bool, device=dev)]
-        if self.depth_vid_cond and depth_vid is not None:
+        if self.dv_dense is not None and (depth_vid is not None or dv_cam is not None):     # [R588]
+            dtok, slot = self.dv_dense(depth_vid.to(dt) if depth_vid is not None else None, dv_cam)
+            dtok = dtok + self._pe_at(slot.float() * (Fsrc - 1) / max(T - 1, 1), dt)[None] + self.geo_type[0]   # 카메라 토큰과 같은 시간축 (소스 프레임 번호)
+            dm = torch.ones(B, dtok.shape[1], dtype=torch.bool, device=dev)
+            if self.training and self.dv_dropout > 0:
+                dm = dm & (torch.rand(B, 1, device=dev) >= self.dv_dropout)
+            gparts.append(dtok); gmasks.append(dm)
+        elif self.depth_vid_cond and depth_vid is not None:
             fd = self.dv_enc(depth_vid.to(dt)); nt, nh, nw = fd.shape[-3:]
             tc = ((torch.arange(nt, device=dev, dtype=torch.float32) + 0.5) * Fsrc / nt - 0.5)
             ys = (torch.arange(nh, device=dev, dtype=dt) + 0.5) / nh * 2 - 1; xs = (torch.arange(nw, device=dev, dtype=dt) + 0.5) / nw * 2 - 1

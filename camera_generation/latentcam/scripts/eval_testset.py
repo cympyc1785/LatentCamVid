@@ -386,7 +386,12 @@ def main():
                        depth_vid_resampler_layers=int(getattr(cfg, 'depth_vid_resampler_layers', 2) or 2),
                        # [R578] depth_vid_srccam: 소스 카메라 토큰 (srccam_cond 필요) 을 depth resampler 입력에 같이 — 0 = 예전
                        depth_vid_srccam_dim=((54 if str(getattr(cfg, 'srccam_cond', '')) == 'plucker' else 11)
-                                             if getattr(cfg, 'depth_vid_srccam', False) else 0))
+                                             if getattr(cfg, 'depth_vid_srccam', False) else 0),
+                       # [R588] depth_vid_dense: Molmo2 378² 좌표 dense depth + 픽셀 Plücker (models/dense_depth_encoder.py). false = 예전 Conv3d 경로
+                       depth_vid_dense=bool(getattr(cfg, 'depth_vid_dense', False)),
+                       depth_vid_dense_depth=bool(getattr(cfg, 'depth_vid_dense_depth', True)),
+                       depth_vid_dense_plucker=bool(getattr(cfg, 'depth_vid_dense_plucker', True)),
+                       depth_vid_dense_q=int(getattr(cfg, 'depth_vid_dense_q', 16) or 16))
     # [R91] start pose head (D261/D296) — 학습 진입점과 같은 kwargs. 안 넘기면 strict load 가 start_query/start_out 에서 죽는다.
     _sp_kw = {}
     if bool(getattr(cfg, 'start_pose_pred', False)):

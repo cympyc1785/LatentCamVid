@@ -1297,6 +1297,36 @@ class CamDataset(torch.utils.data.Dataset):
             dy = torch.cat([dy, dy[-1:].expand(k, -1, -1)], 0); dv = torch.cat([dv, dv[-1:].expand(k, -1)], 0)
         return {'pc_static': st, 'pc_static_valid': sv, 'pc_dyn': tf(dy) * dv[..., None], 'pc_dyn_valid': dv}
 
+    def _depth_vid_dense(self, scene_idx, s, e, norm_scale):
+        """[R588] `<scene>/da3/dense_depth378.npz` (fit/bank/depth_vid_cache.py --mode dense: Molmo2 처럼 S×S 로 늘린 원본 z, nearest) 의 [s,e)
+        → (3,T,S,S) float16 [log1p(z/norm_scale)·valid · valid · dynamic]. 캐시 안 함 (장면당 15 MB)."""
+        p = osp.join(self.scene_dir_list[scene_idx], 'da3', str(getattr(self.cfg, 'depth_vid_dense_file', None) or 'dense_depth378.npz'))
+        if not osp.isfile(p):
+            raise FileNotFoundError(f"depth_vid_dense 인데 파일이 없다: {p} — fit/bank/depth_vid_cache.py --mode dense 를 먼저 돌릴 것")
+        z = np.load(p); S = int(z['size']); Tall = z['depth'].shape[0]
+        d = torch.from_numpy(z['depth'][s:e].astype(np.float32))
+        dyn = torch.from_numpy(np.unpackbits(z['dyn_bits'])[:Tall * S * S].reshape(Tall, S, S)[s:e].astype(np.float32))
+        if d.shape[0] < e - s:                                              # 소스가 짧으면 마지막 프레임 반복 (_depth_vid 와 같은 규칙)
+            k = e - s - d.shape[0]; d = torch.cat([d, d[-1:].expand(k, -1, -1)], 0); dyn = torch.cat([dyn, dyn[-1:].expand(k, -1, -1)], 0)
+        v = (d > 0).float()
+        return torch.stack([torch.log1p(d / float(norm_scale)) * v, v, dyn * v], 0).half()
+
+    def _dense_cam(self, scene_idx, s, e, w2c_s, norm_scale, hw_orig):
+        """[R588] 프레임별 소스 카메라 (T,16) = c2w 회전 Rt (9) · 중심 o (3) · fx/W, fy/H, cx/W, cy/H (4) — frame-s 카메라 좌표 / norm_scale.
+        기준계·단위는 _srccam_tokens 와 같다. 모델 (DenseDepthEncoder.plucker) 이 늘린 S×S 픽셀마다 Plücker ray 를 만든다."""
+        idxs = self._target_frame_idxs(s, e)
+        H0, W0 = float(hw_orig[0]), float(hw_orig[1])
+        w2c_v = self.extrinsics_list[scene_idx][list(idxs)].float()
+        K = self.intrinsics_list[scene_idx][list(idxs)].float()
+        rel = w2c_v @ torch.linalg.inv(w2c_s.float()).unsqueeze(0)
+        Rt = rel[:, :3, :3].transpose(1, 2)
+        o = -torch.einsum('vij,vj->vi', Rt, rel[:, :3, 3] / norm_scale)
+        k = torch.stack([K[:, 0, 0] / W0, K[:, 1, 1] / H0, K[:, 0, 2] / W0, K[:, 1, 2] / H0], -1)
+        out = torch.cat([Rt.reshape(-1, 9), o, k], -1).float()
+        if out.shape[0] < e - s:
+            out = torch.cat([out, out[-1:].expand(e - s - out.shape[0], -1)], 0)
+        return out
+
     def _depth_vid(self, scene_idx, s, e, norm_scale):
         """[R482] `<scene>/da3/<depth_vid_file>` (camera_generation/dataset/fit/bank/depth_vid_cache.py: 소스 전 프레임 DA3 depth 를 (T,h,w)
         float16 로 줄인 것, 하늘·무효 = 0) 의 세그먼트 구간 [s,e) → (2,e-s,h,w) [log1p(depth / norm_scale) · valid]. voxel 화 없음, 동적 물체 포함."""
@@ -2133,7 +2163,12 @@ class CamDataset(torch.utils.data.Dataset):
         if getattr(self.cfg, 'occ_grid_cond', False):
             out['occ_grid'] = self._occ_grid(scene_idx, data_name.split('_')[-1], norm_scale)
         # [R482] depth_vid_cond: 소스 depth 영상 (2,T,h,w) — voxel 화 없음 · 동적 포함 (기본 off = 키 없음).
-        if getattr(self.cfg, 'depth_vid_cond', False):
+        if getattr(self.cfg, 'depth_vid_cond', False) and getattr(self.cfg, 'depth_vid_dense', False):   # [R588] Molmo2 378² 좌표 dense depth + Plücker 카메라
+            if getattr(self.cfg, 'depth_vid_dense_depth', True):
+                out['depth_vid'] = self._depth_vid_dense(scene_idx, s, e, norm_scale)
+            if getattr(self.cfg, 'depth_vid_dense_plucker', True):
+                out['dv_cam'] = self._dense_cam(scene_idx, s, e, extrinsics[0], norm_scale, (h, w))
+        elif getattr(self.cfg, 'depth_vid_cond', False):
             out['depth_vid'] = self._depth_vid(scene_idx, s, e, norm_scale)
         # [R429] collision 보조 손실의 거리장 (1,N,N,N) — 손실 전용 (모델 입력 아님). collision_loss_w=0 (기본) 이면 키 없음.
         if float(getattr(self.cfg, 'collision_loss_w', 0.0) or 0.0) > 0:

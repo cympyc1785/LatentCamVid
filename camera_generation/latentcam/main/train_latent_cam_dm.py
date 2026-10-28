@@ -647,6 +647,8 @@ def build_video_cond(data, device):
         kw['occ_grid'] = data['occ_grid'].to(device).float()
     if 'depth_vid' in data:            # [R482] 소스 depth 영상 → 모델 depth CA
         kw['depth_vid'] = data['depth_vid'].to(device).float()
+    if 'dv_cam' in data:               # [R588] dense Plücker 용 소스 카메라 (T,16)
+        kw['dv_cam'] = data['dv_cam'].to(device).float()
     if 'pc_static' in data:            # [R582] 4D 점 구름 → MMDiT 기하 stream
         for k in ('pc_static', 'pc_dyn'):
             kw[k] = data[k].to(device).float()
@@ -1057,7 +1059,12 @@ def train():
                        depth_vid_resampler_layers=int(getattr(cfg, 'depth_vid_resampler_layers', 2) or 2),
                        # [R578] depth_vid_srccam: 소스 카메라 토큰 (srccam_cond 필요) 을 depth resampler 입력에 같이 — 0 = 예전
                        depth_vid_srccam_dim=((54 if str(getattr(cfg, 'srccam_cond', '')) == 'plucker' else 11)
-                                             if getattr(cfg, 'depth_vid_srccam', False) else 0))
+                                             if getattr(cfg, 'depth_vid_srccam', False) else 0),
+                       # [R588] depth_vid_dense: Molmo2 378² 좌표 dense depth + 픽셀 Plücker (models/dense_depth_encoder.py). false = 예전 Conv3d 경로
+                       depth_vid_dense=bool(getattr(cfg, 'depth_vid_dense', False)),
+                       depth_vid_dense_depth=bool(getattr(cfg, 'depth_vid_dense_depth', True)),
+                       depth_vid_dense_plucker=bool(getattr(cfg, 'depth_vid_dense_plucker', True)),
+                       depth_vid_dense_q=int(getattr(cfg, 'depth_vid_dense_q', 16) or 16))
     # [R429] collision 손실 배선 확인 (0 이면 안 찍힘).
     if float(getattr(cfg, 'collision_loss_w', 0.0) or 0.0) > 0:
         assert bool(getattr(cfg, 'use_vae', False)), "collision_loss 는 latent arm 전용"
@@ -1126,8 +1133,10 @@ def train():
               f"fourier={getattr(model, 'subject_pts_fourier', 0)} stats={getattr(model, 'subject_pts_stats', False)} "
               f"params={sum(p.numel() for n, p in model.named_parameters() if 'pts' in n or 'subj' in n)}")
     if getattr(cfg, 'depth_vid_cond', False):                    # [R482] 같은 규칙
-        assert getattr(model, 'depth_vid_cond', False) and hasattr(model, 'dv_enc'), "depth_vid_cond=true 인데 모델에 depth 영상 모듈이 없다"
+        assert getattr(model, 'depth_vid_cond', False) and (hasattr(model, 'dv_enc') or getattr(model, 'dv_dense', None) is not None), "depth_vid_cond=true 인데 모델에 depth 영상 모듈이 없다"
         print(f"(model) depth_vid: dropout={model.dv_dropout} resampler={getattr(model, 'dv_rs', 0)} "
+              f"dense={getattr(model, 'dv_dense', None) is not None}"
+              + (f" (depth={model.dv_dense.use_depth} plucker={model.dv_dense.use_plucker} Q={model.dv_dense.Q})" if getattr(model, 'dv_dense', None) is not None else "") + " "
               f"params={sum(p.numel() for n, p in model.named_parameters() if n.startswith('dv_'))}", flush=True)
     if getattr(cfg, 'occ_grid_cond', False):                     # [R425] 같은 규칙 — 격자 모듈이 없으면 기동 즉시 멈춘다
         assert getattr(model, 'occ_grid_cond', False) and hasattr(model, 'occ_enc'), "occ_grid_cond=true 인데 모델에 점유 격자 모듈이 없다"

@@ -287,6 +287,11 @@ pc_dyn_n: 256                # 프레임당 동적 점 수
 pc_dyn_queries: 8            # 프레임당 동적 토큰 수 (attention pool)
 pc_dropout: 0.1
 video_point_pe: false        # [R582] true = Molmo2 패치 토큰에 patch_points_8x8 3D PE (video_patch_points: true 필요, mmdit 전용)
+depth_vid_dense: false        # [R588] true = Molmo2 첫 입력처럼 378² 픽셀 depth (+ 픽셀 Plücker) → patch conv → 시간칸 13 × Q 토큰 (depth_vid_cond 필요)
+depth_vid_dense_file: dense_depth378.npz
+depth_vid_dense_depth: true    # depth 3채널 (log z · valid · dynamic) 을 넣을지
+depth_vid_dense_plucker: true  # 픽셀 Plücker 6채널 (소스 카메라) 을 넣을지
+depth_vid_dense_q: 16          # 시간칸당 resampler query 수 (토큰 = 13 × Q)
 track_cond_mode: concat   # [R577] concat (기본, cam_in 에 49→13 보간 concat) | xattn (49 프레임 토큰 별도 cross-attention)
 # [R326] subject 궤적 파일 (<scene>/da3/ 아래). 기본 = VLM+SAM3+DA3 OBB 중심. target_track_molmo2.npz = Molmo2 tracking + DA3 lifting.
 target_track_file: target_track.npz

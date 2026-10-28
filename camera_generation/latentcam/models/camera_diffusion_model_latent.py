@@ -217,6 +217,10 @@ class CameraDiffusionModel(nn.Module):
         depth_vid_resampler=64,
         depth_vid_resampler_layers=2,
         depth_vid_srccam_dim=0,
+        depth_vid_dense=False,
+        depth_vid_dense_depth=True,
+        depth_vid_dense_plucker=True,
+        depth_vid_dense_q=16,
         video_text_fuse="token",
         start_pose_dim=0,
         start_pose_tf_p=0.0,
@@ -293,7 +297,20 @@ class CameraDiffusionModel(nn.Module):
         #   → 시공간 3D conv (t·y·x 모두 stride 2 × 3) → 토큰 + (t,y,x) Fourier PE → Perceiver resampler K → DiT 층마다 CA (0 초기화 gate).
         #   occ_grid_cond 와 같은 주입 방식, 입력만 다르다 (사용자 10-21 "voxelize 없이 dynamic 도 포함해서 depth 그 자체에서 time 축 고려해서 conv").
         self.depth_vid_cond = bool(depth_vid_cond)
-        if self.depth_vid_cond:
+        self.dv_dense = None
+        if self.depth_vid_cond and depth_vid_dense:
+            # [R588] dense: Molmo2 첫 입력과 같은 378² 픽셀 depth (+ 픽셀 Plücker) → patch conv 27² → latent 13 시간칸 × Q 토큰 (models/dense_depth_encoder.py).
+            #   예전 Conv3d·resampler·srccam 54-d 경로는 만들지 않는다. CA 주입 (dv_gate·dv_layers) 은 같다.
+            from models.dense_depth_encoder import DenseDepthEncoder
+            self.dv_dropout = float(depth_vid_dropout); self.dv_rs = 0; self.dv_srccam_dim = 0
+            self.dv_dense = DenseDepthEncoder(hidden_dim, num_heads, use_depth=bool(depth_vid_dense_depth), use_plucker=bool(depth_vid_dense_plucker),
+                                              queries=int(depth_vid_dense_q))
+            self.dv_gate = nn.Parameter(torch.zeros(num_layers))
+            self.dv_layers = nn.ModuleList([
+                nn.ModuleList([nn.LayerNorm(hidden_dim), CrossAttention(hidden_dim, num_heads),
+                               FusedMLP(hidden_dim, dropout, nn.GELU, hidden_layer_multiplier=4)])
+                for _ in range(num_layers)])
+        elif self.depth_vid_cond:
             self.dv_dropout, self.dv_nf = float(depth_vid_dropout), 6
             self.dv_enc = nn.Sequential(nn.Conv3d(2, 32, 3, 2, 1), nn.SiLU(), nn.Conv3d(32, 64, 3, 2, 1), nn.SiLU(),
                                         nn.Conv3d(64, 128, 3, 2, 1), nn.SiLU())
@@ -590,7 +607,7 @@ class CameraDiffusionModel(nn.Module):
 
     def forward(self, x_t, t, text_emb, text_mask, geo_emb=None, geo_mask=None, cond=None,
                 video_emb=None, video_mask=None, video_text_emb=None, video_text_mask=None,
-                start_pose=None, video_points=None, video_points_valid=None, subject_pts=None, occ_grid=None, depth_vid=None):
+                start_pose=None, video_points=None, video_points_valid=None, subject_pts=None, occ_grid=None, depth_vid=None, dv_cam=None):
         self.text_cross_attn_weight = None
         # [new 2026-09-03] video CA. `video_latent_dim==0` 이거나 video_emb 가 없으면 이 스트림은
         # 통째로 건너뛴다 = 기존 경로와 동일.
@@ -734,7 +751,13 @@ class CameraDiffusionModel(nn.Module):
             tx_tok = self.tx_in(cond.to(x_t.dtype)) + positional_encoding_at(tpos, self.cam_in.out_features).to(x_t.dtype)[None]
             cond = None                                                                     # concat 경로로는 안 간다 (cond_dim 0)
         dv_tok = None
-        if getattr(self, 'depth_vid_cond', False) and depth_vid is not None:   # [R482] 없으면 (추론에서 조건 없음) 토큰 없이 = gate 경로 생략
+        if getattr(self, 'dv_dense', None) is not None and (depth_vid is not None or dv_cam is not None):   # [R588]
+            dv_tok, slot = self.dv_dense(depth_vid.to(x_t.dtype) if depth_vid is not None else None, dv_cam)
+            dv_tok = dv_tok + positional_encoding_at(slot.to(dv_tok.dtype), dv_tok.shape[-1]).to(dv_tok.dtype)[None]   # 카메라 토큰 τ 와 같은 시간 PE
+            if self.training and self.dv_dropout > 0:
+                keep = (torch.rand(B, 1, 1, device=device) >= self.dv_dropout).to(dv_tok.dtype)
+                dv_tok = dv_tok * keep
+        elif getattr(self, 'depth_vid_cond', False) and depth_vid is not None:   # [R482] 없으면 (추론에서 조건 없음) 토큰 없이 = gate 경로 생략
             g = depth_vid.to(x_t.dtype)
             if self.training and self.dv_dropout > 0:
                 drop = (torch.rand(B, device=device) < self.dv_dropout)

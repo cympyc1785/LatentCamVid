@@ -11,6 +11,8 @@
 
 ### Added
 
+- **`dataset/fit/graph/build_scene_graph.py`** (R592). `--save_frame_extent`: 노드 track 에 프레임별 OBB extent (평활 전 fit 값, `track.extent`) 를 같이 저장. 대표 OBB 는 그대로 median (D63) — 기존 그래프와 center·yaw·extent 차이 0 확인. 기본 off.
+
 - **`latentcam/main/dataset_dl3dv.py` · `main/train_latent_cam_dm.py` · `main/base.py` · `conf/config.yaml`** (R591). 학습 속도 옵션 (값 동일, 기본 off): `depth_vid_dense_gpu` (dense depth 채널 log1p·valid·dynamic 을 GPU 에서 조립 — dataset 은 원본 z + 동적 packbits 만, CPU·전송 약 1/3; CPU 판과 차이 0 확인), `depth_vid_dense_dir` (<dir>/<scene>.npz 를 먼저 — /dev/shm RAM 사본을 학습들이 공유), `loader_pin_memory` · `loader_prefetch` (DataLoader).
 
 - **`dataset/eval/eval_subject_in_frame.py`** (R590). `--prompts_name` (기본 prompts.json) — v5f_all 처럼 eval 이 다른 프롬프트 파일 (prompts_v2.json) 을 쓴 경우 캡션 일치 검사를 그 파일과 한다. 기본은 예전과 같다.

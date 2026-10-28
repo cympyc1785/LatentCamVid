@@ -227,8 +227,9 @@ def build_node(inst: dict, node_id: str, num_frames: int, cam_centers_g: np.ndar
                view_dir_g: np.ndarray, parallax: float, deinflate: bool = False,
                min_points_per_frame: int = 30,
                yaw_median_window: int = 5, moving_threshold_u: float = 0.05,
-               prefer_person_label: bool = False, obb_trim_quantile: float = 0.0):
-    """인스턴스 하나 → 노드 dict. 프레임별 OBB fit → yaw unwrap + median → 대표 OBB."""
+               prefer_person_label: bool = False, obb_trim_quantile: float = 0.0, save_frame_extent: bool = False):
+    """인스턴스 하나 → 노드 dict. 프레임별 OBB fit → yaw unwrap + median → 대표 OBB.
+    [R592] save_frame_extent: 프레임별 extent (평활 전 fit 값) 를 track.extent 로 같이 남긴다 (대표 OBB 는 그대로 median, D63)."""
     frames = sorted(f for f, points in inst["points_by_frame"].items()
                     if len(points) >= min_points_per_frame)
     if len(frames) < 1:
@@ -309,7 +310,8 @@ def build_node(inst: dict, node_id: str, num_frames: int, cam_centers_g: np.ndar
         "center_drift_u": round(drift, 4),
         "speed_u_per_frame": round(path_len / max(span, 1), 5),
         "track": {"frames": frames, "center_smooth": centers_dense, "yaw": yaws_dense,
-                  "conf": [round(float(s), 3) for s in inst["scores"]]},
+                  "conf": [round(float(s), 3) for s in inst["scores"]],
+                  **({"extent": [[round(float(v), 5) for v in e] for e in extents]} if save_frame_extent else {})},
         "obs_az_span_deg": round(azimuth_span(azimuths), 1),
         "observed_faces": observed_faces(azimuths),
         "viewing_distance": {"d_ref": round(float(np.median(distances)), 4),
@@ -475,7 +477,7 @@ def main(args):
         node = build_node(inst, f"{inst['kind']}_{counters[inst['kind']]}", num_frames,
                           cam_centers_g, view_dir_g, plx, deinflate=args.deinflate,
                           prefer_person_label=args.prefer_person_label,
-                          obb_trim_quantile=args.obb_trim_quantile)
+                          obb_trim_quantile=args.obb_trim_quantile, save_frame_extent=args.save_frame_extent)
         if node is None:
             dropped.append({**inst, "drop_reasons": ["OBB 를 세울 프레임이 없다"]})
             counters[inst["kind"]] -= 1
@@ -741,6 +743,7 @@ if __name__ == "__main__":
     parser.add_argument("--depth_mode_gap_frac", default=0.005, type=float)
     # [R264] OBB 를 맞추기 전 프레임별 축별 백분위 양끝 제거 (경계 꼬리). 0 = 끔 (예전과 동일). 권장 0.02.
     parser.add_argument("--obb_trim_quantile", default=0.0, type=float)
+    parser.add_argument("--save_frame_extent", action="store_true", default=False)   # [R592] track.extent (프레임별 [l,w,h]) 저장
     # [R265] dyn 노드 위치·변위를 CoTracker 궤적으로 (`<dir>/<video>__<node_id>.npz`). None = 끔 (예전과 동일).
     parser.add_argument("--tracker_dir", default=None, type=str)
     parser.add_argument("--tracker_min_pairs", default=5, type=int)

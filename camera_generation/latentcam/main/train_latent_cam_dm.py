@@ -647,6 +647,8 @@ def build_video_cond(data, device):
         kw['occ_grid'] = data['occ_grid'].to(device).float()
     if 'depth_vid' in data:            # [R482] 소스 depth 영상 → 모델 depth CA
         kw['depth_vid'] = data['depth_vid'].to(device).float()
+    if 'depth_vid_raw' in data:        # [R591] dense depth 채널을 GPU 에서 조립 (_depth_vid_dense 와 같은 값)
+        kw['depth_vid'] = dense_depth_on_gpu(data['depth_vid_raw'], data['depth_vid_dynbits'], data['depth_vid_ns'], device)
     if 'dv_cam' in data:               # [R588] dense Plücker 용 소스 카메라 (T,16)
         kw['dv_cam'] = data['dv_cam'].to(device).float()
     if 'pc_static' in data:            # [R582] 4D 점 구름 → MMDiT 기하 stream
@@ -661,6 +663,18 @@ def build_video_cond(data, device):
         kw['video_text_emb'] = data['peav_text'].to(device).float()
         kw['video_text_mask'] = data['peav_text_mask'].to(device).bool()
     return kw
+
+
+def dense_depth_on_gpu(raw, dynbits, ns, device):
+    """[R591] (B,T,S,S) fp16 z · (B,T·S·S/8) uint8 packbits · (B,) norm_scale → (B,3,T,S,S) [log1p(z/ns)·valid, valid, dyn·valid].
+    dataset._depth_vid_dense (CPU) 와 같은 식·같은 fp16 반올림 — 학습이 보는 값이 바뀌지 않는다."""
+    d = raw.to(device, non_blocking=True).float()
+    B, T, S, _ = d.shape
+    sh = torch.arange(7, -1, -1, device=device, dtype=torch.uint8)
+    dyn = ((dynbits.to(device, non_blocking=True)[..., None] >> sh) & 1).reshape(B, -1)[:, :T * S * S].reshape(B, T, S, S).float()
+    v = (d > 0).float()
+    x = torch.stack([torch.log1p(d / ns.to(device).float().view(B, 1, 1, 1)) * v, v, dyn * v], 1)
+    return x.half().float()
 
 
 def mmdit_kw(cfg):

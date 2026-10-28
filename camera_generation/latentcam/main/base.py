@@ -124,14 +124,14 @@ class Trainer(Base):
                 dataset=self.trainset_loader,
                 batch_size=self.cfg.num_gpus * self.cfg.batch_size,
                 shuffle=True, num_workers=self.cfg.num_thread,
-                persistent_workers=True, drop_last=True, collate_fn=collate_fn)
+                persistent_workers=True, drop_last=True, collate_fn=collate_fn, **loader_kw(self.cfg))
             self.itr_per_epoch = math.ceil(len(self.trainset_loader) / self.cfg.num_gpus / self.cfg.batch_size)
         if include_val:
             self.valid_batch_generator = DataLoader(
                 dataset=self.validset_loader,
                 batch_size=self.cfg.num_gpus * self.cfg.batch_size,
                 shuffle=False, num_workers=self.cfg.num_thread,
-                persistent_workers=True, collate_fn=collate_fn)
+                persistent_workers=True, collate_fn=collate_fn, **loader_kw(self.cfg))
 
     def _make_mixed_loaders(self, dataset, include_train, include_val):
         """dataset_name='mixed' 전용 DataLoader 구성. 배치 하나 = 코퍼스 하나.
@@ -153,7 +153,7 @@ class Trainer(Base):
             self.batch_generator = DataLoader(
                 dataset=self.trainset_loader, batch_sampler=sampler,
                 num_workers=self.cfg.num_thread, persistent_workers=True,
-                collate_fn=collate_fn)
+                collate_fn=collate_fn, **loader_kw(self.cfg))
             self.itr_per_epoch = len(sampler)
             print(f"[mixed loader] train {len(sampler)} batches (bs {bs}) "
                   f"per corpus {sampler._n_batches}")
@@ -170,7 +170,7 @@ class Trainer(Base):
             self.valid_batch_generator = DataLoader(
                 dataset=self.validset_loader, batch_sampler=v_sampler,
                 num_workers=self.cfg.num_thread, persistent_workers=True,
-                collate_fn=collate_fn)
+                collate_fn=collate_fn, **loader_kw(self.cfg))
             print(f"[mixed loader] val {len(v_sampler)} batches "
                   f"(interleave={v_sampler.interleave}) per corpus {v_sampler._n_batches}")
 
@@ -179,6 +179,17 @@ class Trainer(Base):
         model = DataParallel(model).cuda()
         model.eval()
         self.model = model
+
+
+def loader_kw(cfg):
+    """[R591] DataLoader 추가 인자 — loader_pin_memory · loader_prefetch (config). 기본 (false · 0) 이면 빈 dict = 예전과 같다."""
+    kw = {}
+    if bool(getattr(cfg, 'loader_pin_memory', False)):
+        kw['pin_memory'] = True
+    pf = int(getattr(cfg, 'loader_prefetch', 0) or 0)
+    if pf > 0:
+        kw['prefetch_factor'] = pf
+    return kw
 
 
 def collate_fn(batch):

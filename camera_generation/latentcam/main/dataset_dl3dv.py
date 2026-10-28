@@ -1300,7 +1300,7 @@ class CamDataset(torch.utils.data.Dataset):
     def _depth_vid_dense(self, scene_idx, s, e, norm_scale):
         """[R588] `<scene>/da3/dense_depth378.npz` (fit/bank/depth_vid_cache.py --mode dense: Molmo2 처럼 S×S 로 늘린 원본 z, nearest) 의 [s,e)
         → (3,T,S,S) float16 [log1p(z/norm_scale)·valid · valid · dynamic]. 캐시 안 함 (장면당 15 MB)."""
-        p = osp.join(self.scene_dir_list[scene_idx], 'da3', str(getattr(self.cfg, 'depth_vid_dense_file', None) or 'dense_depth378.npz'))
+        p = self._dense_depth_path(scene_idx)
         if not osp.isfile(p):
             raise FileNotFoundError(f"depth_vid_dense 인데 파일이 없다: {p} — fit/bank/depth_vid_cache.py --mode dense 를 먼저 돌릴 것")
         z = np.load(p); S = int(z['size']); Tall = z['depth'].shape[0]
@@ -1310,6 +1310,28 @@ class CamDataset(torch.utils.data.Dataset):
             k = e - s - d.shape[0]; d = torch.cat([d, d[-1:].expand(k, -1, -1)], 0); dyn = torch.cat([dyn, dyn[-1:].expand(k, -1, -1)], 0)
         v = (d > 0).float()
         return torch.stack([torch.log1p(d / float(norm_scale)) * v, v, dyn * v], 0).half()
+
+    def _dense_depth_path(self, scene_idx):
+        """[R591] depth_vid_dense_dir 를 주면 <dir>/<scene>.npz (예: /dev/shm 에 복사한 RAM 사본 — 여러 학습이 같은 파일을 공유) 를 먼저 본다."""
+        d = getattr(self.cfg, 'depth_vid_dense_dir', None)
+        if d:
+            q = osp.join(str(d), osp.basename(osp.normpath(self.scene_dir_list[scene_idx])) + '.npz')
+            if osp.isfile(q):
+                return q
+        return osp.join(self.scene_dir_list[scene_idx], 'da3', str(getattr(self.cfg, 'depth_vid_dense_file', None) or 'dense_depth378.npz'))
+
+    def _depth_vid_dense_raw(self, scene_idx, s, e, norm_scale):
+        """[R591] _depth_vid_dense 와 같은 값을 GPU 에서 만들도록 원본만 넘긴다 — depth (T,S,S) fp16 z · 동적 packbits (T·S·S/8,) uint8 ·
+        norm_scale. CPU 변환·전송이 약 1/3 (42 MB → 15 MB). 조립 식은 train_latent_cam_dm.dense_depth_on_gpu."""
+        p = self._dense_depth_path(scene_idx)
+        if not osp.isfile(p):
+            raise FileNotFoundError(f"depth_vid_dense 인데 파일이 없다: {p} — fit/bank/depth_vid_cache.py --mode dense 를 먼저 돌릴 것")
+        z = np.load(p); S = int(z['size']); Tall = z['depth'].shape[0]
+        idx = list(range(s, min(e, Tall))) + [Tall - 1] * max(0, e - Tall)          # 소스가 짧으면 마지막 프레임 반복 (같은 규칙)
+        d = torch.from_numpy(np.ascontiguousarray(z['depth'][idx]))
+        bits = np.unpackbits(z['dyn_bits'])[:Tall * S * S].reshape(Tall, S, S)[idx]
+        return {'depth_vid_raw': d, 'depth_vid_dynbits': torch.from_numpy(np.packbits(bits.reshape(-1))),
+                'depth_vid_ns': torch.tensor(float(norm_scale), dtype=torch.float32)}
 
     def _dense_cam(self, scene_idx, s, e, w2c_s, norm_scale, hw_orig):
         """[R588] 프레임별 소스 카메라 (T,16) = c2w 회전 Rt (9) · 중심 o (3) · fx/W, fy/H, cx/W, cy/H (4) — frame-s 카메라 좌표 / norm_scale.
@@ -2164,7 +2186,9 @@ class CamDataset(torch.utils.data.Dataset):
             out['occ_grid'] = self._occ_grid(scene_idx, data_name.split('_')[-1], norm_scale)
         # [R482] depth_vid_cond: 소스 depth 영상 (2,T,h,w) — voxel 화 없음 · 동적 포함 (기본 off = 키 없음).
         if getattr(self.cfg, 'depth_vid_cond', False) and getattr(self.cfg, 'depth_vid_dense', False):   # [R588] Molmo2 378² 좌표 dense depth + Plücker 카메라
-            if getattr(self.cfg, 'depth_vid_dense_depth', True):
+            if getattr(self.cfg, 'depth_vid_dense_depth', True) and getattr(self.cfg, 'depth_vid_dense_gpu', False):
+                out.update(self._depth_vid_dense_raw(scene_idx, s, e, norm_scale))   # [R591] 원본 z + 동적 비트만 — 채널 조립은 GPU (build_video_cond)
+            elif getattr(self.cfg, 'depth_vid_dense_depth', True):
                 out['depth_vid'] = self._depth_vid_dense(scene_idx, s, e, norm_scale)
             if getattr(self.cfg, 'depth_vid_dense_plucker', True):
                 out['dv_cam'] = self._dense_cam(scene_idx, s, e, extrinsics[0], norm_scale, (h, w))

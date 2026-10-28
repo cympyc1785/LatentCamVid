@@ -11,6 +11,8 @@
 
 ### Added
 
+- **`latentcam/main/dataset_dl3dv.py` · `main/train_latent_cam_dm.py` · `main/base.py` · `conf/config.yaml`** (R591). 학습 속도 옵션 (값 동일, 기본 off): `depth_vid_dense_gpu` (dense depth 채널 log1p·valid·dynamic 을 GPU 에서 조립 — dataset 은 원본 z + 동적 packbits 만, CPU·전송 약 1/3; CPU 판과 차이 0 확인), `depth_vid_dense_dir` (<dir>/<scene>.npz 를 먼저 — /dev/shm RAM 사본을 학습들이 공유), `loader_pin_memory` · `loader_prefetch` (DataLoader).
+
 - **`dataset/eval/eval_subject_in_frame.py`** (R590). `--prompts_name` (기본 prompts.json) — v5f_all 처럼 eval 이 다른 프롬프트 파일 (prompts_v2.json) 을 쓴 경우 캡션 일치 검사를 그 파일과 한다. 기본은 예전과 같다.
 
 - **`latentcam/models/dense_depth_encoder.py` (신규) · `camera_diffusion_model_latent.py` · `camera_diffusion_model_mmdit_v2.py` · `main/dataset_dl3dv.py` · `main/train_latent_cam_dm.py` · `scripts/eval_testset.py` · `conf/config.yaml` · `dataset/fit/bank/depth_vid_cache.py`** (R588). `depth_vid_dense`: Molmo2 SigLIP 첫 입력과 같은 좌표 (프레임 전체를 비율 무시 378² 로 늘림) 의 픽셀 depth [log z·valid·dynamic] + 픽셀 Plücker 6 (늘린 픽셀을 원본 좌표로 되돌려 원래 K·pose 로, frame-s / norm_scale) → patch conv 14 (27²) → latent 시간칸 13 평균 → 칸마다 Q 토큰 resampler → 카메라 토큰과 같은 시간 PE. DiT 는 기존 depth CA 자리, MMDiT 는 기하 stream (Conv3d·54-d srccam 대신). `depth_vid_dense_depth` / `_plucker` 로 각각 끔. 캐시 `depth_vid_cache.py --mode dense` → `dense_depth378.npz` (장면당 15 MB). 기본 off 는 예전과 동일.

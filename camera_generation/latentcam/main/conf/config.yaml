@@ -217,6 +217,8 @@ vae_latent_scale: 0.96032625
 vae_ckpt_path: /data1/cympyc1785/LatentCamVid/camera_generation/latentcam/checkpoints/vae_20260302_300.pth
 num_gpus: 1
 num_thread: 8
+loader_pin_memory: false   # [R591] DataLoader pin_memory
+loader_prefetch: 0         # [R591] DataLoader prefetch_factor (0 = 기본 2)
 num_frames: 49
 # 'T5' (기본) = umt5-xxl 을 여기서 돌려 text CA 에 먹인다 (4096-d).
 # [new 2026-09-03] 'PEAV' = umt5 를 아예 안 띄우고 peav_text_cache 의 PE-AV text tower 토큰
@@ -292,6 +294,8 @@ depth_vid_dense_file: dense_depth378.npz
 depth_vid_dense_depth: true    # depth 3채널 (log z · valid · dynamic) 을 넣을지
 depth_vid_dense_plucker: true  # 픽셀 Plücker 6채널 (소스 카메라) 을 넣을지
 depth_vid_dense_q: 16          # 시간칸당 resampler query 수 (토큰 = 13 × Q)
+depth_vid_dense_gpu: false     # [R591] true = depth 채널 조립을 GPU 에서 (같은 값, CPU·전송 1/3)
+depth_vid_dense_dir: null      # [R591] <dir>/<scene>.npz 를 먼저 읽는다 (예 /dev/shm/dense378 RAM 사본). 없으면 코퍼스 경로
 track_cond_mode: concat   # [R577] concat (기본, cam_in 에 49→13 보간 concat) | xattn (49 프레임 토큰 별도 cross-attention)
 # [R326] subject 궤적 파일 (<scene>/da3/ 아래). 기본 = VLM+SAM3+DA3 OBB 중심. target_track_molmo2.npz = Molmo2 tracking + DA3 lifting.
 target_track_file: target_track.npz

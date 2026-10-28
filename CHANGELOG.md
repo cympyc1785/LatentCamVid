@@ -11,6 +11,8 @@
 
 ### Added
 
+- **`dataset/eval/eval_subject_in_frame.py`** (R590). `--prompts_name` (기본 prompts.json) — v5f_all 처럼 eval 이 다른 프롬프트 파일 (prompts_v2.json) 을 쓴 경우 캡션 일치 검사를 그 파일과 한다. 기본은 예전과 같다.
+
 - **`latentcam/models/dense_depth_encoder.py` (신규) · `camera_diffusion_model_latent.py` · `camera_diffusion_model_mmdit_v2.py` · `main/dataset_dl3dv.py` · `main/train_latent_cam_dm.py` · `scripts/eval_testset.py` · `conf/config.yaml` · `dataset/fit/bank/depth_vid_cache.py`** (R588). `depth_vid_dense`: Molmo2 SigLIP 첫 입력과 같은 좌표 (프레임 전체를 비율 무시 378² 로 늘림) 의 픽셀 depth [log z·valid·dynamic] + 픽셀 Plücker 6 (늘린 픽셀을 원본 좌표로 되돌려 원래 K·pose 로, frame-s / norm_scale) → patch conv 14 (27²) → latent 시간칸 13 평균 → 칸마다 Q 토큰 resampler → 카메라 토큰과 같은 시간 PE. DiT 는 기존 depth CA 자리, MMDiT 는 기하 stream (Conv3d·54-d srccam 대신). `depth_vid_dense_depth` / `_plucker` 로 각각 끔. 캐시 `depth_vid_cache.py --mode dense` → `dense_depth378.npz` (장면당 15 MB). 기본 off 는 예전과 동일.
 
 - **`dataset/exec/run_worlddirector_batch.py`** (R583). WorldDirector (SCVideo attn_sup, WorldTraj ckpt `results/ckpts/225.pth`) 를 원래 세팅으로 v5f_all test 에 추론 — WT scene.ply → 첫 카메라 정규화 (점 거리 평균 · ‖p‖≤1.25 · ×1.8 · z-up) → Concerto large outdoor → 772 토큰, umT5 len512, DDIM 50, VAE vae_intr (0.96032625). 우리 쪽 맞춤은 첫 카메라 (WT 영상 프레임 offset, L1) 와 단위 (WT/DA3 깊이 비) 뿐. `--stage align` (vista4d env) · `--stage infer` (venv wdconcerto = latentcam + concerto + flash-attn 2.8.3). `--points ours_all|ours_static` + `--stage points`: WT scene.ply 대신 우리 recon depth 역투영 점 (전체 / dynamic 2px dilation 제외), 첫 카메라 = recon cam0, 깊이 비 1.

@@ -70,9 +70,10 @@ def load_c2w(json_path: str):
     return np.array([f["transform_matrix"] for f in data["frames"]], dtype=np.float64) @ GL2CV
 
 
-def load_prompts(corpus_root: str, prefix: str, scene: str):
-    """씬 하나의 `prompts.json`. entry 당 한 번씩 열면 875번 파싱하게 되므로 씬 단위로 캐시."""
-    with open(path.join(corpus_root, prefix, scene, "da3", "prompts.json"), encoding="utf-8") as f:
+def load_prompts(corpus_root: str, prefix: str, scene: str, name: str = "prompts.json"):
+    """씬 하나의 `prompts.json`. entry 당 한 번씩 열면 875번 파싱하게 되므로 씬 단위로 캐시.
+    [R590] `name` = eval 이 쓴 프롬프트 파일 (v5f_all 은 prompts_v2.json — 캡션 일치 검사가 그 파일과 맞아야 한다)."""
+    with open(path.join(corpus_root, prefix, scene, "da3", name), encoding="utf-8") as f:
         return json.load(f)
 
 
@@ -236,7 +237,7 @@ def main(args):
         # 가림 판정의 depth 여유(0.02·S)는 씬 게이지를 따라야 한다 — `gates.evaluate` 와 같은 값.
         scene_scale = float(graph["scale"]["S"])
 
-        prompts = load_prompts(args.corpus_root, args.name_prefix, scene)
+        prompts = load_prompts(args.corpus_root, args.name_prefix, scene, args.prompts_name)
         picks = sorted(by_scene[scene], key=lambda t: int(t[1]))
         if args.limit:                      # 프로브용 — 씬마다 앞에서 N entry 만
             picks = picks[:args.limit]
@@ -418,6 +419,7 @@ if __name__ == "__main__":
     parser.add_argument("--corpus_root",
                         default="/data1/cympyc1785/data/Vista4D-Eval-Data/latentcam_da3_k6_d121")
     parser.add_argument("--eval_data", default=EVAL_DATA_DEFAULT)
+    parser.add_argument("--prompts_name", default="prompts.json")    # [R590] v5f_all = prompts_v2.json
     add_cloud_source_args(parser)
     parser.add_argument("--vista4d_root", default=VISTA4D_ROOT_DEFAULT)
     parser.add_argument("--center_box", type=float, default=0.80)    # verify.py 기본값과 동일

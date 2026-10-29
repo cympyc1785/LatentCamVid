@@ -11,6 +11,8 @@
 
 ### Added
 
+- **`dataset/viz/viser_cloud.py`**. GUI `screenshot` 폴더: 지금 시점을 배경 투명 RGBA PNG 로 저장하는 버튼 (`client.get_render(transport_format="png")`, 해상도 입력, 저장 폴더 `--shot_dir` 기본 `results/viser_shots`). 다른 동작은 그대로.
+
 - **`dataset/exec/chain_bank_rounds.py`** (R595). `--out_root`: graph 마커·강등·뱅크 완료 판정을 볼 산출 루트 (config 의 output_root 와 맞춘다). 기본값 `out_dynpose` = 옛 동작. v6 확장 (out_dynpose_v5) 체인에 사용.
 
 - **`dataset/fit/graph/build_scene_graph.py`** (R592). `--save_frame_extent`: 노드 track 에 프레임별 OBB extent (평활 전 fit 값, `track.extent`) 를 같이 저장. 대표 OBB 는 그대로 median (D63) — 기존 그래프와 center·yaw·extent 차이 0 확인. 기본 off.

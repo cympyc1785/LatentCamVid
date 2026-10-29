@@ -657,6 +657,7 @@ def main():
     # cloud.npz 가 들어있는 상위 폴더. `--video` 와 합쳐 <out>/<video>/cloud.npz 를 연다.
     parser.add_argument("--out", default=path.join(CINEMATRAJ_ROOT, "out"), type=str)
     parser.add_argument("--port", default=8084, type=int)
+    parser.add_argument("--shot_dir", default="/data1/cympyc1785/LatentCamVid/results/viser_shots", type=str)  # screenshot 버튼 저장 폴더
     # 정적 점 표시 상한. 37M 을 다 보내면 브라우저가 죽는다.
     parser.add_argument("--max_static", default=1_500_000, type=int)
     # 프레임당 동적 점 상한 (0 = 전부). 49프레임을 미리 다 올려두고 슬라이더로 가린다.
@@ -1447,6 +1448,14 @@ def main():
         gui_probe_info = server.gui.add_text("pose", initial_value="", multiline=True,
                                              disabled=True)
 
+    # 투명 배경 스크린샷 — `get_render(transport_format="png")` 는 배경이 투명한 RGBA 를 준다
+    # (사용자 10-29 "스크린샷 배경 투명만 적용해서 버튼"). 누른 브라우저의 지금 시점을 그대로 찍는다.
+    with server.gui.add_folder("screenshot"):
+        gui_shot_w = server.gui.add_number("width", initial_value=1920, min=64, max=4096, step=1)
+        gui_shot_h = server.gui.add_number("height", initial_value=1080, min=64, max=4096, step=1)
+        gui_shot = server.gui.add_button("save PNG (transparent bg)")
+        gui_shot_info = server.gui.add_text("saved", initial_value="", disabled=True)
+
     def shown_frames():
         """지금 띄울 프레임 집합. `current frame` / `interval` / `all frames` 세 갈래.
 
@@ -1726,6 +1735,20 @@ def main():
     gui_probe_snap.on_click(probe_snap)
     gui_probe_aim.on_click(probe_aim)
 
+    @gui_shot.on_click
+    def _(event):
+        from PIL import Image
+        if event.client is None:
+            return
+        rgba = event.client.get_render(height=int(gui_shot_h.value), width=int(gui_shot_w.value),
+                                       transport_format="png")
+        import os
+        os.makedirs(args.shot_dir, exist_ok=True)
+        out = path.join(args.shot_dir, f"{args.video}_{time.strftime('%Y%m%d_%H%M%S')}.png")
+        Image.fromarray(np.asarray(rgba, dtype=np.uint8), "RGBA" if rgba.shape[-1] == 4 else "RGB").save(out)
+        gui_shot_info.value = out
+        print(f"screenshot -> {out} {rgba.shape}", flush=True)
+
     probe_0 = make_probe(*_pose(src_gl[0], gl2cv), PROBE_FOV_DEG, cam_scale * 1.6,
                          bool(args.probe_on), bool(args.probe_on))
     bind_probe(probe_0)
@@ -1803,6 +1826,7 @@ def main():
             ("pin color", "PIN_COLORS 순환 (--pin_palette)" if args.pin_palette
                           else "GUI 버튼 = target start 피커 스냅샷 / 기동 --pin = "
                                "PIN_COLORS 순환 (gradation 없음)"),
+            ("screenshot", f"GUI screenshot > save PNG (투명 배경 RGBA) -> {args.shot_dir}"),
             ("url", f"http://localhost:{args.port}")]
     width_key = max(len(k) for k, _ in rows)
     for key, value in rows:

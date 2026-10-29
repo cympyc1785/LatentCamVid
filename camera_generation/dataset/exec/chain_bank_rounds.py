@@ -365,4 +365,8 @@ if __name__ == "__main__":
     # GPU 당 뱅크 프로세스 2개가 이미 한계라(실측 55.9 GiB / 80 GiB), 세 번째 세대를 겹치면
     # 남의 작업까지 OOM 으로 죽는다. 빈 문자열(기본) = 안 기다린다.
     parser.add_argument("--wait_for", default="")
-    sys.exit(main(parser.parse_args()))
+    # R595. graph·강등·뱅크 산출 루트 (config 의 output_root 와 같아야). 기본값 = 옛 동작 (out_dynpose).
+    parser.add_argument("--out_root", default=OUT_ROOT)
+    _args = parser.parse_args()
+    OUT_ROOT = _args.out_root
+    sys.exit(main(_args))
